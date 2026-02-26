@@ -71,71 +71,6 @@ const PEG_COLORS = {
   obstacle: { main: COLORS.obstacle, hit: COLORS.obstacle, glow: COLORS.obstacleGlow }
 };
 
-function roundDebug(value, digits = 3) {
-  return Number.isFinite(value) ? Number(value.toFixed(digits)) : value;
-}
-
-function clamp01(v) {
-  if (!Number.isFinite(v)) return 0;
-  return Math.max(0, Math.min(1, v));
-}
-
-function edgeDistanceToViewport(x, y, width, height) {
-  if (!Number.isFinite(x) || !Number.isFinite(y)) return Infinity;
-  return Math.min(x, width - x, y, height - y);
-}
-
-function isInsideViewport(x, y, width, height) {
-  return x >= 0 && x <= width && y >= 0 && y <= height;
-}
-
-function outsideDistanceToViewport(x, y, width, height) {
-  const dx = x < 0 ? -x : (x > width ? x - width : 0);
-  const dy = y < 0 ? -y : (y > height ? y - height : 0);
-  return Math.hypot(dx, dy);
-}
-
-function isWrapDebugEnabled() {
-  if (typeof window === 'undefined') return false;
-  try {
-    if (window.__PEGGLE_WRAP_DEBUG === true) return true;
-    if (window.location && /(?:\?|&)wrapDebug=1(?:&|$)/.test(window.location.search || '')) return true;
-    if (window.localStorage && window.localStorage.getItem('peggleWrapDebug') === '1') return true;
-  } catch (_) {
-    return false;
-  }
-  return false;
-}
-
-const WRAP_DRAW_DEBUG_LAST_LOG = new Map();
-
-function logWrapDrawDebug(key, payload, minIntervalMs = 90) {
-  if (!isWrapDebugEnabled()) return;
-  const now = (typeof performance !== 'undefined' && performance.now)
-    ? performance.now()
-    : Date.now();
-  const last = WRAP_DRAW_DEBUG_LAST_LOG.get(key) || 0;
-  if (now - last < minIntervalMs) return;
-  WRAP_DRAW_DEBUG_LAST_LOG.set(key, now);
-  // eslint-disable-next-line no-console
-  console.debug('[WrapDraw]', payload);
-}
-
-function distToNearestWall(x, y, width, height) {
-  if (!Number.isFinite(x) || !Number.isFinite(y)) return Infinity;
-  return Math.min(x, width - x, y, height - y);
-}
-
-function distToVerticalEdges(x, width) {
-  if (!Number.isFinite(x) || !Number.isFinite(width)) return Infinity;
-  return Math.min(Math.abs(x), Math.abs(width - x));
-}
-
-function distToHorizontalEdges(y, height) {
-  if (!Number.isFinite(y) || !Number.isFinite(height)) return Infinity;
-  return Math.min(Math.abs(y), Math.abs(height - y));
-}
-
 export class Renderer {
   constructor(canvas) {
     this.canvas = canvas;
@@ -154,8 +89,6 @@ export class Renderer {
     this.launchX = 0;
     this.launchY = 40;
 
-    // Debug state
-    this._wrapModeByPegId = new Map();
   }
 
   resize(width, height) {
@@ -358,22 +291,7 @@ export class Renderer {
     ctx.restore();
   }
 
-  getWrapCopyOffsets(peg) {
-    const animShiftX = Number.isFinite(peg?._animWrapDrawShiftX)
-      ? peg._animWrapDrawShiftX
-      : (Number.isFinite(peg?._animWrapShiftX) ? peg._animWrapShiftX : 0);
-    const animShiftY = Number.isFinite(peg?._animWrapDrawShiftY)
-      ? peg._animWrapDrawShiftY
-      : (Number.isFinite(peg?._animWrapShiftY) ? peg._animWrapShiftY : 0);
-    if (Math.abs(animShiftX) > 0.001 || Math.abs(animShiftY) > 0.001) {
-      // Keep copy on the exact inverse wrapped trajectory so corner/diagonal motion
-      // does not produce axis-only ghost flashes.
-      return [{ x: -animShiftX, y: -animShiftY }];
-    }
-    return [];
-  }
-
-  getWrapCopyAlpha(peg, copyX, copyY, offX = 0, offY = 0) {
+  getWrapExtents(peg) {
     const radius = PHYSICS_CONFIG.pegRadius;
     let extentX = radius;
     let extentY = radius;
@@ -404,63 +322,27 @@ export class Renderer {
         extentY = Math.max(radius, Math.abs(sin) * halfW + Math.abs(cos) * halfH);
       }
     }
-    const extent = Math.max(extentX, extentY);
-
-    // Ramp distances:
-    // - insideRamp: fade in near walls while inside viewport
-    // - outsideRamp: allow small offscreen fade but suppress far-away copies
-    const insideRamp = Math.max(14, extent * 1.9);
-    const outsideRamp = Math.max(20, extent * 2.8);
-
-    const axisDrivenX = Math.abs(Math.abs(offX) - this.width) <= 1e-3;
-    const axisDrivenY = Math.abs(Math.abs(offY) - this.height) <= 1e-3;
-
-    const pointProximity = (x, y, preferAxis = null) => {
-      const edgeDistance = (() => {
-        if (preferAxis === 'x') return distToVerticalEdges(x, this.width);
-        if (preferAxis === 'y') return distToHorizontalEdges(y, this.height);
-        return edgeDistanceToViewport(x, y, this.width, this.height);
-      })();
-      if (isInsideViewport(x, y, this.width, this.height)) {
-        return clamp01((insideRamp - edgeDistance) / insideRamp);
-      }
-      const outsideDist = preferAxis === 'x'
-        ? Math.max(0, distToVerticalEdges(x, this.width))
-        : preferAxis === 'y'
-          ? Math.max(0, distToHorizontalEdges(y, this.height))
-          : outsideDistanceToViewport(x, y, this.width, this.height);
-      if (outsideDist > outsideRamp) return 0;
-      return clamp01((outsideRamp - outsideDist) / outsideRamp);
-    };
-
-    const axisMode = axisDrivenX && !axisDrivenY
-      ? 'x'
-      : axisDrivenY && !axisDrivenX
-        ? 'y'
-        : null;
-
-    const mainProximity = pointProximity(peg.x, peg.y, axisMode);
-    const copyProximity = pointProximity(copyX, copyY, axisMode);
-
-    // Suppress interior flashes: if the copy is fully inside but not near any wall,
-    // do not let main-side proximity force it visible.
-    const copyInside = isInsideViewport(copyX, copyY, this.width, this.height);
-    if (copyInside) {
-      const copyWallDist = distToNearestWall(copyX, copyY, this.width, this.height);
-      const wallFloor = Math.max(10, extent * 0.9);
-      if (copyWallDist > wallFloor) return 0;
-    }
-
-    return Math.min(mainProximity, copyProximity);
+    return { x: extentX + 1, y: extentY + 1 };
   }
 
-  getPreWrapCopy(peg) {
-    const x = Number.isFinite(peg._animPreWrapShiftX) ? peg._animPreWrapShiftX : 0;
-    const y = Number.isFinite(peg._animPreWrapShiftY) ? peg._animPreWrapShiftY : 0;
-    const alpha = Number.isFinite(peg._animPreWrapAlpha) ? peg._animPreWrapAlpha : 0;
-    if (alpha <= 0.001) return null;
-    if (Math.abs(x) < 0.001 && Math.abs(y) < 0.001) return null;
-    return { x, y, alpha };
+  getWrapCopyOffsets(peg) {
+    const ext = this.getWrapExtents(peg);
+    const xOffsets = [0];
+    const yOffsets = [0];
+
+    if ((peg.x - ext.x) < 0) xOffsets.push(this.width);
+    if ((peg.x + ext.x) > this.width) xOffsets.push(-this.width);
+    if ((peg.y - ext.y) < 0) yOffsets.push(this.height);
+    if ((peg.y + ext.y) > this.height) yOffsets.push(-this.height);
+
+    const offsets = [];
+    for (const ox of xOffsets) {
+      for (const oy of yOffsets) {
+        if (Math.abs(ox) < 0.001 && Math.abs(oy) < 0.001) continue;
+        offsets.push({ x: ox, y: oy });
+      }
+    }
+    return offsets;
   }
 
   drawPegWithOffset(peg, offsetX, offsetY, isHit = false, isSelected = false, alpha = 1) {
@@ -495,102 +377,8 @@ export class Renderer {
       if (!wrapSet || !wrapSet.has(peg.id)) continue;
 
       const copyOffsets = this.getWrapCopyOffsets(peg);
-      if (copyOffsets.length > 0) {
-        const prevMode = this._wrapModeByPegId.get(peg.id) || 'none';
-        if (prevMode !== 'wrap') {
-          logWrapDrawDebug(`mode:${peg.id}`, {
-            pegId: peg.id,
-            transition: `${prevMode}->wrap`,
-            pegX: roundDebug(peg.x, 2),
-            pegY: roundDebug(peg.y, 2),
-            shiftX: roundDebug(peg._animWrapShiftX, 3),
-            shiftY: roundDebug(peg._animWrapShiftY, 3),
-            preAlpha: roundDebug(peg._animPreWrapAlpha, 4)
-          }, 0);
-        }
-        this._wrapModeByPegId.set(peg.id, 'wrap');
-        logWrapDrawDebug(`draw:wrap:${peg.id}`, {
-          pegId: peg.id,
-          mode: 'wrap',
-          pegX: roundDebug(peg.x, 2),
-          pegY: roundDebug(peg.y, 2),
-          shiftX: roundDebug(peg._animWrapShiftX, 3),
-          shiftY: roundDebug(peg._animWrapShiftY, 3),
-          drawShiftX: roundDebug(peg._animWrapDrawShiftX, 3),
-          drawShiftY: roundDebug(peg._animWrapDrawShiftY, 3),
-          offsets: copyOffsets.map(off => ({
-            x: roundDebug(off.x, 3),
-            y: roundDebug(off.y, 3),
-            drawX: roundDebug((peg.x || 0) + off.x, 2),
-            drawY: roundDebug((peg.y || 0) + off.y, 2)
-          }))
-        });
-        for (const off of copyOffsets) {
-          const copyX = (peg.x || 0) + off.x;
-          const copyY = (peg.y || 0) + off.y;
-          const wrapAlpha = this.getWrapCopyAlpha(peg, copyX, copyY, off.x, off.y);
-          if (wrapAlpha <= 0.001) continue;
-          const inside =
-            copyX >= 0 && copyX <= this.width &&
-            copyY >= 0 && copyY <= this.height;
-          const wallDist = distToNearestWall(copyX, copyY, this.width, this.height);
-          const suspiciousInsideCopy = inside && wallDist > 45;
-          if (suspiciousInsideCopy) {
-            logWrapDrawDebug(`suspect:wrap:${peg.id}`, {
-              pegId: peg.id,
-              reason: 'wrap-copy-inside-not-near-wall',
-              pegX: roundDebug(peg.x, 2),
-              pegY: roundDebug(peg.y, 2),
-              copyX: roundDebug(copyX, 2),
-              copyY: roundDebug(copyY, 2),
-              wallDist: roundDebug(wallDist, 2),
-              shiftX: roundDebug(peg._animWrapShiftX, 3),
-              shiftY: roundDebug(peg._animWrapShiftY, 3),
-              wrapAlpha: roundDebug(wrapAlpha, 4)
-            }, 0);
-          }
-          this.drawPegWithOffset(peg, off.x, off.y, isHit, isSelected, wrapAlpha);
-        }
-      } else {
-        const preCopy = this.getPreWrapCopy(peg);
-        if (preCopy) {
-          const prevMode = this._wrapModeByPegId.get(peg.id) || 'none';
-          if (prevMode !== 'pre') {
-            logWrapDrawDebug(`mode:${peg.id}`, {
-              pegId: peg.id,
-              transition: `${prevMode}->pre`,
-              pegX: roundDebug(peg.x, 2),
-              pegY: roundDebug(peg.y, 2),
-              preShiftX: roundDebug(preCopy.x, 3),
-              preShiftY: roundDebug(preCopy.y, 3),
-              preAlpha: roundDebug(preCopy.alpha, 4)
-            }, 0);
-          }
-          this._wrapModeByPegId.set(peg.id, 'pre');
-          logWrapDrawDebug(`draw:pre:${peg.id}`, {
-            pegId: peg.id,
-            mode: 'pre',
-            pegX: roundDebug(peg.x, 2),
-            pegY: roundDebug(peg.y, 2),
-            preShiftX: roundDebug(preCopy.x, 3),
-            preShiftY: roundDebug(preCopy.y, 3),
-            preAlpha: roundDebug(preCopy.alpha, 4),
-            drawX: roundDebug((peg.x || 0) + preCopy.x, 2),
-            drawY: roundDebug((peg.y || 0) + preCopy.y, 2)
-          });
-          this.drawPegWithOffset(peg, preCopy.x, preCopy.y, isHit, isSelected, preCopy.alpha);
-        } else {
-          const prevMode = this._wrapModeByPegId.get(peg.id) || 'none';
-          if (prevMode !== 'none') {
-            logWrapDrawDebug(`mode:${peg.id}`, {
-              pegId: peg.id,
-              transition: `${prevMode}->none`,
-              pegX: roundDebug(peg.x, 2),
-              pegY: roundDebug(peg.y, 2)
-            }, 0);
-          }
-          this._wrapModeByPegId.set(peg.id, 'none');
-        }
+      for (const off of copyOffsets) {
+        this.drawPegWithOffset(peg, off.x, off.y, isHit, isSelected, 1);
       }
     }
   }
