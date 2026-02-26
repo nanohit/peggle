@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#0d1117">
+  <title>Peggle Editor</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <div class="app">
+    <!-- Header -->
+    <header class="header">
+      <button id="menuBtn" class="header-btn" title="Menu">☰</button>
+      <h1 id="levelTitle" class="level-title">Level 1</h1>
+      <button id="playBtn" class="header-btn" title="Play Level">▶</button>
+    </header>
+
+    <!-- Canvas -->
+    <div id="canvasContainer" class="canvas-container">
+      <canvas id="gameCanvas"></canvas>
+      <!-- Animation side panel (inside canvas-container so canvas stays visible) -->
+      <div id="animPanel" class="anim-panel">
+        <div class="anim-panel-title">Animate <button id="closeAnimPanel" class="anim-close-btn">✕</button></div>
+        <div class="anim-panel-body">
+          <div class="anim-slider">
+            <label>Duration <span id="animDurationValue">2.0</span>s</label>
+            <input type="range" id="animDurationSlider" min="5" max="80" value="20">
+          </div>
+          <div class="anim-slider">
+            <label>X <span id="animDxValue">0</span>px</label>
+            <input type="range" id="animDxSlider" min="-300" max="300" value="0">
+          </div>
+          <div class="anim-slider">
+            <label>Y <span id="animDyValue">0</span>px</label>
+            <input type="range" id="animDySlider" min="-300" max="300" value="0">
+          </div>
+          <div class="anim-slider">
+            <label>Rot <span id="animRotValue">0</span>°</label>
+            <input type="range" id="animRotSlider" min="-180" max="180" value="0">
+          </div>
+          <label class="anim-toggle"><input type="checkbox" id="animEasingToggle" checked> Ease</label>
+          <button id="animInverseBtn" class="anim-btn anim-btn-toggle" type="button">Inverse: OFF</button>
+          <div class="anim-hint">Hold Shift while dragging to snap angle to 10°</div>
+          <div class="anim-buttons">
+            <button id="animPreviewBtn" class="anim-btn">Preview</button>
+            <button id="animClearBtn" class="anim-btn">Clear</button>
+            <button id="animApplyBtn" class="anim-btn primary">Apply</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Status Bar -->
+    <div class="status-bar">
+      <span id="pegCount">Pegs: 0</span>
+      <span id="selectionCount"></span>
+    </div>
+
+    <!-- Toolbar -->
+    <div class="toolbar">
+      <div class="toolbar-group">
+        <div class="peg-buttons">
+          <button class="peg-btn" data-type="orange" title="Orange (Must Hit)"></button>
+          <button class="peg-btn active" data-type="blue" title="Blue (Normal)"></button>
+          <button class="peg-btn" data-type="green" title="Green (Special)"></button>
+          <button class="peg-btn" data-type="purple" title="Purple (Bonus)"></button>
+          <button class="peg-btn" data-type="multi" title="Multiball"></button>
+          <button class="peg-btn" data-type="obstacle" title="Obstacle (Stays)"></button>
+        </div>
+        <div class="shape-buttons">
+          <button class="shape-btn active" data-shape="circle" title="Circle">●</button>
+          <button class="shape-btn" data-shape="brick" title="Brick">▬</button>
+        </div>
+      </div>
+      <div class="tool-buttons">
+        <button id="undoBtn" class="tool-btn" title="Undo">↶</button>
+        <button id="redoBtn" class="tool-btn" title="Redo">↷</button>
+        <button id="gridBtn" class="tool-btn active" title="Grid">⊞</button>
+        <button id="magnetBtn" class="tool-btn" title="Magnet Snap (S)">🧲</button>
+        <button id="selectBtn" class="tool-btn" title="Select Mode">◻</button>
+        <button id="drawBtn" class="tool-btn" title="Draw Curves (D)">✏</button>
+        <button id="animateBtn" class="tool-btn" title="Animate (A)">~</button>
+        <button id="moreBtn" class="tool-btn" title="More">⋯</button>
+      </div>
+    </div>
+
+    <!-- Quick Actions Panel -->
+    <div id="actionsOverlay" class="actions-overlay">
+      <div class="actions-panel">
+        <button id="rotateBtn" class="action-btn">↻ Rotate 15°</button>
+        <button id="mirrorHBtn" class="action-btn">↔ Mirror Horizontal</button>
+        <button id="mirrorVBtn" class="action-btn">↕ Mirror Vertical</button>
+        <button id="duplicateBtn" class="action-btn">⊕ Duplicate</button>
+        <button id="groupBtn" class="action-btn">▣ Group Selected</button>
+        <button id="deleteSelBtn" class="action-btn danger">✕ Delete Selected</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Menu Overlay -->
+  <div id="menuOverlay" class="menu-overlay">
+    <div class="menu-panel">
+      <div class="menu-section">
+        <div class="menu-section-title">Level Settings</div>
+        <input type="text" id="levelName" class="menu-input" placeholder="Level Name">
+        <select id="levelDifficulty" class="menu-select">
+          <option value="1">Difficulty: 1 - Easy</option>
+          <option value="2">Difficulty: 2 - Medium</option>
+          <option value="3">Difficulty: 3 - Hard</option>
+          <option value="4">Difficulty: 4 - Expert</option>
+          <option value="5">Difficulty: 5 - Extreme</option>
+        </select>
+        <button id="addToTrainingBtn" class="menu-btn primary">Add to Training</button>
+      </div>
+
+      <div class="menu-section">
+        <div class="menu-section-title">Levels</div>
+        <button id="newLevelBtn" class="menu-btn">+ New Level</button>
+        <button id="levelListBtn" class="menu-btn">📋 Level List</button>
+      </div>
+
+      <div class="menu-section">
+        <div class="menu-section-title">Settings</div>
+        <button id="physicsBtn" class="menu-btn">⚙️ Physics Settings</button>
+        <button id="clearBtn" class="menu-btn danger">🗑️ Clear All Pegs</button>
+      </div>
+
+      <div class="menu-section">
+        <div class="menu-section-title">Import / Export</div>
+        <button id="exportBtn" class="menu-btn">💾 Export Level</button>
+        <button id="importBtn" class="menu-btn">📂 Import Level</button>
+        <button id="exportTrainingBtn" class="menu-btn">📊 Export Training Data</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Level List Overlay -->
+  <div id="levelListOverlay" class="level-list-overlay">
+    <div class="level-list-header">
+      <button id="closeLevelList" class="header-btn">←</button>
+      <h2 class="level-list-title">Levels</h2>
+      <div style="width: 36px;"></div>
+    </div>
+    <div class="level-list-content">
+      <div id="levelItems"></div>
+    </div>
+  </div>
+
+  <!-- Physics Settings Overlay -->
+  <div id="physicsOverlay" class="physics-overlay">
+    <div class="physics-panel">
+      <div class="physics-header">
+        <h2>Physics Settings</h2>
+        <button id="closePhysicsPanel" class="header-btn">✕</button>
+      </div>
+      <div class="physics-content">
+        <div class="slider-group">
+          <label>Gravity: <span id="gravityValue">0.12</span></label>
+          <input type="range" id="gravitySlider" min="1" max="50" value="12">
+        </div>
+        <div class="slider-group">
+          <label>Bounce: <span id="bounceValue">0.65</span></label>
+          <input type="range" id="bounceSlider" min="20" max="95" value="65">
+        </div>
+        <div class="slider-group">
+          <label>Speed: <span id="speedValue">1.00</span></label>
+          <input type="range" id="speedSlider" min="25" max="200" value="100">
+        </div>
+        <div class="slider-group">
+          <label>Peg Size: <span id="sizeValue">10</span></label>
+          <input type="range" id="sizeSlider" min="5" max="20" value="10">
+        </div>
+        <div class="slider-group">
+          <label>Launch Power: <span id="powerValue">8.0</span></label>
+          <input type="range" id="powerSlider" min="4" max="16" value="8" step="0.5">
+        </div>
+        <div class="toggle-group">
+          <label>
+            <input type="checkbox" id="trajectoryToggle">
+            Show full trajectory (debug)
+          </label>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

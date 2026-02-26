@@ -1,0 +1,1172 @@
+// Peggle Renderer - Canvas rendering for game and editor
+
+import { PHYSICS_CONFIG, getBallRadius } from './physics.js';
+
+// Color palette
+const COLORS = {
+  background: '#1a1a2e',
+  backgroundGradientTop: '#16213e',
+  backgroundGradientBottom: '#1a1a2e',
+  
+  // Peg colors
+  orange: '#ff6b35',
+  orangeHit: '#ffb347',
+  orangeGlow: 'rgba(255, 107, 53, 0.5)',
+  
+  blue: '#4ecdc4',
+  blueHit: '#7ee8e2',
+  blueGlow: 'rgba(78, 205, 196, 0.4)',
+  
+  green: '#95d5b2',
+  greenHit: '#b7e4c7',
+  greenGlow: 'rgba(149, 213, 178, 0.4)',
+  
+  purple: '#c77dff',
+  purpleHit: '#e0aaff',
+  purpleGlow: 'rgba(199, 125, 255, 0.4)',
+
+  // Multiball
+  multi: '#ff4d9d',
+  multiHit: '#ff7ab8',
+  multiGlow: 'rgba(255, 77, 157, 0.5)',
+  
+  // Obstacle
+  obstacle: '#6b7280',
+  obstacleGlow: 'rgba(107, 114, 128, 0.3)',
+  
+  // Ball
+  ball: '#f8f9fa',
+  ballGlow: 'rgba(248, 249, 250, 0.6)',
+  
+  // UI
+  launcher: '#adb5bd',
+  launcherAim: 'rgba(255, 255, 255, 0.4)',
+  trajectoryLine: 'rgba(255, 255, 255, 0.3)',
+  trajectoryDot: 'rgba(255, 255, 255, 0.5)',
+  bucket: '#6c757d',
+  bucketInner: '#495057',
+  
+  // Grid
+  gridLine: 'rgba(255, 255, 255, 0.08)',
+  gridLineStrong: 'rgba(255, 255, 255, 0.15)',
+  
+  // Selection
+  selection: '#ffd60a',
+  selectionFill: 'rgba(255, 214, 10, 0.15)',
+  
+  // Text
+  text: '#f8f9fa',
+  textDim: '#adb5bd',
+  
+  // Walls
+  wall: 'rgba(255, 255, 255, 0.1)'
+};
+
+const PEG_COLORS = {
+  orange: { main: COLORS.orange, hit: COLORS.orangeHit, glow: COLORS.orangeGlow },
+  blue: { main: COLORS.blue, hit: COLORS.blueHit, glow: COLORS.blueGlow },
+  green: { main: COLORS.green, hit: COLORS.greenHit, glow: COLORS.greenGlow },
+  purple: { main: COLORS.purple, hit: COLORS.purpleHit, glow: COLORS.purpleGlow },
+  multi: { main: COLORS.multi, hit: COLORS.multiHit, glow: COLORS.multiGlow },
+  obstacle: { main: COLORS.obstacle, hit: COLORS.obstacle, glow: COLORS.obstacleGlow }
+};
+
+function roundDebug(value, digits = 3) {
+  return Number.isFinite(value) ? Number(value.toFixed(digits)) : value;
+}
+
+function clamp01(v) {
+  if (!Number.isFinite(v)) return 0;
+  return Math.max(0, Math.min(1, v));
+}
+
+function edgeDistanceToViewport(x, y, width, height) {
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return Infinity;
+  return Math.min(x, width - x, y, height - y);
+}
+
+function isInsideViewport(x, y, width, height) {
+  return x >= 0 && x <= width && y >= 0 && y <= height;
+}
+
+function outsideDistanceToViewport(x, y, width, height) {
+  const dx = x < 0 ? -x : (x > width ? x - width : 0);
+  const dy = y < 0 ? -y : (y > height ? y - height : 0);
+  return Math.hypot(dx, dy);
+}
+
+function isWrapDebugEnabled() {
+  if (typeof window === 'undefined') return false;
+  try {
+    if (window.__PEGGLE_WRAP_DEBUG === true) return true;
+    if (window.location && /(?:\?|&)wrapDebug=1(?:&|$)/.test(window.location.search || '')) return true;
+    if (window.localStorage && window.localStorage.getItem('peggleWrapDebug') === '1') return true;
+  } catch (_) {
+    return false;
+  }
+  return false;
+}
+
+const WRAP_DRAW_DEBUG_LAST_LOG = new Map();
+
+function logWrapDrawDebug(key, payload, minIntervalMs = 90) {
+  if (!isWrapDebugEnabled()) return;
+  const now = (typeof performance !== 'undefined' && performance.now)
+    ? performance.now()
+    : Date.now();
+  const last = WRAP_DRAW_DEBUG_LAST_LOG.get(key) || 0;
+  if (now - last < minIntervalMs) return;
+  WRAP_DRAW_DEBUG_LAST_LOG.set(key, now);
+  // eslint-disable-next-line no-console
+  console.debug('[WrapDraw]', payload);
+}
+
+function distToNearestWall(x, y, width, height) {
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return Infinity;
+  return Math.min(x, width - x, y, height - y);
+}
+
+function distToVerticalEdges(x, width) {
+  if (!Number.isFinite(x) || !Number.isFinite(width)) return Infinity;
+  return Math.min(Math.abs(x), Math.abs(width - x));
+}
+
+function distToHorizontalEdges(y, height) {
+  if (!Number.isFinite(y) || !Number.isFinite(height)) return Infinity;
+  return Math.min(Math.abs(y), Math.abs(height - y));
+}
+
+export class Renderer {
+  constructor(canvas) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext('2d');
+    this.width = canvas.width;
+    this.height = canvas.height;
+    
+    // Editor state
+    this.showGrid = false;
+    this.gridSize = 20;
+    this.selectedPegIds = new Set();
+    
+    // Aim state
+    this.aimAngle = Math.PI / 2;
+    this.showAim = false;
+    this.launchX = 0;
+    this.launchY = 40;
+
+    // Debug state
+    this._wrapModeByPegId = new Map();
+  }
+
+  resize(width, height) {
+    this.width = width;
+    this.height = height;
+    this.canvas.width = width;
+    this.canvas.height = height;
+    this.launchX = width / 2;
+  }
+
+  clear() {
+    const ctx = this.ctx;
+    
+    // Draw gradient background
+    const gradient = ctx.createLinearGradient(0, 0, 0, this.height);
+    gradient.addColorStop(0, COLORS.backgroundGradientTop);
+    gradient.addColorStop(1, COLORS.backgroundGradientBottom);
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, this.width, this.height);
+    
+    // Draw wall indicators
+    ctx.strokeStyle = COLORS.wall;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(1, 1, this.width - 2, this.height - 2);
+  }
+
+  drawGrid() {
+    if (!this.showGrid) return;
+    
+    const ctx = this.ctx;
+    ctx.lineWidth = 1;
+
+    // Vertical lines
+    for (let x = 0; x <= this.width; x += this.gridSize) {
+      ctx.strokeStyle = x % (this.gridSize * 5) === 0 ? COLORS.gridLineStrong : COLORS.gridLine;
+      ctx.beginPath();
+      ctx.moveTo(x + 0.5, 0);
+      ctx.lineTo(x + 0.5, this.height);
+      ctx.stroke();
+    }
+
+    // Horizontal lines
+    for (let y = 0; y <= this.height; y += this.gridSize) {
+      ctx.strokeStyle = y % (this.gridSize * 5) === 0 ? COLORS.gridLineStrong : COLORS.gridLine;
+      ctx.beginPath();
+      ctx.moveTo(0, y + 0.5);
+      ctx.lineTo(this.width, y + 0.5);
+      ctx.stroke();
+    }
+  }
+
+  // Trace a closed curved-ribbon path defined by slice boundary points.
+  // Each slice has {x, y, nx, ny} (position on curve + surface normal).
+  // topH/botH = offsets along the normal for the two edges of the ribbon.
+  drawCurvedBrickPath(ctx, slices, topH, botH) {
+    ctx.beginPath();
+    // Top edge left→right
+    ctx.moveTo(slices[0].x + slices[0].nx * topH, slices[0].y + slices[0].ny * topH);
+    for (let i = 1; i < slices.length; i++) {
+      ctx.lineTo(slices[i].x + slices[i].nx * topH, slices[i].y + slices[i].ny * topH);
+    }
+    // Bottom edge right→left
+    for (let i = slices.length - 1; i >= 0; i--) {
+      ctx.lineTo(slices[i].x + slices[i].nx * botH, slices[i].y + slices[i].ny * botH);
+    }
+    ctx.closePath();
+  }
+
+  drawPeg(peg, isHit = false, isSelected = false) {
+    const ctx = this.ctx;
+    const colors = PEG_COLORS[peg.type] || PEG_COLORS.blue;
+    const radius = PHYSICS_CONFIG.pegRadius;
+
+    // ── Curved brick: render as a warped ribbon in world space ──
+    if (peg.shape === 'brick' && peg.curveSlices && peg.curveSlices.length >= 2) {
+      const halfH = (peg.height || PHYSICS_CONFIG.pegRadius * 1.2) / 2;
+      const sl = peg.curveSlices;
+      ctx.save();
+
+      // Glow
+      if (!isHit) { ctx.shadowColor = colors.glow; ctx.shadowBlur = 12; }
+
+      // Main fill
+      this.drawCurvedBrickPath(ctx, sl, halfH, -halfH);
+      ctx.fillStyle = isHit ? colors.hit : colors.main;
+      ctx.fill();
+
+      // Subtle edge outline
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.18)';
+      ctx.lineWidth = 0.5;
+      ctx.stroke();
+
+      // Inner highlight (thin strip along top)
+      this.drawCurvedBrickPath(ctx, sl, halfH, halfH * 0.3);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+      ctx.fill();
+
+      // Selection ring
+      if (isSelected) {
+        this.drawCurvedBrickPath(ctx, sl, halfH + 4, -halfH - 4);
+        ctx.strokeStyle = COLORS.selection;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+
+      // Hit glow overlay
+      if (isHit && peg.type !== 'obstacle') {
+        ctx.globalAlpha = 0.6;
+        ctx.shadowColor = colors.hit;
+        ctx.shadowBlur = 20;
+        this.drawCurvedBrickPath(ctx, sl, halfH, -halfH);
+        ctx.fillStyle = colors.hit;
+        ctx.fill();
+      }
+
+      ctx.restore();
+      return;
+    }
+
+    // ── Flat brick / circle: existing local-space rendering ──
+    ctx.save();
+    ctx.translate(peg.x, peg.y);
+    ctx.rotate(peg.angle || 0);
+
+    // Glow effect
+    if (!isHit) {
+      ctx.shadowColor = colors.glow;
+      ctx.shadowBlur = 12;
+    }
+
+    if (peg.shape === 'brick') {
+      const w = peg.width || PHYSICS_CONFIG.pegRadius * 4;
+      const h = peg.height || PHYSICS_CONFIG.pegRadius * 1.2;
+
+      ctx.beginPath();
+      ctx.roundRect(-w/2, -h/2, w, h, 2);
+      ctx.fillStyle = isHit ? colors.hit : colors.main;
+      ctx.fill();
+
+      // Inner highlight
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+      ctx.beginPath();
+      ctx.roundRect(-w/2 + 2, -h/2 + 1, w - 4, h/3, 1);
+      ctx.fill();
+    } else {
+      // Draw circle peg
+      ctx.beginPath();
+      ctx.arc(0, 0, radius, 0, Math.PI * 2);
+      ctx.fillStyle = isHit ? colors.hit : colors.main;
+      ctx.fill();
+
+      // Inner highlight
+      ctx.shadowBlur = 0;
+      ctx.beginPath();
+      ctx.arc(-radius * 0.25, -radius * 0.25, radius * 0.35, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
+      ctx.fill();
+    }
+
+    // Selection indicator
+    if (isSelected) {
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = COLORS.selection;
+      ctx.lineWidth = 2;
+
+      if (peg.shape === 'brick') {
+        const w = peg.width || PHYSICS_CONFIG.brickWidth;
+        const h = peg.height || PHYSICS_CONFIG.brickHeight;
+        ctx.strokeRect(-w/2 - 4, -h/2 - 4, w + 8, h + 8);
+      } else {
+        ctx.beginPath();
+        ctx.arc(0, 0, radius + 4, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+
+    // Hit state - brighter glow
+    if (isHit && peg.type !== 'obstacle') {
+      ctx.globalAlpha = 0.6;
+      ctx.shadowColor = colors.hit;
+      ctx.shadowBlur = 20;
+
+      if (peg.shape === 'brick') {
+        const w = peg.width || PHYSICS_CONFIG.brickWidth;
+        const h = peg.height || PHYSICS_CONFIG.brickHeight;
+        ctx.beginPath();
+        ctx.roundRect(-w/2, -h/2, w, h, 3);
+        ctx.fillStyle = colors.hit;
+        ctx.fill();
+      } else {
+        ctx.beginPath();
+        ctx.arc(0, 0, radius, 0, Math.PI * 2);
+        ctx.fillStyle = colors.hit;
+        ctx.fill();
+      }
+    }
+
+    ctx.restore();
+  }
+
+  getWrapCopyOffsets(peg) {
+    const animShiftX = Number.isFinite(peg?._animWrapDrawShiftX)
+      ? peg._animWrapDrawShiftX
+      : (Number.isFinite(peg?._animWrapShiftX) ? peg._animWrapShiftX : 0);
+    const animShiftY = Number.isFinite(peg?._animWrapDrawShiftY)
+      ? peg._animWrapDrawShiftY
+      : (Number.isFinite(peg?._animWrapShiftY) ? peg._animWrapShiftY : 0);
+    if (Math.abs(animShiftX) > 0.001 || Math.abs(animShiftY) > 0.001) {
+      // Keep copy on the exact inverse wrapped trajectory so corner/diagonal motion
+      // does not produce axis-only ghost flashes.
+      return [{ x: -animShiftX, y: -animShiftY }];
+    }
+    return [];
+  }
+
+  getWrapCopyAlpha(peg, copyX, copyY, offX = 0, offY = 0) {
+    const radius = PHYSICS_CONFIG.pegRadius;
+    let extentX = radius;
+    let extentY = radius;
+    if (peg && peg.shape === 'brick') {
+      if (peg.curveSlices && peg.curveSlices.length >= 2) {
+        const halfH = (peg.height || radius * 1.2) / 2;
+        let minX = Infinity, maxX = -Infinity;
+        let minY = Infinity, maxY = -Infinity;
+        for (const s of peg.curveSlices) {
+          const x1 = s.x + s.nx * halfH;
+          const x2 = s.x - s.nx * halfH;
+          const y1 = s.y + s.ny * halfH;
+          const y2 = s.y - s.ny * halfH;
+          minX = Math.min(minX, x1, x2);
+          maxX = Math.max(maxX, x1, x2);
+          minY = Math.min(minY, y1, y2);
+          maxY = Math.max(maxY, y1, y2);
+        }
+        extentX = Math.max(radius, Math.abs(maxX - peg.x), Math.abs(peg.x - minX));
+        extentY = Math.max(radius, Math.abs(maxY - peg.y), Math.abs(peg.y - minY));
+      } else {
+        const halfW = (peg.width || radius * 4) / 2;
+        const halfH = (peg.height || radius * 1.2) / 2;
+        const angle = peg.angle || 0;
+        const cos = Math.cos(angle);
+        const sin = Math.sin(angle);
+        extentX = Math.max(radius, Math.abs(cos) * halfW + Math.abs(sin) * halfH);
+        extentY = Math.max(radius, Math.abs(sin) * halfW + Math.abs(cos) * halfH);
+      }
+    }
+    const extent = Math.max(extentX, extentY);
+
+    // Ramp distances:
+    // - insideRamp: fade in near walls while inside viewport
+    // - outsideRamp: allow small offscreen fade but suppress far-away copies
+    const insideRamp = Math.max(14, extent * 1.9);
+    const outsideRamp = Math.max(20, extent * 2.8);
+
+    const axisDrivenX = Math.abs(Math.abs(offX) - this.width) <= 1e-3;
+    const axisDrivenY = Math.abs(Math.abs(offY) - this.height) <= 1e-3;
+
+    const pointProximity = (x, y, preferAxis = null) => {
+      const edgeDistance = (() => {
+        if (preferAxis === 'x') return distToVerticalEdges(x, this.width);
+        if (preferAxis === 'y') return distToHorizontalEdges(y, this.height);
+        return edgeDistanceToViewport(x, y, this.width, this.height);
+      })();
+      if (isInsideViewport(x, y, this.width, this.height)) {
+        return clamp01((insideRamp - edgeDistance) / insideRamp);
+      }
+      const outsideDist = preferAxis === 'x'
+        ? Math.max(0, distToVerticalEdges(x, this.width))
+        : preferAxis === 'y'
+          ? Math.max(0, distToHorizontalEdges(y, this.height))
+          : outsideDistanceToViewport(x, y, this.width, this.height);
+      if (outsideDist > outsideRamp) return 0;
+      return clamp01((outsideRamp - outsideDist) / outsideRamp);
+    };
+
+    const axisMode = axisDrivenX && !axisDrivenY
+      ? 'x'
+      : axisDrivenY && !axisDrivenX
+        ? 'y'
+        : null;
+
+    const mainProximity = pointProximity(peg.x, peg.y, axisMode);
+    const copyProximity = pointProximity(copyX, copyY, axisMode);
+
+    // Suppress interior flashes: if the copy is fully inside but not near any wall,
+    // do not let main-side proximity force it visible.
+    const copyInside = isInsideViewport(copyX, copyY, this.width, this.height);
+    if (copyInside) {
+      const copyWallDist = distToNearestWall(copyX, copyY, this.width, this.height);
+      const wallFloor = Math.max(10, extent * 0.9);
+      if (copyWallDist > wallFloor) return 0;
+    }
+
+    return Math.min(mainProximity, copyProximity);
+  }
+
+  getPreWrapCopy(peg) {
+    const x = Number.isFinite(peg._animPreWrapShiftX) ? peg._animPreWrapShiftX : 0;
+    const y = Number.isFinite(peg._animPreWrapShiftY) ? peg._animPreWrapShiftY : 0;
+    const alpha = Number.isFinite(peg._animPreWrapAlpha) ? peg._animPreWrapAlpha : 0;
+    if (alpha <= 0.001) return null;
+    if (Math.abs(x) < 0.001 && Math.abs(y) < 0.001) return null;
+    return { x, y, alpha };
+  }
+
+  drawPegWithOffset(peg, offsetX, offsetY, isHit = false, isSelected = false, alpha = 1) {
+    if (alpha <= 0.001) return;
+    if (Math.abs(offsetX) < 0.001 && Math.abs(offsetY) < 0.001 && alpha >= 0.999) {
+      this.drawPeg(peg, isHit, isSelected);
+      return;
+    }
+
+    this.ctx.save();
+    this.ctx.globalAlpha *= alpha;
+    const shifted = { ...peg, x: peg.x + offsetX, y: peg.y + offsetY };
+    if (peg.curveSlices) {
+      shifted.curveSlices = peg.curveSlices.map(s => ({
+        ...s,
+        x: s.x + offsetX,
+        y: s.y + offsetY
+      }));
+    }
+    this.drawPeg(shifted, isHit, isSelected);
+    this.ctx.restore();
+  }
+
+  drawPegs(pegs, hitPegIds = [], selectedIds = new Set(), wrapCopyPegIds = null) {
+    const hitSet = new Set(hitPegIds);
+    const wrapSet = wrapCopyPegIds instanceof Set ? wrapCopyPegIds : null;
+    
+    for (const peg of pegs) {
+      const isHit = hitSet.has(peg.id);
+      const isSelected = selectedIds.has(peg.id);
+      this.drawPeg(peg, isHit, isSelected);
+      if (!wrapSet || !wrapSet.has(peg.id)) continue;
+
+      const copyOffsets = this.getWrapCopyOffsets(peg);
+      if (copyOffsets.length > 0) {
+        const prevMode = this._wrapModeByPegId.get(peg.id) || 'none';
+        if (prevMode !== 'wrap') {
+          logWrapDrawDebug(`mode:${peg.id}`, {
+            pegId: peg.id,
+            transition: `${prevMode}->wrap`,
+            pegX: roundDebug(peg.x, 2),
+            pegY: roundDebug(peg.y, 2),
+            shiftX: roundDebug(peg._animWrapShiftX, 3),
+            shiftY: roundDebug(peg._animWrapShiftY, 3),
+            preAlpha: roundDebug(peg._animPreWrapAlpha, 4)
+          }, 0);
+        }
+        this._wrapModeByPegId.set(peg.id, 'wrap');
+        logWrapDrawDebug(`draw:wrap:${peg.id}`, {
+          pegId: peg.id,
+          mode: 'wrap',
+          pegX: roundDebug(peg.x, 2),
+          pegY: roundDebug(peg.y, 2),
+          shiftX: roundDebug(peg._animWrapShiftX, 3),
+          shiftY: roundDebug(peg._animWrapShiftY, 3),
+          drawShiftX: roundDebug(peg._animWrapDrawShiftX, 3),
+          drawShiftY: roundDebug(peg._animWrapDrawShiftY, 3),
+          offsets: copyOffsets.map(off => ({
+            x: roundDebug(off.x, 3),
+            y: roundDebug(off.y, 3),
+            drawX: roundDebug((peg.x || 0) + off.x, 2),
+            drawY: roundDebug((peg.y || 0) + off.y, 2)
+          }))
+        });
+        for (const off of copyOffsets) {
+          const copyX = (peg.x || 0) + off.x;
+          const copyY = (peg.y || 0) + off.y;
+          const wrapAlpha = this.getWrapCopyAlpha(peg, copyX, copyY, off.x, off.y);
+          if (wrapAlpha <= 0.001) continue;
+          const inside =
+            copyX >= 0 && copyX <= this.width &&
+            copyY >= 0 && copyY <= this.height;
+          const wallDist = distToNearestWall(copyX, copyY, this.width, this.height);
+          const suspiciousInsideCopy = inside && wallDist > 45;
+          if (suspiciousInsideCopy) {
+            logWrapDrawDebug(`suspect:wrap:${peg.id}`, {
+              pegId: peg.id,
+              reason: 'wrap-copy-inside-not-near-wall',
+              pegX: roundDebug(peg.x, 2),
+              pegY: roundDebug(peg.y, 2),
+              copyX: roundDebug(copyX, 2),
+              copyY: roundDebug(copyY, 2),
+              wallDist: roundDebug(wallDist, 2),
+              shiftX: roundDebug(peg._animWrapShiftX, 3),
+              shiftY: roundDebug(peg._animWrapShiftY, 3),
+              wrapAlpha: roundDebug(wrapAlpha, 4)
+            }, 0);
+          }
+          this.drawPegWithOffset(peg, off.x, off.y, isHit, isSelected, wrapAlpha);
+        }
+      } else {
+        const preCopy = this.getPreWrapCopy(peg);
+        if (preCopy) {
+          const prevMode = this._wrapModeByPegId.get(peg.id) || 'none';
+          if (prevMode !== 'pre') {
+            logWrapDrawDebug(`mode:${peg.id}`, {
+              pegId: peg.id,
+              transition: `${prevMode}->pre`,
+              pegX: roundDebug(peg.x, 2),
+              pegY: roundDebug(peg.y, 2),
+              preShiftX: roundDebug(preCopy.x, 3),
+              preShiftY: roundDebug(preCopy.y, 3),
+              preAlpha: roundDebug(preCopy.alpha, 4)
+            }, 0);
+          }
+          this._wrapModeByPegId.set(peg.id, 'pre');
+          logWrapDrawDebug(`draw:pre:${peg.id}`, {
+            pegId: peg.id,
+            mode: 'pre',
+            pegX: roundDebug(peg.x, 2),
+            pegY: roundDebug(peg.y, 2),
+            preShiftX: roundDebug(preCopy.x, 3),
+            preShiftY: roundDebug(preCopy.y, 3),
+            preAlpha: roundDebug(preCopy.alpha, 4),
+            drawX: roundDebug((peg.x || 0) + preCopy.x, 2),
+            drawY: roundDebug((peg.y || 0) + preCopy.y, 2)
+          });
+          this.drawPegWithOffset(peg, preCopy.x, preCopy.y, isHit, isSelected, preCopy.alpha);
+        } else {
+          const prevMode = this._wrapModeByPegId.get(peg.id) || 'none';
+          if (prevMode !== 'none') {
+            logWrapDrawDebug(`mode:${peg.id}`, {
+              pegId: peg.id,
+              transition: `${prevMode}->none`,
+              pegX: roundDebug(peg.x, 2),
+              pegY: roundDebug(peg.y, 2)
+            }, 0);
+          }
+          this._wrapModeByPegId.set(peg.id, 'none');
+        }
+      }
+    }
+  }
+
+  drawBall(ball) {
+    if (!ball) return;
+
+    const ctx = this.ctx;
+
+    // Ball glow
+    ctx.shadowColor = COLORS.ballGlow;
+    ctx.shadowBlur = 15;
+
+    // Ball body
+    ctx.beginPath();
+    ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+    ctx.fillStyle = COLORS.ball;
+    ctx.fill();
+
+    // Highlight
+    ctx.shadowBlur = 0;
+    ctx.beginPath();
+    ctx.arc(ball.x - ball.radius * 0.25, ball.y - ball.radius * 0.25, ball.radius * 0.35, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.fill();
+  }
+
+  drawLauncher(x, y, angle, showAim = true) {
+    const ctx = this.ctx;
+    
+    // Launcher base
+    ctx.fillStyle = COLORS.launcher;
+    ctx.beginPath();
+    ctx.arc(x, y, 15, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Ball preview in launcher
+    ctx.fillStyle = COLORS.ball;
+    ctx.beginPath();
+    ctx.arc(x, y, getBallRadius(), 0, Math.PI * 2);
+    ctx.fill();
+
+    // Direction indicator
+    if (showAim) {
+      const indicatorLen = 25;
+      ctx.strokeStyle = COLORS.launcherAim;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + Math.cos(angle) * indicatorLen, y + Math.sin(angle) * indicatorLen);
+      ctx.stroke();
+    }
+  }
+
+  drawTrajectory(trajectory, fullPath = false) {
+    if (!trajectory || !trajectory.points || trajectory.points.length < 2) return;
+    
+    const ctx = this.ctx;
+    const points = trajectory.points;
+    
+    if (fullPath) {
+      // Draw full trajectory path
+      ctx.strokeStyle = COLORS.trajectoryLine;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(points[0].x, points[0].y);
+      
+      for (let i = 1; i < points.length; i++) {
+        ctx.lineTo(points[i].x, points[i].y);
+      }
+      ctx.stroke();
+      ctx.setLineDash([]);
+      
+      // Draw dots at intervals
+      ctx.fillStyle = COLORS.trajectoryDot;
+      for (let i = 0; i < points.length; i += 10) {
+        ctx.beginPath();
+        ctx.arc(points[i].x, points[i].y, 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      
+      // Mark hit points
+      ctx.fillStyle = COLORS.orange;
+      for (const hit of trajectory.hits) {
+        ctx.beginPath();
+        ctx.arc(hit.x, hit.y, 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    } else {
+      // Draw trajectory to first hit only (dotted line)
+      ctx.strokeStyle = COLORS.trajectoryLine;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 6]);
+      ctx.beginPath();
+      ctx.moveTo(points[0].x, points[0].y);
+      
+      for (let i = 1; i < points.length; i++) {
+        ctx.lineTo(points[i].x, points[i].y);
+      }
+      ctx.stroke();
+      ctx.setLineDash([]);
+      
+      // Draw end point
+      if (points.length > 1) {
+        const endPoint = points[points.length - 1];
+        ctx.fillStyle = COLORS.trajectoryDot;
+        ctx.beginPath();
+        ctx.arc(endPoint.x, endPoint.y, 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
+  drawBalls(balls) {
+    if (!balls || balls.length === 0) return;
+    for (const ball of balls) {
+      this.drawBall(ball);
+    }
+  }
+
+  drawBucket(bucket) {
+    const ctx = this.ctx;
+    const { x, y, width, height } = bucket;
+
+    // Bucket body
+    ctx.fillStyle = COLORS.bucket;
+    ctx.beginPath();
+    ctx.moveTo(x - width / 2, y - height / 2);
+    ctx.lineTo(x - width / 2 + 8, y + height / 2);
+    ctx.lineTo(x + width / 2 - 8, y + height / 2);
+    ctx.lineTo(x + width / 2, y - height / 2);
+    ctx.closePath();
+    ctx.fill();
+
+    // Inner
+    ctx.fillStyle = COLORS.bucketInner;
+    ctx.beginPath();
+    ctx.moveTo(x - width / 2 + 4, y - height / 2 + 4);
+    ctx.lineTo(x - width / 2 + 10, y + height / 2 - 2);
+    ctx.lineTo(x + width / 2 - 10, y + height / 2 - 2);
+    ctx.lineTo(x + width / 2 - 4, y - height / 2 + 4);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  drawScore(score, ballsLeft, orangePegsLeft, totalOrangePegs) {
+    const ctx = this.ctx;
+    
+    ctx.fillStyle = COLORS.text;
+    ctx.font = 'bold 14px -apple-system, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(`${score.toLocaleString()}`, 10, 20);
+
+    ctx.textAlign = 'right';
+    ctx.fillText(`⚪ ${ballsLeft}`, this.width - 10, 20);
+
+    // Orange pegs counter
+    ctx.fillStyle = COLORS.orange;
+    ctx.textAlign = 'center';
+    const pegsText = `🟠 ${totalOrangePegs - orangePegsLeft}/${totalOrangePegs}`;
+    ctx.fillText(pegsText, this.width / 2, 20);
+  }
+
+  drawMessage(text, subtext = '') {
+    const ctx = this.ctx;
+    
+    // Overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+    ctx.fillRect(0, 0, this.width, this.height);
+
+    // Main text
+    ctx.fillStyle = COLORS.text;
+    ctx.font = 'bold 28px -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(text, this.width / 2, this.height / 2 - 15);
+
+    // Subtext
+    if (subtext) {
+      ctx.fillStyle = COLORS.textDim;
+      ctx.font = '14px -apple-system, sans-serif';
+      ctx.fillText(subtext, this.width / 2, this.height / 2 + 15);
+    }
+  }
+
+  // Faint line showing the raw drawn path
+  drawSplinePath(rawPoints) {
+    if (!rawPoints || rawPoints.length < 2) return;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.18)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([2, 5]);
+    ctx.beginPath();
+    ctx.moveTo(rawPoints[0].x, rawPoints[0].y);
+    for (let i = 1; i < rawPoints.length; i++) {
+      ctx.lineTo(rawPoints[i].x, rawPoints[i].y);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+
+  // Semi-transparent preview of where bricks/circles will be placed
+  drawGhostBricks(ghostBricks, brickW, brickH, pegType, pegShape) {
+    if (!ghostBricks || ghostBricks.length === 0) return;
+    const ctx = this.ctx;
+    const colors = PEG_COLORS[pegType] || PEG_COLORS.blue;
+    const radius = PHYSICS_CONFIG.pegRadius;
+    const halfH = brickH / 2;
+    ctx.save();
+    ctx.globalAlpha = 0.6;
+    for (const gb of ghostBricks) {
+      if (pegShape === 'brick' && gb.slices && gb.slices.length >= 2) {
+        // Curved ghost brick — warped ribbon
+        this.drawCurvedBrickPath(ctx, gb.slices, halfH, -halfH);
+        ctx.fillStyle = colors.main;
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+        ctx.lineWidth = 0.5;
+        ctx.stroke();
+        // Top highlight
+        this.drawCurvedBrickPath(ctx, gb.slices, halfH, halfH * 0.3);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+        ctx.fill();
+      } else if (pegShape === 'brick') {
+        // Flat ghost brick fallback
+        ctx.save();
+        ctx.translate(gb.x, gb.y);
+        ctx.rotate(gb.angle || 0);
+        ctx.beginPath();
+        ctx.roundRect(-brickW / 2, -brickH / 2, brickW, brickH, 2);
+        ctx.fillStyle = colors.main;
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.restore();
+      } else {
+        // Circle ghost
+        ctx.save();
+        ctx.translate(gb.x, gb.y);
+        ctx.beginPath();
+        ctx.arc(0, 0, radius, 0, Math.PI * 2);
+        ctx.fillStyle = colors.main;
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+    ctx.restore();
+  }
+
+  drawWrappedMotionLine(start, motion) {
+    if (!start || !motion) return;
+    const eps = 1e-6;
+    let cx = start.x;
+    let cy = start.y;
+    let remX = motion.dx || 0;
+    let remY = motion.dy || 0;
+    let guard = 0;
+
+    while ((Math.abs(remX) > eps || Math.abs(remY) > eps) && guard < 40) {
+      guard++;
+      let alphaX = Infinity;
+      let alphaY = Infinity;
+
+      if (remX > eps) alphaX = (this.width - cx) / remX;
+      else if (remX < -eps) alphaX = (0 - cx) / remX;
+
+      if (remY > eps) alphaY = (this.height - cy) / remY;
+      else if (remY < -eps) alphaY = (0 - cy) / remY;
+
+      let alpha = Math.min(1, alphaX, alphaY);
+      if (!Number.isFinite(alpha) || alpha <= eps) alpha = 1;
+
+      const nx = cx + remX * alpha;
+      const ny = cy + remY * alpha;
+      this.ctx.beginPath();
+      this.ctx.moveTo(cx, cy);
+      this.ctx.lineTo(nx, ny);
+      this.ctx.stroke();
+
+      if (alpha >= 1 - eps) break;
+
+      const hitX = Math.abs(alpha - alphaX) < 1e-5;
+      const hitY = Math.abs(alpha - alphaY) < 1e-5;
+
+      cx = hitX ? (remX > 0 ? 0 : this.width) : nx;
+      cy = hitY ? (remY > 0 ? 0 : this.height) : ny;
+      remX *= (1 - alpha);
+      remY *= (1 - alpha);
+    }
+  }
+
+  drawAnimationGhosts(ghosts, center, ghostCenter, offset, motion, _inverse = false) {
+    if (!ghosts || ghosts.length === 0 || !center) return;
+    const ctx = this.ctx;
+    const radius = PHYSICS_CONFIG.pegRadius;
+
+    const fallbackCenter = offset
+      ? { x: center.x + offset.dx, y: center.y + offset.dy }
+      : null;
+    const targetCenter = ghostCenter || fallbackCenter;
+
+    // Dashed yellow line from original center to ghost center
+    ctx.save();
+    if (motion && (Math.abs(motion.dx || 0) > 0.001 || Math.abs(motion.dy || 0) > 0.001)) {
+      ctx.strokeStyle = '#ffd60a';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([6, 4]);
+      this.drawWrappedMotionLine(center, motion);
+      ctx.setLineDash([]);
+    } else if (targetCenter) {
+      ctx.strokeStyle = '#ffd60a';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      ctx.moveTo(center.x, center.y);
+      ctx.lineTo(targetCenter.x, targetCenter.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // Draw ghost pegs at offset position
+    ctx.globalAlpha = 0.35;
+    for (const ghost of ghosts) {
+      this.drawPeg(ghost, false, false);
+    }
+    ctx.globalAlpha = 1;
+
+    // Yellow outline around each ghost peg to indicate draggable
+    ctx.strokeStyle = '#ffd60a';
+    ctx.lineWidth = 1.5;
+    for (const ghost of ghosts) {
+      if (ghost.shape === 'brick' && ghost.curveSlices && ghost.curveSlices.length >= 2) {
+        const halfH = (ghost.height || radius * 1.2) / 2;
+        this.drawCurvedBrickPath(ctx, ghost.curveSlices, halfH + 3, -halfH - 3);
+        ctx.stroke();
+      } else if (ghost.shape === 'brick') {
+        ctx.save();
+        ctx.translate(ghost.x, ghost.y);
+        ctx.rotate(ghost.angle || 0);
+        const w = ghost.width || radius * 4;
+        const h = ghost.height || radius * 1.2;
+        ctx.strokeRect(-w/2 - 3, -h/2 - 3, w + 6, h + 6);
+        ctx.restore();
+      } else {
+        ctx.beginPath();
+        ctx.arc(ghost.x, ghost.y, radius + 3, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+
+    ctx.restore();
+  }
+
+  drawAnimationIndicators(pegs, groups) {
+    if (!pegs) return;
+    const ctx = this.ctx;
+    const groupAnimIds = new Set();
+
+    // Mark group-animated pegs
+    if (groups) {
+      for (const g of groups) {
+        if (g.animation) {
+          for (const p of pegs) {
+            if (p.groupId === g.id) groupAnimIds.add(p.id);
+          }
+        }
+      }
+    }
+
+    ctx.save();
+    ctx.font = 'bold 10px -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#ffd60a';
+
+    for (const peg of pegs) {
+      const hasAnim = peg.animation || groupAnimIds.has(peg.id);
+      if (hasAnim) {
+        const radius = peg.shape === 'brick'
+          ? Math.max(peg.width || 40, peg.height || 12) / 2
+          : PHYSICS_CONFIG.pegRadius;
+        ctx.fillText('\u2194', peg.x, peg.y - radius - 5);
+      }
+    }
+    ctx.restore();
+  }
+
+  drawEditorHUD(pegCount, selectedCount, drawMode = false, drawShapeMode = 'free') {
+    const ctx = this.ctx;
+
+    ctx.fillStyle = COLORS.textDim;
+    ctx.font = '12px -apple-system, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(`Pegs: ${pegCount}`, 10, this.height - 15);
+
+    if (selectedCount > 0) {
+      ctx.fillText(`Selected: ${selectedCount}`, 80, this.height - 15);
+    }
+
+    if (drawMode) {
+      ctx.fillStyle = COLORS.orange;
+      ctx.textAlign = 'right';
+      let hint;
+      if (drawShapeMode === 'circle') {
+        hint = 'DRAW: Circle (C) | W=sine D=free';
+      } else if (drawShapeMode === 'sine') {
+        hint = 'DRAW: Sine (W) | C=circle D=free';
+      } else {
+        hint = 'DRAW: Freehand | SHIFT=snap | C=circle W=sine';
+      }
+      ctx.fillText(hint, this.width - 10, this.height - 15);
+    }
+  }
+
+  drawShapeCenter(x, y) {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.lineWidth = 1;
+    const size = 8;
+    ctx.beginPath();
+    ctx.moveTo(x - size, y);
+    ctx.lineTo(x + size, y);
+    ctx.moveTo(x, y - size);
+    ctx.lineTo(x, y + size);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  drawSelectionBox(startX, startY, endX, endY) {
+    const ctx = this.ctx;
+    
+    const x = Math.min(startX, endX);
+    const y = Math.min(startY, endY);
+    const w = Math.abs(endX - startX);
+    const h = Math.abs(endY - startY);
+
+    ctx.fillStyle = COLORS.selectionFill;
+    ctx.fillRect(x, y, w, h);
+    
+    ctx.strokeStyle = COLORS.selection;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.strokeRect(x, y, w, h);
+    ctx.setLineDash([]);
+  }
+
+  drawRotationHandle(handle, bounds) {
+    if (!handle || !bounds) return;
+    
+    const ctx = this.ctx;
+    
+    // Draw selection bounds outline
+    ctx.strokeStyle = COLORS.selection;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.strokeRect(
+      bounds.minX - 4, 
+      bounds.minY - 4, 
+      bounds.maxX - bounds.minX + 8, 
+      bounds.maxY - bounds.minY + 8
+    );
+    ctx.setLineDash([]);
+    
+    // Draw line from top of bounds to handle
+    const centerX = (bounds.minX + bounds.maxX) / 2;
+    ctx.strokeStyle = COLORS.selection;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(centerX, bounds.minY - 4);
+    ctx.lineTo(handle.x, handle.y);
+    ctx.stroke();
+    
+    // Draw rotation handle circle
+    ctx.fillStyle = COLORS.selection;
+    ctx.beginPath();
+    ctx.arc(handle.x, handle.y, 8, 0, Math.PI * 2);
+    ctx.fill();
+    
+    // Inner circle
+    ctx.fillStyle = '#000';
+    ctx.beginPath();
+    ctx.arc(handle.x, handle.y, 4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Render full game frame
+  renderGame(state) {
+    this.clear();
+    
+    if (state.showGrid) {
+      this.showGrid = true;
+      this.drawGrid();
+    }
+
+    this.drawPegs(
+      state.pegs,
+      state.hitPegIds,
+      state.selectedPegIds || new Set(),
+      state.wrapCopyPegIds || null
+    );
+
+    // Draw ghost preview during draw mode
+    if (state.ghostBricks && state.ghostBricks.length > 0) {
+      this.drawSplinePath(state.drawPath);
+      this.drawGhostBricks(state.ghostBricks, state.brickWidth, state.brickHeight, state.pegType, state.pegShape);
+    }
+
+    // Draw trajectory before ball
+    if (state.trajectory) {
+      this.drawTrajectory(state.trajectory, state.showFullTrajectory);
+    }
+    
+    if (state.balls) {
+      this.drawBalls(state.balls);
+    } else if (state.ball) {
+      this.drawBall(state.ball);
+    }
+
+    if (state.bucket) {
+      this.drawBucket(state.bucket);
+    }
+
+    if (state.showLauncher) {
+      this.drawLauncher(state.launchX, state.launchY, state.aimAngle, state.showAim);
+    }
+
+    if (state.score !== undefined) {
+      this.drawScore(state.score, state.ballsLeft, state.orangePegsLeft, state.totalOrangePegs);
+    }
+
+    if (state.selectionBox) {
+      this.drawSelectionBox(
+        state.selectionBox.startX,
+        state.selectionBox.startY,
+        state.selectionBox.endX,
+        state.selectionBox.endY
+      );
+    }
+
+    // Draw rotation handle for selected elements
+    if (state.rotationHandle && state.selectionBounds) {
+      this.drawRotationHandle(state.rotationHandle, state.selectionBounds);
+    }
+
+    // Animation ghosts (editor animation mode)
+    if (state.animationMode && state.animationGhosts) {
+      this.drawAnimationGhosts(
+        state.animationGhosts,
+        state.animationCenter,
+        state.animationGhostCenter,
+        state.animationGhostOffset,
+        state.animationMotion,
+        state.animationInverse
+      );
+    }
+
+    if (state.message) {
+      this.drawMessage(state.message, state.subMessage);
+    }
+
+    if (state.drawCenter) {
+      this.drawShapeCenter(state.drawCenter.x, state.drawCenter.y);
+    }
+
+    if (state.isEditor) {
+      this.drawEditorHUD(state.pegs.length, state.selectedPegIds?.size || 0, state.drawMode, state.drawShapeMode);
+      // Show animation indicators when not in animation mode
+      if (!state.animationMode) {
+        this.drawAnimationIndicators(state.pegs, state.groups);
+      }
+    }
+  }
+}
