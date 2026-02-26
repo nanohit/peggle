@@ -105,9 +105,9 @@ function resolveInverseMotionToSameDestination(
     return best;
   };
 
-  const maxStepX = hasWidth ? 8 : 0;
-  const maxStepY = hasHeight ? 8 : 0;
-  const maxWrapCount = 8;
+  const maxStepX = hasWidth ? 4 : 0;
+  const maxStepY = hasHeight ? 4 : 0;
+  const maxWrapCount = 4;
   const candidateSteps = [];
   for (let k = -maxStepX; k <= maxStepX; k++) {
     for (let l = -maxStepY; l <= maxStepY; l++) {
@@ -511,13 +511,14 @@ export class PegAnimator {
         const startedX = Math.abs(wrappedCenter.shiftX) > eps;
         const startedY = Math.abs(wrappedCenter.shiftY) > eps;
         const startedAny = startedX || startedY;
+        const isSingleCornerWrap = Math.abs(plannedK) <= 1 && Math.abs(plannedL) <= 1;
 
-        if (plannedK !== 0 && plannedL !== 0) {
+        if (plannedK !== 0 && plannedL !== 0 && isSingleCornerWrap) {
           if (startedAny) {
             centerShiftX = -plannedK * worldWidth;
             centerShiftY = -plannedL * worldHeight;
           }
-        } else {
+        } else if (plannedK === 0 || plannedL === 0) {
           if (plannedK !== 0 && startedX) {
             centerShiftX = -plannedK * worldWidth;
           }
