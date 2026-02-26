@@ -105,9 +105,9 @@ function resolveInverseMotionToSameDestination(
     return best;
   };
 
-  const maxStepX = hasWidth ? 1 : 0;
-  const maxStepY = hasHeight ? 1 : 0;
-  const maxWrapCount = 2;
+  const maxStepX = hasWidth ? 8 : 0;
+  const maxStepY = hasHeight ? 8 : 0;
+  const maxWrapCount = 8;
   const candidateSteps = [];
   for (let k = -maxStepX; k <= maxStepX; k++) {
     for (let l = -maxStepY; l <= maxStepY; l++) {
@@ -465,6 +465,12 @@ export class PegAnimator {
             }
           )
         : { dx: anim.dx, dy: anim.dy };
+      const directMotion = (anim.wrap && (canWrapX || canWrapY))
+        ? resolveDirectPreviewVector(anim.dx, anim.dy, worldWidth, worldHeight, {
+            startX: anim.centerX,
+            startY: anim.centerY
+          })
+        : { dx: anim.dx, dy: anim.dy };
       const motionDx = motion.dx;
       const motionDy = motion.dy;
       const tx = motionDx * t;
@@ -500,12 +506,22 @@ export class PegAnimator {
       // For inverse motion that needs wrapping on both axes, apply both axis
       // shifts as soon as wrapping starts to avoid a two-step X-then-Y path.
       if (anim.inverse && canWrapX && canWrapY) {
-        const plannedK = Math.round((motionDx - anim.dx) / worldWidth);
-        const plannedL = Math.round((motionDy - anim.dy) / worldHeight);
+        const plannedK = Math.round((motionDx - directMotion.dx) / worldWidth);
+        const plannedL = Math.round((motionDy - directMotion.dy) / worldHeight);
+        const startedX = Math.abs(wrappedCenter.shiftX) > eps;
+        const startedY = Math.abs(wrappedCenter.shiftY) > eps;
+        const startedAny = startedX || startedY;
+
         if (plannedK !== 0 && plannedL !== 0) {
-          const hasWrapStarted = Math.abs(centerShiftX) > eps || Math.abs(centerShiftY) > eps;
-          if (hasWrapStarted) {
+          if (startedAny) {
             centerShiftX = -plannedK * worldWidth;
+            centerShiftY = -plannedL * worldHeight;
+          }
+        } else {
+          if (plannedK !== 0 && startedX) {
+            centerShiftX = -plannedK * worldWidth;
+          }
+          if (plannedL !== 0 && startedY) {
             centerShiftY = -plannedL * worldHeight;
           }
         }
