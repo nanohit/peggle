@@ -686,15 +686,10 @@ export class Renderer {
       : null;
     const targetCenter = ghostCenter || fallbackCenter;
 
-    // Dashed yellow line from original center to ghost center
+    // Dashed guide line from original center to ghost center.
+    // We intentionally draw a single segment to avoid parallel wrap-track clutter.
     ctx.save();
-    if (motion && (Math.abs(motion.dx || 0) > 0.001 || Math.abs(motion.dy || 0) > 0.001)) {
-      ctx.strokeStyle = '#ffd60a';
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([6, 4]);
-      this.drawWrappedMotionLine(center, motion);
-      ctx.setLineDash([]);
-    } else if (targetCenter) {
+    if (targetCenter) {
       ctx.strokeStyle = '#ffd60a';
       ctx.lineWidth = 1.5;
       ctx.setLineDash([6, 4]);
@@ -703,6 +698,26 @@ export class Renderer {
       ctx.lineTo(targetCenter.x, targetCenter.y);
       ctx.stroke();
       ctx.setLineDash([]);
+
+      // Direction cue near the start so inverse/non-inverse remains obvious
+      // without rendering extra wrapped trajectory segments.
+      const dirX = motion?.dx || 0;
+      const dirY = motion?.dy || 0;
+      const dirLen = Math.hypot(dirX, dirY);
+      if (dirLen > 0.001) {
+        const ux = dirX / dirLen;
+        const uy = dirY / dirLen;
+        const arrowLen = 16;
+        const ax = center.x + ux * arrowLen;
+        const ay = center.y + uy * arrowLen;
+        ctx.setLineDash([]);
+        ctx.strokeStyle = '#ffd60a';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(center.x, center.y);
+        ctx.lineTo(ax, ay);
+        ctx.stroke();
+      }
     }
 
     // Draw ghost pegs at offset position

@@ -49,55 +49,63 @@ function resolveInverseMotionToSameDestination(
     return { dx: -dx, dy: -dy };
   }
 
-  const searchK = hasWidth ? 4 : 0;
-  const searchL = hasHeight ? 4 : 0;
-  let best = null;
+  const normalizeWrapStep = (k, l) => ({
+    k: hasWidth ? k : 0,
+    l: hasHeight ? l : 0
+  });
 
-  const consider = (k, l) => {
-    const candDx = dx + (hasWidth ? k * width : 0);
-    const candDy = dy + (hasHeight ? l * height : 0);
+  const makeCandidate = (k, l) => {
+    const kk = hasWidth ? k : 0;
+    const ll = hasHeight ? l : 0;
+    if (kk === 0 && ll === 0) return null;
+    const candDx = dx + kk * width;
+    const candDy = dy + ll * height;
     const candLen = Math.hypot(candDx, candDy);
-    if (candLen <= eps) return;
-
+    if (candLen <= eps) return null;
     const dot = candDx * dx + candDy * dy;
-    // Must travel in the opposite hemisphere.
-    if (dot >= -1e-4 * baseLen * baseLen) return;
-
-    const cosOpp = (-dot) / (candLen * baseLen);
-    if (!Number.isFinite(cosOpp) || cosOpp <= 0) return;
-
-    const anglePenalty = 1 - Math.min(1, cosOpp); // 0 = perfectly opposite
-    const lengthPenalty = candLen / baseLen;
-    const wrapPenalty = Math.abs(k) + Math.abs(l);
-    const score = anglePenalty * 120 + lengthPenalty + wrapPenalty * 0.02;
-
-    if (
-      !best ||
-      score < best.score - 1e-9 ||
-      (Math.abs(score - best.score) <= 1e-9 && candLen < best.len)
-    ) {
-      best = { dx: candDx, dy: candDy, score, len: candLen };
-    }
+    const opp = (-dot) / (candLen * baseLen); // higher = more opposite
+    const wrapCount = Math.abs(kk) + Math.abs(ll);
+    const axisCount = (kk !== 0 ? 1 : 0) + (ll !== 0 ? 1 : 0);
+    return { dx: candDx, dy: candDy, len: candLen, dot, opp, wrapCount, axisCount };
   };
 
-  if (hasWidth && hasHeight) {
-    for (let k = -searchK; k <= searchK; k++) {
-      for (let l = -searchL; l <= searchL; l++) {
-        if (k === 0 && l === 0) continue;
-        consider(k, l);
+  const chooseBest = (candidates, requireOpposite = true) => {
+    let best = null;
+    for (const c of candidates) {
+      if (!c) continue;
+      if (requireOpposite && c.dot >= -1e-4 * baseLen * baseLen) continue;
+      if (
+        !best ||
+        c.wrapCount < best.wrapCount ||
+        (c.wrapCount === best.wrapCount && c.axisCount < best.axisCount) ||
+        (c.wrapCount === best.wrapCount && c.axisCount === best.axisCount && c.len < best.len - 1e-9) ||
+        (c.wrapCount === best.wrapCount && c.axisCount === best.axisCount && Math.abs(c.len - best.len) <= 1e-9 && c.opp > best.opp + 1e-9)
+      ) {
+        best = c;
       }
     }
-  } else if (hasWidth) {
-    for (let k = -searchK; k <= searchK; k++) {
-      if (k === 0) continue;
-      consider(k, 0);
-    }
-  } else if (hasHeight) {
-    for (let l = -searchL; l <= searchL; l++) {
-      if (l === 0) continue;
-      consider(0, l);
-    }
+    return best;
+  };
+
+  // Pass 1: minimal-wrap candidates only (single wall or single corner wrap).
+  const primarySteps = [];
+  if (hasWidth) {
+    primarySteps.push(normalizeWrapStep(-1, 0));
+    primarySteps.push(normalizeWrapStep(1, 0));
   }
+  if (hasHeight) {
+    primarySteps.push(normalizeWrapStep(0, -1));
+    primarySteps.push(normalizeWrapStep(0, 1));
+  }
+  if (hasWidth && hasHeight) {
+    primarySteps.push(normalizeWrapStep(-1, -1));
+    primarySteps.push(normalizeWrapStep(-1, 1));
+    primarySteps.push(normalizeWrapStep(1, -1));
+    primarySteps.push(normalizeWrapStep(1, 1));
+  }
+  const primaryCandidates = primarySteps.map(s => makeCandidate(s.k, s.l));
+  let best = chooseBest(primaryCandidates, true);
+  if (!best) best = chooseBest(primaryCandidates, false);
 
   if (best) return { dx: best.dx, dy: best.dy };
 
