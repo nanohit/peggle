@@ -1450,10 +1450,7 @@ export class Editor {
       useInverse,
       center ? {
         startX: center.x,
-        startY: center.y,
-        extentX: 0,
-        extentY: 0,
-        minVisibleRatio: ANIMATION_WRAP_VISIBLE_RATIO
+        startY: center.y
       } : null
     );
   }

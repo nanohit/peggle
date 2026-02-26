@@ -291,58 +291,16 @@ export class Renderer {
     ctx.restore();
   }
 
-  getWrapExtents(peg) {
-    const radius = PHYSICS_CONFIG.pegRadius;
-    let extentX = radius;
-    let extentY = radius;
-    if (peg && peg.shape === 'brick') {
-      if (peg.curveSlices && peg.curveSlices.length >= 2) {
-        const halfH = (peg.height || radius * 1.2) / 2;
-        let minX = Infinity, maxX = -Infinity;
-        let minY = Infinity, maxY = -Infinity;
-        for (const s of peg.curveSlices) {
-          const x1 = s.x + s.nx * halfH;
-          const x2 = s.x - s.nx * halfH;
-          const y1 = s.y + s.ny * halfH;
-          const y2 = s.y - s.ny * halfH;
-          minX = Math.min(minX, x1, x2);
-          maxX = Math.max(maxX, x1, x2);
-          minY = Math.min(minY, y1, y2);
-          maxY = Math.max(maxY, y1, y2);
-        }
-        extentX = Math.max(radius, Math.abs(maxX - peg.x), Math.abs(peg.x - minX));
-        extentY = Math.max(radius, Math.abs(maxY - peg.y), Math.abs(peg.y - minY));
-      } else {
-        const halfW = (peg.width || radius * 4) / 2;
-        const halfH = (peg.height || radius * 1.2) / 2;
-        const angle = peg.angle || 0;
-        const cos = Math.cos(angle);
-        const sin = Math.sin(angle);
-        extentX = Math.max(radius, Math.abs(cos) * halfW + Math.abs(sin) * halfH);
-        extentY = Math.max(radius, Math.abs(sin) * halfW + Math.abs(cos) * halfH);
-      }
-    }
-    return { x: extentX + 1, y: extentY + 1 };
-  }
-
   getWrapCopyOffsets(peg) {
-    const ext = this.getWrapExtents(peg);
-    const xOffsets = [0];
-    const yOffsets = [0];
+    const eps = 1e-6;
 
-    if ((peg.x - ext.x) < 0) xOffsets.push(this.width);
-    if ((peg.x + ext.x) > this.width) xOffsets.push(-this.width);
-    if ((peg.y - ext.y) < 0) yOffsets.push(this.height);
-    if ((peg.y + ext.y) > this.height) yOffsets.push(-this.height);
-
-    const offsets = [];
-    for (const ox of xOffsets) {
-      for (const oy of yOffsets) {
-        if (Math.abs(ox) < 0.001 && Math.abs(oy) < 0.001) continue;
-        offsets.push({ x: ox, y: oy });
-      }
+    const wrapShiftX = Number.isFinite(peg?._animWrapShiftX) ? peg._animWrapShiftX : 0;
+    const wrapShiftY = Number.isFinite(peg?._animWrapShiftY) ? peg._animWrapShiftY : 0;
+    if (Math.abs(wrapShiftX) > eps || Math.abs(wrapShiftY) > eps) {
+      // Already wrapped this frame: draw exactly one copy at the pre-wrap image.
+      return [{ x: -wrapShiftX, y: -wrapShiftY }];
     }
-    return offsets;
+    return [];
   }
 
   drawPegWithOffset(peg, offsetX, offsetY, isHit = false, isSelected = false, alpha = 1) {
@@ -632,48 +590,6 @@ export class Renderer {
       }
     }
     ctx.restore();
-  }
-
-  drawWrappedMotionLine(start, motion) {
-    if (!start || !motion) return;
-    const eps = 1e-6;
-    let cx = start.x;
-    let cy = start.y;
-    let remX = motion.dx || 0;
-    let remY = motion.dy || 0;
-    let guard = 0;
-
-    while ((Math.abs(remX) > eps || Math.abs(remY) > eps) && guard < 40) {
-      guard++;
-      let alphaX = Infinity;
-      let alphaY = Infinity;
-
-      if (remX > eps) alphaX = (this.width - cx) / remX;
-      else if (remX < -eps) alphaX = (0 - cx) / remX;
-
-      if (remY > eps) alphaY = (this.height - cy) / remY;
-      else if (remY < -eps) alphaY = (0 - cy) / remY;
-
-      let alpha = Math.min(1, alphaX, alphaY);
-      if (!Number.isFinite(alpha) || alpha <= eps) alpha = 1;
-
-      const nx = cx + remX * alpha;
-      const ny = cy + remY * alpha;
-      this.ctx.beginPath();
-      this.ctx.moveTo(cx, cy);
-      this.ctx.lineTo(nx, ny);
-      this.ctx.stroke();
-
-      if (alpha >= 1 - eps) break;
-
-      const hitX = Math.abs(alpha - alphaX) < 1e-5;
-      const hitY = Math.abs(alpha - alphaY) < 1e-5;
-
-      cx = hitX ? (remX > 0 ? 0 : this.width) : nx;
-      cy = hitY ? (remY > 0 ? 0 : this.height) : ny;
-      remX *= (1 - alpha);
-      remY *= (1 - alpha);
-    }
   }
 
   drawAnimationGhosts(ghosts, center, ghostCenter, offset, motion, _inverse = false) {

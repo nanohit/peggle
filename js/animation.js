@@ -31,6 +31,24 @@ function wrapAxisToroidal(rawValue, size) {
   return { value, shift: value - safeRaw };
 }
 
+function resolveDirectPreviewVector(baseDx, baseDy, width, height, anchor = null) {
+  const dx = normalizeNumber(baseDx);
+  const dy = normalizeNumber(baseDy);
+  const startX = normalizeNumber(anchor?.startX);
+  const startY = normalizeNumber(anchor?.startY);
+  const hasWidth = Number.isFinite(width) && width > 0;
+  const hasHeight = Number.isFinite(height) && height > 0;
+
+  if (!hasWidth && !hasHeight) return { dx, dy };
+
+  const targetX = hasWidth ? wrapCoordinate(startX + dx, width) : startX + dx;
+  const targetY = hasHeight ? wrapCoordinate(startY + dy, height) : startY + dy;
+  return {
+    dx: targetX - startX,
+    dy: targetY - startY
+  };
+}
+
 function resolveInverseMotionToSameDestination(
   baseDx,
   baseDy,
@@ -76,10 +94,10 @@ function resolveInverseMotionToSameDestination(
       if (requireOpposite && c.dot >= -1e-4 * baseLen * baseLen) continue;
       if (
         !best ||
-        c.wrapCount < best.wrapCount ||
-        (c.wrapCount === best.wrapCount && c.axisCount < best.axisCount) ||
-        (c.wrapCount === best.wrapCount && c.axisCount === best.axisCount && c.len < best.len - 1e-9) ||
-        (c.wrapCount === best.wrapCount && c.axisCount === best.axisCount && Math.abs(c.len - best.len) <= 1e-9 && c.opp > best.opp + 1e-9)
+        c.opp > best.opp + 1e-9 ||
+        (Math.abs(c.opp - best.opp) <= 1e-9 && c.wrapCount < best.wrapCount) ||
+        (Math.abs(c.opp - best.opp) <= 1e-9 && c.wrapCount === best.wrapCount && c.axisCount < best.axisCount) ||
+        (Math.abs(c.opp - best.opp) <= 1e-9 && c.wrapCount === best.wrapCount && c.axisCount === best.axisCount && c.len < best.len - 1e-9)
       ) {
         best = c;
       }
@@ -87,25 +105,20 @@ function resolveInverseMotionToSameDestination(
     return best;
   };
 
-  // Pass 1: minimal-wrap candidates only (single wall or single corner wrap).
-  const primarySteps = [];
-  if (hasWidth) {
-    primarySteps.push(normalizeWrapStep(-1, 0));
-    primarySteps.push(normalizeWrapStep(1, 0));
+  const maxStepX = hasWidth ? 1 : 0;
+  const maxStepY = hasHeight ? 1 : 0;
+  const maxWrapCount = 2;
+  const candidateSteps = [];
+  for (let k = -maxStepX; k <= maxStepX; k++) {
+    for (let l = -maxStepY; l <= maxStepY; l++) {
+      if (k === 0 && l === 0) continue;
+      if (Math.abs(k) + Math.abs(l) > maxWrapCount) continue;
+      candidateSteps.push(normalizeWrapStep(k, l));
+    }
   }
-  if (hasHeight) {
-    primarySteps.push(normalizeWrapStep(0, -1));
-    primarySteps.push(normalizeWrapStep(0, 1));
-  }
-  if (hasWidth && hasHeight) {
-    primarySteps.push(normalizeWrapStep(-1, -1));
-    primarySteps.push(normalizeWrapStep(-1, 1));
-    primarySteps.push(normalizeWrapStep(1, -1));
-    primarySteps.push(normalizeWrapStep(1, 1));
-  }
-  const primaryCandidates = primarySteps.map(s => makeCandidate(s.k, s.l));
-  let best = chooseBest(primaryCandidates, true);
-  if (!best) best = chooseBest(primaryCandidates, false);
+  const candidates = candidateSteps.map(s => makeCandidate(s.k, s.l));
+  let best = chooseBest(candidates, true);
+  if (!best) best = chooseBest(candidates, false);
 
   if (best) return { dx: best.dx, dy: best.dy };
 
@@ -142,8 +155,9 @@ export function resolveWrappedMotion(
   const baseDx = normalizeNumber(requestedDx);
   const baseDy = normalizeNumber(requestedDy);
   if (!inverse) return { dx: baseDx, dy: baseDy };
-  void anchor;
-  return resolveInverseMotionToSameDestination(baseDx, baseDy, width, height);
+
+  const direct = resolveDirectPreviewVector(baseDx, baseDy, width, height, anchor);
+  return resolveInverseMotionToSameDestination(direct.dx, direct.dy, width, height);
 }
 
 function getVisibilityMargin(extent, minVisibleRatio = MIN_VISIBLE_RATIO) {
@@ -332,8 +346,6 @@ export class PegAnimator {
       pegMap.set(p.id, p);
       p._animWrapShiftX = 0;
       p._animWrapShiftY = 0;
-      p._animMotionDx = 0;
-      p._animMotionDy = 0;
       // Snapshot original positions (deep copy curveSlices)
       const snap = { x: p.x, y: p.y, angle: p.angle || 0 };
       if (p.curveSlices) {
@@ -441,13 +453,17 @@ export class PegAnimator {
       const t = anim.easingFn(rawT);
 
       const motion = (anim.wrap && (canWrapX || canWrapY))
-        ? resolveWrappedMotion(anim.dx, anim.dy, worldWidth, worldHeight, anim.inverse, {
-            startX: anim.centerX,
-            startY: anim.centerY,
-            extentX: 0,
-            extentY: 0,
-            minVisibleRatio: ANIMATION_WRAP_VISIBLE_RATIO
-          })
+        ? resolveWrappedMotion(
+            anim.dx,
+            anim.dy,
+            worldWidth,
+            worldHeight,
+            anim.inverse,
+            {
+              startX: anim.centerX,
+              startY: anim.centerY
+            }
+          )
         : { dx: anim.dx, dy: anim.dy };
       const motionDx = motion.dx;
       const motionDy = motion.dy;
@@ -461,9 +477,7 @@ export class PegAnimator {
             x: rawCenterX,
             y: rawCenterY,
             shiftX: 0,
-            shiftY: 0,
-            primaryShiftX: 0,
-            primaryShiftY: 0
+            shiftY: 0
           };
         }
         const wrappedX = canWrapX
@@ -476,13 +490,26 @@ export class PegAnimator {
           x: wrappedX.value,
           y: wrappedY.value,
           shiftX: wrappedX.shift,
-          shiftY: wrappedY.shift,
-          primaryShiftX: wrappedX.shift,
-          primaryShiftY: wrappedY.shift
+          shiftY: wrappedY.shift
         };
       })();
-      const centerShiftX = wrappedCenter.shiftX;
-      const centerShiftY = wrappedCenter.shiftY;
+      let centerShiftX = wrappedCenter.shiftX;
+      let centerShiftY = wrappedCenter.shiftY;
+      const eps = 1e-6;
+
+      // For inverse motion that needs wrapping on both axes, apply both axis
+      // shifts as soon as wrapping starts to avoid a two-step X-then-Y path.
+      if (anim.inverse && canWrapX && canWrapY) {
+        const plannedK = Math.round((motionDx - anim.dx) / worldWidth);
+        const plannedL = Math.round((motionDy - anim.dy) / worldHeight);
+        if (plannedK !== 0 && plannedL !== 0) {
+          const hasWrapStarted = Math.abs(centerShiftX) > eps || Math.abs(centerShiftY) > eps;
+          if (hasWrapStarted) {
+            centerShiftX = -plannedK * worldWidth;
+            centerShiftY = -plannedL * worldHeight;
+          }
+        }
+      }
       const rot = anim.rotation * t;
       const cosR = Math.cos(rot);
       const sinR = Math.sin(rot);
@@ -541,8 +568,6 @@ export class PegAnimator {
         peg.y = rawY + centerShiftY;
         peg._animWrapShiftX = centerShiftX;
         peg._animWrapShiftY = centerShiftY;
-        peg._animMotionDx = motionDx;
-        peg._animMotionDy = motionDy;
 
         // Keep group shape coherent by applying the same center wrap shift to all slices.
         if (rawSlices && peg.curveSlices) {
@@ -569,8 +594,6 @@ export class PegAnimator {
       peg.angle = orig.angle;
       peg._animWrapShiftX = 0;
       peg._animWrapShiftY = 0;
-      peg._animMotionDx = 0;
-      peg._animMotionDy = 0;
       if (orig.curveSlices && peg.curveSlices) {
         for (let i = 0; i < orig.curveSlices.length; i++) {
           const os = orig.curveSlices[i];
