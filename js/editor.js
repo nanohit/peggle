@@ -1441,17 +1441,12 @@ export class Editor {
   resolveAnimationMotion(useInverse = this.animationInverse) {
     if (!this.animationGhostOffset) return { dx: 0, dy: 0 };
     const bounds = this.getAnimationWorldBounds();
-    const center = this.getAnimationCenter();
     return resolveWrappedMotion(
       this.animationGhostOffset.dx || 0,
       this.animationGhostOffset.dy || 0,
       bounds.width,
       bounds.height,
-      useInverse,
-      center ? {
-        startX: center.x,
-        startY: center.y
-      } : null
+      useInverse
     );
   }
 
@@ -1612,20 +1607,11 @@ export class Editor {
     const rawCenterX = center.x + motion.dx;
     const rawCenterY = center.y + motion.dy;
     const wrapped = wrapPointWithVisibility(
-      rawCenterX,
-      rawCenterY,
-      bounds.width,
-      bounds.height,
-      0,
-      0,
-      motion.dx,
-      motion.dy,
-      ANIMATION_WRAP_VISIBLE_RATIO
+      rawCenterX, rawCenterY,
+      bounds.width, bounds.height,
+      0, 0, ANIMATION_WRAP_VISIBLE_RATIO
     );
-    return {
-      x: wrapped.x,
-      y: wrapped.y
-    };
+    return { x: wrapped.x, y: wrapped.y };
   }
 
   getAnimationGhosts() {
@@ -1646,15 +1632,9 @@ export class Editor {
     const rawCenterX = center.x + dx;
     const rawCenterY = center.y + dy;
     const wrappedCenter = wrapPointWithVisibility(
-      rawCenterX,
-      rawCenterY,
-      bounds.width,
-      bounds.height,
-      0,
-      0,
-      dx,
-      dy,
-      ANIMATION_WRAP_VISIBLE_RATIO
+      rawCenterX, rawCenterY,
+      bounds.width, bounds.height,
+      0, 0, ANIMATION_WRAP_VISIBLE_RATIO
     );
     const centerShiftX = wrappedCenter.shiftX;
     const centerShiftY = wrappedCenter.shiftY;

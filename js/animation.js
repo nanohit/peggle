@@ -31,133 +31,80 @@ function wrapAxisToroidal(rawValue, size) {
   return { value, shift: value - safeRaw };
 }
 
-function resolveDirectPreviewVector(baseDx, baseDy, width, height, anchor = null) {
-  const dx = normalizeNumber(baseDx);
-  const dy = normalizeNumber(baseDy);
-  const startX = normalizeNumber(anchor?.startX);
-  const startY = normalizeNumber(anchor?.startY);
-  const hasWidth = Number.isFinite(width) && width > 0;
-  const hasHeight = Number.isFinite(height) && height > 0;
-
-  if (!hasWidth && !hasHeight) return { dx, dy };
-
-  const targetX = hasWidth ? wrapCoordinate(startX + dx, width) : startX + dx;
-  const targetY = hasHeight ? wrapCoordinate(startY + dy, height) : startY + dy;
-  return {
-    dx: targetX - startX,
-    dy: targetY - startY
-  };
-}
-
-function resolveInverseMotionToSameDestination(
-  baseDx,
-  baseDy,
-  width,
-  height
-) {
+// Inverse motion: go in the opposite direction from (dx, dy) but arrive at
+// the same wrapped destination.  Every vector (dx + j*W, dy + m*H) for
+// integer j, m reaches the same destination on the torus.  Among those that
+// go generally OPPOSITE to forward, we pick the one whose direction is
+// closest to the exact 180° mirror (-dx, -dy), with a tiebreak for shorter
+// path length.  This avoids the angle distortion of per-axis flipping.
+function resolveInverseMotion(baseDx, baseDy, width, height) {
   const dx = normalizeNumber(baseDx);
   const dy = normalizeNumber(baseDy);
   const eps = 1e-6;
-  const baseLen = Math.hypot(dx, dy);
-  if (baseLen <= eps) return { dx: 0, dy: 0 };
+  const fwdLen = Math.hypot(dx, dy);
+  if (fwdLen <= eps) return { dx: 0, dy: 0 };
 
   const hasWidth = Number.isFinite(width) && width > 0;
   const hasHeight = Number.isFinite(height) && height > 0;
-  if (!hasWidth && !hasHeight) {
-    return { dx: -dx, dy: -dy };
+  if (!hasWidth && !hasHeight) return { dx: -dx, dy: -dy };
+
+  // Single-axis: trivial 180° flip
+  if (!hasWidth || Math.abs(dx) <= eps) {
+    const d = ((dy % height) + height) % height;
+    return { dx: dx, dy: dy > 0 ? d - height : d };
+  }
+  if (!hasHeight || Math.abs(dy) <= eps) {
+    const d = ((dx % width) + width) % width;
+    return { dx: dx > 0 ? d - width : d, dy: dy };
   }
 
-  const normalizeWrapStep = (k, l) => ({
-    k: hasWidth ? k : 0,
-    l: hasHeight ? l : 0
-  });
+  // Unit vector of the exact mirror direction
+  const mux = -dx / fwdLen;
+  const muy = -dy / fwdLen;
 
-  const makeCandidate = (k, l) => {
-    const kk = hasWidth ? k : 0;
-    const ll = hasHeight ? l : 0;
-    if (kk === 0 && ll === 0) return null;
-    const candDx = dx + kk * width;
-    const candDy = dy + ll * height;
-    const candLen = Math.hypot(candDx, candDy);
-    if (candLen <= eps) return null;
-    const dot = candDx * dx + candDy * dy;
-    const opp = (-dot) / (candLen * baseLen); // higher = more opposite
-    const wrapCount = Math.abs(kk) + Math.abs(ll);
-    const axisCount = (kk !== 0 ? 1 : 0) + (ll !== 0 ? 1 : 0);
-    return { dx: candDx, dy: candDy, len: candLen, dot, opp, wrapCount, axisCount };
-  };
-
-  const chooseBest = (candidates, requireOpposite = true) => {
-    let best = null;
-    for (const c of candidates) {
-      if (!c) continue;
-      if (requireOpposite && c.dot >= -1e-4 * baseLen * baseLen) continue;
-      if (
-        !best ||
-        c.opp > best.opp + 1e-9 ||
-        (Math.abs(c.opp - best.opp) <= 1e-9 && c.wrapCount < best.wrapCount) ||
-        (Math.abs(c.opp - best.opp) <= 1e-9 && c.wrapCount === best.wrapCount && c.axisCount < best.axisCount) ||
-        (Math.abs(c.opp - best.opp) <= 1e-9 && c.wrapCount === best.wrapCount && c.axisCount === best.axisCount && c.len < best.len - 1e-9)
-      ) {
-        best = c;
-      }
-    }
-    return best;
-  };
-
-  const maxStepX = hasWidth ? 4 : 0;
-  const maxStepY = hasHeight ? 4 : 0;
-  const maxWrapCount = 4;
-  const candidateSteps = [];
-  for (let k = -maxStepX; k <= maxStepX; k++) {
-    for (let l = -maxStepY; l <= maxStepY; l++) {
-      if (k === 0 && l === 0) continue;
-      if (Math.abs(k) + Math.abs(l) > maxWrapCount) continue;
-      candidateSteps.push(normalizeWrapStep(k, l));
+  // Collect all candidates that go opposite to forward
+  const candidates = [];
+  for (let j = -5; j <= 5; j++) {
+    for (let m = -5; m <= 5; m++) {
+      if (j === 0 && m === 0) continue;
+      const cx = dx + j * width;
+      const cy = dy + m * height;
+      const cLen = Math.hypot(cx, cy);
+      if (cLen <= eps) continue;
+      // Must go generally opposite to the forward direction
+      if (cx * dx + cy * dy >= 0) continue;
+      const cos = (cx * mux + cy * muy) / cLen;
+      candidates.push({ dx: cx, dy: cy, cos, len: cLen });
     }
   }
-  const candidates = candidateSteps.map(s => makeCandidate(s.k, s.l));
-  let best = chooseBest(candidates, true);
-  if (!best) best = chooseBest(candidates, false);
 
-  if (best) return { dx: best.dx, dy: best.dy };
+  if (candidates.length === 0) return { dx: -dx, dy: -dy };
 
-  // Fallback that still preserves destination modulo width/height.
-  let fallbackDx = -dx;
-  let fallbackDy = -dy;
-  if (hasWidth) {
-    const k = Math.round((-2 * dx) / width);
-    fallbackDx = dx + k * width;
-    if (fallbackDx * dx >= 0) fallbackDx += dx >= 0 ? -width : width;
-  }
-  if (hasHeight) {
-    const l = Math.round((-2 * dy) / height);
-    fallbackDy = dy + l * height;
-    if (fallbackDy * dy >= 0) fallbackDy += dy >= 0 ? -height : height;
+  // Sort by length (shortest first), then pick the shortest one
+  // whose angle is "good enough" — within 15° of the best angle available.
+  // This prevents multi-wrap paths when a single-wrap is nearly as good.
+  candidates.sort((a, b) => a.len - b.len);
+  const bestAngle = Math.max(...candidates.map(c => c.cos));
+  // cos(15°) ≈ 0.966 — allow up to ~15° deviation from best angle
+  const threshold = bestAngle - 0.07;
+
+  for (const c of candidates) {
+    if (c.cos >= threshold) {
+      return { dx: c.dx, dy: c.dy };
+    }
   }
 
-  if (Math.hypot(fallbackDx, fallbackDy) <= eps) {
-    return { dx: -dx, dy: -dy };
-  }
-  return { dx: fallbackDx, dy: fallbackDy };
+  // Fallback to best angle regardless of length
+  return candidates.reduce((a, b) => a.cos > b.cos ? a : b);
 }
 
 // Resolve animation motion vector.
 // Inverse keeps the same wrapped destination as non-inverse, but travels in the opposite direction.
-export function resolveWrappedMotion(
-  requestedDx,
-  requestedDy,
-  width,
-  height,
-  inverse = false,
-  anchor = null
-) {
+export function resolveWrappedMotion(requestedDx, requestedDy, width, height, inverse = false) {
   const baseDx = normalizeNumber(requestedDx);
   const baseDy = normalizeNumber(requestedDy);
   if (!inverse) return { dx: baseDx, dy: baseDy };
-
-  const direct = resolveDirectPreviewVector(baseDx, baseDy, width, height, anchor);
-  return resolveInverseMotionToSameDestination(direct.dx, direct.dy, width, height);
+  return resolveInverseMotion(baseDx, baseDy, width, height);
 }
 
 function getVisibilityMargin(extent, minVisibleRatio = MIN_VISIBLE_RATIO) {
@@ -189,33 +136,19 @@ export function wrapWithVisibility(rawValue, size, extent, minVisibleRatio = MIN
   return { value, shift };
 }
 
-// Wrap a 2D point independently on each axis.
+// Wrap a 2D point independently on each axis, keeping it within the visible
+// area defined by [−margin, size+margin].
 export function wrapPointWithVisibility(
-  rawX,
-  rawY,
-  width,
-  height,
-  extentX,
-  extentY,
-  motionDx,
-  motionDy,
-  minVisibleRatio = MIN_VISIBLE_RATIO,
-  preferX = null,
-  preferY = null
+  rawX, rawY, width, height,
+  extentX, extentY,
+  minVisibleRatio = MIN_VISIBLE_RATIO
 ) {
   const hasX = Number.isFinite(width) && width > 0;
   const hasY = Number.isFinite(height) && height > 0;
   const safeRawX = normalizeNumber(rawX);
   const safeRawY = normalizeNumber(rawY);
   if (!hasX && !hasY) {
-    return {
-      x: safeRawX,
-      y: safeRawY,
-      shiftX: 0,
-      shiftY: 0,
-      primaryShiftX: 0,
-      primaryShiftY: 0
-    };
+    return { x: safeRawX, y: safeRawY, shiftX: 0, shiftY: 0 };
   }
 
   const marginX = getVisibilityMargin(extentX, minVisibleRatio);
@@ -225,70 +158,15 @@ export function wrapPointWithVisibility(
   const minY = -marginY;
   const maxY = (hasY ? height : safeRawY) + marginY;
 
-  let x = safeRawX;
-  let y = safeRawY;
-  let shiftX = 0;
-  let shiftY = 0;
+  let x = safeRawX, y = safeRawY;
+  let shiftX = 0, shiftY = 0;
   let guard = 0;
-  while (hasX && x < minX && guard < 80) {
-    x += width;
-    shiftX += width;
-    guard++;
-  }
-  while (hasX && x > maxX && guard < 160) {
-    x -= width;
-    shiftX -= width;
-    guard++;
-  }
-  while (hasY && y < minY && guard < 240) {
-    y += height;
-    shiftY += height;
-    guard++;
-  }
-  while (hasY && y > maxY && guard < 320) {
-    y -= height;
-    shiftY -= height;
-    guard++;
-  }
+  while (hasX && x < minX && guard < 80)  { x += width;  shiftX += width;  guard++; }
+  while (hasX && x > maxX && guard < 160) { x -= width;  shiftX -= width;  guard++; }
+  while (hasY && y < minY && guard < 240) { y += height; shiftY += height; guard++; }
+  while (hasY && y > maxY && guard < 320) { y -= height; shiftY -= height; guard++; }
 
-  // If the visible interval allows multiple equivalent wrapped representatives,
-  // choose the one closest to the preferred reference point to keep endpoint
-  // representation stable across inverse/non-inverse paths.
-  const prefX = Number.isFinite(preferX) ? preferX : null;
-  const prefY = Number.isFinite(preferY) ? preferY : null;
-  const eps = 1e-9;
-  if (hasX && prefX !== null) {
-    while (x + width <= maxX + eps && Math.abs((x + width) - prefX) + eps < Math.abs(x - prefX)) {
-      x += width;
-      shiftX += width;
-    }
-    while (x - width >= minX - eps && Math.abs((x - width) - prefX) + eps < Math.abs(x - prefX)) {
-      x -= width;
-      shiftX -= width;
-    }
-  }
-  if (hasY && prefY !== null) {
-    while (y + height <= maxY + eps && Math.abs((y + height) - prefY) + eps < Math.abs(y - prefY)) {
-      y += height;
-      shiftY += height;
-    }
-    while (y - height >= minY - eps && Math.abs((y - height) - prefY) + eps < Math.abs(y - prefY)) {
-      y -= height;
-      shiftY -= height;
-    }
-  }
-
-  void motionDx;
-  void motionDy;
-
-  return {
-    x,
-    y,
-    shiftX,
-    shiftY,
-    primaryShiftX: shiftX,
-    primaryShiftY: shiftY
-  };
+  return { x, y, shiftX, shiftY };
 }
 
 export function estimatePegExtents(peg, centerX, centerY, angle = 0, slices = null) {
@@ -453,80 +331,27 @@ export class PegAnimator {
       const t = anim.easingFn(rawT);
 
       const motion = (anim.wrap && (canWrapX || canWrapY))
-        ? resolveWrappedMotion(
-            anim.dx,
-            anim.dy,
-            worldWidth,
-            worldHeight,
-            anim.inverse,
-            {
-              startX: anim.centerX,
-              startY: anim.centerY
-            }
-          )
+        ? resolveWrappedMotion(anim.dx, anim.dy, worldWidth, worldHeight, anim.inverse)
         : { dx: anim.dx, dy: anim.dy };
-      const directMotion = (anim.wrap && (canWrapX || canWrapY))
-        ? resolveDirectPreviewVector(anim.dx, anim.dy, worldWidth, worldHeight, {
-            startX: anim.centerX,
-            startY: anim.centerY
-          })
-        : { dx: anim.dx, dy: anim.dy };
-      const motionDx = motion.dx;
-      const motionDy = motion.dy;
-      const tx = motionDx * t;
-      const ty = motionDy * t;
+      const tx = motion.dx * t;
+      const ty = motion.dy * t;
       const rawCenterX = anim.centerX + tx;
       const rawCenterY = anim.centerY + ty;
-      const wrappedCenter = (() => {
-        if (!(anim.wrap && (canWrapX || canWrapY))) {
-          return {
-            x: rawCenterX,
-            y: rawCenterY,
-            shiftX: 0,
-            shiftY: 0
-          };
+
+      // Wrap center position toroidally (independent per axis)
+      let centerShiftX = 0;
+      let centerShiftY = 0;
+      if (anim.wrap) {
+        if (canWrapX) {
+          const w = wrapAxisToroidal(rawCenterX, worldWidth);
+          centerShiftX = w.shift;
         }
-        const wrappedX = canWrapX
-          ? wrapAxisToroidal(rawCenterX, worldWidth)
-          : { value: rawCenterX, shift: 0 };
-        const wrappedY = canWrapY
-          ? wrapAxisToroidal(rawCenterY, worldHeight)
-          : { value: rawCenterY, shift: 0 };
-        return {
-          x: wrappedX.value,
-          y: wrappedY.value,
-          shiftX: wrappedX.shift,
-          shiftY: wrappedY.shift
-        };
-      })();
-      let centerShiftX = wrappedCenter.shiftX;
-      let centerShiftY = wrappedCenter.shiftY;
-      const eps = 1e-6;
-
-      // For inverse motion that needs wrapping on both axes, apply both axis
-      // shifts as soon as wrapping starts to avoid a two-step X-then-Y path.
-      if (anim.inverse && canWrapX && canWrapY) {
-        const plannedK = Math.round((motionDx - directMotion.dx) / worldWidth);
-        const plannedL = Math.round((motionDy - directMotion.dy) / worldHeight);
-        const startedX = Math.abs(wrappedCenter.shiftX) > eps;
-        const startedY = Math.abs(wrappedCenter.shiftY) > eps;
-        const startedAny = startedX || startedY;
-        const isSingleCornerWrap = Math.abs(plannedK) <= 1 && Math.abs(plannedL) <= 1;
-
-        if (plannedK !== 0 && plannedL !== 0 && isSingleCornerWrap) {
-          if (startedAny) {
-            centerShiftX = -plannedK * worldWidth;
-            centerShiftY = -plannedL * worldHeight;
-          }
-        } else if (plannedK === 0 || plannedL === 0) {
-          if (plannedK !== 0 && startedX) {
-            centerShiftX = -plannedK * worldWidth;
-          }
-          if (plannedL !== 0 && startedY) {
-            centerShiftY = -plannedL * worldHeight;
-          }
+        if (canWrapY) {
+          const w = wrapAxisToroidal(rawCenterY, worldHeight);
+          centerShiftY = w.shift;
         }
       }
+
       const rot = anim.rotation * t;
       const cosR = Math.cos(rot);
       const sinR = Math.sin(rot);

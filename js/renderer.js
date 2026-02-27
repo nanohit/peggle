@@ -292,15 +292,27 @@ export class Renderer {
   }
 
   getWrapCopyOffsets(peg) {
-    const eps = 1e-6;
+    // Proximity-based: show copies when the peg is near any screen edge
+    // so that wrapping looks smooth instead of jumping.
+    const buffer = PHYSICS_CONFIG.pegRadius * 2;
+    const copies = [];
+    const nearL = peg.x < buffer;
+    const nearR = peg.x > this.width - buffer;
+    const nearT = peg.y < buffer;
+    const nearB = peg.y > this.height - buffer;
 
-    const wrapShiftX = Number.isFinite(peg?._animWrapShiftX) ? peg._animWrapShiftX : 0;
-    const wrapShiftY = Number.isFinite(peg?._animWrapShiftY) ? peg._animWrapShiftY : 0;
-    if (Math.abs(wrapShiftX) > eps || Math.abs(wrapShiftY) > eps) {
-      // Already wrapped this frame: draw exactly one copy at the pre-wrap image.
-      return [{ x: -wrapShiftX, y: -wrapShiftY }];
-    }
-    return [];
+    if (nearR) copies.push({ x: -this.width, y: 0 });
+    if (nearL) copies.push({ x:  this.width, y: 0 });
+    if (nearB) copies.push({ x: 0, y: -this.height });
+    if (nearT) copies.push({ x: 0, y:  this.height });
+
+    // Corner copies
+    if (nearR && nearB) copies.push({ x: -this.width, y: -this.height });
+    if (nearR && nearT) copies.push({ x: -this.width, y:  this.height });
+    if (nearL && nearB) copies.push({ x:  this.width, y: -this.height });
+    if (nearL && nearT) copies.push({ x:  this.width, y:  this.height });
+
+    return copies;
   }
 
   drawPegWithOffset(peg, offsetX, offsetY, isHit = false, isSelected = false, alpha = 1) {
@@ -592,6 +604,48 @@ export class Renderer {
     ctx.restore();
   }
 
+  drawWrappedMotionLine(start, motion) {
+    if (!start || !motion) return;
+    const eps = 1e-6;
+    let cx = start.x;
+    let cy = start.y;
+    let remX = motion.dx || 0;
+    let remY = motion.dy || 0;
+    let guard = 0;
+
+    while ((Math.abs(remX) > eps || Math.abs(remY) > eps) && guard < 60) {
+      guard++;
+      let alphaX = Infinity;
+      let alphaY = Infinity;
+
+      if (remX > eps) alphaX = (this.width - cx) / remX;
+      else if (remX < -eps) alphaX = (0 - cx) / remX;
+
+      if (remY > eps) alphaY = (this.height - cy) / remY;
+      else if (remY < -eps) alphaY = (0 - cy) / remY;
+
+      let alpha = Math.min(1, alphaX, alphaY);
+      if (!Number.isFinite(alpha) || alpha <= eps) alpha = 1;
+
+      const nx = cx + remX * alpha;
+      const ny = cy + remY * alpha;
+      this.ctx.beginPath();
+      this.ctx.moveTo(cx, cy);
+      this.ctx.lineTo(nx, ny);
+      this.ctx.stroke();
+
+      if (alpha >= 1 - eps) break;
+
+      const hitX = Math.abs(alpha - alphaX) < 1e-5;
+      const hitY = Math.abs(alpha - alphaY) < 1e-5;
+
+      cx = hitX ? (remX > 0 ? 0 : this.width) : nx;
+      cy = hitY ? (remY > 0 ? 0 : this.height) : ny;
+      remX *= (1 - alpha);
+      remY *= (1 - alpha);
+    }
+  }
+
   drawAnimationGhosts(ghosts, center, ghostCenter, offset, motion, _inverse = false) {
     if (!ghosts || ghosts.length === 0 || !center) return;
     const ctx = this.ctx;
@@ -602,10 +656,15 @@ export class Renderer {
       : null;
     const targetCenter = ghostCenter || fallbackCenter;
 
-    // Dashed guide line from original center to ghost center.
-    // We intentionally draw a single segment to avoid parallel wrap-track clutter.
+    // Guide line showing the actual path (wrapping through walls for inverse).
     ctx.save();
-    if (targetCenter) {
+    if (motion && (Math.abs(motion.dx || 0) > 0.001 || Math.abs(motion.dy || 0) > 0.001)) {
+      ctx.strokeStyle = '#ffd60a';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([6, 4]);
+      this.drawWrappedMotionLine(center, motion);
+      ctx.setLineDash([]);
+    } else if (targetCenter) {
       ctx.strokeStyle = '#ffd60a';
       ctx.lineWidth = 1.5;
       ctx.setLineDash([6, 4]);
@@ -614,26 +673,6 @@ export class Renderer {
       ctx.lineTo(targetCenter.x, targetCenter.y);
       ctx.stroke();
       ctx.setLineDash([]);
-
-      // Direction cue near the start so inverse/non-inverse remains obvious
-      // without rendering extra wrapped trajectory segments.
-      const dirX = motion?.dx || 0;
-      const dirY = motion?.dy || 0;
-      const dirLen = Math.hypot(dirX, dirY);
-      if (dirLen > 0.001) {
-        const ux = dirX / dirLen;
-        const uy = dirY / dirLen;
-        const arrowLen = 16;
-        const ax = center.x + ux * arrowLen;
-        const ay = center.y + uy * arrowLen;
-        ctx.setLineDash([]);
-        ctx.strokeStyle = '#ffd60a';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(center.x, center.y);
-        ctx.lineTo(ax, ay);
-        ctx.stroke();
-      }
     }
 
     // Draw ghost pegs at offset position
