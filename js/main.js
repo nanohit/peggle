@@ -421,6 +421,22 @@ class PeggleApp {
       this._syncAnimationInverseButton();
     });
 
+    // Cycle button
+    const cycleBtn = document.getElementById('animCycleBtn');
+    cycleBtn.addEventListener('click', () => {
+      if (!this.editor || !this.editor.animationMode) return;
+      this.editor.animationCycle = !this.editor.animationCycle;
+      // Cycle forces linear easing
+      if (this.editor.animationCycle) {
+        this.editor.animationEasing = 'linear';
+        document.getElementById('animEasingToggle').checked = false;
+        document.getElementById('animEasingToggle').disabled = true;
+      } else {
+        document.getElementById('animEasingToggle').disabled = false;
+      }
+      this._syncAnimationCycleButton();
+    });
+
     // Preview button
     document.getElementById('animPreviewBtn').addEventListener('click', () => {
       if (!this.editor) return;
@@ -448,17 +464,18 @@ class PeggleApp {
       this.editor.stopAnimationPreview();
       document.getElementById('animPreviewBtn').textContent = 'Preview';
 
-      const dx = parseInt(document.getElementById('animDxSlider').value);
-      const dy = parseInt(document.getElementById('animDySlider').value);
+      const dx = Math.round(this.editor.animationGhostOffset?.dx || 0);
+      const dy = Math.round(this.editor.animationGhostOffset?.dy || 0);
       const rot = parseInt(document.getElementById('animRotSlider').value) * Math.PI / 180;
       const dur = parseInt(document.getElementById('animDurationSlider').value) / 10;
-      const easing = document.getElementById('animEasingToggle').checked ? 'easeInOut' : 'linear';
+      const cycle = !!this.editor.animationCycle;
+      const easing = cycle ? 'linear' : (document.getElementById('animEasingToggle').checked ? 'easeInOut' : 'linear');
       const inverse = !!this.editor.animationInverse;
 
       if (dx === 0 && dy === 0 && rot === 0) {
         this.editor.clearTargetAnimation();
       } else {
-        this.editor.setTargetAnimation({ dx, dy, rotation: rot, duration: dur, easing, inverse, wrap: true });
+        this.editor.setTargetAnimation({ dx, dy, rotation: rot, duration: dur, easing, inverse, cycle, wrap: true });
       }
       this.closeAnimationPanel();
     });
@@ -506,6 +523,7 @@ class PeggleApp {
     document.getElementById('animDurationValue').textContent = dur.toFixed(1);
     document.getElementById('animEasingToggle').checked = easing === 'easeInOut';
     this._syncAnimationInverseButton();
+    this._syncAnimationCycleButton();
   }
 
   _syncAnimationInverseButton() {
@@ -514,6 +532,20 @@ class PeggleApp {
     const inverseOn = !!(this.editor && this.editor.animationInverse);
     inverseBtn.classList.toggle('active', inverseOn);
     inverseBtn.textContent = inverseOn ? 'Inverse: ON' : 'Inverse: OFF';
+  }
+
+  _syncAnimationCycleButton() {
+    const cycleBtn = document.getElementById('animCycleBtn');
+    if (!cycleBtn) return;
+    const cycleOn = !!(this.editor && this.editor.animationCycle);
+    cycleBtn.classList.toggle('active', cycleOn);
+    cycleBtn.textContent = cycleOn ? 'Cycle: ON' : 'Cycle: OFF';
+    // Disable easing when cycle is on
+    const easingToggle = document.getElementById('animEasingToggle');
+    if (easingToggle) {
+      easingToggle.disabled = cycleOn;
+      if (cycleOn) easingToggle.checked = false;
+    }
   }
 
   initMode() {

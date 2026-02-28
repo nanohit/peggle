@@ -31,80 +31,88 @@ function wrapAxisToroidal(rawValue, size) {
   return { value, shift: value - safeRaw };
 }
 
-// Inverse motion: go in the opposite direction from (dx, dy) but arrive at
-// the same wrapped destination.  Every vector (dx + j*W, dy + m*H) for
-// integer j, m reaches the same destination on the torus.  Among those that
-// go generally OPPOSITE to forward, we pick the one whose direction is
-// closest to the exact 180° mirror (-dx, -dy), with a tiebreak for shorter
-// path length.  This avoids the angle distortion of per-axis flipping.
-function resolveInverseMotion(baseDx, baseDy, width, height) {
-  const dx = normalizeNumber(baseDx);
-  const dy = normalizeNumber(baseDy);
+// Mirror-wrap trace: trace a path from (startX, startY) along (dx, dy),
+// reflecting at walls. When hitting a vertical wall (left/right), X teleports
+// to the opposite wall and Y mirrors around the STARTING Y position (not H/2).
+// Horizontal wall: Y teleports, X mirrors around starting X. The velocity
+// direction is PRESERVED (no flip) so the remaining path heads back toward
+// the origin area. This guarantees exactly 1 wall teleport for any angle.
+// Find nearest wall hit alpha for a ray from (cx,cy) in direction (vx,vy)
+function wallHitAlpha(cx, cy, vx, vy, W, H) {
   const eps = 1e-6;
-  const fwdLen = Math.hypot(dx, dy);
-  if (fwdLen <= eps) return { dx: 0, dy: 0 };
-
-  const hasWidth = Number.isFinite(width) && width > 0;
-  const hasHeight = Number.isFinite(height) && height > 0;
-  if (!hasWidth && !hasHeight) return { dx: -dx, dy: -dy };
-
-  // Single-axis: trivial 180° flip
-  if (!hasWidth || Math.abs(dx) <= eps) {
-    const d = ((dy % height) + height) % height;
-    return { dx: dx, dy: dy > 0 ? d - height : d };
+  let alpha = Infinity;
+  if (Math.abs(vx) > eps) {
+    const a = (vx > 0 ? W - cx : -cx) / vx;
+    if (a > eps) alpha = Math.min(alpha, a);
   }
-  if (!hasHeight || Math.abs(dy) <= eps) {
-    const d = ((dx % width) + width) % width;
-    return { dx: dx > 0 ? d - width : d, dy: dy };
+  if (Math.abs(vy) > eps) {
+    const a = (vy > 0 ? H - cy : -cy) / vy;
+    if (a > eps) alpha = Math.min(alpha, a);
+  }
+  return alpha;
+}
+
+// Red-dot wrap: when the forward path crosses a wall, find where the
+// REVERSE ray from the current position first hits a wall (the "red dot"),
+// jump there, and continue with the remaining velocity at the same angle.
+export function mirrorWrapTrace(startX, startY, dx, dy, W, H) {
+  const eps = 1e-6;
+  const hasW = Number.isFinite(W) && W > 0;
+  const hasH = Number.isFinite(H) && H > 0;
+
+  if (!hasW && !hasH) {
+    return { x: startX + dx, y: startY + dy, mirrorX: false, mirrorY: false };
   }
 
-  // Unit vector of the exact mirror direction
-  const mux = -dx / fwdLen;
-  const muy = -dy / fwdLen;
+  let cx = startX, cy = startY;
+  let vx = dx, vy = dy;
+  let guard = 0;
 
-  // Collect all candidates that go opposite to forward
-  const candidates = [];
-  for (let j = -5; j <= 5; j++) {
-    for (let m = -5; m <= 5; m++) {
-      if (j === 0 && m === 0) continue;
-      const cx = dx + j * width;
-      const cy = dy + m * height;
-      const cLen = Math.hypot(cx, cy);
-      if (cLen <= eps) continue;
-      // Must go generally opposite to the forward direction
-      if (cx * dx + cy * dy >= 0) continue;
-      const cos = (cx * mux + cy * muy) / cLen;
-      candidates.push({ dx: cx, dy: cy, cos, len: cLen });
+  while ((Math.abs(vx) > eps || Math.abs(vy) > eps) && guard < 10) {
+    guard++;
+
+    // How far forward until we hit a wall?
+    const alphaFwd = wallHitAlpha(cx, cy, vx, vy, W, H);
+
+    if (alphaFwd >= 1) {
+      // No wall hit — reach destination directly
+      cx += vx;
+      cy += vy;
+      break;
     }
+
+    // Forward path hits a wall. Remaining velocity after the hit:
+    const remainVx = vx * (1 - alphaFwd);
+    const remainVy = vy * (1 - alphaFwd);
+
+    // Find the "red dot": trace BACKWARDS from (cx, cy) until hitting a wall
+    const alphaRev = wallHitAlpha(cx, cy, -vx, -vy, W, H);
+    const redX = cx - vx * alphaRev;
+    const redY = cy - vy * alphaRev;
+
+    // Jump to red dot, continue with remaining velocity (same direction)
+    cx = redX;
+    cy = redY;
+    vx = remainVx;
+    vy = remainVy;
   }
 
-  if (candidates.length === 0) return { dx: -dx, dy: -dy };
+  return { x: cx, y: cy, mirrorX: false, mirrorY: false };
+}
 
-  // Sort by length (shortest first), then pick the shortest one
-  // whose angle is "good enough" — within 15° of the best angle available.
-  // This prevents multi-wrap paths when a single-wrap is nearly as good.
-  candidates.sort((a, b) => a.len - b.len);
-  const bestAngle = Math.max(...candidates.map(c => c.cos));
-  // cos(15°) ≈ 0.966 — allow up to ~15° deviation from best angle
-  const threshold = bestAngle - 0.07;
-
-  for (const c of candidates) {
-    if (c.cos >= threshold) {
-      return { dx: c.dx, dy: c.dy };
-    }
-  }
-
-  // Fallback to best angle regardless of length
-  return candidates.reduce((a, b) => a.cos > b.cos ? a : b);
+// Inverse motion: negate the vector. With mirror-wrap, (-dx, -dy) goes in
+// the exact opposite direction and reflects off the opposite wall.
+function resolveInverseMotion(baseDx, baseDy) {
+  return { dx: -normalizeNumber(baseDx), dy: -normalizeNumber(baseDy) };
 }
 
 // Resolve animation motion vector.
-// Inverse keeps the same wrapped destination as non-inverse, but travels in the opposite direction.
+// Inverse simply negates the direction (mirror-wrap handles the rest).
 export function resolveWrappedMotion(requestedDx, requestedDy, width, height, inverse = false) {
   const baseDx = normalizeNumber(requestedDx);
   const baseDy = normalizeNumber(requestedDy);
   if (!inverse) return { dx: baseDx, dy: baseDy };
-  return resolveInverseMotion(baseDx, baseDy, width, height);
+  return resolveInverseMotion(baseDx, baseDy);
 }
 
 function getVisibilityMargin(extent, minVisibleRatio = MIN_VISIBLE_RATIO) {
@@ -224,6 +232,7 @@ export class PegAnimator {
       pegMap.set(p.id, p);
       p._animWrapShiftX = 0;
       p._animWrapShiftY = 0;
+      p._wrapPartner = null;
       // Snapshot original positions (deep copy curveSlices)
       const snap = { x: p.x, y: p.y, angle: p.angle || 0 };
       if (p.curveSlices) {
@@ -279,7 +288,8 @@ export class PegAnimator {
         duration: anim.duration || 2,
         wrap: anim.wrap !== false,
         inverse: !!anim.inverse,
-        easingFn: EASING_FNS[anim.easing] || linear
+        cycle: !!anim.cycle,
+        easingFn: anim.cycle ? linear : (EASING_FNS[anim.easing] || linear)
       });
       for (const pegId of memberIds) this.animatedPegIds.add(pegId);
     }
@@ -304,7 +314,8 @@ export class PegAnimator {
         duration: anim.duration || 2,
         wrap: anim.wrap !== false,
         inverse: !!anim.inverse,
-        easingFn: EASING_FNS[anim.easing] || linear
+        cycle: !!anim.cycle,
+        easingFn: anim.cycle ? linear : (EASING_FNS[anim.easing] || linear)
       });
       this.animatedPegIds.add(p.id);
     }
@@ -325,34 +336,50 @@ export class PegAnimator {
 
     for (const anim of this.animations) {
       const duration = Math.max(anim.duration || 0, 0.001);
-      const cycle = duration * 2;
-      const phase = (this.elapsed % cycle) / duration;
-      const rawT = phase <= 1 ? phase : 2 - phase; // ping-pong 0→1→0
-      const t = anim.easingFn(rawT);
 
-      const motion = (anim.wrap && (canWrapX || canWrapY))
-        ? resolveWrappedMotion(anim.dx, anim.dy, worldWidth, worldHeight, anim.inverse)
-        : { dx: anim.dx, dy: anim.dy };
-      const tx = motion.dx * t;
-      const ty = motion.dy * t;
-      const rawCenterX = anim.centerX + tx;
-      const rawCenterY = anim.centerY + ty;
+      let tx, ty, rot;
 
-      // Wrap center position toroidally (independent per axis)
-      let centerShiftX = 0;
-      let centerShiftY = 0;
-      if (anim.wrap) {
-        if (canWrapX) {
-          const w = wrapAxisToroidal(rawCenterX, worldWidth);
-          centerShiftX = w.shift;
+      if (anim.cycle && anim.wrap && (canWrapX || canWrapY)) {
+        // Cycle: forward to destination, then retrace back to origin.
+        // With mirror-wrap, the return path is the reverse of the forward reflected path,
+        // so both legs are equal length. Each leg takes half the duration.
+        const fwd = resolveWrappedMotion(anim.dx, anim.dy, worldWidth, worldHeight, anim.inverse);
+        const phase = (this.elapsed % duration) / duration; // 0→1 sawtooth
+
+        // Rotation: constant speed, same direction, never reverses.
+        rot = anim.rotation * (this.elapsed / duration);
+
+        if (phase < 0.5) {
+          // Forward leg: origin → destination
+          const localT = phase / 0.5;
+          tx = fwd.dx * localT;
+          ty = fwd.dy * localT;
+        } else {
+          // Return leg: destination → origin (retrace)
+          const localT = (phase - 0.5) / 0.5;
+          tx = fwd.dx * (1 - localT);
+          ty = fwd.dy * (1 - localT);
         }
-        if (canWrapY) {
-          const w = wrapAxisToroidal(rawCenterY, worldHeight);
-          centerShiftY = w.shift;
-        }
+      } else {
+        // Normal ping-pong (or cycle without wrap, treated as ping-pong)
+        const fullCycle = duration * 2;
+        const phase = (this.elapsed % fullCycle) / duration;
+        const rawT = phase <= 1 ? phase : 2 - phase;
+        const t = anim.easingFn(rawT);
+
+        const motion = (anim.wrap && (canWrapX || canWrapY))
+          ? resolveWrappedMotion(anim.dx, anim.dy, worldWidth, worldHeight, anim.inverse)
+          : { dx: anim.dx, dy: anim.dy };
+        tx = motion.dx * t;
+        ty = motion.dy * t;
+        rot = anim.rotation * t;
       }
 
-      const rot = anim.rotation * t;
+      // Mirror-wrap: trace path with wall reflections
+      const traced = (anim.wrap && (canWrapX || canWrapY))
+        ? mirrorWrapTrace(anim.centerX, anim.centerY, tx, ty, worldWidth || 0, worldHeight || 0)
+        : { x: anim.centerX + tx, y: anim.centerY + ty, mirrorX: false, mirrorY: false };
+
       const cosR = Math.cos(rot);
       const sinR = Math.sin(rot);
 
@@ -363,61 +390,90 @@ export class PegAnimator {
         if (!orig) continue;
 
         const finalAngle = orig.angle + rot;
-        let rawX;
-        let rawY;
         if (anim.type === 'group') {
-          // Rotate peg position around group center, then translate
-          const localX = orig.x - anim.centerX;
-          const localY = orig.y - anim.centerY;
-          rawX = anim.centerX + localX * cosR - localY * sinR + tx;
-          rawY = anim.centerY + localX * sinR + localY * cosR + ty;
-          peg.angle = orig.angle + rot;
+          let localX = orig.x - anim.centerX;
+          let localY = orig.y - anim.centerY;
+          // Rotate around group center
+          let rx = localX * cosR - localY * sinR;
+          let ry = localX * sinR + localY * cosR;
+          // Mirror local offsets if the center reflected off a wall
+          if (traced.mirrorX) rx = -rx;
+          if (traced.mirrorY) ry = -ry;
+          peg.x = traced.x + rx;
+          peg.y = traced.y + ry;
         } else {
-          // Individual: translate + rotate around own center
-          rawX = orig.x + tx;
-          rawY = orig.y + ty;
+          peg.x = traced.x;
+          peg.y = traced.y;
         }
         peg.angle = finalAngle;
+        peg._animWrapShiftX = 0;
+        peg._animWrapShiftY = 0;
 
-        let rawSlices = null;
-        if (orig.curveSlices && peg.curveSlices) {
-          rawSlices = [];
-          for (let i = 0; i < orig.curveSlices.length; i++) {
-            const os = orig.curveSlices[i];
-            let sliceX;
-            let sliceY;
-            if (anim.type === 'group') {
-              const sx = os.x - anim.centerX;
-              const sy = os.y - anim.centerY;
-              sliceX = anim.centerX + sx * cosR - sy * sinR + tx;
-              sliceY = anim.centerY + sx * sinR + sy * cosR + ty;
-            } else {
-              const sx = os.x - orig.x;
-              const sy = os.y - orig.y;
-              sliceX = rawX + sx * cosR - sy * sinR;
-              sliceY = rawY + sx * sinR + sy * cosR;
+        // Compute wrap partner for smooth edge transition
+        peg._wrapPartner = null;
+        if (anim.wrap && (canWrapX || canWrapY)) {
+          const W = worldWidth || 0;
+          const H = worldHeight || 0;
+          const r = PHYSICS_CONFIG.pegRadius;
+          // Distance to nearest wall on each side
+          const distL = peg.x;
+          const distR = W > 0 ? W - peg.x : Infinity;
+          const distT = peg.y;
+          const distB = H > 0 ? H - peg.y : Infinity;
+          const minDist = Math.min(distL, distR, distT, distB);
+          // Activate partner when peg center is within 2x radius of wall
+          const threshold = r * 2;
+          if (minDist < threshold) {
+            const motionResolved = resolveWrappedMotion(anim.dx, anim.dy, W, H, anim.inverse);
+            const mLen = Math.sqrt(motionResolved.dx ** 2 + motionResolved.dy ** 2);
+            if (mLen > 0) {
+              const ndx = motionResolved.dx / mLen;
+              const ndy = motionResolved.dy / mLen;
+              for (const sign of [1, -1]) {
+                const dvx = ndx * sign;
+                const dvy = ndy * sign;
+                const wallDist = wallHitAlpha(peg.x, peg.y, dvx, dvy, W, H);
+                if (wallDist < threshold) {
+                  // Push just past the wall to find partner position
+                  const push = wallDist + 0.1;
+                  const partner = mirrorWrapTrace(peg.x, peg.y, dvx * push, dvy * push, W, H);
+                  // Alpha: 1 when at wall (minDist=0), 0 when at threshold
+                  const partnerAlpha = 1 - (minDist / threshold);
+                  peg._wrapPartner = {
+                    x: partner.x - dvx * 0.1,
+                    y: partner.y - dvy * 0.1,
+                    alpha: Math.max(0, Math.min(1, partnerAlpha))
+                  };
+                  break;
+                }
+              }
             }
-            rawSlices.push({
-              x: sliceX,
-              y: sliceY,
-              nx: os.nx * cosR - os.ny * sinR,
-              ny: os.nx * sinR + os.ny * cosR
-            });
           }
         }
 
-        peg.x = rawX + centerShiftX;
-        peg.y = rawY + centerShiftY;
-        peg._animWrapShiftX = centerShiftX;
-        peg._animWrapShiftY = centerShiftY;
-
-        // Keep group shape coherent by applying the same center wrap shift to all slices.
-        if (rawSlices && peg.curveSlices) {
-          for (let i = 0; i < rawSlices.length; i++) {
-            peg.curveSlices[i].x = rawSlices[i].x + centerShiftX;
-            peg.curveSlices[i].y = rawSlices[i].y + centerShiftY;
-            peg.curveSlices[i].nx = rawSlices[i].nx;
-            peg.curveSlices[i].ny = rawSlices[i].ny;
+        if (orig.curveSlices && peg.curveSlices) {
+          for (let i = 0; i < orig.curveSlices.length; i++) {
+            const os = orig.curveSlices[i];
+            let sx, sy;
+            if (anim.type === 'group') {
+              sx = os.x - anim.centerX;
+              sy = os.y - anim.centerY;
+            } else {
+              sx = os.x - orig.x;
+              sy = os.y - orig.y;
+            }
+            let rsx = sx * cosR - sy * sinR;
+            let rsy = sx * sinR + sy * cosR;
+            if (traced.mirrorX) rsx = -rsx;
+            if (traced.mirrorY) rsy = -rsy;
+            let rnx = os.nx * cosR - os.ny * sinR;
+            let rny = os.nx * sinR + os.ny * cosR;
+            if (traced.mirrorX) rnx = -rnx;
+            if (traced.mirrorY) rny = -rny;
+            peg.curveSlices[i].x = (anim.type === 'group' ? traced.x : peg.x) + rsx;
+            peg.curveSlices[i].y = (anim.type === 'group' ? traced.y : peg.y) + rsy;
+            peg.curveSlices[i].nx = rnx;
+            peg.curveSlices[i].ny = rny;
           }
         }
       }
@@ -436,6 +492,7 @@ export class PegAnimator {
       peg.angle = orig.angle;
       peg._animWrapShiftX = 0;
       peg._animWrapShiftY = 0;
+      peg._wrapPartner = null;
       if (orig.curveSlices && peg.curveSlices) {
         for (let i = 0; i < orig.curveSlices.length; i++) {
           const os = orig.curveSlices[i];

@@ -10,7 +10,8 @@ import {
   ANIMATION_WRAP_VISIBLE_RATIO,
   estimatePegExtents,
   resolveWrappedMotion,
-  wrapPointWithVisibility
+  wrapPointWithVisibility,
+  mirrorWrapTrace
 } from './animation.js';
 
 export class Editor {
@@ -66,6 +67,7 @@ export class Editor {
     this.animationDuration = 2;
     this.animationEasing = 'easeInOut';
     this.animationInverse = false;
+    this.animationCycle = false;
     this.animationPreview = false;
     this.animationPreviewAnimator = null;
     this.onAnimationOffsetChange = null; // callback for slider sync
@@ -1510,6 +1512,7 @@ export class Editor {
     this.animationDuration = existing?.duration || 2;
     this.animationEasing = existing?.easing || 'easeInOut';
     this.animationInverse = !!existing?.inverse;
+    this.animationCycle = !!existing?.cycle;
     this.animationMode = true;
     this.animationPreview = false;
     this.animationPreviewAnimator = null;
@@ -1525,6 +1528,7 @@ export class Editor {
     this.animationPreview = false;
     this.animationPreviewAnimator = null;
     this.animationInverse = false;
+    this.animationCycle = false;
   }
 
   getTargetAnimation() {
@@ -1545,7 +1549,8 @@ export class Editor {
     const normalizedAnim = {
       ...animData,
       wrap: animData?.wrap !== false,
-      inverse: !!animData?.inverse
+      inverse: !!animData?.inverse,
+      cycle: !!animData?.cycle
     };
 
     this.saveUndoState();
@@ -1604,14 +1609,11 @@ export class Editor {
     if (!center || !this.animationGhostOffset) return null;
     const bounds = this.getAnimationWorldBounds();
     const motion = this.resolveAnimationMotion();
-    const rawCenterX = center.x + motion.dx;
-    const rawCenterY = center.y + motion.dy;
-    const wrapped = wrapPointWithVisibility(
-      rawCenterX, rawCenterY,
-      bounds.width, bounds.height,
-      0, 0, ANIMATION_WRAP_VISIBLE_RATIO
+    const traced = mirrorWrapTrace(
+      center.x, center.y, motion.dx, motion.dy,
+      bounds.width, bounds.height
     );
-    return { x: wrapped.x, y: wrapped.y };
+    return { x: traced.x, y: traced.y, mirrorX: traced.mirrorX, mirrorY: traced.mirrorY };
   }
 
   getAnimationGhosts() {
@@ -1623,66 +1625,54 @@ export class Editor {
 
     const bounds = this.getAnimationWorldBounds();
     const motion = this.resolveAnimationMotion();
-    const dx = motion.dx;
-    const dy = motion.dy;
     const rot = this.animationRotation;
     const cosR = Math.cos(rot);
     const sinR = Math.sin(rot);
     const pegsToGhost = this.getAnimationTargetPegs(level);
-    const rawCenterX = center.x + dx;
-    const rawCenterY = center.y + dy;
-    const wrappedCenter = wrapPointWithVisibility(
-      rawCenterX, rawCenterY,
-      bounds.width, bounds.height,
-      0, 0, ANIMATION_WRAP_VISIBLE_RATIO
+
+    // Mirror-wrap: trace path with wall reflections (emerge from red dot)
+    const traced = mirrorWrapTrace(
+      center.x, center.y, motion.dx, motion.dy,
+      bounds.width, bounds.height
     );
-    const centerShiftX = wrappedCenter.shiftX;
-    const centerShiftY = wrappedCenter.shiftY;
 
     return pegsToGhost.map(peg => {
       const ghost = { ...peg };
-      let rawX;
-      let rawY;
       const ghostAngle = (peg.angle || 0) + rot;
+
       if (this.animationTarget.type === 'group') {
         const px = peg.x - center.x;
         const py = peg.y - center.y;
-        rawX = center.x + px * cosR - py * sinR + dx;
-        rawY = center.y + px * sinR + py * cosR + dy;
+        let rx = px * cosR - py * sinR;
+        let ry = px * sinR + py * cosR;
+        if (traced.mirrorX) rx = -rx;
+        if (traced.mirrorY) ry = -ry;
+        ghost.x = traced.x + rx;
+        ghost.y = traced.y + ry;
       } else {
-        rawX = peg.x + dx;
-        rawY = peg.y + dy;
+        ghost.x = traced.x;
+        ghost.y = traced.y;
       }
 
       ghost.angle = ghostAngle;
-      let rawSlices = null;
       if (peg.curveSlices) {
-        rawSlices = peg.curveSlices.map(s => {
+        ghost.curveSlices = peg.curveSlices.map(s => {
           const sx = s.x - (this.animationTarget.type === 'group' ? center.x : peg.x);
           const sy = s.y - (this.animationTarget.type === 'group' ? center.y : peg.y);
-          const pivotX = this.animationTarget.type === 'group' ? center.x : peg.x;
-          const pivotY = this.animationTarget.type === 'group' ? center.y : peg.y;
-          const sliceX = pivotX + sx * cosR - sy * sinR + dx;
-          const sliceY = pivotY + sx * sinR + sy * cosR + dy;
+          let rsx = sx * cosR - sy * sinR;
+          let rsy = sx * sinR + sy * cosR;
+          if (traced.mirrorX) rsx = -rsx;
+          if (traced.mirrorY) rsy = -rsy;
+          let rnx = s.nx * cosR - s.ny * sinR;
+          let rny = s.nx * sinR + s.ny * cosR;
+          if (traced.mirrorX) rnx = -rnx;
+          if (traced.mirrorY) rny = -rny;
           return {
-            x: sliceX,
-            y: sliceY,
-            nx: s.nx * cosR - s.ny * sinR,
-            ny: s.nx * sinR + s.ny * cosR
+            x: (this.animationTarget.type === 'group' ? traced.x : ghost.x) + rsx,
+            y: (this.animationTarget.type === 'group' ? traced.y : ghost.y) + rsy,
+            nx: rnx, ny: rny
           };
         });
-      }
-
-      ghost.x = rawX + centerShiftX;
-      ghost.y = rawY + centerShiftY;
-
-      if (rawSlices) {
-        ghost.curveSlices = rawSlices.map(s => ({
-          x: s.x + centerShiftX,
-          y: s.y + centerShiftY,
-          nx: s.nx,
-          ny: s.ny
-        }));
       }
       return ghost;
     });
@@ -1703,8 +1693,9 @@ export class Editor {
       dy: this.animationGhostOffset?.dy || 0,
       rotation: this.animationRotation,
       duration: this.animationDuration,
-      easing: this.animationEasing,
+      easing: this.animationCycle ? 'linear' : this.animationEasing,
       inverse: this.animationInverse,
+      cycle: this.animationCycle,
       wrap: true
     };
 

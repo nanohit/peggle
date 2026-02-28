@@ -344,11 +344,13 @@ export class Renderer {
       const isHit = hitSet.has(peg.id);
       const isSelected = selectedIds.has(peg.id);
       this.drawPeg(peg, isHit, isSelected);
-      if (!wrapSet || !wrapSet.has(peg.id)) continue;
 
-      const copyOffsets = this.getWrapCopyOffsets(peg);
-      for (const off of copyOffsets) {
-        this.drawPegWithOffset(peg, off.x, off.y, isHit, isSelected, 1);
+      // Draw wrap partner copy for smooth wall transitions (alpha-blended)
+      if (peg._wrapPartner) {
+        const offsetX = peg._wrapPartner.x - peg.x;
+        const offsetY = peg._wrapPartner.y - peg.y;
+        const a = peg._wrapPartner.alpha != null ? peg._wrapPartner.alpha : 1;
+        this.drawPegWithOffset(peg, offsetX, offsetY, isHit, isSelected, a);
       }
     }
   }
@@ -607,42 +609,56 @@ export class Renderer {
   drawWrappedMotionLine(start, motion) {
     if (!start || !motion) return;
     const eps = 1e-6;
-    let cx = start.x;
-    let cy = start.y;
-    let remX = motion.dx || 0;
-    let remY = motion.dy || 0;
+    const W = this.width, H = this.height;
+    let cx = start.x, cy = start.y;
+    let vx = motion.dx || 0, vy = motion.dy || 0;
     let guard = 0;
 
-    while ((Math.abs(remX) > eps || Math.abs(remY) > eps) && guard < 60) {
+    const hitAlpha = (px, py, dvx, dvy) => {
+      let a = Infinity;
+      if (Math.abs(dvx) > eps) {
+        const t = (dvx > 0 ? W - px : -px) / dvx;
+        if (t > eps) a = Math.min(a, t);
+      }
+      if (Math.abs(dvy) > eps) {
+        const t = (dvy > 0 ? H - py : -py) / dvy;
+        if (t > eps) a = Math.min(a, t);
+      }
+      return a;
+    };
+
+    while ((Math.abs(vx) > eps || Math.abs(vy) > eps) && guard < 10) {
       guard++;
-      let alphaX = Infinity;
-      let alphaY = Infinity;
 
-      if (remX > eps) alphaX = (this.width - cx) / remX;
-      else if (remX < -eps) alphaX = (0 - cx) / remX;
+      const alphaFwd = hitAlpha(cx, cy, vx, vy);
 
-      if (remY > eps) alphaY = (this.height - cy) / remY;
-      else if (remY < -eps) alphaY = (0 - cy) / remY;
+      if (alphaFwd >= 1) {
+        // No wall hit — draw to destination
+        this.ctx.beginPath();
+        this.ctx.moveTo(cx, cy);
+        this.ctx.lineTo(cx + vx, cy + vy);
+        this.ctx.stroke();
+        break;
+      }
 
-      let alpha = Math.min(1, alphaX, alphaY);
-      if (!Number.isFinite(alpha) || alpha <= eps) alpha = 1;
-
-      const nx = cx + remX * alpha;
-      const ny = cy + remY * alpha;
+      // Draw segment to wall hit
+      const wallX = cx + vx * alphaFwd;
+      const wallY = cy + vy * alphaFwd;
       this.ctx.beginPath();
       this.ctx.moveTo(cx, cy);
-      this.ctx.lineTo(nx, ny);
+      this.ctx.lineTo(wallX, wallY);
       this.ctx.stroke();
 
-      if (alpha >= 1 - eps) break;
+      // Remaining velocity
+      const remainVx = vx * (1 - alphaFwd);
+      const remainVy = vy * (1 - alphaFwd);
 
-      const hitX = Math.abs(alpha - alphaX) < 1e-5;
-      const hitY = Math.abs(alpha - alphaY) < 1e-5;
-
-      cx = hitX ? (remX > 0 ? 0 : this.width) : nx;
-      cy = hitY ? (remY > 0 ? 0 : this.height) : ny;
-      remX *= (1 - alpha);
-      remY *= (1 - alpha);
+      // Red dot: trace backwards from current pos to wall
+      const alphaRev = hitAlpha(cx, cy, -vx, -vy);
+      cx = cx - vx * alphaRev;
+      cy = cy - vy * alphaRev;
+      vx = remainVx;
+      vy = remainVy;
     }
   }
 
@@ -656,23 +672,56 @@ export class Renderer {
       : null;
     const targetCenter = ghostCenter || fallbackCenter;
 
-    // Guide line showing the actual path (wrapping through walls for inverse).
+    // Guide line: center → ghost (forward), and center → wall (backward) + fat dot
     ctx.save();
-    if (motion && (Math.abs(motion.dx || 0) > 0.001 || Math.abs(motion.dy || 0) > 0.001)) {
+    const dx = (motion && motion.dx) || (targetCenter ? targetCenter.x - center.x : 0);
+    const dy = (motion && motion.dy) || (targetCenter ? targetCenter.y - center.y : 0);
+    const hasDelta = Math.abs(dx) > 0.001 || Math.abs(dy) > 0.001;
+
+    if (hasDelta) {
+      const W = this.width, H = this.height;
+
+      // Forward line: center → ghost destination (traces through walls)
       ctx.strokeStyle = '#ffd60a';
       ctx.lineWidth = 1.5;
       ctx.setLineDash([6, 4]);
-      this.drawWrappedMotionLine(center, motion);
+      this.drawWrappedMotionLine(center, { dx, dy });
       ctx.setLineDash([]);
-    } else if (targetCenter) {
-      ctx.strokeStyle = '#ffd60a';
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([6, 4]);
-      ctx.beginPath();
-      ctx.moveTo(center.x, center.y);
-      ctx.lineTo(targetCenter.x, targetCenter.y);
-      ctx.stroke();
-      ctx.setLineDash([]);
+
+      // Reverse line: trace from center in OPPOSITE direction until hitting a wall
+      const rdx = -dx, rdy = -dy;
+      let wallAlpha = Infinity;
+
+      if (Math.abs(rdx) > 1e-6) {
+        const a = (rdx > 0 ? W - center.x : -center.x) / rdx;
+        if (a > 1e-6) wallAlpha = Math.min(wallAlpha, a);
+      }
+      if (Math.abs(rdy) > 1e-6) {
+        const a = (rdy > 0 ? H - center.y : -center.y) / rdy;
+        if (a > 1e-6) wallAlpha = Math.min(wallAlpha, a);
+      }
+
+      if (Number.isFinite(wallAlpha)) {
+        const wallX = center.x + rdx * wallAlpha;
+        const wallY = center.y + rdy * wallAlpha;
+
+        // Draw reverse dashed line (same color, slightly dimmer)
+        ctx.strokeStyle = 'rgba(255, 214, 10, 0.5)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([6, 4]);
+        ctx.beginPath();
+        ctx.moveTo(center.x, center.y);
+        ctx.lineTo(wallX, wallY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Fat dot at wall intersection
+        ctx.fillStyle = '#ff3b30';
+        ctx.beginPath();
+        ctx.arc(wallX, wallY, 6, 0, Math.PI * 2);
+        ctx.fill();
+
+      }
     }
 
     // Draw ghost pegs at offset position

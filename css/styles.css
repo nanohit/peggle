@@ -747,6 +747,16 @@ html, body {
   cursor: pointer;
 }
 
+.anim-toggle input[type="checkbox"]:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.anim-toggle:has(input:disabled) {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .anim-buttons {
   display: flex;
   gap: 4px;
