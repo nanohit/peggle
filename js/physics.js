@@ -397,29 +397,30 @@ export class PhysicsEngine {
     this.hitPegs.clear();
   }
 
-  // Trajectory prediction
+  // Trajectory prediction — uses current peg positions (already animated by the game loop).
+  // Recalculated every frame during aiming, so it naturally tracks animated pegs.
   predictTrajectory(startX, startY, angle, power, maxSteps = 500, stopAtFirstHit = true) {
     const points = [];
     const simulatedHits = [];
-    
+
     // Create simulated ball
     let x = startX;
     let y = startY;
     let vx = Math.cos(angle) * power;
     let vy = Math.sin(angle) * power;
     const radius = getBallRadius();
-    
+
     for (let i = 0; i < maxSteps; i++) {
       points.push({ x, y });
-      
+
       // Apply physics
       vy += PHYSICS_CONFIG.gravity;
       vx *= PHYSICS_CONFIG.friction;
       vy *= PHYSICS_CONFIG.friction;
-      
+
       x += vx;
       y += vy;
-      
+
       // Wall collisions
       if (x - radius < 0) {
         x = radius;
@@ -433,11 +434,11 @@ export class PhysicsEngine {
         y = radius;
         vy = Math.abs(vy) * PHYSICS_CONFIG.bounce;
       }
-      
+
       // Check peg collisions
       for (const peg of this.pegs) {
         let collision;
-        
+
         if (peg.shape === 'brick') {
           collision = circleRectCollision({ x, y, vx, vy, radius }, peg);
         } else {
@@ -447,18 +448,18 @@ export class PhysicsEngine {
             radius: PHYSICS_CONFIG.pegRadius
           });
         }
-        
+
         if (collision) {
           // Resolve collision for continued simulation
           x += collision.normal.x * (collision.depth + 0.5);
           y += collision.normal.y * (collision.depth + 0.5);
-          
+
           const bounce = PHYSICS_CONFIG.bounce;
           vx -= (1 + bounce) * collision.relativeVelocityNormal * collision.normal.x;
           vy -= (1 + bounce) * collision.relativeVelocityNormal * collision.normal.y;
-          
+
           simulatedHits.push({ x, y, pegId: peg.id });
-          
+
           if (stopAtFirstHit) {
             points.push({ x, y });
             return { points, hits: simulatedHits };
@@ -466,13 +467,13 @@ export class PhysicsEngine {
           break;
         }
       }
-      
+
       // Ball fell below screen
       if (y > this.height + 50) {
         break;
       }
     }
-    
+
     return { points, hits: simulatedHits };
   }
 }

@@ -26,25 +26,25 @@
         <div class="anim-panel-title">Animate <button id="closeAnimPanel" class="anim-close-btn">✕</button></div>
         <div class="anim-panel-body">
           <div class="anim-slider">
-            <label>Duration <span id="animDurationValue">2.0</span>s</label>
+            <label>Duration <input type="number" id="animDurationInput" class="anim-num" value="2.0" step="0.1" min="0.5" max="8.0">s</label>
             <input type="range" id="animDurationSlider" min="5" max="80" value="20">
           </div>
           <div class="anim-slider">
-            <label>X <span id="animDxValue">0</span>px</label>
+            <label>X <input type="number" id="animDxInput" class="anim-num" value="0" step="1" min="-800" max="800">px</label>
             <input type="range" id="animDxSlider" min="-800" max="800" value="0">
           </div>
           <div class="anim-slider">
-            <label>Y <span id="animDyValue">0</span>px</label>
+            <label>Y <input type="number" id="animDyInput" class="anim-num" value="0" step="1" min="-800" max="800">px</label>
             <input type="range" id="animDySlider" min="-800" max="800" value="0">
           </div>
           <div class="anim-slider">
-            <label>Rot <span id="animRotValue">0</span>°</label>
-            <input type="range" id="animRotSlider" min="-180" max="180" value="0">
+            <label>Rot <input type="number" id="animRotInput" class="anim-num" value="0" step="1" min="-360" max="360">°</label>
+            <input type="range" id="animRotSlider" min="-360" max="360" value="0">
           </div>
           <label class="anim-toggle"><input type="checkbox" id="animEasingToggle" checked> Ease</label>
           <button id="animInverseBtn" class="anim-btn anim-btn-toggle" type="button">Inverse: OFF</button>
           <button id="animCycleBtn" class="anim-btn anim-btn-toggle" type="button">Cycle: OFF</button>
-          <div class="anim-hint">Hold Shift while dragging to snap angle to 10°</div>
+          <div class="anim-hint">Hold Shift to snap (5px, 5°, 0.5s)</div>
           <div class="anim-buttons">
             <button id="animPreviewBtn" class="anim-btn">Preview</button>
             <button id="animClearBtn" class="anim-btn">Clear</button>

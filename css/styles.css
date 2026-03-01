@@ -705,10 +705,35 @@ html, body {
 
 .anim-slider label {
   display: flex;
-  justify-content: space-between;
+  align-items: center;
+  gap: 2px;
   font-size: 10px;
   color: var(--text-secondary);
   margin-bottom: 2px;
+}
+
+.anim-num {
+  width: 42px;
+  padding: 1px 3px;
+  margin: 0 1px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-primary);
+  font-size: 10px;
+  text-align: center;
+  -moz-appearance: textfield;
+}
+
+.anim-num::-webkit-inner-spin-button,
+.anim-num::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.anim-num:focus {
+  outline: none;
+  border-color: var(--accent);
 }
 
 .anim-slider input[type="range"] {

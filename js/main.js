@@ -379,35 +379,90 @@ class PeggleApp {
       this.closeAnimationPanel();
     });
 
-    // Sliders update editor ghost offset
+    // Sliders + number inputs update editor ghost offset (bidirectional sync)
     const dxSlider = document.getElementById('animDxSlider');
     const dySlider = document.getElementById('animDySlider');
     const rotSlider = document.getElementById('animRotSlider');
     const durSlider = document.getElementById('animDurationSlider');
+    const dxInput = document.getElementById('animDxInput');
+    const dyInput = document.getElementById('animDyInput');
+    const rotInput = document.getElementById('animRotInput');
+    const durInput = document.getElementById('animDurationInput');
     const inverseBtn = document.getElementById('animInverseBtn');
+
+    // Shift-snap helper: snap value to nearest step when shift is held
+    const snapVal = (val, step, e) => (e && e.shiftKey) ? Math.round(val / step) * step : val;
+
+    // Track shift key state for slider snapping + number input step changes
+    let shiftHeld = false;
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Shift') {
+        shiftHeld = true;
+        dxInput.step = 5; dyInput.step = 5; rotInput.step = 5; durInput.step = 0.5;
+      }
+    });
+    window.addEventListener('keyup', (e) => {
+      if (e.key === 'Shift') {
+        shiftHeld = false;
+        dxInput.step = 1; dyInput.step = 1; rotInput.step = 1; durInput.step = 0.1;
+      }
+    });
 
     dxSlider.addEventListener('input', () => {
       if (!this.editor || !this.editor.animationMode) return;
-      this.editor.animationGhostOffset.dx = parseInt(dxSlider.value);
-      document.getElementById('animDxValue').textContent = dxSlider.value;
+      let v = parseInt(dxSlider.value);
+      if (shiftHeld) { v = Math.round(v / 5) * 5; dxSlider.value = v; }
+      this.editor.animationGhostOffset.dx = v;
+      dxInput.value = v;
+    });
+    dxInput.addEventListener('input', () => {
+      if (!this.editor || !this.editor.animationMode) return;
+      const v = parseInt(dxInput.value) || 0;
+      this.editor.animationGhostOffset.dx = v;
+      dxSlider.value = Math.max(-800, Math.min(800, v));
     });
 
     dySlider.addEventListener('input', () => {
       if (!this.editor || !this.editor.animationMode) return;
-      this.editor.animationGhostOffset.dy = parseInt(dySlider.value);
-      document.getElementById('animDyValue').textContent = dySlider.value;
+      let v = parseInt(dySlider.value);
+      if (shiftHeld) { v = Math.round(v / 5) * 5; dySlider.value = v; }
+      this.editor.animationGhostOffset.dy = v;
+      dyInput.value = v;
+    });
+    dyInput.addEventListener('input', () => {
+      if (!this.editor || !this.editor.animationMode) return;
+      const v = parseInt(dyInput.value) || 0;
+      this.editor.animationGhostOffset.dy = v;
+      dySlider.value = Math.max(-800, Math.min(800, v));
     });
 
     rotSlider.addEventListener('input', () => {
       if (!this.editor || !this.editor.animationMode) return;
-      this.editor.animationRotation = parseInt(rotSlider.value) * Math.PI / 180;
-      document.getElementById('animRotValue').textContent = rotSlider.value;
+      let v = parseInt(rotSlider.value);
+      if (shiftHeld) { v = Math.round(v / 5) * 5; rotSlider.value = v; }
+      this.editor.animationRotation = v * Math.PI / 180;
+      rotInput.value = v;
+    });
+    rotInput.addEventListener('input', () => {
+      if (!this.editor || !this.editor.animationMode) return;
+      const v = parseInt(rotInput.value) || 0;
+      this.editor.animationRotation = v * Math.PI / 180;
+      rotSlider.value = Math.max(-360, Math.min(360, v));
     });
 
     durSlider.addEventListener('input', () => {
       if (!this.editor || !this.editor.animationMode) return;
-      this.editor.animationDuration = parseInt(durSlider.value) / 10;
-      document.getElementById('animDurationValue').textContent = (parseInt(durSlider.value) / 10).toFixed(1);
+      let raw = parseInt(durSlider.value);
+      if (shiftHeld) { raw = Math.round(raw / 5) * 5; durSlider.value = raw; }
+      const v = raw / 10;
+      this.editor.animationDuration = v;
+      durInput.value = v.toFixed(1);
+    });
+    durInput.addEventListener('input', () => {
+      if (!this.editor || !this.editor.animationMode) return;
+      const v = parseFloat(durInput.value) || 0.5;
+      this.editor.animationDuration = v;
+      durSlider.value = Math.max(5, Math.min(80, Math.round(v * 10)));
     });
 
     document.getElementById('animEasingToggle').addEventListener('change', (e) => {
@@ -466,8 +521,8 @@ class PeggleApp {
 
       const dx = Math.round(this.editor.animationGhostOffset?.dx || 0);
       const dy = Math.round(this.editor.animationGhostOffset?.dy || 0);
-      const rot = parseInt(document.getElementById('animRotSlider').value) * Math.PI / 180;
-      const dur = parseInt(document.getElementById('animDurationSlider').value) / 10;
+      const rot = this.editor.animationRotation || 0;
+      const dur = this.editor.animationDuration || 2;
       const cycle = !!this.editor.animationCycle;
       const easing = cycle ? 'linear' : (document.getElementById('animEasingToggle').checked ? 'easeInOut' : 'linear');
       const inverse = !!this.editor.animationInverse;
@@ -485,13 +540,15 @@ class PeggleApp {
     this._syncAnimationSliders();
     document.getElementById('animPanel').classList.add('visible');
 
-    // Wire canvas drag → slider sync
+    // Wire canvas drag → slider + input sync
     if (this.editor) {
       this.editor.onAnimationOffsetChange = (offset) => {
-        document.getElementById('animDxSlider').value = Math.round(offset.dx);
-        document.getElementById('animDxValue').textContent = Math.round(offset.dx);
-        document.getElementById('animDySlider').value = Math.round(offset.dy);
-        document.getElementById('animDyValue').textContent = Math.round(offset.dy);
+        const dx = Math.round(offset.dx);
+        const dy = Math.round(offset.dy);
+        document.getElementById('animDxSlider').value = dx;
+        document.getElementById('animDxInput').value = dx;
+        document.getElementById('animDySlider').value = dy;
+        document.getElementById('animDyInput').value = dy;
       };
     }
   }
@@ -514,13 +571,13 @@ class PeggleApp {
     const easing = this.editor.animationEasing;
 
     document.getElementById('animDxSlider').value = Math.round(off.dx);
-    document.getElementById('animDxValue').textContent = Math.round(off.dx);
+    document.getElementById('animDxInput').value = Math.round(off.dx);
     document.getElementById('animDySlider').value = Math.round(off.dy);
-    document.getElementById('animDyValue').textContent = Math.round(off.dy);
+    document.getElementById('animDyInput').value = Math.round(off.dy);
     document.getElementById('animRotSlider').value = rot;
-    document.getElementById('animRotValue').textContent = rot;
+    document.getElementById('animRotInput').value = rot;
     document.getElementById('animDurationSlider').value = Math.round(dur * 10);
-    document.getElementById('animDurationValue').textContent = dur.toFixed(1);
+    document.getElementById('animDurationInput').value = dur.toFixed(1);
     document.getElementById('animEasingToggle').checked = easing === 'easeInOut';
     this._syncAnimationInverseButton();
     this._syncAnimationCycleButton();

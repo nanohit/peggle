@@ -285,6 +285,11 @@ export class Game {
     if (this.state !== 'playing') {
       // Keep bucket moving even while idle/aiming
       this.physics.updateBucket();
+      // Recalculate trajectory every frame during aiming so it reflects
+      // animated peg positions in real-time (not just on mouse move)
+      if (this.state === 'aiming') {
+        this.updateTrajectory();
+      }
       return;
     }
 
