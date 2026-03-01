@@ -37,6 +37,9 @@ export class Game {
     this.hitPegIds = [];
     this.turnHitPegIds = [];
 
+    // Flippers
+    this.flippers = null;
+
     // Stuck ball detection
     this.ballPositionHistory = [];
 
@@ -107,6 +110,37 @@ export class Game {
       if (this.state === 'aiming') handleMove(e);
     }, sig);
     canvas.addEventListener('mouseup', handleEnd, sig);
+
+    // Flipper activation — spacebar anytime, click/tap during playing
+    const handleFlip = () => {
+      if (!this.flippers) return;
+      if (this.state === 'won' || this.state === 'lost') return;
+      this.flippers._flipperActivated = true;
+    };
+    const handleFlipEnd = () => {
+      if (!this.flippers) return;
+      this.flippers._flipperActivated = false;
+    };
+
+    document.addEventListener('keydown', (e) => {
+      if (e.code === 'Space') { e.preventDefault(); handleFlip(); }
+    }, sig);
+    document.addEventListener('keyup', (e) => {
+      if (e.code === 'Space') handleFlipEnd();
+    }, sig);
+
+    canvas.addEventListener('mousedown', (e) => {
+      if (this.state === 'playing') handleFlip();
+    }, sig);
+    canvas.addEventListener('mouseup', (e) => {
+      if (this.state === 'playing') handleFlipEnd();
+    }, sig);
+    canvas.addEventListener('touchstart', (e) => {
+      if (this.state === 'playing') { e.preventDefault(); handleFlip(); }
+    }, { passive: false, ...sig });
+    canvas.addEventListener('touchend', (e) => {
+      if (this.state === 'playing') handleFlipEnd();
+    }, sig);
   }
 
   updateAim(e) {
@@ -161,13 +195,28 @@ export class Game {
     this.physics.setPegs(this.pegs);
     this.animator.loadFromLevel(this.pegs, levelData.groups || []);
 
+    // Load flippers
+    if (levelData.flippers && levelData.flippers.enabled) {
+      this.flippers = {
+        ...levelData.flippers,
+        _flipperT: 0,
+        _flipperActivated: false,
+        _angularDelta: 0,
+        _angularVelocity: 0
+      };
+      this.physics.setFlippers(this.flippers);
+    } else {
+      this.flippers = null;
+      this.physics.setFlippers(null);
+    }
+
     this.score = 0;
     this.ballsLeft = 10;
     this.hitPegIds = [];
     this.turnHitPegIds = [];
     this.state = 'idle';
     this.trajectory = null;
-    
+
     this.resetBall();
   }
 
@@ -197,18 +246,28 @@ export class Game {
     this.ballPositionHistory = [];
   }
 
+  isOrangePeg(p) {
+    return p.type === 'orange' || (p.type === 'bumper' && p.bumperOrange);
+  }
+
   getOrangePegsLeft() {
     const allHitIds = [...this.hitPegIds, ...this.turnHitPegIds];
     const hitSet = new Set(allHitIds);
-    return this.pegs.filter(p => p.type === 'orange' && !hitSet.has(p.id)).length;
+    return this.pegs.filter(p => this.isOrangePeg(p) && !hitSet.has(p.id)).length;
   }
 
   getTotalOrangePegs() {
-    return this.pegs.filter(p => p.type === 'orange').length;
+    return this.pegs.filter(p => this.isOrangePeg(p)).length;
   }
 
   calculateScore(peg) {
     if (peg.type === 'obstacle') return 0;
+    // Permanent bumpers don't score; orange bumpers score as orange; disappear bumpers as blue
+    if (peg.type === 'bumper') {
+      if (peg.bumperOrange) return SCORE.orange;
+      if (peg.bumperDisappear) return SCORE.blue;
+      return 0;
+    }
     
     const baseScore = SCORE[peg.type] || SCORE.blue;
     
@@ -229,8 +288,13 @@ export class Game {
     this.hitPegIds = [...this.hitPegIds, ...this.turnHitPegIds];
     
     // Remove hit pegs from pegs array (they're gone)
+    // Obstacles and permanent bumpers stay
     const hitSet = new Set(this.hitPegIds);
-    this.pegs = this.pegs.filter(p => p.type === 'obstacle' || !hitSet.has(p.id));
+    this.pegs = this.pegs.filter(p => {
+      if (p.type === 'obstacle') return true;
+      if (p.type === 'bumper' && !p.bumperDisappear && !p.bumperOrange) return true;
+      return !hitSet.has(p.id);
+    });
     this.physics.setPegs(this.pegs);
     
     // Check win condition
@@ -285,6 +349,8 @@ export class Game {
     if (this.state !== 'playing') {
       // Keep bucket moving even while idle/aiming
       this.physics.updateBucket();
+      // Keep flippers at rest position when not playing
+      this.physics.updateFlippers(dt);
       // Recalculate trajectory every frame during aiming so it reflects
       // animated peg positions in real-time (not just on mouse move)
       if (this.state === 'aiming') {
@@ -293,21 +359,39 @@ export class Game {
       return;
     }
 
+    // Update flippers before physics so collision uses current position
+    this.physics.updateFlippers(dt);
+
     const result = this.physics.update();
     this.balls = this.physics.balls;
 
     // Handle newly hit pegs
     for (const event of result.hitEvents) {
       const peg = event.peg;
+
+      // Bumper collision: trigger scale-pulse animation (fires every hit)
+      if (event.bumperAnimOnly) {
+        peg._bumperHitScale = 1.3;
+        continue;
+      }
+
       const points = this.calculateScore(peg);
       this.score += points;
       this.turnHitPegIds.push(peg.id);
-      
+
       if (this.onPegHit) this.onPegHit(peg, points);
       if (this.onScoreChange) this.onScoreChange(this.score);
 
       if (peg.type === 'multi') {
         this.spawnMultiballs(event.ball, 5);
+      }
+    }
+
+    // Animate bumper hit scale decay
+    for (const peg of this.pegs) {
+      if (peg._bumperHitScale && peg._bumperHitScale > 1.001) {
+        peg._bumperHitScale = 1 + (peg._bumperHitScale - 1) * 0.85;
+        if (peg._bumperHitScale < 1.005) peg._bumperHitScale = 1;
       }
     }
 
@@ -400,6 +484,7 @@ export class Game {
       wrapCopyPegIds: this.animator.getAnimatedPegIds(),
       balls: this.balls,
       bucket: this.physics.bucket,
+      flippers: this.flippers,
       showLauncher: this.state === 'idle' || this.state === 'aiming',
       launchX: this.launchX,
       launchY: this.launchY,

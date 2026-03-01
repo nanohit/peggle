@@ -33,6 +33,12 @@ const COLORS = {
   // Obstacle
   obstacle: '#6b7280',
   obstacleGlow: 'rgba(107, 114, 128, 0.3)',
+
+  // Bumper
+  bumper: '#e0e0e0',
+  bumperHit: '#ffffff',
+  bumperGlow: 'rgba(224, 224, 224, 0.5)',
+  bumperRing: '#a0a0a0',
   
   // Ball
   ball: '#f8f9fa',
@@ -46,6 +52,10 @@ const COLORS = {
   bucket: '#6c757d',
   bucketInner: '#495057',
   
+  // Flippers
+  flipper: '#c0c0c0',
+  flipperPivot: '#555555',
+
   // Grid
   gridLine: 'rgba(255, 255, 255, 0.08)',
   gridLineStrong: 'rgba(255, 255, 255, 0.15)',
@@ -68,7 +78,8 @@ const PEG_COLORS = {
   green: { main: COLORS.green, hit: COLORS.greenHit, glow: COLORS.greenGlow },
   purple: { main: COLORS.purple, hit: COLORS.purpleHit, glow: COLORS.purpleGlow },
   multi: { main: COLORS.multi, hit: COLORS.multiHit, glow: COLORS.multiGlow },
-  obstacle: { main: COLORS.obstacle, hit: COLORS.obstacle, glow: COLORS.obstacleGlow }
+  obstacle: { main: COLORS.obstacle, hit: COLORS.obstacle, glow: COLORS.obstacleGlow },
+  bumper: { main: COLORS.bumper, hit: COLORS.bumperHit, glow: COLORS.bumperGlow }
 };
 
 export class Renderer {
@@ -161,6 +172,97 @@ export class Renderer {
     const ctx = this.ctx;
     const colors = PEG_COLORS[peg.type] || PEG_COLORS.blue;
     const radius = PHYSICS_CONFIG.pegRadius;
+
+    // ── Bumper: metallic circle with ring ──
+    if (peg.type === 'bumper') {
+      const scale = peg.bumperScale || 1;
+      const hitScale = peg._bumperHitScale || 1;
+      const r = radius * scale * hitScale;
+
+      // Determine color based on bumper mode
+      let ringColor = COLORS.bumperRing;
+      let bodyColorOuter = '#909090';
+      let bodyColorMid = '#d0d0d0';
+      let glowColor = COLORS.bumperGlow;
+      if (peg.bumperDisappear) {
+        // Blue tint (like normal pegs)
+        ringColor = '#3a9e97';
+        bodyColorOuter = '#2a7a74';
+        bodyColorMid = '#4ecdc4';
+        glowColor = COLORS.blueGlow;
+      }
+      if (peg.bumperOrange) {
+        // Orange tint (must-hit)
+        ringColor = '#cc5528';
+        bodyColorOuter = '#a0401a';
+        bodyColorMid = '#ff6b35';
+        glowColor = COLORS.orangeGlow;
+      }
+
+      ctx.save();
+      ctx.translate(peg.x, peg.y);
+
+      // Thick outer ring (stroked inward to fill the edge)
+      ctx.beginPath();
+      ctx.arc(0, 0, r, 0, Math.PI * 2);
+      ctx.fillStyle = ringColor;
+      ctx.fill();
+
+      // Inner body fill (smaller circle inside the ring)
+      const innerR = r * 0.7;
+      const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, innerR);
+      grad.addColorStop(0, '#ffffff');
+      grad.addColorStop(0.4, bodyColorMid);
+      grad.addColorStop(1, bodyColorOuter);
+      ctx.beginPath();
+      ctx.arc(0, 0, innerR, 0, Math.PI * 2);
+      ctx.fillStyle = grad;
+      ctx.fill();
+
+      // Specular glare (centered)
+      ctx.beginPath();
+      ctx.arc(0, 0, innerR * 0.3, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
+      ctx.fill();
+
+      // Hit glow for disappearing bumpers (drawn under the pulse)
+      if (isHit && (peg.bumperDisappear || peg.bumperOrange)) {
+        ctx.globalAlpha = 0.5;
+        const hitColor = peg.bumperOrange ? COLORS.orangeHit : COLORS.blueHit;
+        ctx.beginPath();
+        ctx.arc(0, 0, r, 0, Math.PI * 2);
+        ctx.fillStyle = hitColor;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+
+      // Hit flash pulse (always on top)
+      if (peg._bumperHitScale && peg._bumperHitScale > 1.01) {
+        const pulseAlpha = Math.min(1, (peg._bumperHitScale - 1) * 5);
+        ctx.globalAlpha = pulseAlpha;
+        ctx.shadowColor = '#ffffff';
+        ctx.shadowBlur = 30;
+        ctx.beginPath();
+        ctx.arc(0, 0, r, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.globalAlpha = 1;
+      }
+
+      // Selection indicator
+      if (isSelected) {
+        ctx.shadowBlur = 0;
+        ctx.strokeStyle = COLORS.selection;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, 0, r + 7, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+
+      ctx.restore();
+      return;
+    }
 
     // ── Curved brick: render as a warped ribbon in world space ──
     if (peg.shape === 'brick' && peg.curveSlices && peg.curveSlices.length >= 2) {
@@ -498,6 +600,72 @@ export class Renderer {
     ctx.lineTo(x + width / 2 - 4, y - height / 2 + 4);
     ctx.closePath();
     ctx.fill();
+  }
+
+  drawFlippers(flippers, canvasWidth, selected) {
+    if (!flippers || !flippers.enabled) return;
+    const ctx = this.ctx;
+    const centerX = canvasWidth / 2;
+    const t = flippers._flipperT || 0;
+    const restRad = (flippers.restAngle || 25) * Math.PI / 180;
+    const flipRad = (flippers.flipAngle || 30) * Math.PI / 180;
+
+    const sc = flippers.scale || 1;
+    const len = (flippers.length || 40) * sc;
+    const w = (flippers.width || 8) * sc;
+
+    // Left flipper: rest points down-right, flip points up-right
+    const leftPivotX = centerX - flippers.xOffset;
+    const leftAngle = restRad - t * (restRad + flipRad);
+    this.drawSingleFlipper(leftPivotX, flippers.y, leftAngle, len, w, t, selected);
+
+    // Right flipper: mirrored
+    const rightPivotX = centerX + flippers.xOffset;
+    const rightAngle = Math.PI - leftAngle;
+    this.drawSingleFlipper(rightPivotX, flippers.y, rightAngle, len, w, t, selected);
+  }
+
+  drawSingleFlipper(pivotX, pivotY, angle, length, width, t, selected) {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.translate(pivotX, pivotY);
+    ctx.rotate(angle);
+
+    const r = width / 2;
+
+    // Rounded bar shape: pivot end (semicircle) → straight → tip (semicircle)
+    ctx.beginPath();
+    ctx.arc(0, 0, r, -Math.PI / 2, Math.PI / 2, true);  // pivot semicircle (left side)
+    ctx.lineTo(length - r, r);
+    ctx.arc(length - r, 0, r, Math.PI / 2, -Math.PI / 2, true); // tip semicircle
+    ctx.lineTo(0, -r);
+    ctx.closePath();
+
+    // Metallic gradient
+    const grad = ctx.createLinearGradient(0, -r, 0, r);
+    grad.addColorStop(0, t > 0.5 ? '#f0f0f0' : '#d0d0d0');
+    grad.addColorStop(0.5, t > 0.5 ? '#e0e0e0' : '#b0b0b0');
+    grad.addColorStop(1, t > 0.5 ? '#c0c0c0' : '#909090');
+    ctx.fillStyle = grad;
+    ctx.fill();
+    ctx.strokeStyle = '#666';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Selection highlight
+    if (selected) {
+      ctx.strokeStyle = COLORS.selection;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+
+    // Pivot dot
+    ctx.beginPath();
+    ctx.arc(0, 0, 3, 0, Math.PI * 2);
+    ctx.fillStyle = COLORS.flipperPivot;
+    ctx.fill();
+
+    ctx.restore();
   }
 
   drawScore(score, ballsLeft, orangePegsLeft, totalOrangePegs) {
@@ -853,23 +1021,23 @@ export class Renderer {
     ctx.setLineDash([]);
   }
 
-  drawRotationHandle(handle, bounds) {
+  drawRotationHandle(handle, bounds, isBumperScale = false) {
     if (!handle || !bounds) return;
-    
+
     const ctx = this.ctx;
-    
+
     // Draw selection bounds outline
     ctx.strokeStyle = COLORS.selection;
     ctx.lineWidth = 1;
     ctx.setLineDash([4, 4]);
     ctx.strokeRect(
-      bounds.minX - 4, 
-      bounds.minY - 4, 
-      bounds.maxX - bounds.minX + 8, 
+      bounds.minX - 4,
+      bounds.minY - 4,
+      bounds.maxX - bounds.minX + 8,
       bounds.maxY - bounds.minY + 8
     );
     ctx.setLineDash([]);
-    
+
     // Draw line from top of bounds to handle
     const centerX = (bounds.minX + bounds.maxX) / 2;
     ctx.strokeStyle = COLORS.selection;
@@ -878,18 +1046,27 @@ export class Renderer {
     ctx.moveTo(centerX, bounds.minY - 4);
     ctx.lineTo(handle.x, handle.y);
     ctx.stroke();
-    
-    // Draw rotation handle circle
+
+    // Draw handle circle
     ctx.fillStyle = COLORS.selection;
     ctx.beginPath();
     ctx.arc(handle.x, handle.y, 8, 0, Math.PI * 2);
     ctx.fill();
-    
-    // Inner circle
-    ctx.fillStyle = '#000';
-    ctx.beginPath();
-    ctx.arc(handle.x, handle.y, 4, 0, Math.PI * 2);
-    ctx.fill();
+
+    if (isBumperScale) {
+      // Draw scale arrows icon (↔) instead of rotation dot
+      ctx.fillStyle = '#000';
+      ctx.font = 'bold 10px -apple-system, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('⇔', handle.x, handle.y);
+    } else {
+      // Inner circle (rotation)
+      ctx.fillStyle = '#000';
+      ctx.beginPath();
+      ctx.arc(handle.x, handle.y, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 
   // Render full game frame
@@ -929,6 +1106,10 @@ export class Renderer {
       this.drawBucket(state.bucket);
     }
 
+    if (state.flippers) {
+      this.drawFlippers(state.flippers, this.canvas.width, state.flipperSelected);
+    }
+
     if (state.showLauncher) {
       this.drawLauncher(state.launchX, state.launchY, state.aimAngle, state.showAim);
     }
@@ -946,9 +1127,9 @@ export class Renderer {
       );
     }
 
-    // Draw rotation handle for selected elements
+    // Draw rotation/scale handle for selected elements
     if (state.rotationHandle && state.selectionBounds) {
-      this.drawRotationHandle(state.rotationHandle, state.selectionBounds);
+      this.drawRotationHandle(state.rotationHandle, state.selectionBounds, state.isBumperSelection);
     }
 
     // Animation ghosts (editor animation mode)

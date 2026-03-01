@@ -52,6 +52,56 @@
           </div>
         </div>
       </div>
+      <!-- Bumper properties panel (right side) -->
+      <div id="bumperPanel" class="bumper-panel">
+        <div class="bumper-panel-title">Bumper <button id="closeBumperPanel" class="anim-close-btn">✕</button></div>
+        <div class="bumper-panel-body">
+          <div class="anim-slider">
+            <label>Bounce <input type="number" id="bumperBounceInput" class="anim-num" value="2.0" step="0.1" min="0.5" max="7.0"></label>
+            <input type="range" id="bumperBounceSlider" min="5" max="70" value="20">
+          </div>
+          <div class="anim-slider">
+            <label>Scale <input type="number" id="bumperScaleInput" class="anim-num" value="1.0" step="0.1" min="0.5" max="7.0"></label>
+            <input type="range" id="bumperScaleSlider" min="5" max="70" value="10">
+          </div>
+          <label class="anim-toggle"><input type="checkbox" id="bumperDisappearToggle"> Disappear on hit</label>
+          <label class="anim-toggle"><input type="checkbox" id="bumperOrangeToggle"> Count as orange</label>
+        </div>
+      </div>
+      <!-- Flipper properties panel (right side) -->
+      <div id="flipperPanel" class="bumper-panel">
+        <div class="bumper-panel-title">Flippers <button id="closeFlipperPanel" class="anim-close-btn">✕</button></div>
+        <div class="bumper-panel-body">
+          <div class="anim-slider">
+            <label>Length <input type="number" id="flipperLengthInput" class="anim-num" value="40" step="1" min="20" max="150"></label>
+            <input type="range" id="flipperLengthSlider" min="20" max="150" value="40">
+          </div>
+          <div class="anim-slider">
+            <label>Spread <input type="number" id="flipperOffsetInput" class="anim-num" value="50" step="1" min="10" max="250"></label>
+            <input type="range" id="flipperOffsetSlider" min="10" max="250" value="50">
+          </div>
+          <div class="anim-slider">
+            <label>Rest ° <input type="number" id="flipperRestInput" class="anim-num" value="25" step="1" min="5" max="60"></label>
+            <input type="range" id="flipperRestSlider" min="5" max="60" value="25">
+          </div>
+          <div class="anim-slider">
+            <label>Flip ° <input type="number" id="flipperFlipInput" class="anim-num" value="30" step="1" min="10" max="70"></label>
+            <input type="range" id="flipperFlipSlider" min="10" max="70" value="30">
+          </div>
+          <div class="anim-slider">
+            <label>Bounce <input type="number" id="flipperBounceInput" class="anim-num" value="1.2" step="0.1" min="0.3" max="5.0"></label>
+            <input type="range" id="flipperBounceSlider" min="3" max="50" value="12">
+          </div>
+          <div class="anim-slider">
+            <label>Width <input type="number" id="flipperWidthInput" class="anim-num" value="8" step="1" min="4" max="40"></label>
+            <input type="range" id="flipperWidthSlider" min="4" max="40" value="8">
+          </div>
+          <div class="anim-slider">
+            <label>Scale <input type="number" id="flipperScaleInput" class="anim-num" value="1.0" step="0.1" min="0.5" max="3.0"></label>
+            <input type="range" id="flipperScaleSlider" min="5" max="30" value="10">
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Status Bar -->
@@ -70,6 +120,7 @@
           <button class="peg-btn" data-type="purple" title="Purple (Bonus)"></button>
           <button class="peg-btn" data-type="multi" title="Multiball"></button>
           <button class="peg-btn" data-type="obstacle" title="Obstacle (Stays)"></button>
+          <button class="peg-btn" data-type="bumper" title="Bumper (Bouncy)"></button>
         </div>
         <div class="shape-buttons">
           <button class="shape-btn active" data-shape="circle" title="Circle">●</button>
@@ -84,6 +135,7 @@
         <button id="selectBtn" class="tool-btn" title="Select Mode">◻</button>
         <button id="drawBtn" class="tool-btn" title="Draw Curves (D)">✏</button>
         <button id="animateBtn" class="tool-btn" title="Animate (A)">~</button>
+        <button id="flipperBtn" class="tool-btn" title="Flippers (F)">⌐⌐</button>
         <button id="moreBtn" class="tool-btn" title="More">⋯</button>
       </div>
     </div>

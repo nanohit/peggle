@@ -88,7 +88,13 @@ export class Editor {
     this.onSelectionChange = null;
     this.onGridChange = null;
     this.onSnapChange = null;
-    
+    this.onFlipperSelectionChange = null;
+
+    // Flipper editor state
+    this.flipperSelected = false;
+    this.flipperDragStartY = 0;
+    this.flipperDragStartOffset = 0;
+
     this.setupInput();
   }
 
@@ -129,26 +135,49 @@ export class Editor {
       this.isInteracting = true;
       this.isCopying = e.altKey;
 
-      // Check if clicking on rotation handle first
+      // Check if clicking on rotation/scale handle first
       if (this.selectedPegIds.size > 0) {
         const handle = this.getRotationHandlePosition();
         if (handle && Utils.distance(pos.x, pos.y, handle.x, handle.y) < 15) {
-          this.interactionType = 'rotate';
-          this.rotationCenter = this.getSelectionCenter();
-          this.rotationStartAngle = Utils.angleBetween(
-            this.rotationCenter.x, this.rotationCenter.y, pos.x, pos.y
-          );
-          this.saveUndoState();
+          // If only bumpers are selected, use handle for scaling instead of rotation
+          if (this.isSelectionAllBumpers()) {
+            this.interactionType = 'bumperScale';
+            this.rotationCenter = this.getSelectionCenter();
+            this._bumperScaleStartDist = Utils.distance(pos.x, pos.y, this.rotationCenter.x, this.rotationCenter.y);
+            this._bumperScaleStartValues = this.getSelectedBumperScales();
+            this.saveUndoState();
+          } else {
+            this.interactionType = 'rotate';
+            this.rotationCenter = this.getSelectionCenter();
+            this.rotationStartAngle = Utils.angleBetween(
+              this.rotationCenter.x, this.rotationCenter.y, pos.x, pos.y
+            );
+            this.saveUndoState();
+          }
           return;
         }
       }
       
+      // Check if clicking on flippers
+      if (this.isNearFlipper(pos)) {
+        this.flipperSelected = true;
+        this.selectedPegIds.clear();
+        this.notifySelectionChange();
+        this.interactionType = 'flipperDrag';
+        const f = this.levelManager.getFlippers();
+        this.flipperDragStartY = f.y;
+        this.flipperDragStartOffset = f.xOffset;
+        if (this.onFlipperSelectionChange) this.onFlipperSelectionChange(true);
+        return;
+      }
+
       // Check if clicking on existing peg
       const peg = this.getPegAtPosition(pos.x, pos.y);
-      
+
       if (peg) {
+        this.deselectFlippers();
         this.dragPegId = peg.id;
-        
+
         // Handle selection
         if (!this.selectedPegIds.has(peg.id)) {
           if (!e.shiftKey) {
@@ -169,6 +198,7 @@ export class Editor {
         this.interactionType = 'drag';
         this.captureDragStartPositions();
       } else {
+        this.deselectFlippers();
         // Clicking on empty space
         if (this.mode === 'select') {
           // Always marquee in select mode
@@ -243,7 +273,30 @@ export class Editor {
             this.rotationStartAngle = currentAngle;
           }
           break;
-          
+
+        case 'bumperScale':
+          if (this.rotationCenter && this._bumperScaleStartDist > 0) {
+            const currentDist = Utils.distance(pos.x, pos.y, this.rotationCenter.x, this.rotationCenter.y);
+            const scaleRatio = currentDist / this._bumperScaleStartDist;
+            this.setSelectedBumperScales(this._bumperScaleStartValues, scaleRatio);
+            if (this.onBumperPropertyChange) this.onBumperPropertyChange();
+          }
+          break;
+
+        case 'flipperDrag': {
+          const f = this.levelManager.getFlippers();
+          if (f) {
+            f.y = this.flipperDragStartY + totalDy;
+            // Clamp Y to stay above bucket and below mid-screen
+            f.y = Math.max(this.canvas.height * 0.3, Math.min(this.canvas.height - 35, f.y));
+            // Horizontal drag adjusts spread
+            f.xOffset = Math.max(10, Math.min(250, this.flipperDragStartOffset + totalDx));
+            this.levelManager.save();
+            if (this.onFlipperSelectionChange) this.onFlipperSelectionChange(true);
+          }
+          break;
+        }
+
         case 'marquee':
           this.selectionBox.endX = pos.x;
           this.selectionBox.endY = pos.y;
@@ -288,6 +341,10 @@ export class Editor {
           break;
 
         case 'rotate':
+          this.levelManager.save();
+          break;
+
+        case 'bumperScale':
           this.levelManager.save();
           break;
           
@@ -356,7 +413,11 @@ export class Editor {
 
       if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault();
-        this.deleteSelectedPegs();
+        if (this.flipperSelected) {
+          this.deleteFlippers();
+        } else {
+          this.deleteSelectedPegs();
+        }
       } else if (e.key === 'z' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         if (e.shiftKey) {
@@ -455,8 +516,10 @@ export class Editor {
           return peg;
         }
       } else {
-        const radius = PHYSICS_CONFIG.pegRadius + 8;
-        if (Utils.distance(x, y, peg.x, peg.y) <= radius) {
+        const baseRadius = peg.type === 'bumper'
+          ? PHYSICS_CONFIG.pegRadius * (peg.bumperScale || 1)
+          : PHYSICS_CONFIG.pegRadius;
+        if (Utils.distance(x, y, peg.x, peg.y) <= baseRadius + 8) {
           return peg;
         }
       }
@@ -541,9 +604,14 @@ export class Editor {
     for (const pegId of this.selectedPegIds) {
       const peg = level.pegs.find(p => p.id === pegId);
       if (peg) {
-        const r = peg.shape === 'brick' ? 
-          Math.max(peg.width || 40, peg.height || 12) / 2 : 
-          PHYSICS_CONFIG.pegRadius;
+        let r;
+        if (peg.shape === 'brick') {
+          r = Math.max(peg.width || 40, peg.height || 12) / 2;
+        } else if (peg.type === 'bumper') {
+          r = PHYSICS_CONFIG.pegRadius * (peg.bumperScale || 1);
+        } else {
+          r = PHYSICS_CONFIG.pegRadius;
+        }
         
         minX = Math.min(minX, peg.x - r);
         minY = Math.min(minY, peg.y - r);
@@ -881,17 +949,25 @@ export class Editor {
       }
     }
     
+    // Bumpers are always circles
+    const shape = this.selectedPegType === 'bumper' ? 'circle' : this.selectedShape;
+
     const pegData = {
       x: x,
       y: y,
       type: this.selectedPegType,
-      shape: this.selectedShape,
-      angle: this.selectedShape === 'brick' ? this.currentRotation : 0
+      shape: shape,
+      angle: shape === 'brick' ? this.currentRotation : 0
     };
-    
-    if (this.selectedShape === 'brick') {
+
+    if (shape === 'brick') {
       pegData.width = this.getBrickWidth();
       pegData.height = this.getBrickHeight();
+    }
+
+    if (this.selectedPegType === 'bumper') {
+      pegData.bumperBounce = 2.0;
+      pegData.bumperScale = 1.0;
     }
     if (!this.isPegPositionAllowed(pegData, pegData.x, pegData.y, pegData.angle, pegData.curveSlices)) return null;
     
@@ -1040,16 +1116,28 @@ export class Editor {
   setSelectedPegsType(type) {
     const level = this.levelManager.getCurrentLevel();
     if (!level || this.selectedPegIds.size === 0) return;
-    
+
     this.saveUndoState();
-    
+
     for (const pegId of this.selectedPegIds) {
       const peg = level.pegs.find(p => p.id === pegId);
       if (peg) {
         peg.type = type;
+        if (type === 'bumper') {
+          peg.shape = 'circle';
+          if (peg.bumperBounce == null) peg.bumperBounce = 2.0;
+          if (peg.bumperScale == null) peg.bumperScale = 1.0;
+        } else {
+          // Clean up bumper properties when changing away
+          delete peg.bumperBounce;
+          delete peg.bumperScale;
+          delete peg.bumperDisappear;
+          delete peg.bumperOrange;
+          delete peg._bumperHitScale;
+        }
       }
     }
-    
+
     this.levelManager.save();
   }
 
@@ -1196,14 +1284,14 @@ export class Editor {
   duplicateSelectedPegs(offsetX = 20, offsetY = 20) {
     const level = this.levelManager.getCurrentLevel();
     if (!level || this.selectedPegIds.size === 0) return;
-    
+
     this.saveUndoState();
     const newPegIds = new Set();
-    
+
     for (const pegId of this.selectedPegIds) {
       const peg = level.pegs.find(p => p.id === pegId);
       if (peg) {
-        const newPeg = this.levelManager.addPeg({
+        const pegData = {
           x: peg.x + offsetX,
           y: peg.y + offsetY,
           type: peg.type,
@@ -1211,7 +1299,14 @@ export class Editor {
           angle: peg.angle,
           width: peg.width,
           height: peg.height
-        });
+        };
+        if (peg.type === 'bumper') {
+          pegData.bumperBounce = peg.bumperBounce;
+          pegData.bumperScale = peg.bumperScale;
+          pegData.bumperDisappear = peg.bumperDisappear;
+          pegData.bumperOrange = peg.bumperOrange;
+        }
+        const newPeg = this.levelManager.addPeg(pegData);
         if (newPeg) {
           newPegIds.add(newPeg.id);
         }
@@ -1230,13 +1325,13 @@ export class Editor {
   duplicateSelectedPegsInPlace() {
     const level = this.levelManager.getCurrentLevel();
     if (!level || this.selectedPegIds.size === 0) return;
-    
+
     const newPegIds = new Set();
-    
+
     for (const pegId of this.selectedPegIds) {
       const peg = level.pegs.find(p => p.id === pegId);
       if (peg) {
-        const newPeg = this.levelManager.addPeg({
+        const pegData = {
           x: peg.x,
           y: peg.y,
           type: peg.type,
@@ -1244,7 +1339,14 @@ export class Editor {
           angle: peg.angle,
           width: peg.width,
           height: peg.height
-        });
+        };
+        if (peg.type === 'bumper') {
+          pegData.bumperBounce = peg.bumperBounce;
+          pegData.bumperScale = peg.bumperScale;
+          pegData.bumperDisappear = peg.bumperDisappear;
+          pegData.bumperOrange = peg.bumperOrange;
+        }
+        const newPeg = this.levelManager.addPeg(pegData);
         if (newPeg) {
           newPegIds.add(newPeg.id);
         }
@@ -1350,8 +1452,9 @@ export class Editor {
       this.animationPreviewAnimator.tick(level.pegs, 1 / 60, this.getAnimationWorldBounds());
     }
 
-    const rotationHandle = (!this.animationMode && this.selectedPegIds.size > 0)
-      ? this.getRotationHandlePosition() : null;
+    const hasSelection = !this.animationMode && this.selectedPegIds.size > 0;
+    const rotationHandle = hasSelection ? this.getRotationHandlePosition() : null;
+    const isBumperSelection = hasSelection && this.isSelectionAllBumpers();
 
     this.renderer.renderGame({
       pegs: level ? level.pegs : [],
@@ -1364,7 +1467,8 @@ export class Editor {
       showGrid: this.showGrid,
       selectionBox: this.selectionBox,
       rotationHandle: rotationHandle,
-      selectionBounds: (!this.animationMode && this.selectedPegIds.size > 0) ? this.getSelectionBounds() : null,
+      isBumperSelection: isBumperSelection,
+      selectionBounds: hasSelection ? this.getSelectionBounds() : null,
       isEditor: true,
       drawMode: this.mode === 'draw',
       drawShapeMode: this.drawShapeMode,
@@ -1384,7 +1488,10 @@ export class Editor {
       animationMotion: (this.animationMode && !this.animationPreview) ? this.resolveAnimationMotion() : null,
       animationInverse: this.animationMode && !this.animationPreview ? this.animationInverse : false,
       animationGhostOffset: this.animationGhostOffset,
-      groups: level ? level.groups : []
+      groups: level ? level.groups : [],
+      // Flippers
+      flippers: level ? level.flippers : null,
+      flipperSelected: this.flipperSelected
     });
   }
 
@@ -1432,6 +1539,114 @@ export class Editor {
     this.snapToGrid = !this.snapToGrid;
     if (this.onSnapChange) this.onSnapChange(this.snapToGrid);
     return this.snapToGrid;
+  }
+
+  // ── Bumper Helpers ──
+
+  isSelectionAllBumpers() {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level || this.selectedPegIds.size === 0) return false;
+    for (const pegId of this.selectedPegIds) {
+      const peg = level.pegs.find(p => p.id === pegId);
+      if (!peg || peg.type !== 'bumper') return false;
+    }
+    return true;
+  }
+
+  getSelectedBumperScales() {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level) return new Map();
+    const scales = new Map();
+    for (const pegId of this.selectedPegIds) {
+      const peg = level.pegs.find(p => p.id === pegId);
+      if (peg && peg.type === 'bumper') {
+        scales.set(pegId, peg.bumperScale || 1.0);
+      }
+    }
+    return scales;
+  }
+
+  setSelectedBumperScales(startScales, ratio) {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level) return;
+    for (const [pegId, startScale] of startScales) {
+      const peg = level.pegs.find(p => p.id === pegId);
+      if (peg) {
+        peg.bumperScale = Utils.clamp(startScale * ratio, 0.5, 7.0);
+      }
+    }
+  }
+
+  setSelectedBumperBounce(bounce) {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level) return;
+    for (const pegId of this.selectedPegIds) {
+      const peg = level.pegs.find(p => p.id === pegId);
+      if (peg && peg.type === 'bumper') {
+        peg.bumperBounce = bounce;
+      }
+    }
+    this.levelManager.save();
+  }
+
+  getSelectedBumperProperties() {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level || this.selectedPegIds.size === 0) return null;
+    // Return properties of first selected bumper
+    for (const pegId of this.selectedPegIds) {
+      const peg = level.pegs.find(p => p.id === pegId);
+      if (peg && peg.type === 'bumper') {
+        return {
+          bounce: peg.bumperBounce ?? 2.0,
+          scale: peg.bumperScale ?? 1.0,
+          disappear: !!peg.bumperDisappear,
+          orange: !!peg.bumperOrange
+        };
+      }
+    }
+    return null;
+  }
+
+  // Callback for bumper panel sync
+  onBumperPropertyChange = null;
+
+  // ── Flipper Helpers ──
+
+  isNearFlipper(pos) {
+    const f = this.levelManager.getFlippers();
+    if (!f || !f.enabled) return false;
+    const cx = this.canvas.width / 2;
+    const sc = f.scale || 1;
+    const len = (f.length || 40) * sc;
+
+    for (const side of [-1, 1]) {
+      const px = cx + side * f.xOffset;
+      const restRad = (f.restAngle || 25) * Math.PI / 180;
+      const angle = (side === -1) ? restRad : (Math.PI - restRad);
+      const tipX = px + Math.cos(angle) * len;
+      const tipY = f.y + Math.sin(angle) * len;
+      const midX = (px + tipX) / 2;
+      const midY = (f.y + tipY) / 2;
+
+      if (Utils.distance(pos.x, pos.y, px, f.y) < 18) return true;
+      if (Utils.distance(pos.x, pos.y, tipX, tipY) < 18) return true;
+      if (Utils.distance(pos.x, pos.y, midX, midY) < 18) return true;
+    }
+    return false;
+  }
+
+  deselectFlippers() {
+    if (this.flipperSelected) {
+      this.flipperSelected = false;
+      if (this.onFlipperSelectionChange) this.onFlipperSelectionChange(false);
+    }
+  }
+
+  deleteFlippers() {
+    this.levelManager.setFlippers(null);
+    this.flipperSelected = false;
+    if (this.onFlipperSelectionChange) this.onFlipperSelectionChange(false);
+    if (this.onFlippersDeleted) this.onFlippersDeleted();
   }
 
   // ── Animation Mode ──

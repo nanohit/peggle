@@ -15,6 +15,7 @@
   --purple: #c77dff;
   --multi: #ff4d9d;
   --obstacle: #6b7280;
+  --bumper: #e0e0e0;
   --border: #30363d;
   --shadow: rgba(0, 0, 0, 0.4);
 }
@@ -197,6 +198,15 @@ html, body {
 }
 .peg-btn[data-type="obstacle"]::after {
   background: var(--obstacle);
+}
+
+.peg-btn[data-type="bumper"] {
+  background: rgba(224, 224, 224, 0.2);
+  color: var(--bumper);
+}
+.peg-btn[data-type="bumper"]::after {
+  background: var(--bumper);
+  box-shadow: 0 0 6px var(--bumper), inset 0 0 3px rgba(0,0,0,0.3);
 }
 
 .peg-btn.active {
@@ -822,6 +832,41 @@ html, body {
   border-color: var(--accent);
   color: var(--accent-hover);
   background: rgba(88, 166, 255, 0.2);
+}
+
+/* Bumper Properties Panel (right side) */
+.bumper-panel {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 148px;
+  background: rgba(22, 27, 34, 0.92);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  z-index: 20;
+  display: none;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.bumper-panel.visible {
+  display: block;
+}
+
+.bumper-panel-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border);
+}
+
+.bumper-panel-body {
+  padding: 6px 8px 8px;
 }
 
 .anim-hint {

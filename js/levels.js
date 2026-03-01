@@ -23,6 +23,7 @@ export class LevelManager {
       tags: [],
       pegs: [],
       groups: [],
+      flippers: null,
       metadata: {
         created: new Date().toISOString().split('T')[0],
         modified: new Date().toISOString(),
@@ -108,7 +109,16 @@ export class LevelManager {
 
     // Preserve animation data
     if (peg.animation) newPeg.animation = peg.animation;
-    
+
+    // Bumper properties
+    if (peg.type === 'bumper') {
+      newPeg.bumperBounce = peg.bumperBounce ?? 2.0;
+      newPeg.bumperScale = peg.bumperScale ?? 1.0;
+      newPeg.bumperDisappear = !!peg.bumperDisappear;
+      newPeg.bumperOrange = !!peg.bumperOrange;
+      newPeg.shape = 'circle'; // bumpers are always circles
+    }
+
     level.pegs.push(newPeg);
     level.metadata.modified = new Date().toISOString();
     this.save();
@@ -252,6 +262,21 @@ export class LevelManager {
       return group;
     }
     return null;
+  }
+
+  // Set flippers data on current level
+  setFlippers(flippersData) {
+    const level = this.getCurrentLevel();
+    if (!level) return;
+    level.flippers = flippersData;
+    level.metadata.modified = new Date().toISOString();
+    this.save();
+  }
+
+  // Get flippers for current level
+  getFlippers() {
+    const level = this.getCurrentLevel();
+    return level ? level.flippers : null;
   }
 
   // Add level to training data

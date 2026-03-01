@@ -46,20 +46,18 @@ export class Ball {
     this.radius = getBallRadius();
   }
 
-  update() {
+  // Phase 1: update velocity (gravity, friction, clamp). No position change.
+  updateVelocity() {
     if (!this.active) return;
 
     const timeScale = PHYSICS_CONFIG.timeScale;
 
-    // Apply gravity (scaled)
     this.vy += PHYSICS_CONFIG.gravity * timeScale;
 
-    // Apply friction
     const frictionScale = Math.pow(PHYSICS_CONFIG.friction, timeScale);
     this.vx *= frictionScale;
     this.vy *= frictionScale;
 
-    // Clamp velocity
     const speed = Utils.magnitude(this.vx, this.vy);
     if (speed > PHYSICS_CONFIG.maxVelocity) {
       const scale = PHYSICS_CONFIG.maxVelocity / speed;
@@ -67,19 +65,26 @@ export class Ball {
       this.vy *= scale;
     }
 
-    // Update position (scaled)
-    this.x += this.vx * timeScale;
-    this.y += this.vy * timeScale;
-
-    // Detect if ball is stuck (very slow movement)
+    // Stuck detection
     if (speed < 0.3 && Math.abs(this.vy) < 0.5) {
       this.stuckFrames++;
-      if (this.stuckFrames > 180) { // 3 seconds at 60fps
-        this.stuck = true;
-      }
+      if (this.stuckFrames > 180) this.stuck = true;
     } else {
       this.stuckFrames = 0;
     }
+  }
+
+  // Phase 2: advance position by a fraction of the frame's movement.
+  // fraction = 1/numSubSteps for each sub-step.
+  stepPosition(fraction) {
+    const timeScale = PHYSICS_CONFIG.timeScale;
+    this.x += this.vx * timeScale * fraction;
+    this.y += this.vy * timeScale * fraction;
+  }
+
+  // How many pixels the ball will travel this frame (for sub-step calculation)
+  getFrameSpeed() {
+    return Utils.magnitude(this.vx, this.vy) * PHYSICS_CONFIG.timeScale;
   }
 
   reset(x, y) {
@@ -159,6 +164,57 @@ function circleRectCollision(ball, brick) {
   };
 }
 
+// Overlap test for circle vs rotated rectangle — like circleRectCollision
+// but does NOT reject based on velocity direction. Returns { normal, depth }
+// whenever shapes overlap, regardless of ball movement direction.
+function circleRectOverlap(ball, brick) {
+  const cos = Math.cos(-(brick.angle || 0));
+  const sin = Math.sin(-(brick.angle || 0));
+
+  const dx = ball.x - brick.x;
+  const dy = ball.y - brick.y;
+
+  const localX = dx * cos - dy * sin;
+  const localY = dx * sin + dy * cos;
+
+  const halfW = (brick.width || PHYSICS_CONFIG.pegRadius * 4) / 2;
+  const halfH = (brick.height || PHYSICS_CONFIG.pegRadius * 1.2) / 2;
+
+  const closestX = Utils.clamp(localX, -halfW, halfW);
+  const closestY = Utils.clamp(localY, -halfH, halfH);
+
+  const distX = localX - closestX;
+  const distY = localY - closestY;
+  const dist = Math.sqrt(distX * distX + distY * distY);
+
+  if (dist >= ball.radius) return null;
+
+  let normalLocalX, normalLocalY;
+  if (dist === 0) {
+    const overlapX = halfW - Math.abs(localX);
+    const overlapY = halfH - Math.abs(localY);
+    if (overlapX < overlapY) {
+      normalLocalX = localX > 0 ? 1 : -1;
+      normalLocalY = 0;
+    } else {
+      normalLocalX = 0;
+      normalLocalY = localY > 0 ? 1 : -1;
+    }
+  } else {
+    normalLocalX = distX / dist;
+    normalLocalY = distY / dist;
+  }
+
+  const brickAngle = brick.angle || 0;
+  const normalX = normalLocalX * Math.cos(brickAngle) - normalLocalY * Math.sin(brickAngle);
+  const normalY = normalLocalX * Math.sin(brickAngle) + normalLocalY * Math.cos(brickAngle);
+
+  return {
+    normal: { x: normalX, y: normalY },
+    depth: ball.radius - dist
+  };
+}
+
 export class PhysicsEngine {
   constructor(width, height) {
     this.width = width;
@@ -166,6 +222,7 @@ export class PhysicsEngine {
     this.balls = [];
     this.pegs = [];
     this.hitPegs = new Set(); // Track which pegs were hit (for scoring only)
+    this.flippers = null;
     this.bucket = {
       x: width / 2,
       y: height - 25,
@@ -194,6 +251,10 @@ export class PhysicsEngine {
     this.hitPegs.clear();
   }
 
+  setFlippers(flippers) {
+    this.flippers = flippers;
+  }
+
   resize(width, height) {
     this.width = width;
     this.height = height;
@@ -207,36 +268,81 @@ export class PhysicsEngine {
 
     const hitEvents = [];
 
-    // Update ball physics
+    // Maximum pixels a ball may travel per sub-step.
+    // Must be smaller than the thinnest collidable object (~8 px flipper bar).
+    const MAX_STEP_PX = 4;
+
+    // Update ball physics with sub-stepping to prevent tunneling
     for (const ball of this.balls) {
       if (!ball.active) continue;
-      ball.update();
-      this.handleWallCollisions(ball);
 
-      // Peg collisions - ALL pegs are still physically collidable!
-      // Hit pegs just don't score again
-      for (const peg of this.pegs) {
-        let collision;
-        
-        if (peg.shape === 'brick') {
-          collision = circleRectCollision(ball, peg);
-        } else {
-          // Circle peg
-          collision = Utils.circleCollision(ball, {
-            x: peg.x,
-            y: peg.y,
-            radius: PHYSICS_CONFIG.pegRadius
-          });
+      // Phase 1 — velocity (gravity, friction, clamp). No position change yet.
+      ball.updateVelocity();
+
+      // Determine sub-step count based on the faster of:
+      // (a) how far the ball travels this frame, or
+      // (b) how far the flipper tip sweeps this frame (if flippers are active).
+      // This prevents the flipper from sweeping through the ball in one step.
+      const frameSpeed = ball.getFrameSpeed();
+      let maxMovePx = frameSpeed;
+      if (this.flippers && this.flippers.enabled) {
+        const f = this.flippers;
+        const prevT = f._prevT ?? (f._flipperT || 0);
+        const curT = f._flipperT || 0;
+        const tDelta = Math.abs(curT - prevT);
+        if (tDelta > 0.001) {
+          const sc = f.scale || 1;
+          const len = (f.length || 40) * sc;
+          const restRad = (f.restAngle || 25) * Math.PI / 180;
+          const flipRad = (f.flipAngle || 30) * Math.PI / 180;
+          // Tip sweep distance = length * angular change (in radians)
+          const tipSweep = len * tDelta * (restRad + flipRad);
+          maxMovePx = Math.max(maxMovePx, tipSweep);
         }
+      }
+      const numSteps = Math.max(1, Math.ceil(maxMovePx / MAX_STEP_PX));
+      const frac = 1 / numSteps;
 
-        if (collision) {
-          this.resolveCollision(ball, collision);
-          
-          // Only mark as newly hit if not already hit (for scoring)
-          // Obstacles are never "hit" for removal purposes
-          if (peg.type !== 'obstacle' && !this.hitPegs.has(peg.id)) {
-            this.hitPegs.add(peg.id);
-            hitEvents.push({ peg, ball });
+      for (let step = 0; step < numSteps; step++) {
+        // Phase 2 — advance position by one sub-step
+        ball.stepPosition(frac);
+
+        this.handleWallCollisions(ball);
+        // Pass sub-step progress so flipper angle is interpolated between
+        // its previous and current frame positions (prevents sweep-through).
+        this.checkFlipperCollisions(ball, (step + 1) / numSteps, frac);
+
+        // Peg collisions - ALL pegs are still physically collidable
+        for (const peg of this.pegs) {
+          let collision;
+
+          if (peg.shape === 'brick') {
+            collision = circleRectCollision(ball, peg);
+          } else {
+            const pegRadius = peg.type === 'bumper'
+              ? PHYSICS_CONFIG.pegRadius * (peg.bumperScale || 1)
+              : PHYSICS_CONFIG.pegRadius;
+            collision = Utils.circleCollision(ball, {
+              x: peg.x,
+              y: peg.y,
+              radius: pegRadius
+            });
+          }
+
+          if (collision) {
+            this.resolveCollision(ball, collision, peg);
+
+            const isBumper = peg.type === 'bumper';
+
+            if (isBumper) {
+              hitEvents.push({ peg, ball, isBumper: true, bumperAnimOnly: true });
+            }
+
+            const isPermanentBumper = isBumper && !peg.bumperDisappear && !peg.bumperOrange;
+            if (peg.type !== 'obstacle' && !isPermanentBumper && !this.hitPegs.has(peg.id)) {
+              this.hitPegs.add(peg.id);
+              hitEvents.push({ peg, ball });
+            }
           }
         }
       }
@@ -297,9 +403,11 @@ export class PhysicsEngine {
     }
   }
 
-  resolveCollision(ball, collision) {
+  resolveCollision(ball, collision, peg = null) {
     const { normal, depth, relativeVelocityNormal } = collision;
-    const bounce = PHYSICS_CONFIG.bounce;
+    // Use bumper's custom bounce if available
+    const bounce = (peg && peg.type === 'bumper' && peg.bumperBounce != null)
+      ? peg.bumperBounce : PHYSICS_CONFIG.bounce;
 
     // Separate ball from peg
     ball.x += normal.x * (depth + 0.5);
@@ -312,6 +420,15 @@ export class PhysicsEngine {
     // Add slight randomness to prevent perfect loops
     ball.vx += (Math.random() - 0.5) * 0.3;
     ball.vy += (Math.random() - 0.5) * 0.3;
+    this.clampBallSpeed(ball);
+  }
+
+  clampBallSpeed(ball) {
+    const speed = Utils.magnitude(ball.vx, ball.vy);
+    if (speed <= PHYSICS_CONFIG.maxVelocity) return;
+    const scale = PHYSICS_CONFIG.maxVelocity / speed;
+    ball.vx *= scale;
+    ball.vy *= scale;
   }
 
   handleBallCollisions() {
@@ -362,6 +479,8 @@ export class PhysicsEngine {
         a.vy += (Math.random() - 0.5) * 0.1;
         b.vx += (Math.random() - 0.5) * 0.1;
         b.vy += (Math.random() - 0.5) * 0.1;
+        this.clampBallSpeed(a);
+        this.clampBallSpeed(b);
       }
     }
   }
@@ -387,6 +506,141 @@ export class PhysicsEngine {
                      ball.y < bucket.y + bucket.height / 2;
 
     return inXRange && inYRange;
+  }
+
+  updateFlippers(dt) {
+    if (!this.flippers || !this.flippers.enabled) return;
+    const f = this.flippers;
+
+    // Store previous T so the physics sub-step loop can interpolate between
+    // the old and new flipper angles (prevents the flipper from "teleporting"
+    // through the ball in a single frame).
+    f._prevT = f._flipperT || 0;
+
+    // Animate flip position: activated → quickly move toward 1, else decay toward 0
+    const speed = f._flipperActivated ? 14 : 6;
+    const target = f._flipperActivated ? 1 : 0;
+    f._flipperT = f._flipperT || 0;
+    const prevT = f._flipperT;
+    f._flipperT += (target - f._flipperT) * Math.min(1, speed * dt);
+    if (Math.abs(f._flipperT - target) < 0.01) f._flipperT = target;
+    f._angularDelta = f._flipperT - prevT;
+    f._angularVelocity = f._angularDelta / Math.max(dt, 0.001);
+  }
+
+  checkFlipperCollisions(ball, subStepFrac, subStepSize = 1) {
+    if (!this.flippers || !this.flippers.enabled) return;
+    const f = this.flippers;
+    const centerX = this.width / 2;
+    const prevT = f._prevT ?? (f._flipperT || 0);
+    const curT = f._flipperT || 0;
+    const safeStepSize = Math.max(0, Math.min(1, subStepSize));
+    const sampleFrac = Utils.clamp((subStepFrac ?? 1) - safeStepSize * 0.5, 0, 1);
+    // Interpolate flipper angle to match this sub-step's progress through the frame.
+    // This way, if the flipper sweeps from angle A to B in one frame, each sub-step
+    // checks the flipper at an intermediate angle — preventing sweep-through tunneling.
+    const t = prevT + (curT - prevT) * sampleFrac;
+    const restRad = (f.restAngle || 25) * Math.PI / 180;
+    const flipRad = (f.flipAngle || 30) * Math.PI / 180;
+    const angleRange = restRad + flipRad;
+    const sc = f.scale || 1;
+    const length = (f.length || 40) * sc;
+    const w = (f.width || 8) * sc;
+    const subTDelta = (curT - prevT) * safeStepSize;
+    const bounce = f.bounce ?? PHYSICS_CONFIG.bounce;
+
+    // Left flipper
+    const leftPivotX = centerX - f.xOffset;
+    const leftAngle = restRad - t * angleRange;
+    this._checkSingleFlipperCollision(
+      ball, leftPivotX, f.y, leftAngle, length, w, -subTDelta * angleRange, bounce
+    );
+
+    // Right flipper (mirrored)
+    const rightPivotX = centerX + f.xOffset;
+    const rightAngle = Math.PI - leftAngle;
+    this._checkSingleFlipperCollision(
+      ball, rightPivotX, f.y, rightAngle, length, w, subTDelta * angleRange, bounce
+    );
+  }
+
+  _checkSingleFlipperCollision(ball, pivotX, pivotY, angle, length, width, angDeltaRad, bounce) {
+    const flipCenterX = pivotX + Math.cos(angle) * length / 2;
+    const flipCenterY = pivotY + Math.sin(angle) * length / 2;
+
+    const collision = circleRectOverlap(ball, {
+      x: flipCenterX, y: flipCenterY, angle, width: length, height: width
+    });
+
+    if (!collision) return;
+
+    // Determine the flipper's "top" surface normal — the side facing
+    // upward in canvas (more negative Y). Two perpendiculars to the bar:
+    //   A = (-sin(a), cos(a))     B = (sin(a), -cos(a))
+    // Pick whichever has a smaller Y component (points more "up").
+    const sinA = Math.sin(angle), cosA = Math.cos(angle);
+    const topNx = cosA > 0 ? sinA : -sinA;   // simplified: pick by Y sign
+    const topNy = cosA > 0 ? -cosA : cosA;
+
+    // If the geometric normal points toward the underside, override it
+    // with the top normal. This prevents the flipper from pushing the
+    // ball downward when it sweeps up through it.
+    let nx = collision.normal.x;
+    let ny = collision.normal.y;
+    const dot = nx * topNx + ny * topNy;
+    if (dot < 0) {
+      nx = topNx;
+      ny = topNy;
+    }
+
+    // Separate ball from flipper along the corrected normal
+    ball.x += nx * (collision.depth + 0.5);
+    ball.y += ny * (collision.depth + 0.5);
+
+    // Reflect velocity
+    const dvn = ball.vx * nx + ball.vy * ny;
+    if (dvn < 0 || Math.abs(angDeltaRad) > 0.002) {
+      ball.vx -= (1 + bounce) * dvn * nx;
+      ball.vy -= (1 + bounce) * dvn * ny;
+    }
+
+    // Flipper motion contribution (frame-based, bounded to this sub-step)
+    if (Math.abs(angDeltaRad) > 0.0005) {
+      const dx = ball.x - pivotX;
+      const dy = ball.y - pivotY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist > 0) {
+        const tangentSpeed = angDeltaRad * dist * 0.9;
+        ball.vx += (-dy / dist) * tangentSpeed;
+        ball.vy += (dx / dist) * tangentSpeed;
+      }
+    }
+
+    ball.vx += (Math.random() - 0.5) * 0.3;
+    ball.vy += (Math.random() - 0.5) * 0.3;
+    this.clampBallSpeed(ball);
+  }
+
+  getFlipperRects() {
+    if (!this.flippers || !this.flippers.enabled) return [];
+    const f = this.flippers;
+    const centerX = this.width / 2;
+    const t = f._flipperT || 0;
+    const restRad = (f.restAngle || 25) * Math.PI / 180;
+    const flipRad = (f.flipAngle || 30) * Math.PI / 180;
+    const sc = f.scale || 1;
+    const length = (f.length || 40) * sc;
+    const w = (f.width || 8) * sc;
+
+    const leftPivotX = centerX - f.xOffset;
+    const leftAngle = restRad - t * (restRad + flipRad);
+    const rightPivotX = centerX + f.xOffset;
+    const rightAngle = Math.PI - leftAngle;
+
+    return [
+      { x: leftPivotX + Math.cos(leftAngle) * length / 2, y: f.y + Math.sin(leftAngle) * length / 2, angle: leftAngle, width: length, height: w },
+      { x: rightPivotX + Math.cos(rightAngle) * length / 2, y: f.y + Math.sin(rightAngle) * length / 2, angle: rightAngle, width: length, height: w }
+    ];
   }
 
   getHitPegIds() {
@@ -442,10 +696,13 @@ export class PhysicsEngine {
         if (peg.shape === 'brick') {
           collision = circleRectCollision({ x, y, vx, vy, radius }, peg);
         } else {
+          const pegRadius = peg.type === 'bumper'
+            ? PHYSICS_CONFIG.pegRadius * (peg.bumperScale || 1)
+            : PHYSICS_CONFIG.pegRadius;
           collision = Utils.circleCollision({ x, y, vx, vy, radius }, {
             x: peg.x,
             y: peg.y,
-            radius: PHYSICS_CONFIG.pegRadius
+            radius: pegRadius
           });
         }
 
@@ -467,6 +724,19 @@ export class PhysicsEngine {
           break;
         }
       }
+
+      // Stop trajectory at flippers — user controls them so prediction beyond is meaningless
+      const flipperRects = this.getFlipperRects();
+      let hitFlipper = false;
+      for (const rect of flipperRects) {
+        const collision = circleRectOverlap({ x, y, radius }, rect);
+        if (collision) {
+          points.push({ x, y });
+          hitFlipper = true;
+          break;
+        }
+      }
+      if (hitFlipper) break;
 
       // Ball fell below screen
       if (y > this.height + 50) {

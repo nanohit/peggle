@@ -75,6 +75,12 @@ class PeggleApp {
           // Also change type of selected pegs
           if (this.editor.selectedPegIds.size > 0) {
             this.editor.setSelectedPegsType(btn.dataset.type);
+            // Show/hide bumper panel
+            if (btn.dataset.type === 'bumper' && this.editor.isSelectionAllBumpers()) {
+              this.showBumperPanel();
+            } else {
+              this.closeBumperPanel();
+            }
           }
         }
       });
@@ -164,7 +170,13 @@ class PeggleApp {
     });
 
     document.getElementById('deleteSelBtn').addEventListener('click', () => {
-      if (this.editor) this.editor.deleteSelectedPegs();
+      if (this.editor) {
+        if (this.editor.flipperSelected) {
+          this.editor.deleteFlippers();
+        } else {
+          this.editor.deleteSelectedPegs();
+        }
+      }
       document.getElementById('actionsOverlay').classList.remove('visible');
     });
 
@@ -195,6 +207,32 @@ class PeggleApp {
           }
         }
       }
+    });
+
+    // Flipper toggle button
+    document.getElementById('flipperBtn').addEventListener('click', () => {
+      if (!this.editor) return;
+      const level = this.levelManager.getCurrentLevel();
+      if (!level) return;
+
+      if (level.flippers && level.flippers.enabled) {
+        level.flippers.enabled = false;
+        this.closeFlipperPanel();
+      } else {
+        level.flippers = level.flippers || {
+          enabled: true,
+          y: this.canvas.height - 55,
+          xOffset: 50,
+          length: 40,
+          width: 8,
+          restAngle: 25,
+          flipAngle: 30
+        };
+        level.flippers.enabled = true;
+        this.showFlipperPanel();
+      }
+      document.getElementById('flipperBtn').classList.toggle('active', level.flippers && level.flippers.enabled);
+      this.levelManager.save();
     });
 
     // Close actions panel when clicking outside
@@ -289,12 +327,20 @@ class PeggleApp {
     // Animation panel
     this.setupAnimationPanel();
 
+    // Bumper panel
+    this.setupBumperPanel();
+
+    // Flipper panel
+    this.setupFlipperPanel();
+
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
       
       if (e.key === 'p') {
         this.togglePlayMode();
+      } else if (e.key === 'f' && this.mode === 'editor') {
+        document.getElementById('flipperBtn').click();
       }
     });
   }
@@ -536,6 +582,207 @@ class PeggleApp {
     });
   }
 
+  setupBumperPanel() {
+    const bounceSlider = document.getElementById('bumperBounceSlider');
+    const bounceInput = document.getElementById('bumperBounceInput');
+    const scaleSlider = document.getElementById('bumperScaleSlider');
+    const scaleInput = document.getElementById('bumperScaleInput');
+
+    document.getElementById('closeBumperPanel').addEventListener('click', () => {
+      this.closeBumperPanel();
+    });
+
+    bounceSlider.addEventListener('input', () => {
+      if (!this.editor) return;
+      const v = parseInt(bounceSlider.value) / 10;
+      bounceInput.value = v.toFixed(1);
+      this.editor.setSelectedBumperBounce(v);
+    });
+    bounceInput.addEventListener('input', () => {
+      if (!this.editor) return;
+      const v = parseFloat(bounceInput.value) || 0.5;
+      bounceSlider.value = Math.max(5, Math.min(70, Math.round(v * 10)));
+      this.editor.setSelectedBumperBounce(v);
+    });
+
+    const setScale = (v) => {
+      if (!this.editor) return;
+      const clamped = Math.max(0.5, Math.min(7.0, v));
+      const level = this.editor.levelManager.getCurrentLevel();
+      if (!level) return;
+      for (const pegId of this.editor.selectedPegIds) {
+        const peg = level.pegs.find(p => p.id === pegId);
+        if (peg && peg.type === 'bumper') {
+          peg.bumperScale = clamped;
+        }
+      }
+      this.editor.levelManager.save();
+    };
+
+    scaleSlider.addEventListener('input', () => {
+      const v = parseInt(scaleSlider.value) / 10;
+      scaleInput.value = v.toFixed(1);
+      setScale(v);
+    });
+    scaleInput.addEventListener('input', () => {
+      const v = parseFloat(scaleInput.value) || 1.0;
+      scaleSlider.value = Math.max(5, Math.min(70, Math.round(v * 10)));
+      setScale(v);
+    });
+
+    // Disappear on hit toggle
+    const disappearToggle = document.getElementById('bumperDisappearToggle');
+    disappearToggle.addEventListener('change', () => {
+      if (!this.editor) return;
+      const level = this.editor.levelManager.getCurrentLevel();
+      if (!level) return;
+      for (const pegId of this.editor.selectedPegIds) {
+        const peg = level.pegs.find(p => p.id === pegId);
+        if (peg && peg.type === 'bumper') {
+          peg.bumperDisappear = disappearToggle.checked;
+          // Uncheck orange if disappear is checked (mutually exclusive)
+          if (disappearToggle.checked && peg.bumperOrange) {
+            peg.bumperOrange = false;
+          }
+        }
+      }
+      if (disappearToggle.checked) {
+        document.getElementById('bumperOrangeToggle').checked = false;
+      }
+      this.editor.levelManager.save();
+    });
+
+    // Count as orange toggle
+    const orangeToggle = document.getElementById('bumperOrangeToggle');
+    orangeToggle.addEventListener('change', () => {
+      if (!this.editor) return;
+      const level = this.editor.levelManager.getCurrentLevel();
+      if (!level) return;
+      for (const pegId of this.editor.selectedPegIds) {
+        const peg = level.pegs.find(p => p.id === pegId);
+        if (peg && peg.type === 'bumper') {
+          peg.bumperOrange = orangeToggle.checked;
+          // Orange implies disappear behavior, but uncheck disappear toggle
+          if (orangeToggle.checked && peg.bumperDisappear) {
+            peg.bumperDisappear = false;
+          }
+        }
+      }
+      if (orangeToggle.checked) {
+        document.getElementById('bumperDisappearToggle').checked = false;
+      }
+      this.editor.levelManager.save();
+    });
+  }
+
+  showBumperPanel() {
+    const props = this.editor ? this.editor.getSelectedBumperProperties() : null;
+    if (!props) return;
+
+    document.getElementById('bumperBounceSlider').value = Math.round(props.bounce * 10);
+    document.getElementById('bumperBounceInput').value = props.bounce.toFixed(1);
+    document.getElementById('bumperScaleSlider').value = Math.round(props.scale * 10);
+    document.getElementById('bumperScaleInput').value = props.scale.toFixed(1);
+    document.getElementById('bumperDisappearToggle').checked = !!props.disappear;
+    document.getElementById('bumperOrangeToggle').checked = !!props.orange;
+    document.getElementById('bumperPanel').classList.add('visible');
+  }
+
+  closeBumperPanel() {
+    document.getElementById('bumperPanel').classList.remove('visible');
+  }
+
+  setupFlipperPanel() {
+    document.getElementById('closeFlipperPanel').addEventListener('click', () => {
+      this.closeFlipperPanel();
+    });
+
+    const bindFlipperSlider = (sliderId, inputId, prop, min, max) => {
+      const slider = document.getElementById(sliderId);
+      const input = document.getElementById(inputId);
+
+      slider.addEventListener('input', () => {
+        const v = parseInt(slider.value);
+        input.value = v;
+        this._setFlipperProp(prop, v);
+      });
+      input.addEventListener('input', () => {
+        const v = Math.max(min, Math.min(max, parseInt(input.value) || min));
+        slider.value = v;
+        this._setFlipperProp(prop, v);
+      });
+    };
+
+    bindFlipperSlider('flipperLengthSlider', 'flipperLengthInput', 'length', 20, 150);
+    bindFlipperSlider('flipperOffsetSlider', 'flipperOffsetInput', 'xOffset', 10, 250);
+    bindFlipperSlider('flipperRestSlider', 'flipperRestInput', 'restAngle', 5, 60);
+    bindFlipperSlider('flipperFlipSlider', 'flipperFlipInput', 'flipAngle', 10, 70);
+
+    // Bounce slider (0.3 - 5.0, stored as float)
+    const fBounceSlider = document.getElementById('flipperBounceSlider');
+    const fBounceInput = document.getElementById('flipperBounceInput');
+    fBounceSlider.addEventListener('input', () => {
+      const v = parseInt(fBounceSlider.value) / 10;
+      fBounceInput.value = v.toFixed(1);
+      this._setFlipperProp('bounce', v);
+    });
+    fBounceInput.addEventListener('input', () => {
+      const v = Math.max(0.3, Math.min(5.0, parseFloat(fBounceInput.value) || 1.2));
+      fBounceSlider.value = Math.round(v * 10);
+      this._setFlipperProp('bounce', v);
+    });
+
+    bindFlipperSlider('flipperWidthSlider', 'flipperWidthInput', 'width', 4, 40);
+
+    // Scale slider (0.5 - 3.0, stored as float)
+    const fScaleSlider = document.getElementById('flipperScaleSlider');
+    const fScaleInput = document.getElementById('flipperScaleInput');
+    fScaleSlider.addEventListener('input', () => {
+      const v = parseInt(fScaleSlider.value) / 10;
+      fScaleInput.value = v.toFixed(1);
+      this._setFlipperProp('scale', v);
+    });
+    fScaleInput.addEventListener('input', () => {
+      const v = Math.max(0.5, Math.min(3.0, parseFloat(fScaleInput.value) || 1.0));
+      fScaleSlider.value = Math.round(v * 10);
+      this._setFlipperProp('scale', v);
+    });
+  }
+
+  _setFlipperProp(prop, value) {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level || !level.flippers) return;
+    level.flippers[prop] = value;
+    this.levelManager.save();
+  }
+
+  showFlipperPanel() {
+    const f = this.levelManager.getFlippers();
+    if (!f) return;
+
+    document.getElementById('flipperLengthSlider').value = f.length || 40;
+    document.getElementById('flipperLengthInput').value = f.length || 40;
+    document.getElementById('flipperOffsetSlider').value = f.xOffset || 50;
+    document.getElementById('flipperOffsetInput').value = f.xOffset || 50;
+    document.getElementById('flipperRestSlider').value = f.restAngle || 25;
+    document.getElementById('flipperRestInput').value = f.restAngle || 25;
+    document.getElementById('flipperFlipSlider').value = f.flipAngle || 30;
+    document.getElementById('flipperFlipInput').value = f.flipAngle || 30;
+    document.getElementById('flipperWidthSlider').value = f.width || 8;
+    document.getElementById('flipperWidthInput').value = f.width || 8;
+    const bounce = f.bounce ?? 1.2;
+    document.getElementById('flipperBounceSlider').value = Math.round(bounce * 10);
+    document.getElementById('flipperBounceInput').value = bounce.toFixed(1);
+    const scale = f.scale ?? 1.0;
+    document.getElementById('flipperScaleSlider').value = Math.round(scale * 10);
+    document.getElementById('flipperScaleInput').value = scale.toFixed(1);
+    document.getElementById('flipperPanel').classList.add('visible');
+  }
+
+  closeFlipperPanel() {
+    document.getElementById('flipperPanel').classList.remove('visible');
+  }
+
   showAnimationPanel() {
     this._syncAnimationSliders();
     document.getElementById('animPanel').classList.add('visible');
@@ -635,6 +882,34 @@ class PeggleApp {
 
     this.editor.onSelectionChange = (count) => {
       document.getElementById('selectionCount').textContent = count > 0 ? `Selected: ${count}` : '';
+      // Show bumper panel when bumper(s) selected, hide otherwise
+      if (count > 0 && this.editor.isSelectionAllBumpers()) {
+        this.showBumperPanel();
+      } else {
+        this.closeBumperPanel();
+      }
+    };
+
+    this.editor.onFlipperSelectionChange = (selected) => {
+      if (selected) {
+        this.showFlipperPanel();
+      } else {
+        this.closeFlipperPanel();
+      }
+    };
+
+    this.editor.onFlippersDeleted = () => {
+      this.closeFlipperPanel();
+      document.getElementById('flipperBtn').classList.remove('active');
+    };
+
+    this.editor.onBumperPropertyChange = () => {
+      // Sync bumper panel sliders when properties change via drag
+      const props = this.editor.getSelectedBumperProperties();
+      if (props) {
+        document.getElementById('bumperScaleSlider').value = Math.round(props.scale * 10);
+        document.getElementById('bumperScaleInput').value = props.scale.toFixed(1);
+      }
     };
 
     this.editor.onModeChange = (mode) => {
@@ -664,6 +939,10 @@ class PeggleApp {
     // Sync tool button states
     document.getElementById('gridBtn').classList.toggle('active', this.editor.showGrid);
     document.getElementById('magnetBtn').classList.toggle('active', this.editor.snapToGrid);
+
+    // Sync flipper button state
+    const flipperData = this.levelManager.getFlippers();
+    document.getElementById('flipperBtn').classList.toggle('active', !!(flipperData && flipperData.enabled));
     
     // Show current peg count
     const level = this.levelManager.getCurrentLevel();
@@ -674,8 +953,10 @@ class PeggleApp {
 
   startGame() {
     if (this.editor) {
-      // Close animation panel if open
+      // Close panels if open
       this.closeAnimationPanel();
+      this.closeBumperPanel();
+      this.closeFlipperPanel();
       this.editor.stop();
       this.editor = null;
     }
@@ -688,7 +969,7 @@ class PeggleApp {
     }
 
     // Check for at least one orange peg
-    const orangePegs = level.pegs.filter(p => p.type === 'orange');
+    const orangePegs = level.pegs.filter(p => p.type === 'orange' || (p.type === 'bumper' && p.bumperOrange));
     if (orangePegs.length === 0) {
       alert('Add at least one orange peg to play!');
       this.startEditor();
