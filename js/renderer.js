@@ -343,14 +343,17 @@ export class Renderer {
     for (const peg of pegs) {
       const isHit = hitSet.has(peg.id);
       const isSelected = selectedIds.has(peg.id);
-      this.drawPeg(peg, isHit, isSelected);
 
-      // Draw wrap partner copy for smooth wall transitions (alpha-blended)
-      if (peg._wrapPartner) {
-        const offsetX = peg._wrapPartner.x - peg.x;
-        const offsetY = peg._wrapPartner.y - peg.y;
-        const a = peg._wrapPartner.alpha != null ? peg._wrapPartner.alpha : 1;
-        this.drawPegWithOffset(peg, offsetX, offsetY, isHit, isSelected, a);
+      // When wrapping through walls, hide the main peg (which teleports)
+      // and draw only the raw-position copies (which move continuously).
+      if (!peg._wrapHideMain) {
+        this.drawPeg(peg, isHit, isSelected);
+      }
+
+      if (peg._wrapCopies) {
+        for (const copy of peg._wrapCopies) {
+          this.drawPegWithOffset(peg, copy.x - peg.x, copy.y - peg.y, isHit, isSelected, 1);
+        }
       }
     }
   }

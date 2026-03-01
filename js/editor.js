@@ -1443,12 +1443,15 @@ export class Editor {
   resolveAnimationMotion(useInverse = this.animationInverse) {
     if (!this.animationGhostOffset) return { dx: 0, dy: 0 };
     const bounds = this.getAnimationWorldBounds();
+    const center = this.getAnimationCenter();
     return resolveWrappedMotion(
       this.animationGhostOffset.dx || 0,
       this.animationGhostOffset.dy || 0,
       bounds.width,
       bounds.height,
-      useInverse
+      useInverse,
+      center ? center.x : 0,
+      center ? center.y : 0
     );
   }
 

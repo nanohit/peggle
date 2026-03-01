@@ -100,19 +100,49 @@ export function mirrorWrapTrace(startX, startY, dx, dy, W, H) {
   return { x: cx, y: cy, mirrorX: false, mirrorY: false };
 }
 
-// Inverse motion: negate the vector. With mirror-wrap, (-dx, -dy) goes in
-// the exact opposite direction and reflects off the opposite wall.
-function resolveInverseMotion(baseDx, baseDy) {
-  return { dx: -normalizeNumber(baseDx), dy: -normalizeNumber(baseDy) };
+// Compute inverse displacement: same destination, opposite path.
+// If normal goes direct, inverse wraps. If normal wraps, inverse goes direct.
+// Formula: k = alphaBack + alphaFwd - (D - C) / d, then inverse = -k * d.
+function resolveInverseMotion(dx, dy, cx, cy, W, H) {
+  if (Math.abs(dx) < 0.001 && Math.abs(dy) < 0.001) return { dx: 0, dy: 0 };
+  const hasW = W > 0, hasH = H > 0;
+  if (!hasW && !hasH) return { dx: -dx, dy: -dy };
+
+  // Destination via normal path
+  const dest = mirrorWrapTrace(cx, cy, dx, dy, W, H);
+
+  // Check if normal path crosses a wall
+  const alphaFwd = wallHitAlpha(cx, cy, dx, dy, W, H);
+  const normalWraps = alphaFwd < 1 - 1e-6;
+
+  if (normalWraps) {
+    // Normal wraps → inverse is the direct path to destination
+    return { dx: dest.x - cx, dy: dest.y - cy };
+  }
+
+  // Normal is direct → inverse wraps through the wall behind
+  const alphaBack = wallHitAlpha(cx, cy, -dx, -dy, W, H);
+
+  // k from the axis with larger displacement (numerical stability)
+  let k;
+  if (Math.abs(dx) > Math.abs(dy)) {
+    k = alphaBack + alphaFwd - (dest.x - cx) / dx;
+  } else {
+    k = alphaBack + alphaFwd - (dest.y - cy) / dy;
+  }
+
+  if (k <= 0.01) return { dx: dest.x - cx, dy: dest.y - cy }; // fallback to direct
+  return { dx: -k * dx, dy: -k * dy };
 }
 
 // Resolve animation motion vector.
-// Inverse simply negates the direction (mirror-wrap handles the rest).
-export function resolveWrappedMotion(requestedDx, requestedDy, width, height, inverse = false) {
+// When inverse is true, computes the opposite-path displacement to reach the same destination.
+// centerX/centerY are needed for inverse computation (the animation origin point).
+export function resolveWrappedMotion(requestedDx, requestedDy, width, height, inverse = false, centerX = 0, centerY = 0) {
   const baseDx = normalizeNumber(requestedDx);
   const baseDy = normalizeNumber(requestedDy);
   if (!inverse) return { dx: baseDx, dy: baseDy };
-  return resolveInverseMotion(baseDx, baseDy);
+  return resolveInverseMotion(baseDx, baseDy, centerX, centerY, width, height);
 }
 
 function getVisibilityMargin(extent, minVisibleRatio = MIN_VISIBLE_RATIO) {
@@ -232,7 +262,8 @@ export class PegAnimator {
       pegMap.set(p.id, p);
       p._animWrapShiftX = 0;
       p._animWrapShiftY = 0;
-      p._wrapPartner = null;
+      p._wrapCopies = null;
+      p._wrapHideMain = false;
       // Snapshot original positions (deep copy curveSlices)
       const snap = { x: p.x, y: p.y, angle: p.angle || 0 };
       if (p.curveSlices) {
@@ -338,27 +369,56 @@ export class PegAnimator {
       const duration = Math.max(anim.duration || 0, 0.001);
 
       let tx, ty, rot;
+      // wrapRefDx/Dy = the FORWARD displacement used for crossOffset computation.
+      // Always points in the forward direction (never negated for return legs),
+      // because the return leg crosses the same wall as the forward leg.
+      let wrapRefDx = 0, wrapRefDy = 0;
 
       if (anim.cycle && anim.wrap && (canWrapX || canWrapY)) {
-        // Cycle: forward to destination, then retrace back to origin.
-        // With mirror-wrap, the return path is the reverse of the forward reflected path,
-        // so both legs are equal length. Each leg takes half the duration.
-        const fwd = resolveWrappedMotion(anim.dx, anim.dy, worldWidth, worldHeight, anim.inverse);
+        const cx = anim.centerX, cy = anim.centerY;
         const phase = (this.elapsed % duration) / duration; // 0→1 sawtooth
-
-        // Rotation: constant speed, same direction, never reverses.
         rot = anim.rotation * (this.elapsed / duration);
 
-        if (phase < 0.5) {
-          // Forward leg: origin → destination
-          const localT = phase / 0.5;
-          tx = fwd.dx * localT;
-          ty = fwd.dy * localT;
+        if (anim.inverse) {
+          // Two-path cycle: forward via inverse path, return via normal path
+          const fwdDisp = resolveWrappedMotion(anim.dx, anim.dy, worldWidth, worldHeight, true, cx, cy);
+          const retDisp = resolveWrappedMotion(anim.dx, anim.dy, worldWidth, worldHeight, false, cx, cy);
+
+          // Split duration proportional to path lengths for constant speed
+          const fwdLen = Math.sqrt(fwdDisp.dx ** 2 + fwdDisp.dy ** 2);
+          const retLen = Math.sqrt(retDisp.dx ** 2 + retDisp.dy ** 2);
+          const totalLen = fwdLen + retLen || 1;
+          const fwdFrac = fwdLen / totalLen;
+
+          if (phase < fwdFrac) {
+            const localT = phase / fwdFrac;
+            tx = fwdDisp.dx * localT;
+            ty = fwdDisp.dy * localT;
+            wrapRefDx = fwdDisp.dx;
+            wrapRefDy = fwdDisp.dy;
+          } else {
+            const localT = (phase - fwdFrac) / (1 - fwdFrac);
+            tx = retDisp.dx * (1 - localT);
+            ty = retDisp.dy * (1 - localT);
+            // Use the forward displacement for crossOffset (same wall crossing)
+            wrapRefDx = retDisp.dx;
+            wrapRefDy = retDisp.dy;
+          }
         } else {
-          // Return leg: destination → origin (retrace)
-          const localT = (phase - 0.5) / 0.5;
-          tx = fwd.dx * (1 - localT);
-          ty = fwd.dy * (1 - localT);
+          // Non-inverse cycle: retrace same path
+          const fwd = resolveWrappedMotion(anim.dx, anim.dy, worldWidth, worldHeight, false, cx, cy);
+          if (phase < 0.5) {
+            const localT = phase / 0.5;
+            tx = fwd.dx * localT;
+            ty = fwd.dy * localT;
+          } else {
+            const localT = (phase - 0.5) / 0.5;
+            tx = fwd.dx * (1 - localT);
+            ty = fwd.dy * (1 - localT);
+          }
+          // Same displacement for both legs (same wall crossing)
+          wrapRefDx = fwd.dx;
+          wrapRefDy = fwd.dy;
         }
       } else {
         // Normal ping-pong (or cycle without wrap, treated as ping-pong)
@@ -368,17 +428,37 @@ export class PegAnimator {
         const t = anim.easingFn(rawT);
 
         const motion = (anim.wrap && (canWrapX || canWrapY))
-          ? resolveWrappedMotion(anim.dx, anim.dy, worldWidth, worldHeight, anim.inverse)
+          ? resolveWrappedMotion(anim.dx, anim.dy, worldWidth, worldHeight, anim.inverse, anim.centerX, anim.centerY)
           : { dx: anim.dx, dy: anim.dy };
         tx = motion.dx * t;
         ty = motion.dy * t;
         rot = anim.rotation * t;
+        // Always use the forward displacement (same wall for both legs)
+        wrapRefDx = motion.dx;
+        wrapRefDy = motion.dy;
       }
 
       // Mirror-wrap: trace path with wall reflections
-      const traced = (anim.wrap && (canWrapX || canWrapY))
-        ? mirrorWrapTrace(anim.centerX, anim.centerY, tx, ty, worldWidth || 0, worldHeight || 0)
+      const W = worldWidth || 0;
+      const H = worldHeight || 0;
+      const doWrap = anim.wrap && (canWrapX || canWrapY);
+      const traced = doWrap
+        ? mirrorWrapTrace(anim.centerX, anim.centerY, tx, ty, W, H)
         : { x: anim.centerX + tx, y: anim.centerY + ty, mirrorX: false, mirrorY: false };
+
+      // Compute cross offset from the forward displacement.
+      // crossOffset = traced(full) - raw(full) — the teleportation jump vector.
+      let crossOffX = 0, crossOffY = 0;
+      if (doWrap && (Math.abs(wrapRefDx) > 0.1 || Math.abs(wrapRefDy) > 0.1)) {
+        const refTraced = mirrorWrapTrace(anim.centerX, anim.centerY, wrapRefDx, wrapRefDy, W, H);
+        crossOffX = refTraced.x - (anim.centerX + wrapRefDx);
+        crossOffY = refTraced.y - (anim.centerY + wrapRefDy);
+      }
+      const hasCrossOffset = Math.abs(crossOffX) > 1 || Math.abs(crossOffY) > 1;
+
+      // Raw center position (un-wrapped, moves linearly — can go off-canvas)
+      const rawCenterX = anim.centerX + tx;
+      const rawCenterY = anim.centerY + ty;
 
       const cosR = Math.cos(rot);
       const sinR = Math.sin(rot);
@@ -390,17 +470,17 @@ export class PegAnimator {
         if (!orig) continue;
 
         const finalAngle = orig.angle + rot;
+        // Compute local offset for group members (rotation, mirroring)
+        let localRx = 0, localRy = 0;
         if (anim.type === 'group') {
           let localX = orig.x - anim.centerX;
           let localY = orig.y - anim.centerY;
-          // Rotate around group center
-          let rx = localX * cosR - localY * sinR;
-          let ry = localX * sinR + localY * cosR;
-          // Mirror local offsets if the center reflected off a wall
-          if (traced.mirrorX) rx = -rx;
-          if (traced.mirrorY) ry = -ry;
-          peg.x = traced.x + rx;
-          peg.y = traced.y + ry;
+          localRx = localX * cosR - localY * sinR;
+          localRy = localX * sinR + localY * cosR;
+          if (traced.mirrorX) localRx = -localRx;
+          if (traced.mirrorY) localRy = -localRy;
+          peg.x = traced.x + localRx;
+          peg.y = traced.y + localRy;
         } else {
           peg.x = traced.x;
           peg.y = traced.y;
@@ -409,46 +489,24 @@ export class PegAnimator {
         peg._animWrapShiftX = 0;
         peg._animWrapShiftY = 0;
 
-        // Compute wrap partner for smooth edge transition
-        peg._wrapPartner = null;
-        if (anim.wrap && (canWrapX || canWrapY)) {
-          const W = worldWidth || 0;
-          const H = worldHeight || 0;
-          const r = PHYSICS_CONFIG.pegRadius;
-          // Distance to nearest wall on each side
-          const distL = peg.x;
-          const distR = W > 0 ? W - peg.x : Infinity;
-          const distT = peg.y;
-          const distB = H > 0 ? H - peg.y : Infinity;
-          const minDist = Math.min(distL, distR, distT, distB);
-          // Activate partner when peg center is within 2x radius of wall
-          const threshold = r * 2;
-          if (minDist < threshold) {
-            const motionResolved = resolveWrappedMotion(anim.dx, anim.dy, W, H, anim.inverse);
-            const mLen = Math.sqrt(motionResolved.dx ** 2 + motionResolved.dy ** 2);
-            if (mLen > 0) {
-              const ndx = motionResolved.dx / mLen;
-              const ndy = motionResolved.dy / mLen;
-              for (const sign of [1, -1]) {
-                const dvx = ndx * sign;
-                const dvy = ndy * sign;
-                const wallDist = wallHitAlpha(peg.x, peg.y, dvx, dvy, W, H);
-                if (wallDist < threshold) {
-                  // Push just past the wall to find partner position
-                  const push = wallDist + 0.1;
-                  const partner = mirrorWrapTrace(peg.x, peg.y, dvx * push, dvy * push, W, H);
-                  // Alpha: 1 when at wall (minDist=0), 0 when at threshold
-                  const partnerAlpha = 1 - (minDist / threshold);
-                  peg._wrapPartner = {
-                    x: partner.x - dvx * 0.1,
-                    y: partner.y - dvy * 0.1,
-                    alpha: Math.max(0, Math.min(1, partnerAlpha))
-                  };
-                  break;
-                }
-              }
-            }
-          }
+        // Smooth wall transition using raw (un-wrapped) positions.
+        // Instead of drawing the peg at the traced position (which JUMPS at wall
+        // crossings), we draw TWO copies at continuous positions:
+        //   1. Raw position (peg smoothly moves off-canvas through the wall)
+        //   2. Raw + crossOffset (peg smoothly appears on the other side)
+        // Canvas clipping naturally creates the portal effect.
+        // The main peg at traced position is hidden (_wrapHideMain) to avoid
+        // the visual teleportation jump.
+        peg._wrapCopies = null;
+        peg._wrapHideMain = false;
+        if (hasCrossOffset) {
+          const rawX = rawCenterX + localRx;
+          const rawY = rawCenterY + localRy;
+          peg._wrapHideMain = true;
+          peg._wrapCopies = [
+            { x: rawX, y: rawY },
+            { x: rawX + crossOffX, y: rawY + crossOffY }
+          ];
         }
 
         if (orig.curveSlices && peg.curveSlices) {
@@ -492,7 +550,8 @@ export class PegAnimator {
       peg.angle = orig.angle;
       peg._animWrapShiftX = 0;
       peg._animWrapShiftY = 0;
-      peg._wrapPartner = null;
+      peg._wrapCopies = null;
+      peg._wrapHideMain = false;
       if (orig.curveSlices && peg.curveSlices) {
         for (let i = 0; i < orig.curveSlices.length; i++) {
           const os = orig.curveSlices[i];
