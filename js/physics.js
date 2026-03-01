@@ -35,6 +35,7 @@ export class Ball {
     this.active = false;
     this.stuck = false;
     this.stuckFrames = 0;
+    this.speedCapBoost = 0;
   }
 
   launch(angle, power = PHYSICS_CONFIG.launchPower) {
@@ -43,6 +44,7 @@ export class Ball {
     this.active = true;
     this.stuck = false;
     this.stuckFrames = 0;
+    this.speedCapBoost = 0;
     this.radius = getBallRadius();
   }
 
@@ -59,10 +61,17 @@ export class Ball {
     this.vy *= frictionScale;
 
     const speed = Utils.magnitude(this.vx, this.vy);
-    if (speed > PHYSICS_CONFIG.maxVelocity) {
-      const scale = PHYSICS_CONFIG.maxVelocity / speed;
+    const maxSpeed = PHYSICS_CONFIG.maxVelocity + (this.speedCapBoost || 0);
+    if (speed > maxSpeed) {
+      const scale = maxSpeed / speed;
       this.vx *= scale;
       this.vy *= scale;
+    }
+
+    // Flipper boost decays quickly so only fresh flipper hits can exceed base cap.
+    if (this.speedCapBoost > 0) {
+      this.speedCapBoost *= 0.9;
+      if (this.speedCapBoost < 0.05) this.speedCapBoost = 0;
     }
 
     // Stuck detection
@@ -95,6 +104,7 @@ export class Ball {
     this.active = false;
     this.stuck = false;
     this.stuckFrames = 0;
+    this.speedCapBoost = 0;
     this.radius = getBallRadius();
   }
 }
@@ -294,10 +304,17 @@ export class PhysicsEngine {
           const sc = f.scale || 1;
           const len = (f.length || 40) * sc;
           const restRad = (f.restAngle || 25) * Math.PI / 180;
-          const flipRad = (f.flipAngle || 30) * Math.PI / 180;
+          const flipRad = (f.flipAngle ?? 30) * Math.PI / 180;
+          const angleRange = restRad + flipRad;
           // Tip sweep distance = length * angular change (in radians)
-          const tipSweep = len * tDelta * (restRad + flipRad);
+          const tipSweep = len * tDelta * angleRange;
           maxMovePx = Math.max(maxMovePx, tipSweep);
+
+          // Reserve extra sub-steps for the post-contact speed a moving flipper can inject.
+          const tipSpeed = len * tDelta * angleRange;
+          const flipperBounce = f.bounce ?? PHYSICS_CONFIG.bounce;
+          const projected = frameSpeed + tipSpeed * (0.8 + flipperBounce * 0.6);
+          maxMovePx = Math.max(maxMovePx, projected);
         }
       }
       const numSteps = Math.max(1, Math.ceil(maxMovePx / MAX_STEP_PX));
@@ -423,10 +440,13 @@ export class PhysicsEngine {
     this.clampBallSpeed(ball);
   }
 
-  clampBallSpeed(ball) {
+  clampBallSpeed(ball, maxSpeedOverride = null) {
+    if (!ball) return;
     const speed = Utils.magnitude(ball.vx, ball.vy);
-    if (speed <= PHYSICS_CONFIG.maxVelocity) return;
-    const scale = PHYSICS_CONFIG.maxVelocity / speed;
+    const boost = ball.speedCapBoost || 0;
+    const maxSpeed = maxSpeedOverride ?? (PHYSICS_CONFIG.maxVelocity + boost);
+    if (speed <= maxSpeed) return;
+    const scale = maxSpeed / speed;
     ball.vx *= scale;
     ball.vy *= scale;
   }
@@ -525,7 +545,6 @@ export class PhysicsEngine {
     f._flipperT += (target - f._flipperT) * Math.min(1, speed * dt);
     if (Math.abs(f._flipperT - target) < 0.01) f._flipperT = target;
     f._angularDelta = f._flipperT - prevT;
-    f._angularVelocity = f._angularDelta / Math.max(dt, 0.001);
   }
 
   checkFlipperCollisions(ball, subStepFrac, subStepSize = 1) {
@@ -541,7 +560,7 @@ export class PhysicsEngine {
     // checks the flipper at an intermediate angle — preventing sweep-through tunneling.
     const t = prevT + (curT - prevT) * sampleFrac;
     const restRad = (f.restAngle || 25) * Math.PI / 180;
-    const flipRad = (f.flipAngle || 30) * Math.PI / 180;
+    const flipRad = (f.flipAngle ?? 30) * Math.PI / 180;
     const angleRange = restRad + flipRad;
     const sc = f.scale || 1;
     const length = (f.length || 40) * sc;
@@ -553,18 +572,18 @@ export class PhysicsEngine {
     const leftPivotX = centerX - f.xOffset;
     const leftAngle = restRad - t * angleRange;
     this._checkSingleFlipperCollision(
-      ball, leftPivotX, f.y, leftAngle, length, w, -subTDelta * angleRange, bounce
+      ball, leftPivotX, f.y, leftAngle, length, w, -subTDelta * angleRange, safeStepSize, bounce
     );
 
     // Right flipper (mirrored)
     const rightPivotX = centerX + f.xOffset;
     const rightAngle = Math.PI - leftAngle;
     this._checkSingleFlipperCollision(
-      ball, rightPivotX, f.y, rightAngle, length, w, subTDelta * angleRange, bounce
+      ball, rightPivotX, f.y, rightAngle, length, w, subTDelta * angleRange, safeStepSize, bounce
     );
   }
 
-  _checkSingleFlipperCollision(ball, pivotX, pivotY, angle, length, width, angDeltaRad, bounce) {
+  _checkSingleFlipperCollision(ball, pivotX, pivotY, angle, length, width, angDeltaRad, subStepSize, bounce) {
     const flipCenterX = pivotX + Math.cos(angle) * length / 2;
     const flipCenterY = pivotY + Math.sin(angle) * length / 2;
 
@@ -597,27 +616,36 @@ export class PhysicsEngine {
     ball.x += nx * (collision.depth + 0.5);
     ball.y += ny * (collision.depth + 0.5);
 
-    // Reflect velocity
-    const dvn = ball.vx * nx + ball.vy * ny;
-    if (dvn < 0 || Math.abs(angDeltaRad) > 0.002) {
-      ball.vx -= (1 + bounce) * dvn * nx;
-      ball.vy -= (1 + bounce) * dvn * ny;
+    // Use rigid-body relative velocity against a moving flipper surface:
+    // v_rel = v_ball - v_surface, where v_surface = w x r at the contact radius.
+    const step = Math.max(subStepSize, 0.0001);
+    const omega = angDeltaRad / step; // radians per frame
+    const rx = ball.x - pivotX;
+    const ry = ball.y - pivotY;
+    const surfaceVx = -omega * ry;
+    const surfaceVy = omega * rx;
+
+    const relVx = ball.vx - surfaceVx;
+    const relVy = ball.vy - surfaceVy;
+    const relN = relVx * nx + relVy * ny;
+
+    if (relN < 0) {
+      const impulse = -(1 + bounce) * relN;
+      ball.vx += impulse * nx;
+      ball.vy += impulse * ny;
     }
 
-    // Flipper motion contribution (frame-based, bounded to this sub-step)
-    if (Math.abs(angDeltaRad) > 0.0005) {
-      const dx = ball.x - pivotX;
-      const dy = ball.y - pivotY;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist > 0) {
-        const tangentSpeed = angDeltaRad * dist * 0.9;
-        ball.vx += (-dy / dist) * tangentSpeed;
-        ball.vy += (dx / dist) * tangentSpeed;
-      }
-    }
+    // Mild tangential grip so spin direction depends on hit location and flipper motion.
+    const tx = -ny;
+    const ty = nx;
+    const relT = relVx * tx + relVy * ty;
+    const grip = 0.08;
+    ball.vx -= relT * tx * grip;
+    ball.vy -= relT * ty * grip;
 
-    ball.vx += (Math.random() - 0.5) * 0.3;
-    ball.vy += (Math.random() - 0.5) * 0.3;
+    const surfaceSpeed = Math.sqrt(surfaceVx * surfaceVx + surfaceVy * surfaceVy);
+    const extraCap = Math.min(PHYSICS_CONFIG.maxVelocity * 1.1, surfaceSpeed * (0.5 + bounce * 0.25));
+    ball.speedCapBoost = Math.max(ball.speedCapBoost || 0, extraCap);
     this.clampBallSpeed(ball);
   }
 
@@ -627,7 +655,7 @@ export class PhysicsEngine {
     const centerX = this.width / 2;
     const t = f._flipperT || 0;
     const restRad = (f.restAngle || 25) * Math.PI / 180;
-    const flipRad = (f.flipAngle || 30) * Math.PI / 180;
+    const flipRad = (f.flipAngle ?? 30) * Math.PI / 180;
     const sc = f.scale || 1;
     const length = (f.length || 40) * sc;
     const w = (f.width || 8) * sc;

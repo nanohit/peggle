@@ -608,7 +608,7 @@ export class Renderer {
     const centerX = canvasWidth / 2;
     const t = flippers._flipperT || 0;
     const restRad = (flippers.restAngle || 25) * Math.PI / 180;
-    const flipRad = (flippers.flipAngle || 30) * Math.PI / 180;
+    const flipRad = (flippers.flipAngle ?? 30) * Math.PI / 180;
 
     const sc = flippers.scale || 1;
     const len = (flippers.length || 40) * sc;

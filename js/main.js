@@ -226,7 +226,8 @@ class PeggleApp {
           length: 40,
           width: 8,
           restAngle: 25,
-          flipAngle: 30
+          flipAngle: 30,
+          bounce: PHYSICS_CONFIG.bounce
         };
         level.flippers.enabled = true;
         this.showFlipperPanel();
@@ -716,19 +717,19 @@ class PeggleApp {
     bindFlipperSlider('flipperLengthSlider', 'flipperLengthInput', 'length', 20, 150);
     bindFlipperSlider('flipperOffsetSlider', 'flipperOffsetInput', 'xOffset', 10, 250);
     bindFlipperSlider('flipperRestSlider', 'flipperRestInput', 'restAngle', 5, 60);
-    bindFlipperSlider('flipperFlipSlider', 'flipperFlipInput', 'flipAngle', 10, 70);
+    bindFlipperSlider('flipperFlipSlider', 'flipperFlipInput', 'flipAngle', 0, 70);
 
     // Bounce slider (0.3 - 5.0, stored as float)
     const fBounceSlider = document.getElementById('flipperBounceSlider');
     const fBounceInput = document.getElementById('flipperBounceInput');
     fBounceSlider.addEventListener('input', () => {
-      const v = parseInt(fBounceSlider.value) / 10;
-      fBounceInput.value = v.toFixed(1);
+      const v = parseFloat(fBounceSlider.value);
+      fBounceInput.value = v.toFixed(2);
       this._setFlipperProp('bounce', v);
     });
     fBounceInput.addEventListener('input', () => {
-      const v = Math.max(0.3, Math.min(5.0, parseFloat(fBounceInput.value) || 1.2));
-      fBounceSlider.value = Math.round(v * 10);
+      const v = Math.max(0.3, Math.min(5.0, parseFloat(fBounceInput.value) || PHYSICS_CONFIG.bounce));
+      fBounceSlider.value = v.toFixed(2);
       this._setFlipperProp('bounce', v);
     });
 
@@ -766,13 +767,13 @@ class PeggleApp {
     document.getElementById('flipperOffsetInput').value = f.xOffset || 50;
     document.getElementById('flipperRestSlider').value = f.restAngle || 25;
     document.getElementById('flipperRestInput').value = f.restAngle || 25;
-    document.getElementById('flipperFlipSlider').value = f.flipAngle || 30;
-    document.getElementById('flipperFlipInput').value = f.flipAngle || 30;
+    document.getElementById('flipperFlipSlider').value = f.flipAngle ?? 30;
+    document.getElementById('flipperFlipInput').value = f.flipAngle ?? 30;
     document.getElementById('flipperWidthSlider').value = f.width || 8;
     document.getElementById('flipperWidthInput').value = f.width || 8;
-    const bounce = f.bounce ?? 1.2;
-    document.getElementById('flipperBounceSlider').value = Math.round(bounce * 10);
-    document.getElementById('flipperBounceInput').value = bounce.toFixed(1);
+    const bounce = f.bounce ?? PHYSICS_CONFIG.bounce;
+    document.getElementById('flipperBounceSlider').value = bounce.toFixed(2);
+    document.getElementById('flipperBounceInput').value = bounce.toFixed(2);
     const scale = f.scale ?? 1.0;
     document.getElementById('flipperScaleSlider').value = Math.round(scale * 10);
     document.getElementById('flipperScaleInput').value = scale.toFixed(1);

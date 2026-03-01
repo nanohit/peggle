@@ -201,8 +201,7 @@ export class Game {
         ...levelData.flippers,
         _flipperT: 0,
         _flipperActivated: false,
-        _angularDelta: 0,
-        _angularVelocity: 0
+        _angularDelta: 0
       };
       this.physics.setFlippers(this.flippers);
     } else {
