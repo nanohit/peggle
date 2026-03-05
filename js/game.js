@@ -6,6 +6,7 @@ import { Utils } from './utils.js';
 import { PegAnimator } from './animation.js';
 import { SurvivalRuntime } from './survival-runtime.js';
 import { createDefaultFlipperConfig, normalizeFlipperConfig } from './flipper-defaults.js';
+import { YoyoThreadSystem, normalizeYoyoSettings } from './yoyo-thread.js';
 import {
   countSurvivalTargets,
   ensureLevelSurvival
@@ -66,6 +67,7 @@ export class Game {
 
     // Survival mode runtime (camera + scrolling)
     this.survivalRuntime = new SurvivalRuntime(canvas.height, { autoScroll: true });
+    this.yoyoThread = new YoyoThreadSystem(canvas.width, canvas.height);
     
     // Trajectory preview
     this.trajectory = null;
@@ -350,9 +352,11 @@ export class Game {
 
   loadLevel(levelData) {
     const survivalSettings = ensureLevelSurvival(levelData, this.canvas.height);
+    const yoyoSettings = normalizeYoyoSettings(levelData.yoyo);
     this.survivalRuntime.resize(this.canvas.height);
     this.survivalRuntime.configure(survivalSettings);
     this.survivalRuntime.resetCamera(true);
+    this.yoyoThread.configure(yoyoSettings);
 
     this.pegs = levelData.pegs.map(p => {
       const copy = { ...p };
@@ -390,11 +394,14 @@ export class Game {
     this.lastUiStateSignature = '';
 
     this.updateLaunchPosition();
+    this.yoyoThread.setLaunchAnchor(this.launchX, this.launchY);
     this.resetBall();
   }
 
   resetBall() {
     this.updateLaunchPosition();
+    this.yoyoThread.clear();
+    this.yoyoThread.setLaunchAnchor(this.launchX, this.launchY);
     this.balls = [new Ball(this.launchX, this.launchY)];
     this.physics.setBalls(this.balls);
     this.balls = this.physics.balls;
@@ -423,13 +430,17 @@ export class Game {
     if (this.state === 'aimingNext') {
       const newBall = new Ball(this.launchX, this.launchY);
       newBall.launch(this.aimAngle);
+      newBall.yoyoEligible = true;
       this.physics.addBall(newBall);
       this.balls = this.physics.balls;
+      this.yoyoThread.registerBallLaunch(newBall, this.launchX, this.launchY);
       this.state = 'playing';
     } else {
       this.state = 'playing';
       for (const ball of this.balls) {
         ball.launch(this.aimAngle);
+        ball.yoyoEligible = true;
+        this.yoyoThread.registerBallLaunch(ball, this.launchX, this.launchY);
       }
       this.turnHitPegIds = [];
       this.ballPositionHistory = [];
@@ -485,6 +496,8 @@ export class Game {
   }
 
   endTurn(bucketCatchCount = 0) {
+    this.yoyoThread.clear();
+
     if (!this.baseFlipperConfig && this.temporaryFlipperActive) {
       this.temporaryFlipperActive = false;
       this.refreshFlipperState();
@@ -556,6 +569,7 @@ export class Game {
       newBall.x += Math.cos(angle) * newBall.radius * 0.4;
       newBall.y += Math.sin(angle) * newBall.radius * 0.4;
       newBall.launch(angle, speed);
+      newBall.yoyoEligible = false;
       this.physics.addBall(newBall);
     }
     this.balls = this.physics.balls;
@@ -575,6 +589,7 @@ export class Game {
 
     const runsPhysics = this.state === 'playing' || this.state === 'aimingNext';
     if (!runsPhysics) {
+      this.yoyoThread.clear();
       if (this.balls.length === 1 && !this.balls[0].active) {
         this.balls[0].x = this.launchX;
         this.balls[0].y = this.launchY;
@@ -597,6 +612,7 @@ export class Game {
 
     const result = this.physics.update();
     this.balls = this.physics.balls;
+    this.yoyoThread.step(this.balls, this.pegs, dt);
 
     // Handle newly hit pegs
     for (const event of result.hitEvents) {
@@ -743,6 +759,7 @@ export class Game {
       showAim: this.isAimingState(),
       trajectory: this.isAimingState() ? this.trajectory : null,
       showFullTrajectory: this.shouldShowFullTrajectory(),
+      yoyoThreads: this.yoyoThread.getRenderThreads(),
       score: this.score,
       ballsLeft: this.ballsLeft,
       orangePegsLeft: survivalMode ? survivalTargetsLeft : this.getOrangePegsLeft(),
@@ -784,6 +801,7 @@ export class Game {
     this.renderer.resize(width, height);
     this.physics.resize(width, height);
     this.survivalRuntime.resize(height);
+    this.yoyoThread.resize(width, height);
     this.updateLaunchPosition();
     this.physics.setBallLossY(this.getCameraY() + height + 50);
     if (!this.baseFlipperConfig && this.temporaryFlipperActive) {

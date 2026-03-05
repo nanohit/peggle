@@ -7,6 +7,7 @@ import { PHYSICS_CONFIG } from './physics.js';
 import { FLIPPER_DEFAULTS, createDefaultFlipperConfig, normalizeFlipperConfig } from './flipper-defaults.js';
 import { ensureLevelSurvival, normalizeSurvivalSettings } from './survival-mode.js';
 import { GambleSystem } from './gamble-system.js';
+import { normalizeYoyoSettings } from './yoyo-thread.js';
 
 // Fixed aspect ratio: 3:4.5 (width:height)
 const ASPECT_RATIO = 3 / 4.5;
@@ -321,6 +322,13 @@ class PeggleApp {
     document.getElementById('levelDifficulty').addEventListener('change', (e) => {
       this.levelManager.updateCurrentLevel({ difficulty: parseInt(e.target.value) });
     });
+
+    const yoyoToggle = document.getElementById('yoyoThreadToggle');
+    if (yoyoToggle) {
+      yoyoToggle.addEventListener('change', (e) => {
+        this.updateLevelYoyoSettings({ enabled: e.target.checked });
+      });
+    }
 
     document.getElementById('addToTrainingBtn').addEventListener('click', () => {
       const level = this.levelManager.getCurrentLevel();
@@ -961,6 +969,15 @@ class PeggleApp {
     this.updateLevelSettings();
   }
 
+  updateLevelYoyoSettings(partialSettings) {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level) return;
+
+    const next = normalizeYoyoSettings({ ...(level.yoyo || {}), ...(partialSettings || {}) });
+    this.levelManager.updateCurrentLevel({ yoyo: next });
+    this.updateLevelSettings();
+  }
+
   applySurvivalSettingsToEditor() {
     if (!this.editor) return;
     const level = this.levelManager.getCurrentLevel();
@@ -1347,6 +1364,11 @@ class PeggleApp {
 
     document.getElementById('levelName').value = level.name;
     document.getElementById('levelDifficulty').value = level.difficulty || 1;
+    const yoyoSettings = normalizeYoyoSettings(level.yoyo);
+    const yoyoToggle = document.getElementById('yoyoThreadToggle');
+    if (yoyoToggle) {
+      yoyoToggle.checked = !!yoyoSettings.enabled;
+    }
 
     const survival = ensureLevelSurvival(level, this.canvas.height);
     const minHeight = Math.round(this.canvas.height);

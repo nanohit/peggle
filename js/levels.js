@@ -3,6 +3,7 @@
 import { Utils } from './utils.js';
 import { normalizeFlipperConfig } from './flipper-defaults.js';
 import { ensureLevelSurvival, normalizeSurvivalSettings } from './survival-mode.js';
+import { normalizeYoyoSettings } from './yoyo-thread.js';
 
 const STORAGE_KEY = 'peggle_levels';
 const TRAINING_KEY = 'peggle_training_data';
@@ -27,6 +28,7 @@ export class LevelManager {
       groups: [],
       bezierCurves: {},
       flippers: null,
+      yoyo: normalizeYoyoSettings(null),
       survival: ensureLevelSurvival({}, 600),
       metadata: {
         created: new Date().toISOString().split('T')[0],
@@ -78,6 +80,7 @@ export class LevelManager {
     } else {
       ensureLevelSurvival(level, 600);
     }
+    level.yoyo = normalizeYoyoSettings(level.yoyo);
     level.metadata.modified = new Date().toISOString();
     this.save();
     
@@ -438,6 +441,7 @@ export class LevelManager {
     } else {
       level.flippers = normalizeFlipperConfig(level.flippers, { canvasHeight: 600 }) || null;
     }
+    level.yoyo = normalizeYoyoSettings(level.yoyo);
 
     level.metadata = level.metadata || {};
     if (!level.metadata.created) {

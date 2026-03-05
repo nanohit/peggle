@@ -55,6 +55,8 @@ const COLORS = {
   launcherAim: 'rgba(255, 255, 255, 0.4)',
   trajectoryLine: 'rgba(255, 255, 255, 0.3)',
   trajectoryDot: 'rgba(255, 255, 255, 0.5)',
+  yoyoThreadGlow: 'rgba(255, 255, 255, 0.22)',
+  yoyoThreadCore: 'rgba(248, 250, 255, 0.96)',
   bucket: '#6c757d',
   bucketInner: '#495057',
   
@@ -632,6 +634,40 @@ export class Renderer {
         ctx.fill();
       }
     }
+  }
+
+  drawYoyoThreads(threads) {
+    if (!Array.isArray(threads) || threads.length === 0) return;
+
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    const trace = (points) => {
+      ctx.beginPath();
+      ctx.moveTo(points[0].x, points[0].y);
+      for (let i = 1; i < points.length; i++) {
+        ctx.lineTo(points[i].x, points[i].y);
+      }
+    };
+
+    for (const thread of threads) {
+      const points = thread && Array.isArray(thread.points) ? thread.points : null;
+      if (!points || points.length < 2) continue;
+
+      ctx.strokeStyle = COLORS.yoyoThreadGlow;
+      ctx.lineWidth = 6;
+      trace(points);
+      ctx.stroke();
+
+      ctx.strokeStyle = COLORS.yoyoThreadCore;
+      ctx.lineWidth = 3.2;
+      trace(points);
+      ctx.stroke();
+    }
+
+    ctx.restore();
   }
 
   drawBalls(balls) {
@@ -1281,6 +1317,10 @@ export class Renderer {
     // Draw trajectory before ball
     if (state.trajectory) {
       this.drawTrajectory(state.trajectory, state.showFullTrajectory);
+    }
+
+    if (state.yoyoThreads) {
+      this.drawYoyoThreads(state.yoyoThreads);
     }
     
     if (state.balls) {
