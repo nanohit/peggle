@@ -209,7 +209,19 @@ export function wrapPointWithVisibility(
 
 export function estimatePegExtents(peg, centerX, centerY, angle = 0, slices = null) {
   if (!peg || peg.shape !== 'brick') {
-    const r = PHYSICS_CONFIG.pegRadius;
+    let r = PHYSICS_CONFIG.pegRadius;
+    if (peg && peg.type === 'bumper') {
+      r *= (peg.bumperScale || 1);
+    } else if (peg && (peg.type === 'portalBlue' || peg.type === 'portalOrange')) {
+      const halfLen = r * (peg.portalScale || 1);
+      const halfThick = Math.max(2, PHYSICS_CONFIG.pegRadius * 0.25);
+      const c = Math.abs(Math.cos(angle || peg.angle || 0));
+      const s = Math.abs(Math.sin(angle || peg.angle || 0));
+      return {
+        x: c * halfLen + s * halfThick,
+        y: s * halfLen + c * halfThick
+      };
+    }
     return { x: r, y: r };
   }
 

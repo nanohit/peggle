@@ -1,6 +1,8 @@
 // Peggle Levels - Level management and storage
 
 import { Utils } from './utils.js';
+import { normalizeFlipperConfig } from './flipper-defaults.js';
+import { ensureLevelSurvival, normalizeSurvivalSettings } from './survival-mode.js';
 
 const STORAGE_KEY = 'peggle_levels';
 const TRAINING_KEY = 'peggle_training_data';
@@ -23,7 +25,9 @@ export class LevelManager {
       tags: [],
       pegs: [],
       groups: [],
+      bezierCurves: {},
       flippers: null,
+      survival: ensureLevelSurvival({}, 600),
       metadata: {
         created: new Date().toISOString().split('T')[0],
         modified: new Date().toISOString(),
@@ -69,6 +73,11 @@ export class LevelManager {
     if (!level) return null;
     
     Object.assign(level, updates);
+    if (Object.prototype.hasOwnProperty.call(updates || {}, 'survival')) {
+      level.survival = normalizeSurvivalSettings(level.survival, 600);
+    } else {
+      ensureLevelSurvival(level, 600);
+    }
     level.metadata.modified = new Date().toISOString();
     this.save();
     
@@ -97,7 +106,9 @@ export class LevelManager {
       y: peg.y,
       angle: peg.angle || 0,
       shape: peg.shape || 'circle',
-      groupId: peg.groupId || null
+      groupId: peg.groupId || null,
+      bezierGroupId: peg.bezierGroupId || null,
+      bezierIndex: Number.isFinite(peg.bezierIndex) ? peg.bezierIndex : null
     };
     
     // Add brick dimensions if it's a brick shape
@@ -117,6 +128,14 @@ export class LevelManager {
       newPeg.bumperDisappear = !!peg.bumperDisappear;
       newPeg.bumperOrange = !!peg.bumperOrange;
       newPeg.shape = 'circle'; // bumpers are always circles
+    }
+
+    // Portal properties
+    if (peg.type === 'portalBlue' || peg.type === 'portalOrange') {
+      newPeg.portalScale = peg.portalScale ?? 1.0;
+      newPeg.portalOneWay = !!peg.portalOneWay;
+      newPeg.portalOneWayFlip = !!peg.portalOneWayFlip;
+      newPeg.shape = 'circle'; // kept for backward compatibility; rendered/triggered as lines
     }
 
     level.pegs.push(newPeg);
@@ -268,7 +287,7 @@ export class LevelManager {
   setFlippers(flippersData) {
     const level = this.getCurrentLevel();
     if (!level) return;
-    level.flippers = flippersData;
+    level.flippers = normalizeFlipperConfig(flippersData, { canvasHeight: 600 }) || null;
     level.metadata.modified = new Date().toISOString();
     this.save();
   }
@@ -319,6 +338,7 @@ export class LevelManager {
   exportLevel(id) {
     const level = this.levels.find(l => l.id === id);
     if (level) {
+      this.normalizeLevel(level);
       return JSON.stringify(level, null, 2);
     }
     return null;
@@ -348,6 +368,7 @@ export class LevelManager {
       level.metadata = level.metadata || {};
       level.metadata.created = new Date().toISOString().split('T')[0];
       level.metadata.modified = new Date().toISOString();
+      this.normalizeLevel(level);
       
       this.levels.push(level);
       this.save();
@@ -382,7 +403,12 @@ export class LevelManager {
     try {
       const data = localStorage.getItem(STORAGE_KEY);
       if (data) {
-        this.levels = JSON.parse(data);
+        const parsed = JSON.parse(data);
+        this.levels = Array.isArray(parsed)
+          ? parsed.map(level => this.normalizeLevel(level)).filter(Boolean)
+          : [];
+        // Persist normalized schema (including survival defaults) for legacy levels.
+        this.save();
         if (this.levels.length > 0) {
           this.currentLevelIndex = 0;
         }
@@ -397,6 +423,41 @@ export class LevelManager {
       this.levels = [];
       this.trainingLevels = [];
     }
+  }
+
+  normalizeLevel(level) {
+    if (!level || typeof level !== 'object') return null;
+
+    if (!Array.isArray(level.pegs)) level.pegs = [];
+    if (!Array.isArray(level.groups)) level.groups = [];
+    if (!level.bezierCurves || typeof level.bezierCurves !== 'object' || Array.isArray(level.bezierCurves)) {
+      level.bezierCurves = {};
+    }
+    if (!Object.prototype.hasOwnProperty.call(level, 'flippers')) {
+      level.flippers = null;
+    } else {
+      level.flippers = normalizeFlipperConfig(level.flippers, { canvasHeight: 600 }) || null;
+    }
+
+    level.metadata = level.metadata || {};
+    if (!level.metadata.created) {
+      level.metadata.created = new Date().toISOString().split('T')[0];
+    }
+    if (!level.metadata.modified) {
+      level.metadata.modified = new Date().toISOString();
+    }
+    if (level.metadata.playCount == null) {
+      level.metadata.playCount = 0;
+    }
+    if (!Object.prototype.hasOwnProperty.call(level.metadata, 'avgCompletionRate')) {
+      level.metadata.avgCompletionRate = null;
+    }
+    if (!Object.prototype.hasOwnProperty.call(level.metadata, 'authorNotes')) {
+      level.metadata.authorNotes = '';
+    }
+
+    ensureLevelSurvival(level, 600);
+    return level;
   }
 
   // Get all levels

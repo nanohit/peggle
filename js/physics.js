@@ -36,6 +36,7 @@ export class Ball {
     this.stuck = false;
     this.stuckFrames = 0;
     this.speedCapBoost = 0;
+    this.portalCooldown = 0;
   }
 
   launch(angle, power = PHYSICS_CONFIG.launchPower) {
@@ -45,6 +46,7 @@ export class Ball {
     this.stuck = false;
     this.stuckFrames = 0;
     this.speedCapBoost = 0;
+    this.portalCooldown = 0;
     this.radius = getBallRadius();
   }
 
@@ -72,6 +74,9 @@ export class Ball {
     if (this.speedCapBoost > 0) {
       this.speedCapBoost *= 0.9;
       if (this.speedCapBoost < 0.05) this.speedCapBoost = 0;
+    }
+    if (this.portalCooldown > 0) {
+      this.portalCooldown--;
     }
 
     // Stuck detection
@@ -105,6 +110,7 @@ export class Ball {
     this.stuck = false;
     this.stuckFrames = 0;
     this.speedCapBoost = 0;
+    this.portalCooldown = 0;
     this.radius = getBallRadius();
   }
 }
@@ -229,6 +235,8 @@ export class PhysicsEngine {
   constructor(width, height) {
     this.width = width;
     this.height = height;
+    this.ballLossY = height + 50;
+    this.bucketEnabled = true;
     this.balls = [];
     this.pegs = [];
     this.hitPegs = new Set(); // Track which pegs were hit (for scoring only)
@@ -265,9 +273,252 @@ export class PhysicsEngine {
     this.flippers = flippers;
   }
 
+  setBucketEnabled(enabled) {
+    this.bucketEnabled = !!enabled;
+  }
+
+  setBallLossY(lossY) {
+    if (!Number.isFinite(lossY)) return;
+    this.ballLossY = lossY;
+  }
+
+  isPortalPeg(peg) {
+    return peg && (peg.type === 'portalBlue' || peg.type === 'portalOrange');
+  }
+
+  getPegCollisionRadius(peg) {
+    if (!peg) return PHYSICS_CONFIG.pegRadius;
+    if (peg.type === 'bumper') return PHYSICS_CONFIG.pegRadius * (peg.bumperScale || 1);
+    if (this.isPortalPeg(peg)) return PHYSICS_CONFIG.pegRadius * (peg.portalScale || 1);
+    return PHYSICS_CONFIG.pegRadius;
+  }
+
+  getPortalHalfLength(portal) {
+    if (!portal) return PHYSICS_CONFIG.pegRadius;
+    return PHYSICS_CONFIG.pegRadius * (portal.portalScale || 1);
+  }
+
+  findPortalExit(entryPortal) {
+    if (!entryPortal) return null;
+    const targetType = entryPortal.type === 'portalBlue' ? 'portalOrange' : 'portalBlue';
+    let best = null;
+    let bestDistSq = Infinity;
+    for (const peg of this.pegs) {
+      if (!peg || peg.id === entryPortal.id || peg.type !== targetType) continue;
+      const dx = peg.x - entryPortal.x;
+      const dy = peg.y - entryPortal.y;
+      const distSq = dx * dx + dy * dy;
+      if (distSq < bestDistSq) {
+        bestDistSq = distSq;
+        best = peg;
+      }
+    }
+    return best;
+  }
+
+  getPortalCrossing(ballLike, prevX, prevY, portal) {
+    if (!ballLike || !portal) return null;
+
+    const angle = portal.angle || 0;
+    const ux = Math.cos(angle);
+    const uy = Math.sin(angle);
+    const nx = -uy;
+    const ny = ux;
+
+    const dx0 = prevX - portal.x;
+    const dy0 = prevY - portal.y;
+    const dx1 = ballLike.x - portal.x;
+    const dy1 = ballLike.y - portal.y;
+
+    const x0 = dx0 * ux + dy0 * uy;
+    const y0 = dx0 * nx + dy0 * ny;
+    const x1 = dx1 * ux + dy1 * uy;
+    const y1 = dx1 * nx + dy1 * ny;
+
+    const radius = ballLike.radius || getBallRadius();
+    const halfLen = this.getPortalHalfLength(portal);
+    const xReach = halfLen + radius;
+
+    // The swept ball center segment must overlap the portal line's x-range and y-band.
+    if (Math.max(x0, x1) < -xReach || Math.min(x0, x1) > xReach) return null;
+    if (Math.max(y0, y1) < -radius || Math.min(y0, y1) > radius) return null;
+
+    const crossedCenterLine = (y0 <= 0 && y1 >= 0) || (y0 >= 0 && y1 <= 0);
+    const enteredBand = (Math.abs(y0) > radius && Math.abs(y1) <= radius)
+      || (Math.abs(y1) > radius && Math.abs(y0) <= radius);
+    if (!crossedCenterLine && !enteredBand) return null;
+
+    const dy = y1 - y0;
+    let t = 0.5;
+    if (Math.abs(dy) > 1e-6 && crossedCenterLine) {
+      t = Utils.clamp(-y0 / dy, 0, 1);
+    } else if (!crossedCenterLine) {
+      t = Math.abs(y0) <= Math.abs(y1) ? 0 : 1;
+    }
+
+    const crossX = x0 + (x1 - x0) * t;
+    if (Math.abs(crossX) > xReach) return null;
+
+    let side = Math.sign(dy);
+    if (side === 0) side = Math.sign(y1) || Math.sign(y0) || 1;
+
+    return {
+      localX: Utils.clamp(crossX, -halfLen, halfLen),
+      side,
+      y0,
+      y1,
+      worldX: prevX + (ballLike.x - prevX) * t,
+      worldY: prevY + (ballLike.y - prevY) * t,
+      fromPositive: (y0 > 0) || (Math.abs(y0) <= 1e-6 && y1 < 0)
+    };
+  }
+
+  resolvePortalSideCollision(ballLike, portal, keepPositiveSide) {
+    if (!ballLike || !portal) return;
+
+    const angle = portal.angle || 0;
+    const ux = Math.cos(angle);
+    const uy = Math.sin(angle);
+    const nx = -uy;
+    const ny = ux;
+    const radius = ballLike.radius || getBallRadius();
+    const halfLen = this.getPortalHalfLength(portal);
+
+    const dx = ballLike.x - portal.x;
+    const dy = ballLike.y - portal.y;
+    const localXRaw = dx * ux + dy * uy;
+    const localY = dx * nx + dy * ny;
+    const localX = Utils.clamp(localXRaw, -halfLen, halfLen);
+    const targetY = radius + 0.6;
+    const correctedY = keepPositiveSide
+      ? Math.max(localY, targetY)
+      : Math.min(localY, -targetY);
+
+    ballLike.x = portal.x + localX * ux + correctedY * nx;
+    ballLike.y = portal.y + localX * uy + correctedY * ny;
+
+    const vn = ballLike.vx * nx + ballLike.vy * ny;
+    const shouldBounce = keepPositiveSide ? (vn < 0) : (vn > 0);
+    if (!shouldBounce) return;
+
+    const bounce = PHYSICS_CONFIG.bounce;
+    ballLike.vx -= (1 + bounce) * vn * nx;
+    ballLike.vy -= (1 + bounce) * vn * ny;
+    this._clampBallLikeSpeed(ballLike);
+  }
+
+  enforceOneWayExitVelocity(ballLike, exitAngle, blockedFromPositive) {
+    if (!ballLike) return;
+
+    const ux = Math.cos(exitAngle || 0);
+    const uy = Math.sin(exitAngle || 0);
+    const nx = -uy;
+    const ny = ux;
+
+    const vt = ballLike.vx * ux + ballLike.vy * uy;
+    let vn = ballLike.vx * nx + ballLike.vy * ny;
+    // For one-way exits, always bias normal velocity toward the configured open side.
+    if (blockedFromPositive) {
+      if (vn > -0.2) vn = -Math.max(0.2, Math.abs(vn) * 0.5);
+    } else if (vn < 0.2) {
+      vn = Math.max(0.2, Math.abs(vn) * 0.5);
+    }
+    ballLike.vx = vt * ux + vn * nx;
+    ballLike.vy = vt * uy + vn * ny;
+  }
+
+  _clampBallLikeSpeed(ballLike) {
+    if (!ballLike) return;
+    const speed = Utils.magnitude(ballLike.vx, ballLike.vy);
+    const maxSpeed = PHYSICS_CONFIG.maxVelocity + (ballLike.speedCapBoost || 0);
+    if (speed <= maxSpeed) return;
+    const scale = maxSpeed / speed;
+    ballLike.vx *= scale;
+    ballLike.vy *= scale;
+  }
+
+  tryPortalTeleport(ballLike, prevX = ballLike?.x, prevY = ballLike?.y, options = null) {
+    if (!ballLike) return false;
+    if (!Number.isFinite(prevX) || !Number.isFinite(prevY)) return false;
+    if (!this.pegs || this.pegs.length === 0) return false;
+    const previewOnly = !!(options && options.previewOnly);
+    const canTeleport = (ballLike.portalCooldown || 0) <= 0;
+
+    for (const entry of this.pegs) {
+      if (!this.isPortalPeg(entry)) continue;
+      const crossing = this.getPortalCrossing(ballLike, prevX, prevY, entry);
+      if (!crossing) continue;
+
+      const blockedFromPositive = !entry.portalOneWayFlip;
+      const blockedSide = !!entry.portalOneWay && (crossing.fromPositive === blockedFromPositive);
+      if (previewOnly) {
+        return {
+          hit: true,
+          kind: blockedSide ? 'blocked' : 'teleport',
+          x: crossing.worldX,
+          y: crossing.worldY
+        };
+      }
+
+      if (blockedSide) {
+        this.resolvePortalSideCollision(ballLike, entry, blockedFromPositive);
+        return true;
+      }
+
+      if (!canTeleport) {
+        // During portal cooldown, keep one-way portals physically one-sided.
+        if (entry.portalOneWay) {
+          this.resolvePortalSideCollision(ballLike, entry, !blockedFromPositive);
+          return true;
+        }
+        continue;
+      }
+
+      const exit = this.findPortalExit(entry);
+      if (!exit) continue;
+
+      const entryAngle = entry.angle || 0;
+      const exitAngle = exit.angle || 0;
+      const cOut = Math.cos(exitAngle);
+      const sOut = Math.sin(exitAngle);
+
+      // Keep the entry offset along the portal line; place the ball just outside
+      // the exit line on the traversed side so portals behave as thin line triggers.
+      const localX = crossing.localX;
+      const baseOffset = (ballLike.radius || getBallRadius()) + 1.2;
+      // One-way portals always eject from their configured open side,
+      // never from their blocked gray side.
+      const exitBlockedFromPositive = !exit.portalOneWayFlip;
+      const openSign = exitBlockedFromPositive ? -1 : 1;
+      const localY = exit.portalOneWay ? openSign * baseOffset : crossing.side * baseOffset;
+      ballLike.x = exit.x + (localX * cOut - localY * sOut);
+      ballLike.y = exit.y + (localX * sOut + localY * cOut);
+
+      // Preserve incoming angle relative to portal orientation.
+      const delta = exitAngle - entryAngle;
+      const cDelta = Math.cos(delta);
+      const sDelta = Math.sin(delta);
+      const vx = ballLike.vx;
+      const vy = ballLike.vy;
+      ballLike.vx = vx * cDelta - vy * sDelta;
+      ballLike.vy = vx * sDelta + vy * cDelta;
+
+      if (exit.portalOneWay) {
+        this.enforceOneWayExitVelocity(ballLike, exitAngle, exitBlockedFromPositive);
+      }
+
+      ballLike.portalCooldown = 6;
+      this._clampBallLikeSpeed(ballLike);
+      return true;
+    }
+
+    return previewOnly ? null : false;
+  }
+
   resize(width, height) {
     this.width = width;
     this.height = height;
+    this.ballLossY = height + 50;
     this.bucket.y = height - 25;
   }
 
@@ -301,10 +552,10 @@ export class PhysicsEngine {
         const curT = f._flipperT || 0;
         const tDelta = Math.abs(curT - prevT);
         if (tDelta > 0.001) {
-          const sc = f.scale || 1;
-          const len = (f.length || 40) * sc;
-          const restRad = (f.restAngle || 25) * Math.PI / 180;
-          const flipRad = (f.flipAngle ?? 30) * Math.PI / 180;
+          const sc = Number.isFinite(f.scale) ? f.scale : 1.8;
+          const len = (Number.isFinite(f.length) ? f.length : 60) * sc;
+          const restRad = (Number.isFinite(f.restAngle) ? f.restAngle : 23) * Math.PI / 180;
+          const flipRad = (Number.isFinite(f.flipAngle) ? f.flipAngle : 30) * Math.PI / 180;
           const angleRange = restRad + flipRad;
           // Tip sweep distance = length * angular change (in radians)
           const tipSweep = len * tDelta * angleRange;
@@ -322,27 +573,28 @@ export class PhysicsEngine {
 
       for (let step = 0; step < numSteps; step++) {
         // Phase 2 — advance position by one sub-step
+        const prevX = ball.x;
+        const prevY = ball.y;
         ball.stepPosition(frac);
 
         this.handleWallCollisions(ball);
         // Pass sub-step progress so flipper angle is interpolated between
         // its previous and current frame positions (prevents sweep-through).
         this.checkFlipperCollisions(ball, (step + 1) / numSteps, frac);
+        this.tryPortalTeleport(ball, prevX, prevY);
 
-        // Peg collisions - ALL pegs are still physically collidable
+        // Peg collisions - portals are line triggers and do not collide.
         for (const peg of this.pegs) {
+          if (this.isPortalPeg(peg)) continue;
           let collision;
 
           if (peg.shape === 'brick') {
             collision = circleRectCollision(ball, peg);
           } else {
-            const pegRadius = peg.type === 'bumper'
-              ? PHYSICS_CONFIG.pegRadius * (peg.bumperScale || 1)
-              : PHYSICS_CONFIG.pegRadius;
             collision = Utils.circleCollision(ball, {
               x: peg.x,
               y: peg.y,
-              radius: pegRadius
+              radius: this.getPegCollisionRadius(peg)
             });
           }
 
@@ -380,7 +632,7 @@ export class PhysicsEngine {
         bucketCatchCount++;
         continue;
       }
-      const ballLost = ball.y > this.height + 50 || ball.stuck;
+      const ballLost = ball.y > this.ballLossY || ball.stuck;
       if (!ballLost) {
         remaining.push(ball);
       }
@@ -506,6 +758,7 @@ export class PhysicsEngine {
   }
 
   updateBucket() {
+    if (!this.bucketEnabled) return;
     const timeScale = PHYSICS_CONFIG.timeScale;
     this.bucket.x += this.bucket.direction * this.bucket.speed * timeScale;
     
@@ -517,6 +770,7 @@ export class PhysicsEngine {
   }
 
   checkBucketCatch(ball) {
+    if (!this.bucketEnabled) return false;
     if (!ball || !ball.active) return false;
     const bucket = this.bucket;
 
@@ -559,27 +813,29 @@ export class PhysicsEngine {
     // This way, if the flipper sweeps from angle A to B in one frame, each sub-step
     // checks the flipper at an intermediate angle — preventing sweep-through tunneling.
     const t = prevT + (curT - prevT) * sampleFrac;
-    const restRad = (f.restAngle || 25) * Math.PI / 180;
-    const flipRad = (f.flipAngle ?? 30) * Math.PI / 180;
+    const restRad = (Number.isFinite(f.restAngle) ? f.restAngle : 23) * Math.PI / 180;
+    const flipRad = (Number.isFinite(f.flipAngle) ? f.flipAngle : 30) * Math.PI / 180;
     const angleRange = restRad + flipRad;
-    const sc = f.scale || 1;
-    const length = (f.length || 40) * sc;
-    const w = (f.width || 8) * sc;
+    const sc = Number.isFinite(f.scale) ? f.scale : 1.8;
+    const length = (Number.isFinite(f.length) ? f.length : 60) * sc;
+    const w = (Number.isFinite(f.width) ? f.width : 8) * sc;
+    const xOffset = Number.isFinite(f.xOffset) ? f.xOffset : 196;
+    const y = Number.isFinite(f.y) ? f.y : (this.height - 55);
     const subTDelta = (curT - prevT) * safeStepSize;
     const bounce = f.bounce ?? PHYSICS_CONFIG.bounce;
 
     // Left flipper
-    const leftPivotX = centerX - f.xOffset;
+    const leftPivotX = centerX - xOffset;
     const leftAngle = restRad - t * angleRange;
     this._checkSingleFlipperCollision(
-      ball, leftPivotX, f.y, leftAngle, length, w, -subTDelta * angleRange, safeStepSize, bounce
+      ball, leftPivotX, y, leftAngle, length, w, -subTDelta * angleRange, safeStepSize, bounce
     );
 
     // Right flipper (mirrored)
-    const rightPivotX = centerX + f.xOffset;
+    const rightPivotX = centerX + xOffset;
     const rightAngle = Math.PI - leftAngle;
     this._checkSingleFlipperCollision(
-      ball, rightPivotX, f.y, rightAngle, length, w, subTDelta * angleRange, safeStepSize, bounce
+      ball, rightPivotX, y, rightAngle, length, w, subTDelta * angleRange, safeStepSize, bounce
     );
   }
 
@@ -654,20 +910,22 @@ export class PhysicsEngine {
     const f = this.flippers;
     const centerX = this.width / 2;
     const t = f._flipperT || 0;
-    const restRad = (f.restAngle || 25) * Math.PI / 180;
-    const flipRad = (f.flipAngle ?? 30) * Math.PI / 180;
-    const sc = f.scale || 1;
-    const length = (f.length || 40) * sc;
-    const w = (f.width || 8) * sc;
+    const restRad = (Number.isFinite(f.restAngle) ? f.restAngle : 23) * Math.PI / 180;
+    const flipRad = (Number.isFinite(f.flipAngle) ? f.flipAngle : 30) * Math.PI / 180;
+    const sc = Number.isFinite(f.scale) ? f.scale : 1.8;
+    const length = (Number.isFinite(f.length) ? f.length : 60) * sc;
+    const w = (Number.isFinite(f.width) ? f.width : 8) * sc;
+    const xOffset = Number.isFinite(f.xOffset) ? f.xOffset : 196;
+    const y = Number.isFinite(f.y) ? f.y : (this.height - 55);
 
-    const leftPivotX = centerX - f.xOffset;
+    const leftPivotX = centerX - xOffset;
     const leftAngle = restRad - t * (restRad + flipRad);
-    const rightPivotX = centerX + f.xOffset;
+    const rightPivotX = centerX + xOffset;
     const rightAngle = Math.PI - leftAngle;
 
     return [
-      { x: leftPivotX + Math.cos(leftAngle) * length / 2, y: f.y + Math.sin(leftAngle) * length / 2, angle: leftAngle, width: length, height: w },
-      { x: rightPivotX + Math.cos(rightAngle) * length / 2, y: f.y + Math.sin(rightAngle) * length / 2, angle: rightAngle, width: length, height: w }
+      { x: leftPivotX + Math.cos(leftAngle) * length / 2, y: y + Math.sin(leftAngle) * length / 2, angle: leftAngle, width: length, height: w },
+      { x: rightPivotX + Math.cos(rightAngle) * length / 2, y: y + Math.sin(rightAngle) * length / 2, angle: rightAngle, width: length, height: w }
     ];
   }
 
@@ -686,67 +944,78 @@ export class PhysicsEngine {
     const simulatedHits = [];
 
     // Create simulated ball
-    let x = startX;
-    let y = startY;
-    let vx = Math.cos(angle) * power;
-    let vy = Math.sin(angle) * power;
-    const radius = getBallRadius();
+    const simBall = {
+      x: startX,
+      y: startY,
+      vx: Math.cos(angle) * power,
+      vy: Math.sin(angle) * power,
+      radius: getBallRadius(),
+      portalCooldown: 0,
+      speedCapBoost: 0
+    };
 
     for (let i = 0; i < maxSteps; i++) {
-      points.push({ x, y });
+      points.push({ x: simBall.x, y: simBall.y });
 
       // Apply physics
-      vy += PHYSICS_CONFIG.gravity;
-      vx *= PHYSICS_CONFIG.friction;
-      vy *= PHYSICS_CONFIG.friction;
+      simBall.vy += PHYSICS_CONFIG.gravity;
+      simBall.vx *= PHYSICS_CONFIG.friction;
+      simBall.vy *= PHYSICS_CONFIG.friction;
+      if (simBall.portalCooldown > 0) simBall.portalCooldown--;
 
-      x += vx;
-      y += vy;
+      const prevX = simBall.x;
+      const prevY = simBall.y;
+      simBall.x += simBall.vx;
+      simBall.y += simBall.vy;
 
       // Wall collisions
-      if (x - radius < 0) {
-        x = radius;
-        vx = Math.abs(vx) * PHYSICS_CONFIG.bounce;
+      if (simBall.x - simBall.radius < 0) {
+        simBall.x = simBall.radius;
+        simBall.vx = Math.abs(simBall.vx) * PHYSICS_CONFIG.bounce;
       }
-      if (x + radius > this.width) {
-        x = this.width - radius;
-        vx = -Math.abs(vx) * PHYSICS_CONFIG.bounce;
+      if (simBall.x + simBall.radius > this.width) {
+        simBall.x = this.width - simBall.radius;
+        simBall.vx = -Math.abs(simBall.vx) * PHYSICS_CONFIG.bounce;
       }
-      if (y - radius < 0) {
-        y = radius;
-        vy = Math.abs(vy) * PHYSICS_CONFIG.bounce;
+      if (simBall.y - simBall.radius < 0) {
+        simBall.y = simBall.radius;
+        simBall.vy = Math.abs(simBall.vy) * PHYSICS_CONFIG.bounce;
+      }
+
+      const portalHit = this.tryPortalTeleport(simBall, prevX, prevY, { previewOnly: true });
+      if (portalHit && portalHit.hit) {
+        points.push({ x: portalHit.x, y: portalHit.y });
+        break;
       }
 
       // Check peg collisions
       for (const peg of this.pegs) {
+        if (this.isPortalPeg(peg)) continue;
         let collision;
 
         if (peg.shape === 'brick') {
-          collision = circleRectCollision({ x, y, vx, vy, radius }, peg);
+          collision = circleRectCollision(simBall, peg);
         } else {
-          const pegRadius = peg.type === 'bumper'
-            ? PHYSICS_CONFIG.pegRadius * (peg.bumperScale || 1)
-            : PHYSICS_CONFIG.pegRadius;
-          collision = Utils.circleCollision({ x, y, vx, vy, radius }, {
+          collision = Utils.circleCollision(simBall, {
             x: peg.x,
             y: peg.y,
-            radius: pegRadius
+            radius: this.getPegCollisionRadius(peg)
           });
         }
 
         if (collision) {
           // Resolve collision for continued simulation
-          x += collision.normal.x * (collision.depth + 0.5);
-          y += collision.normal.y * (collision.depth + 0.5);
+          simBall.x += collision.normal.x * (collision.depth + 0.5);
+          simBall.y += collision.normal.y * (collision.depth + 0.5);
 
           const bounce = PHYSICS_CONFIG.bounce;
-          vx -= (1 + bounce) * collision.relativeVelocityNormal * collision.normal.x;
-          vy -= (1 + bounce) * collision.relativeVelocityNormal * collision.normal.y;
+          simBall.vx -= (1 + bounce) * collision.relativeVelocityNormal * collision.normal.x;
+          simBall.vy -= (1 + bounce) * collision.relativeVelocityNormal * collision.normal.y;
 
-          simulatedHits.push({ x, y, pegId: peg.id });
+          simulatedHits.push({ x: simBall.x, y: simBall.y, pegId: peg.id });
 
           if (stopAtFirstHit) {
-            points.push({ x, y });
+            points.push({ x: simBall.x, y: simBall.y });
             return { points, hits: simulatedHits };
           }
           break;
@@ -757,17 +1026,17 @@ export class PhysicsEngine {
       const flipperRects = this.getFlipperRects();
       let hitFlipper = false;
       for (const rect of flipperRects) {
-        const collision = circleRectOverlap({ x, y, radius }, rect);
+        const collision = circleRectOverlap(simBall, rect);
         if (collision) {
-          points.push({ x, y });
+          points.push({ x: simBall.x, y: simBall.y });
           hitFlipper = true;
           break;
         }
       }
       if (hitFlipper) break;
 
-      // Ball fell below screen
-      if (y > this.height + 50) {
+      // Ball fell below active loss threshold (camera-aware in survival mode)
+      if (simBall.y > this.ballLossY) {
         break;
       }
     }

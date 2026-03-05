@@ -4,6 +4,9 @@ import { Renderer } from './renderer.js';
 import { LevelManager } from './levels.js';
 import { Utils } from './utils.js';
 import { PHYSICS_CONFIG } from './physics.js';
+import { normalizeFlipperConfig } from './flipper-defaults.js';
+import { SurvivalRuntime } from './survival-runtime.js';
+import { ensureLevelSurvival } from './survival-mode.js';
 import {
   PegAnimator,
   MIN_VISIBLE_RATIO,
@@ -50,7 +53,9 @@ export class Editor {
     // Draw mode state
     this.drawPath = [];
     this.ghostBricks = [];
-    this.drawShapeMode = 'free'; // 'free', 'circle', 'sine'
+    this.drawShapeMode = 'free'; // 'free', 'circle', 'sine', 'bezier'
+    this.bezierDraft = null;     // { start, end, h1, h2, bend }
+    this.activeBezierGroupId = null;
     
     // Rotation state
     this.rotationCenter = null;
@@ -95,6 +100,13 @@ export class Editor {
     this.flipperDragStartY = 0;
     this.flipperDragStartOffset = 0;
 
+    // Survival vertical mode viewport runtime
+    this.survivalRuntime = new SurvivalRuntime(canvas.height, { autoScroll: false });
+    const level = this.levelManager.getCurrentLevel();
+    if (level) {
+      this.survivalRuntime.configure(ensureLevelSurvival(level, canvas.height));
+    }
+
     this.setupInput();
   }
 
@@ -102,8 +114,27 @@ export class Editor {
     const canvas = this.canvas;
     
     const handleStart = (e) => {
+      const screenPos = this.getEventScreenPosition(e);
+      const pos = this.toWorldPosition(screenPos);
+
+      if (this.isMiddlePanEvent(e) && this.isSurvivalMode()) {
+        e.preventDefault();
+        this.isInteracting = true;
+        this.interactionType = 'pan';
+        this.startX = pos.x;
+        this.startY = pos.y;
+        this.lastX = pos.x;
+        this.lastY = pos.y;
+        this.startScreenX = screenPos.x;
+        this.startScreenY = screenPos.y;
+        this.lastScreenX = screenPos.x;
+        this.lastScreenY = screenPos.y;
+        this._panStartCameraY = this.getCameraY();
+        this._panStartScreenY = screenPos.y;
+        return;
+      }
+
       e.preventDefault();
-      const pos = this.getEventPosition(e);
 
       // Animation mode: only handle ghost drag (hit any ghost peg)
       if (this.animationMode) {
@@ -131,9 +162,30 @@ export class Editor {
       this.startY = pos.y;
       this.lastX = pos.x;
       this.lastY = pos.y;
+      this.startScreenX = screenPos.x;
+      this.startScreenY = screenPos.y;
+      this.lastScreenX = screenPos.x;
+      this.lastScreenY = screenPos.y;
       this.hasMoved = false;
       this.isInteracting = true;
       this.isCopying = e.altKey;
+
+      // Draw-bezier: keep current draft active until Enter/Escape.
+      if (this.mode === 'draw' && this.drawShapeMode === 'bezier' && this.bezierDraft) {
+        const bezierControl = this.getBezierControlAt(pos.x, pos.y);
+        if (bezierControl) {
+          this.interactionType = bezierControl;
+          if (bezierControl === 'bezierBend') {
+            this.beginBezierBendDrag(pos);
+          } else if (bezierControl === 'bezierStart' || bezierControl === 'bezierEnd') {
+            this.beginBezierAnchorDrag(bezierControl, pos);
+          }
+          return;
+        }
+        this.isInteracting = false;
+        this.interactionType = null;
+        return;
+      }
 
       // Check if clicking on rotation/scale handle first
       if (this.selectedPegIds.size > 0) {
@@ -216,6 +268,9 @@ export class Editor {
         } else if (this.mode === 'draw') {
           // Draw mode - works for circles and bricks
           this.interactionType = 'draw';
+          if (this.drawShapeMode === 'bezier') {
+            this.clearBezierDraft(false);
+          }
           this.drawPath = [{ x: pos.x, y: pos.y }];
           this.ghostBricks = [];
         } else {
@@ -229,17 +284,26 @@ export class Editor {
       if (!this.isInteracting) return;
       e.preventDefault();
       
-      const pos = this.getEventPosition(e);
+      const screenPos = this.getEventScreenPosition(e);
+      const pos = this.toWorldPosition(screenPos);
       const dx = pos.x - this.lastX;
       const dy = pos.y - this.lastY;
       const totalDx = pos.x - this.startX;
       const totalDy = pos.y - this.startY;
+      const panStartScreenY = this._panStartScreenY ?? this.startScreenY ?? screenPos.y;
+      const totalScreenDy = screenPos.y - panStartScreenY;
       
-      if (Math.abs(totalDx) > 3 || Math.abs(totalDy) > 3) {
+      if (this.interactionType !== 'pan' && (Math.abs(totalDx) > 3 || Math.abs(totalDy) > 3)) {
         this.hasMoved = true;
       }
       
       switch (this.interactionType) {
+        case 'pan':
+          if (this._panStartCameraY != null) {
+            this.survivalRuntime.setCameraY(this._panStartCameraY - totalScreenDy);
+          }
+          break;
+
         case 'animDrag':
           if (this._animDragStart) {
             let nextDx = this._animDragStart.dx + totalDx;
@@ -287,8 +351,9 @@ export class Editor {
           const f = this.levelManager.getFlippers();
           if (f) {
             f.y = this.flipperDragStartY + totalDy;
-            // Clamp Y to stay above bucket and below mid-screen
-            f.y = Math.max(this.canvas.height * 0.3, Math.min(this.canvas.height - 35, f.y));
+            const minFlipperY = this.isSurvivalMode() ? 30 : this.canvas.height * 0.3;
+            const maxFlipperY = this.isSurvivalMode() ? this.getWorldHeight() - 35 : this.canvas.height - 35;
+            f.y = Math.max(minFlipperY, Math.min(maxFlipperY, f.y));
             // Horizontal drag adjusts spread
             f.xOffset = Math.max(10, Math.min(250, this.flipperDragStartOffset + totalDx));
             this.levelManager.save();
@@ -309,7 +374,25 @@ export class Editor {
           break;
           
         case 'draw':
+          // In bezier edit phase, drag should only move controls (not draw strokes).
+          if (this.drawShapeMode === 'bezier' && this.bezierDraft) {
+            break;
+          }
           this.continueDraw(pos.x, pos.y, e.shiftKey);
+          break;
+
+        case 'bezierHandle1':
+        case 'bezierHandle2':
+          this.applyBezierHandleDrag(this.interactionType, pos, e.shiftKey);
+          break;
+
+        case 'bezierStart':
+        case 'bezierEnd':
+          this.applyBezierAnchorDrag(this.interactionType, pos, e.shiftKey);
+          break;
+
+        case 'bezierBend':
+          this.applyBezierBendDrag(pos, e.shiftKey);
           break;
           
         case 'place':
@@ -328,6 +411,8 @@ export class Editor {
       
       this.lastX = pos.x;
       this.lastY = pos.y;
+      this.lastScreenX = screenPos.x;
+      this.lastScreenY = screenPos.y;
     };
 
     const handleEnd = (e) => {
@@ -336,6 +421,9 @@ export class Editor {
       const pos = this.lastX !== undefined ? { x: this.lastX, y: this.lastY } : this.getEventPosition(e);
       
       switch (this.interactionType) {
+        case 'pan':
+          break;
+
         case 'animDrag':
           this._animDragStart = null;
           break;
@@ -364,7 +452,32 @@ export class Editor {
           break;
           
         case 'draw':
-          this.commitGhostBricks();
+          if (this.drawShapeMode === 'bezier') {
+            if (!this.bezierDraft) {
+              const start = this.drawPath[0];
+              const end = { x: pos.x, y: pos.y };
+              if (start && Utils.distance(start.x, start.y, end.x, end.y) >= 10) {
+                this.createBezierDraft(start, end);
+              } else {
+                this.clearBezierDraft();
+              }
+            }
+          } else {
+            this.commitGhostBricks();
+          }
+          break;
+
+        case 'bezierHandle1':
+        case 'bezierHandle2':
+          break;
+
+        case 'bezierStart':
+        case 'bezierEnd':
+          this._bezierDragStart = null;
+          break;
+
+        case 'bezierBend':
+          this._bezierDragStart = null;
           break;
           
         case 'place':
@@ -391,6 +504,8 @@ export class Editor {
       this.isCopying = false;
       this.dragStartPositions = null;
       this.dragAnchorId = null;
+      this._panStartCameraY = null;
+      this._panStartScreenY = null;
     };
 
     const sig = { signal: this.abortController.signal };
@@ -406,6 +521,22 @@ export class Editor {
     canvas.addEventListener('mousemove', handleMove, sig);
     canvas.addEventListener('mouseup', handleEnd, sig);
     canvas.addEventListener('mouseleave', handleEnd, sig);
+    canvas.addEventListener('dblclick', (e) => {
+      if (this.animationMode) return;
+      e.preventDefault();
+      const pos = this.getEventPosition(e);
+      const peg = this.getPegAtPosition(pos.x, pos.y);
+      if (!peg || !peg.bezierGroupId) return;
+      this.beginEditBezierGroup(peg.bezierGroupId);
+    }, sig);
+    canvas.addEventListener('auxclick', (e) => {
+      if (e.button === 1) e.preventDefault();
+    }, sig);
+    canvas.addEventListener('wheel', (e) => {
+      if (!this.isSurvivalMode()) return;
+      e.preventDefault();
+      this.survivalRuntime.scrollBy(e.deltaY);
+    }, { passive: false, ...sig });
 
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
@@ -429,8 +560,12 @@ export class Editor {
         e.preventDefault();
         this.selectAll();
       } else if (e.key === 'Escape') {
-        this.selectedPegIds.clear();
-        this.notifySelectionChange();
+        if (this.bezierDraft) {
+          this.clearBezierDraft();
+        } else {
+          this.selectedPegIds.clear();
+          this.notifySelectionChange();
+        }
       } else if (e.key === 'g' && !e.ctrlKey && !e.metaKey) {
         this.showGrid = !this.showGrid;
         this.renderer.showGrid = this.showGrid;
@@ -443,23 +578,45 @@ export class Editor {
       } else if (e.key === 'R') {
         this.rotateSelectedPegs(-Math.PI / 12);
       } else if (e.key === 'd' && !e.ctrlKey && !e.metaKey) {
-        this.mode = this.mode === 'draw' ? 'place' : 'draw';
+        const enteringDraw = this.mode !== 'draw';
+        if (!enteringDraw) this.clearBezierDraft();
+        this.mode = enteringDraw ? 'draw' : 'place';
         if (this.onModeChange) this.onModeChange(this.mode);
       } else if (e.key === 'c' && !e.ctrlKey && !e.metaKey) {
         if (this.mode === 'draw' && this.drawShapeMode === 'circle') {
           this.drawShapeMode = 'free';
+          this.clearBezierDraft();
         } else {
           this.mode = 'draw';
           this.drawShapeMode = 'circle';
+          this.clearBezierDraft();
           if (this.onModeChange) this.onModeChange(this.mode);
         }
       } else if (e.key === 'w' && !e.ctrlKey && !e.metaKey) {
         if (this.mode === 'draw' && this.drawShapeMode === 'sine') {
           this.drawShapeMode = 'free';
+          this.clearBezierDraft();
         } else {
           this.mode = 'draw';
           this.drawShapeMode = 'sine';
+          this.clearBezierDraft();
           if (this.onModeChange) this.onModeChange(this.mode);
+        }
+      } else if (e.key === 'b' && !e.ctrlKey && !e.metaKey) {
+        if (this.mode === 'draw' && this.drawShapeMode === 'bezier') {
+          this.drawShapeMode = 'free';
+          this.clearBezierDraft();
+        } else {
+          this.mode = 'draw';
+          this.drawShapeMode = 'bezier';
+          this.selectedShape = 'brick';
+          this.clearBezierDraft();
+          if (this.onModeChange) this.onModeChange(this.mode);
+        }
+      } else if (e.key === 'Enter' && this.mode === 'draw' && this.drawShapeMode === 'bezier') {
+        e.preventDefault();
+        if (this.bezierDraft && this.ghostBricks.length > 0) {
+          this.commitGhostBricks();
         }
       } else if (e.key === 'a' && !e.ctrlKey && !e.metaKey) {
         if (this.selectedPegIds.size > 0 && !this.animationMode) {
@@ -471,7 +628,7 @@ export class Editor {
     }, sig);
   }
 
-  getEventPosition(e) {
+  getEventScreenPosition(e) {
     const rect = this.canvas.getBoundingClientRect();
     const scaleX = this.canvas.width / rect.width;
     const scaleY = this.canvas.height / rect.height;
@@ -494,6 +651,43 @@ export class Editor {
     };
   }
 
+  toWorldPosition(screenPos) {
+    return {
+      x: screenPos.x,
+      y: screenPos.y + this.getCameraY()
+    };
+  }
+
+  getEventPosition(e) {
+    return this.toWorldPosition(this.getEventScreenPosition(e));
+  }
+
+  isMiddlePanEvent(e) {
+    return !!e && !e.touches && e.button === 1;
+  }
+
+  isSurvivalMode() {
+    return this.survivalRuntime.isEnabled();
+  }
+
+  getCameraY() {
+    return this.survivalRuntime.getCameraY();
+  }
+
+  getWorldHeight() {
+    return this.isSurvivalMode() ? this.survivalRuntime.getWorldHeight() : this.canvas.height;
+  }
+
+  setSurvivalSettings(settings) {
+    const normalized = this.survivalRuntime.configure(settings);
+    if (!normalized.enabled) {
+      this.survivalRuntime.setCameraY(0);
+    } else {
+      this.survivalRuntime.setCameraY(this.survivalRuntime.getCameraY());
+    }
+    return normalized;
+  }
+
   getPegAtPosition(x, y) {
     const level = this.levelManager.getCurrentLevel();
     if (!level) return null;
@@ -513,6 +707,18 @@ export class Editor {
         const localY = dx * sin + dy * cos;
         
         if (Math.abs(localX) <= w/2 + 8 && Math.abs(localY) <= h/2 + 8) {
+          return peg;
+        }
+      } else if (peg.type === 'portalBlue' || peg.type === 'portalOrange') {
+        const halfLen = PHYSICS_CONFIG.pegRadius * (peg.portalScale || 1);
+        const halfThick = Math.max(4, PHYSICS_CONFIG.pegRadius * 0.45);
+        const cos = Math.cos(-(peg.angle || 0));
+        const sin = Math.sin(-(peg.angle || 0));
+        const dx = x - peg.x;
+        const dy = y - peg.y;
+        const localX = dx * cos - dy * sin;
+        const localY = dx * sin + dy * cos;
+        if (Math.abs(localX) <= halfLen + 8 && Math.abs(localY) <= halfThick + 8) {
           return peg;
         }
       } else {
@@ -554,11 +760,13 @@ export class Editor {
     const extents = estimatePegExtents(pegLike, centerX, centerY, angle, positionedSlices);
     const marginX = extents.x * (1 - 2 * MIN_VISIBLE_RATIO);
     const marginY = extents.y * (1 - 2 * MIN_VISIBLE_RATIO);
+    const minYBase = this.isSurvivalMode() ? 0 : 50;
+    const maxYBase = this.isSurvivalMode() ? this.getWorldHeight() : (this.canvas.height - 35);
     return {
       minX: -marginX,
       maxX: this.canvas.width + marginX,
-      minY: 50 - marginY,
-      maxY: this.canvas.height - 35 + marginY
+      minY: minYBase - marginY,
+      maxY: maxYBase + marginY
     };
   }
 
@@ -604,19 +812,32 @@ export class Editor {
     for (const pegId of this.selectedPegIds) {
       const peg = level.pegs.find(p => p.id === pegId);
       if (peg) {
-        let r;
+        let extentX;
+        let extentY;
         if (peg.shape === 'brick') {
-          r = Math.max(peg.width || 40, peg.height || 12) / 2;
+          const r = Math.max(peg.width || 40, peg.height || 12) / 2;
+          extentX = r;
+          extentY = r;
         } else if (peg.type === 'bumper') {
-          r = PHYSICS_CONFIG.pegRadius * (peg.bumperScale || 1);
+          const r = PHYSICS_CONFIG.pegRadius * (peg.bumperScale || 1);
+          extentX = r;
+          extentY = r;
+        } else if (peg.type === 'portalBlue' || peg.type === 'portalOrange') {
+          const halfLen = PHYSICS_CONFIG.pegRadius * (peg.portalScale || 1);
+          const halfThick = Math.max(2, PHYSICS_CONFIG.pegRadius * 0.25);
+          const c = Math.abs(Math.cos(peg.angle || 0));
+          const s = Math.abs(Math.sin(peg.angle || 0));
+          extentX = c * halfLen + s * halfThick;
+          extentY = s * halfLen + c * halfThick;
         } else {
-          r = PHYSICS_CONFIG.pegRadius;
+          extentX = PHYSICS_CONFIG.pegRadius;
+          extentY = PHYSICS_CONFIG.pegRadius;
         }
-        
-        minX = Math.min(minX, peg.x - r);
-        minY = Math.min(minY, peg.y - r);
-        maxX = Math.max(maxX, peg.x + r);
-        maxY = Math.max(maxY, peg.y + r);
+
+        minX = Math.min(minX, peg.x - extentX);
+        minY = Math.min(minY, peg.y - extentY);
+        maxX = Math.max(maxX, peg.x + extentX);
+        maxY = Math.max(maxY, peg.y + extentY);
       }
     }
     
@@ -633,9 +854,445 @@ export class Editor {
     return { x: centerX, y: handleY };
   }
 
+  clearBezierDraft(resetPreview = true) {
+    this.bezierDraft = null;
+    this.activeBezierGroupId = null;
+    if (resetPreview) {
+      this.drawPath = [];
+      this.ghostBricks = [];
+    }
+    this._bezierDragStart = null;
+  }
+
+  createBezierDraft(start, end) {
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const d = Math.hypot(dx, dy);
+    if (d < 10) return null;
+
+    const ux = dx / d;
+    const uy = dy / d;
+    const handleLen = Math.max(20, d * 0.28);
+
+    this.bezierDraft = {
+      start: { x: start.x, y: start.y },
+      end: { x: end.x, y: end.y },
+      h1: { x: start.x + ux * handleLen, y: start.y + uy * handleLen },
+      h2: { x: end.x - ux * handleLen, y: end.y - uy * handleLen },
+      bend: { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 }
+    };
+    this.activeBezierGroupId = null;
+
+    this.updateBezierDraftPath();
+    return this.bezierDraft;
+  }
+
+  ensureBezierCurveStore(level) {
+    if (!level || typeof level !== 'object') return {};
+    if (!level.bezierCurves || typeof level.bezierCurves !== 'object' || Array.isArray(level.bezierCurves)) {
+      level.bezierCurves = {};
+    }
+    return level.bezierCurves;
+  }
+
+  estimateRigidTransformFromPairs(pairs) {
+    if (!Array.isArray(pairs) || pairs.length === 0) return null;
+    let srcCx = 0, srcCy = 0, dstCx = 0, dstCy = 0;
+    for (const p of pairs) {
+      srcCx += p.sx;
+      srcCy += p.sy;
+      dstCx += p.dx;
+      dstCy += p.dy;
+    }
+    srcCx /= pairs.length;
+    srcCy /= pairs.length;
+    dstCx /= pairs.length;
+    dstCy /= pairs.length;
+
+    let sumDot = 0;
+    let sumCross = 0;
+    for (const p of pairs) {
+      const ax = p.sx - srcCx;
+      const ay = p.sy - srcCy;
+      const bx = p.dx - dstCx;
+      const by = p.dy - dstCy;
+      sumDot += ax * bx + ay * by;
+      sumCross += ax * by - ay * bx;
+    }
+
+    const angle = Math.atan2(sumCross, sumDot);
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    const tx = dstCx - (srcCx * cos - srcCy * sin);
+    const ty = dstCy - (srcCx * sin + srcCy * cos);
+    return { angle, tx, ty };
+  }
+
+  getCircularMeanAngle(values) {
+    if (!Array.isArray(values) || values.length === 0) return 0;
+    let sx = 0;
+    let sy = 0;
+    for (const a of values) {
+      sx += Math.cos(a || 0);
+      sy += Math.sin(a || 0);
+    }
+    if (Math.abs(sx) < 1e-9 && Math.abs(sy) < 1e-9) return 0;
+    return Math.atan2(sy, sx);
+  }
+
+  estimateBezierGroupTransform(groupPegs, data) {
+    if (!Array.isArray(groupPegs) || groupPegs.length === 0 || !data) return null;
+
+    // Preferred: exact point correspondences via bezierIndex/refPoints.
+    const refMap = new Map();
+    if (Array.isArray(data.refPoints)) {
+      for (const rp of data.refPoints) {
+        if (rp && Number.isFinite(rp.index) && Number.isFinite(rp.x) && Number.isFinite(rp.y)) {
+          refMap.set(rp.index, rp);
+        }
+      }
+    }
+
+    const exactPairs = [];
+    for (const peg of groupPegs) {
+      if (!Number.isFinite(peg?.bezierIndex)) continue;
+      const rp = refMap.get(peg.bezierIndex);
+      if (!rp) continue;
+      exactPairs.push({ sx: rp.x, sy: rp.y, dx: peg.x, dy: peg.y });
+    }
+    if (exactPairs.length >= 2) {
+      return this.estimateRigidTransformFromPairs(exactPairs);
+    }
+
+    // Fallback for legacy groups: estimate from centroid + mean tangent angle.
+    const draft = {
+      start: data.start,
+      end: data.end,
+      h1: data.h1,
+      h2: data.h2
+    };
+    const samples = this.sampleBezierDraft(draft, 96);
+    const ghosts = this.computeGhostBricksFromSamples(samples, false, 'brick');
+    if (!ghosts || ghosts.length === 0) return null;
+
+    let srcCx = 0, srcCy = 0;
+    for (const g of ghosts) {
+      srcCx += g.x;
+      srcCy += g.y;
+    }
+    srcCx /= ghosts.length;
+    srcCy /= ghosts.length;
+
+    let dstCx = 0, dstCy = 0;
+    for (const p of groupPegs) {
+      dstCx += p.x;
+      dstCy += p.y;
+    }
+    dstCx /= groupPegs.length;
+    dstCy /= groupPegs.length;
+
+    const srcAngle = this.getCircularMeanAngle(ghosts.map(g => g.angle || 0));
+    const dstAngle = this.getCircularMeanAngle(groupPegs.map(p => p.angle || 0));
+    const angle = dstAngle - srcAngle;
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    const tx = dstCx - (srcCx * cos - srcCy * sin);
+    const ty = dstCy - (srcCx * sin + srcCy * cos);
+    return { angle, tx, ty };
+  }
+
+  applyRigidTransform(point, transform) {
+    if (!point || !transform) return point ? { x: point.x, y: point.y } : null;
+    const cos = Math.cos(transform.angle || 0);
+    const sin = Math.sin(transform.angle || 0);
+    return {
+      x: point.x * cos - point.y * sin + (transform.tx || 0),
+      y: point.x * sin + point.y * cos + (transform.ty || 0)
+    };
+  }
+
+  beginEditBezierGroup(groupId) {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level || !groupId) return false;
+
+    const store = this.ensureBezierCurveStore(level);
+    const data = store[groupId];
+    if (!data || !data.start || !data.end || !data.h1 || !data.h2) return false;
+    const groupPegs = level.pegs.filter(p => p.bezierGroupId === groupId);
+    const transform = this.estimateBezierGroupTransform(groupPegs, data);
+
+    const start = transform ? this.applyRigidTransform(data.start, transform) : { x: data.start.x, y: data.start.y };
+    const end = transform ? this.applyRigidTransform(data.end, transform) : { x: data.end.x, y: data.end.y };
+    const h1 = transform ? this.applyRigidTransform(data.h1, transform) : { x: data.h1.x, y: data.h1.y };
+    const h2 = transform ? this.applyRigidTransform(data.h2, transform) : { x: data.h2.x, y: data.h2.y };
+
+    this.mode = 'draw';
+    this.drawShapeMode = 'bezier';
+    this.activeBezierGroupId = groupId;
+    this.bezierDraft = {
+      start,
+      end,
+      h1,
+      h2,
+      bend: { x: 0, y: 0 }
+    };
+    if (groupPegs.length > 0) {
+      this.selectedPegType = groupPegs[0].type || this.selectedPegType;
+    } else if (data.pegType) {
+      this.selectedPegType = data.pegType;
+    }
+    this.selectedShape = 'brick';
+    this._bezierDragStart = null;
+    this.updateBezierDraftPath();
+    if (this.onModeChange) this.onModeChange(this.mode);
+    return true;
+  }
+
+  getBezierControlAt(x, y) {
+    if (!this.bezierDraft) return null;
+    const hitRadius = 14;
+    const d = this.bezierDraft;
+
+    if (Utils.distance(x, y, d.start.x, d.start.y) <= hitRadius) return 'bezierStart';
+    if (Utils.distance(x, y, d.end.x, d.end.y) <= hitRadius) return 'bezierEnd';
+    if (Utils.distance(x, y, d.h1.x, d.h1.y) <= hitRadius) return 'bezierHandle1';
+    if (Utils.distance(x, y, d.h2.x, d.h2.y) <= hitRadius) return 'bezierHandle2';
+    if (Utils.distance(x, y, d.bend.x, d.bend.y) <= hitRadius) return 'bezierBend';
+    return null;
+  }
+
+  snapVector45(dx, dy) {
+    const mag = Math.hypot(dx, dy);
+    if (mag < 0.001) return { dx, dy };
+    const step = Math.PI / 4;
+    const snapped = Math.round(Math.atan2(dy, dx) / step) * step;
+    return {
+      dx: Math.cos(snapped) * mag,
+      dy: Math.sin(snapped) * mag
+    };
+  }
+
+  applyBezierHandleDrag(which, targetPos, shiftKey = false) {
+    if (!this.bezierDraft) return;
+    const d = this.bezierDraft;
+    const anchor = which === 'bezierHandle1' ? d.start : d.end;
+    let nx = targetPos.x;
+    let ny = targetPos.y;
+
+    if (shiftKey) {
+      const snapped = this.snapVector45(nx - anchor.x, ny - anchor.y);
+      nx = anchor.x + snapped.dx;
+      ny = anchor.y + snapped.dy;
+    }
+
+    if (which === 'bezierHandle1') {
+      d.h1.x = nx;
+      d.h1.y = ny;
+    } else {
+      d.h2.x = nx;
+      d.h2.y = ny;
+    }
+    this.updateBezierDraftPath();
+  }
+
+  beginBezierBendDrag(startPos) {
+    if (!this.bezierDraft) return;
+    this._bezierDragStart = {
+      mouse: { x: startPos.x, y: startPos.y },
+      h1: { ...this.bezierDraft.h1 },
+      h2: { ...this.bezierDraft.h2 }
+    };
+  }
+
+  beginBezierAnchorDrag(which, startPos) {
+    if (!this.bezierDraft) return;
+    this._bezierDragStart = {
+      which,
+      mouse: { x: startPos.x, y: startPos.y },
+      start: { ...this.bezierDraft.start },
+      end: { ...this.bezierDraft.end },
+      h1: { ...this.bezierDraft.h1 },
+      h2: { ...this.bezierDraft.h2 }
+    };
+  }
+
+  applyBezierAnchorDrag(which, pos, shiftKey = false) {
+    if (!this.bezierDraft || !this._bezierDragStart) return;
+    const s = this._bezierDragStart;
+    const draft = this.bezierDraft;
+
+    let dx = pos.x - s.mouse.x;
+    let dy = pos.y - s.mouse.y;
+
+    if (which === 'bezierStart') {
+      let nextX = s.start.x + dx;
+      let nextY = s.start.y + dy;
+      if (shiftKey) {
+        const snapped = this.snapVector45(nextX - s.end.x, nextY - s.end.y);
+        nextX = s.end.x + snapped.dx;
+        nextY = s.end.y + snapped.dy;
+      }
+      const moveX = nextX - s.start.x;
+      const moveY = nextY - s.start.y;
+      draft.start.x = nextX;
+      draft.start.y = nextY;
+      draft.h1.x = s.h1.x + moveX;
+      draft.h1.y = s.h1.y + moveY;
+    } else {
+      let nextX = s.end.x + dx;
+      let nextY = s.end.y + dy;
+      if (shiftKey) {
+        const snapped = this.snapVector45(nextX - s.start.x, nextY - s.start.y);
+        nextX = s.start.x + snapped.dx;
+        nextY = s.start.y + snapped.dy;
+      }
+      const moveX = nextX - s.end.x;
+      const moveY = nextY - s.end.y;
+      draft.end.x = nextX;
+      draft.end.y = nextY;
+      draft.h2.x = s.h2.x + moveX;
+      draft.h2.y = s.h2.y + moveY;
+    }
+
+    this.updateBezierDraftPath();
+  }
+
+  applyBezierBendDrag(pos, shiftKey = false) {
+    if (!this.bezierDraft || !this._bezierDragStart) return;
+    let dx = pos.x - this._bezierDragStart.mouse.x;
+    let dy = pos.y - this._bezierDragStart.mouse.y;
+    if (shiftKey) {
+      const snapped = this.snapVector45(dx, dy);
+      dx = snapped.dx;
+      dy = snapped.dy;
+    }
+    this.bezierDraft.h1.x = this._bezierDragStart.h1.x + dx;
+    this.bezierDraft.h1.y = this._bezierDragStart.h1.y + dy;
+    this.bezierDraft.h2.x = this._bezierDragStart.h2.x + dx;
+    this.bezierDraft.h2.y = this._bezierDragStart.h2.y + dy;
+    this.updateBezierDraftPath();
+  }
+
+  getBezierPointAndTangent(t, p0, p1, p2, p3) {
+    const u = 1 - t;
+    const tt = t * t;
+    const uu = u * u;
+    const uuu = uu * u;
+    const ttt = tt * t;
+
+    const x = (uuu * p0.x)
+      + (3 * uu * t * p1.x)
+      + (3 * u * tt * p2.x)
+      + (ttt * p3.x);
+
+    const y = (uuu * p0.y)
+      + (3 * uu * t * p1.y)
+      + (3 * u * tt * p2.y)
+      + (ttt * p3.y);
+
+    const dx = 3 * uu * (p1.x - p0.x)
+      + 6 * u * t * (p2.x - p1.x)
+      + 3 * tt * (p3.x - p2.x);
+    const dy = 3 * uu * (p1.y - p0.y)
+      + 6 * u * t * (p2.y - p1.y)
+      + 3 * tt * (p3.y - p2.y);
+
+    return {
+      x,
+      y,
+      angle: Math.atan2(dy, dx)
+    };
+  }
+
+  sampleBezierDraft(draft = this.bezierDraft, minPoints = 96) {
+    if (!draft) return [];
+    const p0 = draft.start;
+    const p1 = draft.h1;
+    const p2 = draft.h2;
+    const p3 = draft.end;
+
+    const approxLen = Utils.distance(p0.x, p0.y, p1.x, p1.y)
+      + Utils.distance(p1.x, p1.y, p2.x, p2.y)
+      + Utils.distance(p2.x, p2.y, p3.x, p3.y);
+    const points = Math.max(minPoints, Math.ceil(approxLen / 2));
+    const samples = [];
+
+    let prevAngle = 0;
+    for (let i = 0; i <= points; i++) {
+      const t = i / points;
+      const pt = this.getBezierPointAndTangent(t, p0, p1, p2, p3);
+      if (!Number.isFinite(pt.angle)) pt.angle = prevAngle;
+      prevAngle = pt.angle;
+      samples.push(pt);
+    }
+    return samples;
+  }
+
+  updateBezierDraftPath() {
+    if (!this.bezierDraft) {
+      this.drawPath = [];
+      this.ghostBricks = [];
+      return;
+    }
+
+    const samples = this.sampleBezierDraft(this.bezierDraft);
+    this.drawPath = samples.map(s => ({ x: s.x, y: s.y }));
+    this.ghostBricks = this.computeGhostBricksFromSamples(samples, false, 'brick');
+
+    const mid = this.getBezierPointAndTangent(
+      0.5,
+      this.bezierDraft.start,
+      this.bezierDraft.h1,
+      this.bezierDraft.h2,
+      this.bezierDraft.end
+    );
+    this.bezierDraft.bend = { x: mid.x, y: mid.y };
+  }
+
   // Draw mode - collect points and update ghost preview
   // SHIFT = straight line snapped to nearest 10° from start point
   continueDraw(x, y, shiftKey = false) {
+    if (this.drawShapeMode === 'bezier') {
+      if (this.bezierDraft) {
+        this.updateBezierDraftPath();
+        return;
+      }
+      if (this.drawPath.length === 0) return;
+
+      const start = this.drawPath[0];
+      let endX = x;
+      let endY = y;
+      if (shiftKey) {
+        const snapped = this.snapVector45(endX - start.x, endY - start.y);
+        endX = start.x + snapped.dx;
+        endY = start.y + snapped.dy;
+      }
+
+      this.drawPath = [start, { x: endX, y: endY }];
+
+      const dx = endX - start.x;
+      const dy = endY - start.y;
+      const length = Math.hypot(dx, dy);
+      if (length < 10) {
+        this.ghostBricks = [];
+        return;
+      }
+
+      const steps = Math.max(24, Math.ceil(length / 2));
+      const angle = Math.atan2(dy, dx);
+      const samples = [];
+      for (let i = 0; i <= steps; i++) {
+        const t = i / steps;
+        samples.push({
+          x: start.x + dx * t,
+          y: start.y + dy * t,
+          angle
+        });
+      }
+      this.ghostBricks = this.computeGhostBricksFromSamples(samples, false, 'brick');
+      return;
+    }
+
     if (this.drawPath.length === 0) return;
 
     if (this.drawShapeMode === 'circle') {
@@ -852,10 +1509,11 @@ export class Editor {
   // Shared brick-placement logic: given pre-computed {x, y, angle} samples,
   // build arc-length table and place bricks edge-to-edge.
   // closedLoop: adjusts spacing for perfect integer tiling (circles).
-  computeGhostBricksFromSamples(samples, closedLoop = false) {
+  computeGhostBricksFromSamples(samples, closedLoop = false, forceShape = null) {
     if (samples.length < 2) return [];
 
-    const isBrick = this.selectedShape === 'brick';
+    const effectiveShape = forceShape || this.selectedShape;
+    const isBrick = effectiveShape === 'brick';
     let spacing = isBrick ? this.getBrickWidth() : PHYSICS_CONFIG.pegRadius * 2.2;
 
     // Build cumulative arc-length table
@@ -902,29 +1560,96 @@ export class Editor {
   commitGhostBricks() {
     const level = this.levelManager.getCurrentLevel();
     const toCommit = this.ghostBricks;
+    const draftSnapshot = this.bezierDraft
+      ? {
+          start: { ...this.bezierDraft.start },
+          end: { ...this.bezierDraft.end },
+          h1: { ...this.bezierDraft.h1 },
+          h2: { ...this.bezierDraft.h2 }
+        }
+      : null;
+    const previousBezierGroupId = this.activeBezierGroupId;
+    const isBezierCommit = this.drawShapeMode === 'bezier' && !!draftSnapshot;
+    const bezierGroupId = isBezierCommit ? (previousBezierGroupId || Utils.generateId()) : null;
+
     this.ghostBricks = [];
     this.drawPath = [];
+    this.bezierDraft = null;
+    this.activeBezierGroupId = null;
+    this._bezierDragStart = null;
     if (!level || toCommit.length === 0) return;
     this.saveUndoState();
-    const isBrick = this.selectedShape === 'brick';
+
+    if (isBezierCommit && previousBezierGroupId) {
+      level.pegs = level.pegs.filter(p => p.bezierGroupId !== previousBezierGroupId);
+    }
+
+    if (isBezierCommit && draftSnapshot && bezierGroupId) {
+      const store = this.ensureBezierCurveStore(level);
+      const bezierShape = 'brick';
+      store[bezierGroupId] = {
+        start: draftSnapshot.start,
+        end: draftSnapshot.end,
+        h1: draftSnapshot.h1,
+        h2: draftSnapshot.h2,
+        pegType: this.selectedPegType,
+        pegShape: bezierShape,
+        refPoints: toCommit.map((gb, index) => ({
+          index,
+          x: gb.x,
+          y: gb.y
+        }))
+      };
+    }
+
+    const commitShape = isBezierCommit ? 'brick' : this.selectedShape;
+    const isBrick = commitShape === 'brick';
     const w = this.getBrickWidth();
     const h = this.getBrickHeight();
-    for (const gb of toCommit) {
+    for (let i = 0; i < toCommit.length; i++) {
+      const gb = toCommit[i];
       const pegData = {
         x: gb.x,
         y: gb.y,
         type: this.selectedPegType,
-        shape: this.selectedShape,
+        shape: commitShape,
         angle: isBrick ? gb.angle : 0
       };
+      if (isBezierCommit && bezierGroupId) {
+        pegData.bezierGroupId = bezierGroupId;
+        pegData.bezierIndex = i;
+      }
       if (isBrick) {
         pegData.width = w;
         pegData.height = h;
         if (gb.slices) pegData.curveSlices = gb.slices;
       }
       if (!this.isPegPositionAllowed(pegData, pegData.x, pegData.y, pegData.angle, pegData.curveSlices)) continue;
-      this.levelManager.addPeg(pegData);
+      const newPeg = this.levelManager.addPeg(pegData);
     }
+
+    // Cleanup legacy artifacts from early bezier versions that committed circles
+    // along the same path without bezierGroupId metadata.
+    if (isBezierCommit && toCommit.length > 0) {
+      const near = PHYSICS_CONFIG.pegRadius * 0.9;
+      const legacyIds = [];
+      for (const peg of level.pegs) {
+        if (peg.bezierGroupId || peg.groupId) continue;
+        if (peg.shape !== 'circle') continue;
+        if (peg.type !== this.selectedPegType) continue;
+        for (const gb of toCommit) {
+          if (Utils.distance(peg.x, peg.y, gb.x, gb.y) <= near) {
+            legacyIds.push(peg.id);
+            break;
+          }
+        }
+      }
+      if (legacyIds.length >= 3) {
+        const idSet = new Set(legacyIds);
+        level.pegs = level.pegs.filter(p => !idSet.has(p.id));
+      }
+    }
+
     this.levelManager.save();
     const updated = this.levelManager.getCurrentLevel();
     if (updated && this.onPegCountChange) {
@@ -949,15 +1674,19 @@ export class Editor {
       }
     }
     
-    // Bumpers are always circles
-    const shape = this.selectedPegType === 'bumper' ? 'circle' : this.selectedShape;
+    const forceCircle = this.selectedPegType === 'bumper'
+      || this.selectedPegType === 'portalBlue'
+      || this.selectedPegType === 'portalOrange';
+    const shape = forceCircle ? 'circle' : this.selectedShape;
 
     const pegData = {
       x: x,
       y: y,
       type: this.selectedPegType,
       shape: shape,
-      angle: shape === 'brick' ? this.currentRotation : 0
+      angle: shape === 'brick' || this.selectedPegType === 'portalBlue' || this.selectedPegType === 'portalOrange'
+        ? this.currentRotation
+        : 0
     };
 
     if (shape === 'brick') {
@@ -968,6 +1697,11 @@ export class Editor {
     if (this.selectedPegType === 'bumper') {
       pegData.bumperBounce = 2.0;
       pegData.bumperScale = 1.0;
+    }
+    if (this.selectedPegType === 'portalBlue' || this.selectedPegType === 'portalOrange') {
+      pegData.portalScale = 1.0;
+      pegData.portalOneWay = false;
+      pegData.portalOneWayFlip = false;
     }
     if (!this.isPegPositionAllowed(pegData, pegData.x, pegData.y, pegData.angle, pegData.curveSlices)) return null;
     
@@ -1127,6 +1861,19 @@ export class Editor {
           peg.shape = 'circle';
           if (peg.bumperBounce == null) peg.bumperBounce = 2.0;
           if (peg.bumperScale == null) peg.bumperScale = 1.0;
+          delete peg.portalScale;
+          delete peg.portalOneWay;
+          delete peg.portalOneWayFlip;
+        } else if (type === 'portalBlue' || type === 'portalOrange') {
+          peg.shape = 'circle';
+          if (peg.portalScale == null) peg.portalScale = 1.0;
+          if (peg.portalOneWay == null) peg.portalOneWay = false;
+          if (peg.portalOneWayFlip == null) peg.portalOneWayFlip = false;
+          delete peg.bumperBounce;
+          delete peg.bumperScale;
+          delete peg.bumperDisappear;
+          delete peg.bumperOrange;
+          delete peg._bumperHitScale;
         } else {
           // Clean up bumper properties when changing away
           delete peg.bumperBounce;
@@ -1134,6 +1881,9 @@ export class Editor {
           delete peg.bumperDisappear;
           delete peg.bumperOrange;
           delete peg._bumperHitScale;
+          delete peg.portalScale;
+          delete peg.portalOneWay;
+          delete peg.portalOneWayFlip;
         }
       }
     }
@@ -1150,8 +1900,11 @@ export class Editor {
     for (const pegId of this.selectedPegIds) {
       const peg = level.pegs.find(p => p.id === pegId);
       if (peg) {
-        peg.shape = shape;
-        if (shape === 'brick') {
+        const forceCircle = peg.type === 'bumper'
+          || peg.type === 'portalBlue'
+          || peg.type === 'portalOrange';
+        peg.shape = forceCircle ? 'circle' : shape;
+        if (peg.shape === 'brick') {
           peg.width = peg.width || this.getBrickWidth();
           peg.height = peg.height || this.getBrickHeight();
         }
@@ -1306,6 +2059,11 @@ export class Editor {
           pegData.bumperDisappear = peg.bumperDisappear;
           pegData.bumperOrange = peg.bumperOrange;
         }
+        if (peg.type === 'portalBlue' || peg.type === 'portalOrange') {
+          pegData.portalScale = peg.portalScale;
+          pegData.portalOneWay = !!peg.portalOneWay;
+          pegData.portalOneWayFlip = !!peg.portalOneWayFlip;
+        }
         const newPeg = this.levelManager.addPeg(pegData);
         if (newPeg) {
           newPegIds.add(newPeg.id);
@@ -1345,6 +2103,11 @@ export class Editor {
           pegData.bumperScale = peg.bumperScale;
           pegData.bumperDisappear = peg.bumperDisappear;
           pegData.bumperOrange = peg.bumperOrange;
+        }
+        if (peg.type === 'portalBlue' || peg.type === 'portalOrange') {
+          pegData.portalScale = peg.portalScale;
+          pegData.portalOneWay = !!peg.portalOneWay;
+          pegData.portalOneWayFlip = !!peg.portalOneWayFlip;
         }
         const newPeg = this.levelManager.addPeg(pegData);
         if (newPeg) {
@@ -1443,6 +2206,10 @@ export class Editor {
 
   render() {
     const level = this.levelManager.getCurrentLevel();
+    const survivalOn = this.isSurvivalMode();
+    const renderPegs = (level && this.mode === 'draw' && this.drawShapeMode === 'bezier' && this.bezierDraft && this.activeBezierGroupId)
+      ? level.pegs.filter(p => p.bezierGroupId !== this.activeBezierGroupId)
+      : (level ? level.pegs : []);
     const wrapCopyPegIds = (this.animationPreview && this.animationPreviewAnimator)
       ? this.animationPreviewAnimator.getAnimatedPegIds()
       : null;
@@ -1457,12 +2224,13 @@ export class Editor {
     const isBumperSelection = hasSelection && this.isSelectionAllBumpers();
 
     this.renderer.renderGame({
-      pegs: level ? level.pegs : [],
+      pegs: renderPegs,
       hitPegIds: [],
       wrapCopyPegIds,
       selectedPegIds: this.selectedPegIds,
       ball: null,
       bucket: null,
+      cameraY: this.getCameraY(),
       showLauncher: false,
       showGrid: this.showGrid,
       selectionBox: this.selectionBox,
@@ -1472,6 +2240,7 @@ export class Editor {
       isEditor: true,
       drawMode: this.mode === 'draw',
       drawShapeMode: this.drawShapeMode,
+      drawBezier: this.bezierDraft,
       drawCenter: (this.drawShapeMode !== 'free' && this.isInteracting && this.interactionType === 'draw')
         ? { x: this.startX, y: this.startY } : null,
       ghostBricks: this.ghostBricks,
@@ -1479,7 +2248,7 @@ export class Editor {
       brickWidth: this.getBrickWidth(),
       brickHeight: this.getBrickHeight(),
       pegType: this.selectedPegType,
-      pegShape: this.selectedShape,
+      pegShape: (this.mode === 'draw' && this.drawShapeMode === 'bezier') ? 'brick' : this.selectedShape,
       // Animation mode state
       animationMode: this.animationMode && !this.animationPreview,
       animationGhosts: (this.animationMode && !this.animationPreview) ? this.getAnimationGhosts() : null,
@@ -1491,7 +2260,9 @@ export class Editor {
       groups: level ? level.groups : [],
       // Flippers
       flippers: level ? level.flippers : null,
-      flipperSelected: this.flipperSelected
+      flipperSelected: this.flipperSelected,
+      survivalLoseLineY: survivalOn ? this.survivalRuntime.getLoseLineY() : null,
+      verticalProgress: survivalOn ? this.survivalRuntime.getTrackerState() : null
     });
   }
 
@@ -1514,6 +2285,11 @@ export class Editor {
 
   resize(width, height) {
     this.renderer.resize(width, height);
+    this.survivalRuntime.resize(height);
+    const level = this.levelManager.getCurrentLevel();
+    if (level) {
+      this.survivalRuntime.configure(ensureLevelSurvival(level, height));
+    }
   }
 
   setSelectedPegType(type) {
@@ -1525,6 +2301,9 @@ export class Editor {
   }
 
   setMode(mode) {
+    if (this.mode === 'draw' && mode !== 'draw') {
+      this.clearBezierDraft();
+    }
     this.mode = mode;
   }
 
@@ -1549,6 +2328,16 @@ export class Editor {
     for (const pegId of this.selectedPegIds) {
       const peg = level.pegs.find(p => p.id === pegId);
       if (!peg || peg.type !== 'bumper') return false;
+    }
+    return true;
+  }
+
+  isSelectionAllPortals() {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level || this.selectedPegIds.size === 0) return false;
+    for (const pegId of this.selectedPegIds) {
+      const peg = level.pegs.find(p => p.id === pegId);
+      if (!peg || (peg.type !== 'portalBlue' && peg.type !== 'portalOrange')) return false;
     }
     return true;
   }
@@ -1607,21 +2396,80 @@ export class Editor {
     return null;
   }
 
+  setSelectedPortalScale(scale) {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level) return;
+    const clamped = Utils.clamp(scale, 0.5, 5.0);
+    for (const pegId of this.selectedPegIds) {
+      const peg = level.pegs.find(p => p.id === pegId);
+      if (peg && (peg.type === 'portalBlue' || peg.type === 'portalOrange')) {
+        peg.portalScale = clamped;
+      }
+    }
+    this.levelManager.save();
+  }
+
+  setSelectedPortalOneWay(oneWay) {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level) return;
+    const enabled = !!oneWay;
+    for (const pegId of this.selectedPegIds) {
+      const peg = level.pegs.find(p => p.id === pegId);
+      if (peg && (peg.type === 'portalBlue' || peg.type === 'portalOrange')) {
+        peg.portalOneWay = enabled;
+      }
+    }
+    this.levelManager.save();
+  }
+
+  setSelectedPortalOneWayFlip(oneWayFlip) {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level) return;
+    const enabled = !!oneWayFlip;
+    for (const pegId of this.selectedPegIds) {
+      const peg = level.pegs.find(p => p.id === pegId);
+      if (peg && (peg.type === 'portalBlue' || peg.type === 'portalOrange')) {
+        peg.portalOneWayFlip = enabled;
+      }
+    }
+    this.levelManager.save();
+  }
+
+  getSelectedPortalProperties() {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level || this.selectedPegIds.size === 0) return null;
+    for (const pegId of this.selectedPegIds) {
+      const peg = level.pegs.find(p => p.id === pegId);
+      if (peg && (peg.type === 'portalBlue' || peg.type === 'portalOrange')) {
+        return {
+          scale: peg.portalScale ?? 1.0,
+          oneWay: !!peg.portalOneWay,
+          oneWayFlip: !!peg.portalOneWayFlip
+        };
+      }
+    }
+    return null;
+  }
+
   // Callback for bumper panel sync
   onBumperPropertyChange = null;
 
   // ── Flipper Helpers ──
 
   isNearFlipper(pos) {
-    const f = this.levelManager.getFlippers();
+    const f = normalizeFlipperConfig(this.levelManager.getFlippers(), {
+      canvasHeight: this.canvas.height,
+      cameraY: this.getCameraY(),
+      bounce: PHYSICS_CONFIG.bounce
+    });
     if (!f || !f.enabled) return false;
     const cx = this.canvas.width / 2;
-    const sc = f.scale || 1;
-    const len = (f.length || 40) * sc;
+    const sc = Number.isFinite(f.scale) ? f.scale : 1.8;
+    const len = (Number.isFinite(f.length) ? f.length : 60) * sc;
 
     for (const side of [-1, 1]) {
       const px = cx + side * f.xOffset;
-      const restRad = (f.restAngle || 25) * Math.PI / 180;
+      const restRad = (Number.isFinite(f.restAngle) ? f.restAngle : 23) * Math.PI / 180;
       const angle = (side === -1) ? restRad : (Math.PI - restRad);
       const tipX = px + Math.cos(angle) * len;
       const tipY = f.y + Math.sin(angle) * len;
@@ -1652,7 +2500,7 @@ export class Editor {
   // ── Animation Mode ──
 
   getAnimationWorldBounds() {
-    return { width: this.canvas.width, height: this.canvas.height };
+    return { width: this.canvas.width, height: this.getWorldHeight() };
   }
 
   resolveAnimationMotion(useInverse = this.animationInverse) {

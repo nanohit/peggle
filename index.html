@@ -21,6 +21,38 @@
     <!-- Canvas -->
     <div id="canvasContainer" class="canvas-container">
       <canvas id="gameCanvas"></canvas>
+      <!-- Survival settings side panel -->
+      <div id="survivalPanel" class="survival-panel">
+        <div class="survival-panel-title">Survival</div>
+        <label class="survival-toggle-row">
+          <span>Enable Vertical Mode</span>
+          <input type="checkbox" id="survivalModeToggle">
+        </label>
+        <div id="survivalControls" class="survival-controls hidden">
+          <div class="survival-control">
+            <label for="survivalHeightSlider">Vertical Length</label>
+            <div class="survival-control-row">
+              <input type="range" id="survivalHeightSlider" min="400" max="24000" step="1">
+              <input type="number" id="survivalHeightInput" min="400" max="24000" step="1">
+            </div>
+          </div>
+          <div class="survival-control">
+            <label for="survivalSpeedSlider">Move Speed</label>
+            <div class="survival-control-row">
+              <input type="range" id="survivalSpeedSlider" min="2" max="400" step="1">
+              <input type="number" id="survivalSpeedInput" min="2" max="400" step="1">
+            </div>
+          </div>
+          <div class="survival-control">
+            <label for="survivalLoseLineSlider">Lose Line</label>
+            <div class="survival-control-row">
+              <input type="range" id="survivalLoseLineSlider" min="8" step="1">
+              <input type="number" id="survivalLoseLineInput" min="8" step="1">
+            </div>
+          </div>
+          <div class="survival-hint">Hold Shift for 5-step snapping</div>
+        </div>
+      </div>
       <!-- Animation side panel (inside canvas-container so canvas stays visible) -->
       <div id="animPanel" class="anim-panel">
         <div class="anim-panel-title">Animate <button id="closeAnimPanel" class="anim-close-btn">✕</button></div>
@@ -73,16 +105,16 @@
         <div class="bumper-panel-title">Flippers <button id="closeFlipperPanel" class="anim-close-btn">✕</button></div>
         <div class="bumper-panel-body">
           <div class="anim-slider">
-            <label>Length <input type="number" id="flipperLengthInput" class="anim-num" value="40" step="1" min="20" max="150"></label>
-            <input type="range" id="flipperLengthSlider" min="20" max="150" value="40">
+            <label>Length <input type="number" id="flipperLengthInput" class="anim-num" value="60" step="1" min="20" max="150"></label>
+            <input type="range" id="flipperLengthSlider" min="20" max="150" value="60">
           </div>
           <div class="anim-slider">
-            <label>Spread <input type="number" id="flipperOffsetInput" class="anim-num" value="50" step="1" min="10" max="250"></label>
-            <input type="range" id="flipperOffsetSlider" min="10" max="250" value="50">
+            <label>Spread <input type="number" id="flipperOffsetInput" class="anim-num" value="196" step="1" min="10" max="250"></label>
+            <input type="range" id="flipperOffsetSlider" min="10" max="250" value="196">
           </div>
           <div class="anim-slider">
-            <label>Rest ° <input type="number" id="flipperRestInput" class="anim-num" value="25" step="1" min="5" max="60"></label>
-            <input type="range" id="flipperRestSlider" min="5" max="60" value="25">
+            <label>Rest ° <input type="number" id="flipperRestInput" class="anim-num" value="23" step="1" min="5" max="60"></label>
+            <input type="range" id="flipperRestSlider" min="5" max="60" value="23">
           </div>
           <div class="anim-slider">
             <label>Flip ° <input type="number" id="flipperFlipInput" class="anim-num" value="30" step="1" min="0" max="70"></label>
@@ -97,9 +129,21 @@
             <input type="range" id="flipperWidthSlider" min="4" max="40" value="8">
           </div>
           <div class="anim-slider">
-            <label>Scale <input type="number" id="flipperScaleInput" class="anim-num" value="1.0" step="0.1" min="0.5" max="3.0"></label>
-            <input type="range" id="flipperScaleSlider" min="5" max="30" value="10">
+            <label>Scale <input type="number" id="flipperScaleInput" class="anim-num" value="1.8" step="0.1" min="0.5" max="3.0"></label>
+            <input type="range" id="flipperScaleSlider" min="5" max="30" value="18">
           </div>
+        </div>
+      </div>
+      <!-- Portal properties panel (right side) -->
+      <div id="portalPanel" class="bumper-panel">
+        <div class="bumper-panel-title">Portal <button id="closePortalPanel" class="anim-close-btn">✕</button></div>
+        <div class="bumper-panel-body">
+          <div class="anim-slider">
+            <label>Scale <input type="number" id="portalScaleInput" class="anim-num" value="1.0" step="0.1" min="0.5" max="5.0"></label>
+            <input type="range" id="portalScaleSlider" min="5" max="50" value="10">
+          </div>
+          <label class="anim-toggle"><input type="checkbox" id="portalOneWayToggle"> One-sided (back side collides)</label>
+          <label class="anim-toggle"><input type="checkbox" id="portalOneWayFlipToggle"> Invert one-sided direction</label>
         </div>
       </div>
     </div>
@@ -121,6 +165,8 @@
           <button class="peg-btn" data-type="multi" title="Multiball"></button>
           <button class="peg-btn" data-type="obstacle" title="Obstacle (Stays)"></button>
           <button class="peg-btn" data-type="bumper" title="Bumper (Bouncy)"></button>
+          <button class="peg-btn" data-type="portalBlue" title="Portal Blue"></button>
+          <button class="peg-btn" data-type="portalOrange" title="Portal Orange"></button>
         </div>
         <div class="shape-buttons">
           <button class="shape-btn active" data-shape="circle" title="Circle">●</button>

@@ -39,6 +39,12 @@ const COLORS = {
   bumperHit: '#ffffff',
   bumperGlow: 'rgba(224, 224, 224, 0.5)',
   bumperRing: '#a0a0a0',
+
+  // Portals
+  portalBlue: '#4ecdc4',
+  portalBlueGlow: 'rgba(78, 205, 196, 0.5)',
+  portalOrange: '#ff8b3d',
+  portalOrangeGlow: 'rgba(255, 139, 61, 0.5)',
   
   // Ball
   ball: '#f8f9fa',
@@ -79,7 +85,9 @@ const PEG_COLORS = {
   purple: { main: COLORS.purple, hit: COLORS.purpleHit, glow: COLORS.purpleGlow },
   multi: { main: COLORS.multi, hit: COLORS.multiHit, glow: COLORS.multiGlow },
   obstacle: { main: COLORS.obstacle, hit: COLORS.obstacle, glow: COLORS.obstacleGlow },
-  bumper: { main: COLORS.bumper, hit: COLORS.bumperHit, glow: COLORS.bumperGlow }
+  bumper: { main: COLORS.bumper, hit: COLORS.bumperHit, glow: COLORS.bumperGlow },
+  portalBlue: { main: COLORS.portalBlue, hit: COLORS.portalBlue, glow: COLORS.portalBlueGlow },
+  portalOrange: { main: COLORS.portalOrange, hit: COLORS.portalOrange, glow: COLORS.portalOrangeGlow }
 };
 
 export class Renderer {
@@ -126,11 +134,12 @@ export class Renderer {
     ctx.strokeRect(1, 1, this.width - 2, this.height - 2);
   }
 
-  drawGrid() {
+  drawGrid(cameraY = 0) {
     if (!this.showGrid) return;
     
     const ctx = this.ctx;
     ctx.lineWidth = 1;
+    const majorStep = this.gridSize * 5;
 
     // Vertical lines
     for (let x = 0; x <= this.width; x += this.gridSize) {
@@ -141,9 +150,12 @@ export class Renderer {
       ctx.stroke();
     }
 
-    // Horizontal lines
-    for (let y = 0; y <= this.height; y += this.gridSize) {
-      ctx.strokeStyle = y % (this.gridSize * 5) === 0 ? COLORS.gridLineStrong : COLORS.gridLine;
+    // Horizontal lines (camera-aware so world-space major lines stay aligned)
+    const startY = -(((cameraY % this.gridSize) + this.gridSize) % this.gridSize);
+    for (let y = startY; y <= this.height; y += this.gridSize) {
+      const worldY = y + cameraY;
+      const mod = ((Math.round(worldY) % majorStep) + majorStep) % majorStep;
+      ctx.strokeStyle = mod === 0 ? COLORS.gridLineStrong : COLORS.gridLine;
       ctx.beginPath();
       ctx.moveTo(0, y + 0.5);
       ctx.lineTo(this.width, y + 0.5);
@@ -264,6 +276,67 @@ export class Renderer {
       return;
     }
 
+    // ── Portal: oriented line trigger ──
+    if (peg.type === 'portalBlue' || peg.type === 'portalOrange') {
+      const halfLen = radius * (peg.portalScale || 1);
+      const lineColor = peg.type === 'portalBlue' ? COLORS.portalBlue : COLORS.portalOrange;
+      const glowColor = peg.type === 'portalBlue' ? COLORS.portalBlueGlow : COLORS.portalOrangeGlow;
+      const lineWidth = Math.max(3, radius * 0.5);
+
+      ctx.save();
+      ctx.translate(peg.x, peg.y);
+      ctx.rotate(peg.angle || 0);
+
+      if (!isHit) {
+        ctx.shadowColor = glowColor;
+        ctx.shadowBlur = 16;
+      }
+
+      ctx.strokeStyle = lineColor;
+      ctx.lineWidth = lineWidth;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(-halfLen, 0);
+      ctx.lineTo(halfLen, 0);
+      ctx.stroke();
+      ctx.lineCap = 'butt';
+
+      if (peg.portalOneWay) {
+        const blockedSign = peg.portalOneWayFlip ? -1 : 1;
+        const yOff = blockedSign * (lineWidth * 0.9 + 2);
+        ctx.shadowBlur = 0;
+        ctx.strokeStyle = 'rgba(170, 170, 170, 0.9)';
+        ctx.lineWidth = Math.max(2, lineWidth * 0.45);
+        ctx.beginPath();
+        ctx.moveTo(-halfLen, yOff);
+        ctx.lineTo(halfLen, yOff);
+        ctx.stroke();
+      }
+
+      // Direction marker along portal tangent.
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(halfLen * 0.05, 0);
+      ctx.lineTo(halfLen * 0.35, 0);
+      ctx.stroke();
+
+      if (isSelected) {
+        ctx.strokeStyle = COLORS.selection;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(
+          -halfLen - 7,
+          -(lineWidth * 0.5) - 7,
+          halfLen * 2 + 14,
+          lineWidth + 14
+        );
+      }
+
+      ctx.restore();
+      return;
+    }
+
     // ── Curved brick: render as a warped ribbon in world space ──
     if (peg.shape === 'brick' && peg.curveSlices && peg.curveSlices.length >= 2) {
       const halfH = (peg.height || PHYSICS_CONFIG.pegRadius * 1.2) / 2;
@@ -278,16 +351,7 @@ export class Renderer {
       ctx.fillStyle = isHit ? colors.hit : colors.main;
       ctx.fill();
 
-      // Subtle edge outline
       ctx.shadowBlur = 0;
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.18)';
-      ctx.lineWidth = 0.5;
-      ctx.stroke();
-
-      // Inner highlight (thin strip along top)
-      this.drawCurvedBrickPath(ctx, sl, halfH, halfH * 0.3);
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
-      ctx.fill();
 
       // Selection ring
       if (isSelected) {
@@ -607,22 +671,24 @@ export class Renderer {
     const ctx = this.ctx;
     const centerX = canvasWidth / 2;
     const t = flippers._flipperT || 0;
-    const restRad = (flippers.restAngle || 25) * Math.PI / 180;
-    const flipRad = (flippers.flipAngle ?? 30) * Math.PI / 180;
+    const restRad = (Number.isFinite(flippers.restAngle) ? flippers.restAngle : 23) * Math.PI / 180;
+    const flipRad = (Number.isFinite(flippers.flipAngle) ? flippers.flipAngle : 30) * Math.PI / 180;
 
-    const sc = flippers.scale || 1;
-    const len = (flippers.length || 40) * sc;
-    const w = (flippers.width || 8) * sc;
+    const sc = Number.isFinite(flippers.scale) ? flippers.scale : 1.8;
+    const len = (Number.isFinite(flippers.length) ? flippers.length : 60) * sc;
+    const w = (Number.isFinite(flippers.width) ? flippers.width : 8) * sc;
+    const xOffset = Number.isFinite(flippers.xOffset) ? flippers.xOffset : 196;
+    const y = Number.isFinite(flippers.y) ? flippers.y : (this.height - 55);
 
     // Left flipper: rest points down-right, flip points up-right
-    const leftPivotX = centerX - flippers.xOffset;
+    const leftPivotX = centerX - xOffset;
     const leftAngle = restRad - t * (restRad + flipRad);
-    this.drawSingleFlipper(leftPivotX, flippers.y, leftAngle, len, w, t, selected);
+    this.drawSingleFlipper(leftPivotX, y, leftAngle, len, w, t, selected);
 
     // Right flipper: mirrored
-    const rightPivotX = centerX + flippers.xOffset;
+    const rightPivotX = centerX + xOffset;
     const rightAngle = Math.PI - leftAngle;
-    this.drawSingleFlipper(rightPivotX, flippers.y, rightAngle, len, w, t, selected);
+    this.drawSingleFlipper(rightPivotX, y, rightAngle, len, w, t, selected);
   }
 
   drawSingleFlipper(pivotX, pivotY, angle, length, width, t, selected) {
@@ -668,7 +734,7 @@ export class Renderer {
     ctx.restore();
   }
 
-  drawScore(score, ballsLeft, orangePegsLeft, totalOrangePegs) {
+  drawScore(score, ballsLeft, orangePegsLeft, totalOrangePegs, centerLabel = null) {
     const ctx = this.ctx;
     
     ctx.fillStyle = COLORS.text;
@@ -676,13 +742,14 @@ export class Renderer {
     ctx.textAlign = 'left';
     ctx.fillText(`${score.toLocaleString()}`, 10, 20);
 
+    const ballsLabel = Number.isFinite(ballsLeft) ? ballsLeft : '\u221E';
     ctx.textAlign = 'right';
-    ctx.fillText(`⚪ ${ballsLeft}`, this.width - 10, 20);
+    ctx.fillText(`⚪ ${ballsLabel}`, this.width - 10, 20);
 
-    // Orange pegs counter
-    ctx.fillStyle = COLORS.orange;
+    // Center tracker label
+    ctx.fillStyle = centerLabel ? COLORS.textDim : COLORS.orange;
     ctx.textAlign = 'center';
-    const pegsText = `🟠 ${totalOrangePegs - orangePegsLeft}/${totalOrangePegs}`;
+    const pegsText = centerLabel || `🟠 ${totalOrangePegs - orangePegsLeft}/${totalOrangePegs}`;
     ctx.fillText(pegsText, this.width / 2, 20);
   }
 
@@ -705,6 +772,48 @@ export class Renderer {
       ctx.font = '14px -apple-system, sans-serif';
       ctx.fillText(subtext, this.width / 2, this.height / 2 + 15);
     }
+  }
+
+  drawSurvivalLoseLine(lineY) {
+    if (!Number.isFinite(lineY)) return;
+    const ctx = this.ctx;
+    const y = Math.max(0, Math.min(this.height, lineY));
+
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255, 96, 96, 0.55)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([8, 6]);
+    ctx.beginPath();
+    ctx.moveTo(0, y + 0.5);
+    ctx.lineTo(this.width, y + 0.5);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+
+  drawVerticalProgressTracker(progressState) {
+    if (!progressState) return;
+    const remainingRatio = Math.max(0, Math.min(1, progressState.remainingRatio ?? 0));
+    const progressRatio = Math.max(0, Math.min(1, progressState.progressRatio ?? 0));
+
+    const ctx = this.ctx;
+    const x = 6;
+    const y = 36;
+    const width = 4;
+    const height = Math.max(30, this.height - 72);
+    const fillHeight = height * remainingRatio;
+    const markerY = y + height * progressRatio;
+
+    ctx.save();
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+    ctx.fillRect(x, y, width, height);
+
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.18)';
+    ctx.fillRect(x, y, width, fillHeight);
+
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.26)';
+    ctx.fillRect(x - 1, markerY - 1, width + 2, 2);
+    ctx.restore();
   }
 
   // Faint line showing the raw drawn path
@@ -739,13 +848,6 @@ export class Renderer {
         // Curved ghost brick — warped ribbon
         this.drawCurvedBrickPath(ctx, gb.slices, halfH, -halfH);
         ctx.fillStyle = colors.main;
-        ctx.fill();
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
-        ctx.lineWidth = 0.5;
-        ctx.stroke();
-        // Top highlight
-        this.drawCurvedBrickPath(ctx, gb.slices, halfH, halfH * 0.3);
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
         ctx.fill();
       } else if (pegShape === 'brick') {
         // Flat ghost brick fallback
@@ -978,14 +1080,91 @@ export class Renderer {
       ctx.textAlign = 'right';
       let hint;
       if (drawShapeMode === 'circle') {
-        hint = 'DRAW: Circle (C) | W=sine D=free';
+        hint = 'DRAW: Circle (C) | W=sine B=bezier D=free';
       } else if (drawShapeMode === 'sine') {
-        hint = 'DRAW: Sine (W) | C=circle D=free';
+        hint = 'DRAW: Sine (W) | C=circle B=bezier D=free';
+      } else if (drawShapeMode === 'bezier') {
+        hint = 'DRAW: Bezier (B) | SHIFT=45° handles | Enter=pegglify';
       } else {
-        hint = 'DRAW: Freehand | SHIFT=snap | C=circle W=sine';
+        hint = 'DRAW: Freehand | SHIFT=snap | C=circle W=sine B=bezier';
       }
       ctx.fillText(hint, this.width - 10, this.height - 15);
     }
+  }
+
+  drawBezierDraftGuides(draft) {
+    if (!draft) return;
+    const ctx = this.ctx;
+
+    const drawHandlePoint = (x, y) => {
+      const r = 6;
+      ctx.beginPath();
+      ctx.moveTo(x, y - r);
+      ctx.lineTo(x + r, y);
+      ctx.lineTo(x, y + r);
+      ctx.lineTo(x - r, y);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    };
+
+    const drawAnchor = (x, y) => {
+      ctx.beginPath();
+      ctx.arc(x, y, 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    };
+
+    ctx.save();
+
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(draft.start.x, draft.start.y);
+    ctx.lineTo(draft.end.x, draft.end.y);
+    ctx.stroke();
+
+    ctx.strokeStyle = 'rgba(66, 167, 255, 0.9)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(draft.start.x, draft.start.y);
+    ctx.lineTo(draft.h1.x, draft.h1.y);
+    ctx.moveTo(draft.end.x, draft.end.y);
+    ctx.lineTo(draft.h2.x, draft.h2.y);
+    ctx.stroke();
+
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(draft.start.x, draft.start.y);
+    ctx.bezierCurveTo(
+      draft.h1.x, draft.h1.y,
+      draft.h2.x, draft.h2.y,
+      draft.end.x, draft.end.y
+    );
+    ctx.stroke();
+
+    ctx.fillStyle = '#ffffff';
+    ctx.strokeStyle = '#42a7ff';
+    ctx.lineWidth = 1.5;
+    drawAnchor(draft.start.x, draft.start.y);
+    drawAnchor(draft.end.x, draft.end.y);
+
+    ctx.fillStyle = '#42a7ff';
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.25;
+    drawHandlePoint(draft.h1.x, draft.h1.y);
+    drawHandlePoint(draft.h2.x, draft.h2.y);
+
+    ctx.fillStyle = '#42a7ff';
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.arc(draft.bend.x, draft.bend.y, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.restore();
   }
 
   drawShapeCenter(x, y) {
@@ -1073,9 +1252,17 @@ export class Renderer {
   renderGame(state) {
     this.clear();
     
+    const cameraY = Number.isFinite(state.cameraY) ? state.cameraY : 0;
+
     if (state.showGrid) {
       this.showGrid = true;
-      this.drawGrid();
+      this.drawGrid(cameraY);
+    }
+
+    const useCamera = Math.abs(cameraY) > 0.001;
+    if (useCamera) {
+      this.ctx.save();
+      this.ctx.translate(0, -cameraY);
     }
 
     this.drawPegs(
@@ -1114,10 +1301,6 @@ export class Renderer {
       this.drawLauncher(state.launchX, state.launchY, state.aimAngle, state.showAim);
     }
 
-    if (state.score !== undefined) {
-      this.drawScore(state.score, state.ballsLeft, state.orangePegsLeft, state.totalOrangePegs);
-    }
-
     if (state.selectionBox) {
       this.drawSelectionBox(
         state.selectionBox.startX,
@@ -1144,20 +1327,46 @@ export class Renderer {
       );
     }
 
-    if (state.message) {
-      this.drawMessage(state.message, state.subMessage);
-    }
-
     if (state.drawCenter) {
       this.drawShapeCenter(state.drawCenter.x, state.drawCenter.y);
     }
 
+    if (state.drawBezier) {
+      this.drawBezierDraftGuides(state.drawBezier);
+    }
+
+    if (state.isEditor && !state.animationMode) {
+      this.drawAnimationIndicators(state.pegs, state.groups);
+    }
+
+    if (useCamera) {
+      this.ctx.restore();
+    }
+
+    if (state.survivalLoseLineY != null) {
+      this.drawSurvivalLoseLine(state.survivalLoseLineY);
+    }
+
+    if (state.verticalProgress) {
+      this.drawVerticalProgressTracker(state.verticalProgress);
+    }
+
+    if (state.score !== undefined) {
+      this.drawScore(
+        state.score,
+        state.ballsLeft,
+        state.orangePegsLeft,
+        state.totalOrangePegs,
+        state.centerLabel || null
+      );
+    }
+
+    if (state.message) {
+      this.drawMessage(state.message, state.subMessage);
+    }
+
     if (state.isEditor) {
       this.drawEditorHUD(state.pegs.length, state.selectedPegIds?.size || 0, state.drawMode, state.drawShapeMode);
-      // Show animation indicators when not in animation mode
-      if (!state.animationMode) {
-        this.drawAnimationIndicators(state.pegs, state.groups);
-      }
     }
   }
 }

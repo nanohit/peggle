@@ -4,6 +4,9 @@ import { Game } from './game.js';
 import { Editor } from './editor.js';
 import { LevelManager } from './levels.js';
 import { PHYSICS_CONFIG } from './physics.js';
+import { FLIPPER_DEFAULTS, createDefaultFlipperConfig, normalizeFlipperConfig } from './flipper-defaults.js';
+import { ensureLevelSurvival, normalizeSurvivalSettings } from './survival-mode.js';
+import { GambleSystem } from './gamble-system.js';
 
 // Fixed aspect ratio: 3:4.5 (width:height)
 const ASPECT_RATIO = 3 / 4.5;
@@ -17,6 +20,7 @@ class PeggleApp {
     this.levelManager = new LevelManager();
     this.game = null;
     this.editor = null;
+    this.gambleSystem = null;
     
     this.mode = 'editor'; // 'editor' or 'play'
     
@@ -52,6 +56,25 @@ class PeggleApp {
     
     if (this.game) this.game.resize(width, height);
     if (this.editor) this.editor.resize(width, height);
+
+    const level = this.levelManager.getCurrentLevel();
+    if (level) {
+      const prev = level.survival ? { ...level.survival } : null;
+      const normalized = ensureLevelSurvival(level, height);
+      if (
+        !prev ||
+        prev.enabled !== normalized.enabled ||
+        prev.worldHeight !== normalized.worldHeight ||
+        prev.scrollSpeed !== normalized.scrollSpeed ||
+        prev.loseLineY !== normalized.loseLineY
+      ) {
+        this.levelManager.save();
+      }
+      if (this.editor) {
+        this.editor.setSurvivalSettings(normalized);
+      }
+      this.updateLevelSettings();
+    }
   }
 
   setupUI() {
@@ -68,19 +91,20 @@ class PeggleApp {
     // Peg type buttons
     document.querySelectorAll('.peg-btn').forEach(btn => {
       btn.addEventListener('click', () => {
+        const selectedType = btn.dataset.type;
         document.querySelectorAll('.peg-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         if (this.editor) {
-          this.editor.setSelectedPegType(btn.dataset.type);
+          this.editor.setSelectedPegType(selectedType);
+          const forceCircleShape = this._isCircleOnlyType(selectedType);
+          if (forceCircleShape) {
+            this.editor.setSelectedShape('circle');
+            this._setActiveShapeButton('circle');
+          }
           // Also change type of selected pegs
           if (this.editor.selectedPegIds.size > 0) {
-            this.editor.setSelectedPegsType(btn.dataset.type);
-            // Show/hide bumper panel
-            if (btn.dataset.type === 'bumper' && this.editor.isSelectionAllBumpers()) {
-              this.showBumperPanel();
-            } else {
-              this.closeBumperPanel();
-            }
+            this.editor.setSelectedPegsType(selectedType);
+            this.syncSelectionPanels();
           }
         }
       });
@@ -89,6 +113,11 @@ class PeggleApp {
     // Shape buttons
     document.querySelectorAll('.shape-btn').forEach(btn => {
       btn.addEventListener('click', () => {
+        if (this.editor && this._isCircleOnlyType(this.editor.selectedPegType)) {
+          this.editor.setSelectedShape('circle');
+          this._setActiveShapeButton('circle');
+          return;
+        }
         document.querySelectorAll('.shape-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         if (this.editor) {
@@ -219,16 +248,18 @@ class PeggleApp {
         level.flippers.enabled = false;
         this.closeFlipperPanel();
       } else {
-        level.flippers = level.flippers || {
-          enabled: true,
-          y: this.canvas.height - 55,
-          xOffset: 50,
-          length: 40,
-          width: 8,
-          restAngle: 25,
-          flipAngle: 30,
+        const cameraY = this.editor?.getCameraY?.() || 0;
+        const normalized = normalizeFlipperConfig(level.flippers, {
+          canvasHeight: this.canvas.height,
+          cameraY,
           bounce: PHYSICS_CONFIG.bounce
-        };
+        });
+        level.flippers = normalized || createDefaultFlipperConfig({
+          canvasHeight: this.canvas.height,
+          cameraY,
+          bounce: PHYSICS_CONFIG.bounce,
+          enabled: true
+        });
         level.flippers.enabled = true;
         this.showFlipperPanel();
       }
@@ -331,8 +362,14 @@ class PeggleApp {
     // Bumper panel
     this.setupBumperPanel();
 
+    // Portal panel
+    this.setupPortalPanel();
+
     // Flipper panel
     this.setupFlipperPanel();
+
+    // Survival mode panel
+    this.setupSurvivalPanel();
 
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
@@ -676,6 +713,46 @@ class PeggleApp {
     });
   }
 
+  setupPortalPanel() {
+    const scaleSlider = document.getElementById('portalScaleSlider');
+    const scaleInput = document.getElementById('portalScaleInput');
+    const oneWayToggle = document.getElementById('portalOneWayToggle');
+    const oneWayFlipToggle = document.getElementById('portalOneWayFlipToggle');
+
+    document.getElementById('closePortalPanel').addEventListener('click', () => {
+      this.closePortalPanel();
+    });
+
+    const setScale = (rawValue) => {
+      if (!this.editor) return;
+      const v = Math.max(0.5, Math.min(5.0, rawValue));
+      this.editor.setSelectedPortalScale(v);
+    };
+
+    scaleSlider.addEventListener('input', () => {
+      const v = parseInt(scaleSlider.value) / 10;
+      scaleInput.value = v.toFixed(1);
+      setScale(v);
+    });
+
+    scaleInput.addEventListener('input', () => {
+      const v = parseFloat(scaleInput.value) || 1.0;
+      scaleSlider.value = Math.max(5, Math.min(50, Math.round(v * 10)));
+      setScale(v);
+    });
+
+    oneWayToggle.addEventListener('change', () => {
+      if (!this.editor) return;
+      this.editor.setSelectedPortalOneWay(oneWayToggle.checked);
+      oneWayFlipToggle.disabled = !oneWayToggle.checked;
+    });
+
+    oneWayFlipToggle.addEventListener('change', () => {
+      if (!this.editor) return;
+      this.editor.setSelectedPortalOneWayFlip(oneWayFlipToggle.checked);
+    });
+  }
+
   showBumperPanel() {
     const props = this.editor ? this.editor.getSelectedBumperProperties() : null;
     if (!props) return;
@@ -691,6 +768,22 @@ class PeggleApp {
 
   closeBumperPanel() {
     document.getElementById('bumperPanel').classList.remove('visible');
+  }
+
+  showPortalPanel() {
+    const props = this.editor ? this.editor.getSelectedPortalProperties() : null;
+    if (!props) return;
+
+    document.getElementById('portalScaleSlider').value = Math.round(props.scale * 10);
+    document.getElementById('portalScaleInput').value = props.scale.toFixed(1);
+    document.getElementById('portalOneWayToggle').checked = !!props.oneWay;
+    document.getElementById('portalOneWayFlipToggle').checked = !!props.oneWayFlip;
+    document.getElementById('portalOneWayFlipToggle').disabled = !props.oneWay;
+    document.getElementById('portalPanel').classList.add('visible');
+  }
+
+  closePortalPanel() {
+    document.getElementById('portalPanel').classList.remove('visible');
   }
 
   setupFlipperPanel() {
@@ -750,31 +843,172 @@ class PeggleApp {
     });
   }
 
+  setupSurvivalPanel() {
+    const panel = document.getElementById('survivalPanel');
+    const toggle = document.getElementById('survivalModeToggle');
+    const worldHeightSlider = document.getElementById('survivalHeightSlider');
+    const worldHeightInput = document.getElementById('survivalHeightInput');
+    const speedSlider = document.getElementById('survivalSpeedSlider');
+    const speedInput = document.getElementById('survivalSpeedInput');
+    const loseLineSlider = document.getElementById('survivalLoseLineSlider');
+    const loseLineInput = document.getElementById('survivalLoseLineInput');
+
+    if (
+      !panel || !toggle ||
+      !worldHeightSlider || !worldHeightInput ||
+      !speedSlider || !speedInput ||
+      !loseLineSlider || !loseLineInput
+    ) return;
+
+    let shiftHeld = false;
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Shift') {
+        shiftHeld = true;
+      }
+    });
+    window.addEventListener('keyup', (e) => {
+      if (e.key === 'Shift') {
+        shiftHeld = false;
+      }
+    });
+
+    const snap5 = (value) => shiftHeld ? Math.round(value / 5) * 5 : value;
+
+    toggle.addEventListener('change', () => {
+      this.updateLevelSurvivalSettings({ enabled: toggle.checked });
+      this._setSurvivalSettingsVisible(toggle.checked);
+    });
+
+    const applyWorldHeight = (rawValue) => {
+      const minHeight = this.canvas.height;
+      const parsed = Math.round(parseFloat(rawValue) || minHeight);
+      const value = Math.max(minHeight, parsed);
+      worldHeightSlider.value = value;
+      worldHeightInput.value = value;
+      this.updateLevelSurvivalSettings({ worldHeight: value });
+    };
+
+    worldHeightSlider.addEventListener('input', () => {
+      let value = parseInt(worldHeightSlider.value, 10) || this.canvas.height;
+      value = snap5(value);
+      worldHeightSlider.value = value;
+      worldHeightInput.value = value;
+    });
+    worldHeightSlider.addEventListener('change', () => applyWorldHeight(worldHeightSlider.value));
+    worldHeightInput.addEventListener('change', () => applyWorldHeight(worldHeightInput.value));
+
+    const applySpeed = (rawValue) => {
+      let parsed = parseFloat(rawValue) || 20;
+      parsed = snap5(parsed);
+      const value = Math.max(2, Math.min(400, parsed));
+      speedSlider.value = value;
+      speedInput.value = value.toFixed(1);
+      this.updateLevelSurvivalSettings({ scrollSpeed: value });
+    };
+
+    speedSlider.addEventListener('input', () => {
+      let value = parseInt(speedSlider.value, 10) || 20;
+      value = snap5(value);
+      speedSlider.value = value;
+      speedInput.value = value.toFixed(1);
+    });
+    speedSlider.addEventListener('change', () => applySpeed(speedSlider.value));
+    speedInput.addEventListener('change', () => applySpeed(speedInput.value));
+
+    const applyLoseLine = (rawValue) => {
+      const maxLine = Math.max(8, this.canvas.height - 8);
+      let parsed = Math.round(parseFloat(rawValue) || 8);
+      parsed = snap5(parsed);
+      const value = Math.max(8, Math.min(maxLine, parsed));
+      loseLineSlider.value = value;
+      loseLineInput.value = value;
+      this.updateLevelSurvivalSettings({ loseLineY: value });
+    };
+
+    loseLineSlider.addEventListener('input', () => {
+      let value = parseInt(loseLineSlider.value, 10) || 8;
+      value = snap5(value);
+      loseLineSlider.value = value;
+      loseLineInput.value = value;
+    });
+    loseLineSlider.addEventListener('change', () => applyLoseLine(loseLineSlider.value));
+    loseLineInput.addEventListener('change', () => applyLoseLine(loseLineInput.value));
+  }
+
+  _setSurvivalSettingsVisible(visible) {
+    const container = document.getElementById('survivalControls');
+    if (!container) return;
+    container.classList.toggle('hidden', !visible);
+  }
+
+  setSurvivalPanelVisible(visible) {
+    const panel = document.getElementById('survivalPanel');
+    if (!panel) return;
+    panel.classList.toggle('visible', !!visible);
+  }
+
+  updateLevelSurvivalSettings(partialSettings) {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level) return;
+
+    const current = ensureLevelSurvival(level, this.canvas.height);
+    level.survival = normalizeSurvivalSettings(
+      { ...current, ...partialSettings },
+      this.canvas.height
+    );
+    this.levelManager.save();
+    this.applySurvivalSettingsToEditor();
+    this.updateLevelSettings();
+  }
+
+  applySurvivalSettingsToEditor() {
+    if (!this.editor) return;
+    const level = this.levelManager.getCurrentLevel();
+    if (!level) return;
+    this.editor.setSurvivalSettings(ensureLevelSurvival(level, this.canvas.height));
+  }
+
   _setFlipperProp(prop, value) {
     const level = this.levelManager.getCurrentLevel();
-    if (!level || !level.flippers) return;
-    level.flippers[prop] = value;
+    if (!level) return;
+    const cameraY = this.editor?.getCameraY?.() || 0;
+    const base = normalizeFlipperConfig(level.flippers, {
+      canvasHeight: this.canvas.height,
+      cameraY,
+      bounce: PHYSICS_CONFIG.bounce
+    }) || createDefaultFlipperConfig({
+      canvasHeight: this.canvas.height,
+      cameraY,
+      bounce: PHYSICS_CONFIG.bounce,
+      enabled: true
+    });
+    level.flippers = { ...base, [prop]: value, enabled: true };
     this.levelManager.save();
   }
 
   showFlipperPanel() {
-    const f = this.levelManager.getFlippers();
+    const cameraY = this.editor?.getCameraY?.() || 0;
+    const f = normalizeFlipperConfig(this.levelManager.getFlippers(), {
+      canvasHeight: this.canvas.height,
+      cameraY,
+      bounce: PHYSICS_CONFIG.bounce
+    });
     if (!f) return;
 
-    document.getElementById('flipperLengthSlider').value = f.length || 40;
-    document.getElementById('flipperLengthInput').value = f.length || 40;
-    document.getElementById('flipperOffsetSlider').value = f.xOffset || 50;
-    document.getElementById('flipperOffsetInput').value = f.xOffset || 50;
-    document.getElementById('flipperRestSlider').value = f.restAngle || 25;
-    document.getElementById('flipperRestInput').value = f.restAngle || 25;
-    document.getElementById('flipperFlipSlider').value = f.flipAngle ?? 30;
-    document.getElementById('flipperFlipInput').value = f.flipAngle ?? 30;
-    document.getElementById('flipperWidthSlider').value = f.width || 8;
-    document.getElementById('flipperWidthInput').value = f.width || 8;
+    document.getElementById('flipperLengthSlider').value = f.length ?? FLIPPER_DEFAULTS.length;
+    document.getElementById('flipperLengthInput').value = f.length ?? FLIPPER_DEFAULTS.length;
+    document.getElementById('flipperOffsetSlider').value = f.xOffset ?? FLIPPER_DEFAULTS.xOffset;
+    document.getElementById('flipperOffsetInput').value = f.xOffset ?? FLIPPER_DEFAULTS.xOffset;
+    document.getElementById('flipperRestSlider').value = f.restAngle ?? FLIPPER_DEFAULTS.restAngle;
+    document.getElementById('flipperRestInput').value = f.restAngle ?? FLIPPER_DEFAULTS.restAngle;
+    document.getElementById('flipperFlipSlider').value = f.flipAngle ?? FLIPPER_DEFAULTS.flipAngle;
+    document.getElementById('flipperFlipInput').value = f.flipAngle ?? FLIPPER_DEFAULTS.flipAngle;
+    document.getElementById('flipperWidthSlider').value = f.width ?? FLIPPER_DEFAULTS.width;
+    document.getElementById('flipperWidthInput').value = f.width ?? FLIPPER_DEFAULTS.width;
     const bounce = f.bounce ?? PHYSICS_CONFIG.bounce;
     document.getElementById('flipperBounceSlider').value = bounce.toFixed(2);
     document.getElementById('flipperBounceInput').value = bounce.toFixed(2);
-    const scale = f.scale ?? 1.0;
+    const scale = f.scale ?? FLIPPER_DEFAULTS.scale;
     document.getElementById('flipperScaleSlider').value = Math.round(scale * 10);
     document.getElementById('flipperScaleInput').value = scale.toFixed(1);
     document.getElementById('flipperPanel').classList.add('visible');
@@ -782,6 +1016,37 @@ class PeggleApp {
 
   closeFlipperPanel() {
     document.getElementById('flipperPanel').classList.remove('visible');
+  }
+
+  _isPortalType(type) {
+    return type === 'portalBlue' || type === 'portalOrange';
+  }
+
+  _isCircleOnlyType(type) {
+    return type === 'bumper' || this._isPortalType(type);
+  }
+
+  _setActiveShapeButton(shape) {
+    document.querySelectorAll('.shape-btn').forEach(b => b.classList.remove('active'));
+    const target = document.querySelector(`.shape-btn[data-shape="${shape}"]`);
+    if (target) target.classList.add('active');
+  }
+
+  syncSelectionPanels() {
+    if (!this.editor) return;
+    const count = this.editor.selectedPegIds.size;
+
+    if (count > 0 && this.editor.isSelectionAllBumpers()) {
+      this.showBumperPanel();
+    } else {
+      this.closeBumperPanel();
+    }
+
+    if (count > 0 && this.editor.isSelectionAllPortals()) {
+      this.showPortalPanel();
+    } else {
+      this.closePortalPanel();
+    }
   }
 
   showAnimationPanel() {
@@ -866,6 +1131,8 @@ class PeggleApp {
   }
 
   startEditor() {
+    this.teardownGambleSystem();
+
     if (this.game) {
       this.game.stop();
       this.game = null;
@@ -876,6 +1143,10 @@ class PeggleApp {
     
     // Resize to current dimensions
     this.resizeCanvas();
+    const currentLevel = this.levelManager.getCurrentLevel();
+    if (currentLevel) {
+      this.editor.setSurvivalSettings(ensureLevelSurvival(currentLevel, this.canvas.height));
+    }
     
     this.editor.onPegCountChange = (count) => {
       document.getElementById('pegCount').textContent = `Pegs: ${count}`;
@@ -883,12 +1154,7 @@ class PeggleApp {
 
     this.editor.onSelectionChange = (count) => {
       document.getElementById('selectionCount').textContent = count > 0 ? `Selected: ${count}` : '';
-      // Show bumper panel when bumper(s) selected, hide otherwise
-      if (count > 0 && this.editor.isSelectionAllBumpers()) {
-        this.showBumperPanel();
-      } else {
-        this.closeBumperPanel();
-      }
+      this.syncSelectionPanels();
     };
 
     this.editor.onFlipperSelectionChange = (selected) => {
@@ -936,6 +1202,7 @@ class PeggleApp {
     document.getElementById('playBtn').innerHTML = '▶';
     document.getElementById('playBtn').title = 'Play Level';
     document.querySelector('.toolbar').style.display = 'flex';
+    this.setSurvivalPanelVisible(true);
 
     // Sync tool button states
     document.getElementById('gridBtn').classList.toggle('active', this.editor.showGrid);
@@ -946,17 +1213,22 @@ class PeggleApp {
     document.getElementById('flipperBtn').classList.toggle('active', !!(flipperData && flipperData.enabled));
     
     // Show current peg count
-    const level = this.levelManager.getCurrentLevel();
-    if (level) {
-      document.getElementById('pegCount').textContent = `Pegs: ${level.pegs.length}`;
+    if (currentLevel) {
+      document.getElementById('pegCount').textContent = `Pegs: ${currentLevel.pegs.length}`;
     }
+
+    // Keep side-panel settings in sync when switching/returning to editor.
+    this.updateLevelSettings();
   }
 
   startGame() {
+    this.teardownGambleSystem();
+
     if (this.editor) {
       // Close panels if open
       this.closeAnimationPanel();
       this.closeBumperPanel();
+      this.closePortalPanel();
       this.closeFlipperPanel();
       this.editor.stop();
       this.editor = null;
@@ -969,12 +1241,15 @@ class PeggleApp {
       return;
     }
 
-    // Check for at least one orange peg
-    const orangePegs = level.pegs.filter(p => p.type === 'orange' || (p.type === 'bumper' && p.bumperOrange));
-    if (orangePegs.length === 0) {
-      alert('Add at least one orange peg to play!');
-      this.startEditor();
-      return;
+    const survival = ensureLevelSurvival(level, this.canvas.height);
+    if (!survival.enabled) {
+      // Check for at least one orange peg in classic mode
+      const orangePegs = level.pegs.filter(p => p.type === 'orange' || (p.type === 'bumper' && p.bumperOrange));
+      if (orangePegs.length === 0) {
+        alert('Add at least one orange peg to play!');
+        this.startEditor();
+        return;
+      }
     }
 
     this.mode = 'play';
@@ -1007,6 +1282,31 @@ class PeggleApp {
     document.getElementById('playBtn').innerHTML = '✏️';
     document.getElementById('playBtn').title = 'Back to Editor';
     document.querySelector('.toolbar').style.display = 'none';
+    this.setSurvivalPanelVisible(false);
+    this.mountGambleSystem();
+  }
+
+  mountGambleSystem() {
+    if (!this.game) return;
+    const statusBar = document.querySelector('.status-bar');
+    const pegCountEl = document.getElementById('pegCount');
+    const selectionCountEl = document.getElementById('selectionCount');
+    if (!statusBar || !pegCountEl || !selectionCountEl) return;
+
+    this.gambleSystem = new GambleSystem({
+      game: this.game,
+      levelManager: this.levelManager,
+      statusBar,
+      pegCountEl,
+      selectionCountEl
+    });
+    this.gambleSystem.mount();
+  }
+
+  teardownGambleSystem() {
+    if (!this.gambleSystem) return;
+    this.gambleSystem.dispose();
+    this.gambleSystem = null;
   }
 
   handleGameRestart = () => {
@@ -1047,6 +1347,25 @@ class PeggleApp {
 
     document.getElementById('levelName').value = level.name;
     document.getElementById('levelDifficulty').value = level.difficulty || 1;
+
+    const survival = ensureLevelSurvival(level, this.canvas.height);
+    const minHeight = Math.round(this.canvas.height);
+    document.getElementById('survivalModeToggle').checked = !!survival.enabled;
+    const heightSlider = document.getElementById('survivalHeightSlider');
+    const heightInput = document.getElementById('survivalHeightInput');
+    heightSlider.min = String(minHeight);
+    heightInput.min = String(minHeight);
+    document.getElementById('survivalHeightSlider').value = Math.round(survival.worldHeight);
+    heightInput.value = Math.round(survival.worldHeight);
+    document.getElementById('survivalSpeedSlider').value = Math.round(survival.scrollSpeed);
+    document.getElementById('survivalSpeedInput').value = Number(survival.scrollSpeed).toFixed(1);
+    const loseLineSlider = document.getElementById('survivalLoseLineSlider');
+    const loseLineInput = document.getElementById('survivalLoseLineInput');
+    loseLineSlider.max = Math.max(8, Math.round(this.canvas.height - 8));
+    loseLineSlider.value = Math.round(survival.loseLineY);
+    loseLineInput.max = Math.max(8, Math.round(this.canvas.height - 8));
+    loseLineInput.value = Math.round(survival.loseLineY);
+    this._setSurvivalSettingsVisible(!!survival.enabled);
     
     const isInTraining = this.levelManager.isInTraining(level.id);
     document.getElementById('addToTrainingBtn').textContent = isInTraining ? 'Remove from Training' : 'Add to Training';
@@ -1056,6 +1375,8 @@ class PeggleApp {
     const name = `Level ${this.levelManager.getLevelCount() + 1}`;
     this.levelManager.createLevel(name);
     this.updateLevelTitle();
+    this.updateLevelSettings();
+    this.applySurvivalSettingsToEditor();
     
     if (this.mode === 'editor' && this.editor) {
       this.editor.selectedPegIds.clear();

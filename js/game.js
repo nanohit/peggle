@@ -4,6 +4,12 @@ import { Ball, PhysicsEngine, PHYSICS_CONFIG, getBallRadius } from './physics.js
 import { Renderer } from './renderer.js';
 import { Utils } from './utils.js';
 import { PegAnimator } from './animation.js';
+import { SurvivalRuntime } from './survival-runtime.js';
+import { createDefaultFlipperConfig, normalizeFlipperConfig } from './flipper-defaults.js';
+import {
+  countSurvivalTargets,
+  ensureLevelSurvival
+} from './survival-mode.js';
 
 // Score values
 const SCORE = {
@@ -22,6 +28,8 @@ const SCORE = {
   }
 };
 
+const EARLY_SHOT_TRIGGER_RATIO = 1 / 3;
+
 export class Game {
   constructor(canvas) {
     this.canvas = canvas;
@@ -29,16 +37,21 @@ export class Game {
     this.physics = new PhysicsEngine(canvas.width, canvas.height);
     
     // Game state
-    this.state = 'idle'; // idle, aiming, playing, won, lost
+    this.state = 'idle'; // idle, aiming, aimingNext, playing, won, lost
     this.pegs = [];
     this.balls = [];
     this.score = 0;
     this.ballsLeft = 10;
     this.hitPegIds = [];
     this.turnHitPegIds = [];
+    this.totalSurvivalTargets = 0;
+    this.initialBallCount = 10;
 
     // Flippers
     this.flippers = null;
+    this.baseFlipperConfig = null;
+    this.temporaryFlipperTurns = 0;
+    this.temporaryFlipperActive = false;
 
     // Stuck ball detection
     this.ballPositionHistory = [];
@@ -50,10 +63,14 @@ export class Game {
     this.launchX = canvas.width / 2;
     this.launchY = 40;
     this.aimAngle = Math.PI / 2;
+
+    // Survival mode runtime (camera + scrolling)
+    this.survivalRuntime = new SurvivalRuntime(canvas.height, { autoScroll: true });
     
     // Trajectory preview
     this.trajectory = null;
     this.showFullTrajectory = false;
+    this.ultraAimCharges = 0;
     
     // Animation
     this.animationId = null;
@@ -63,6 +80,8 @@ export class Game {
     this.onGameEnd = null;
     this.onScoreChange = null;
     this.onPegHit = null;
+    this.uiStateListeners = new Set();
+    this.lastUiStateSignature = '';
     
     // Listener cleanup
     this.abortController = new AbortController();
@@ -81,20 +100,20 @@ export class Game {
         // Restart handling
         return;
       }
-      if (this.state !== 'idle') return;
+      if (this.state !== 'idle' && !(this.state === 'playing' && this.canStartEarlyAim())) return;
       e.preventDefault();
-      this.state = 'aiming';
+      this.state = this.state === 'playing' ? 'aimingNext' : 'aiming';
       this.updateAim(e);
     };
 
     const handleMove = (e) => {
-      if (this.state !== 'aiming') return;
+      if (!this.isAimingState()) return;
       e.preventDefault();
       this.updateAim(e);
     };
 
     const handleEnd = (e) => {
-      if (this.state !== 'aiming') return;
+      if (!this.isAimingState()) return;
       e.preventDefault();
       this.launch();
     };
@@ -107,7 +126,7 @@ export class Game {
     // Mouse events
     canvas.addEventListener('mousedown', handleStart, sig);
     canvas.addEventListener('mousemove', (e) => {
-      if (this.state === 'aiming') handleMove(e);
+      if (this.isAimingState()) handleMove(e);
     }, sig);
     canvas.addEventListener('mouseup', handleEnd, sig);
 
@@ -143,6 +162,63 @@ export class Game {
     }, sig);
   }
 
+  getUiStateSnapshot() {
+    return {
+      state: this.state,
+      ballsLeft: this.ballsLeft,
+      initialBallCount: this.initialBallCount
+    };
+  }
+
+  getUiStateSignature() {
+    const snapshot = this.getUiStateSnapshot();
+    return `${snapshot.state}|${snapshot.ballsLeft}|${snapshot.initialBallCount}`;
+  }
+
+  subscribeUiState(listener) {
+    if (typeof listener !== 'function') return () => {};
+    this.uiStateListeners.add(listener);
+    listener(this.getUiStateSnapshot(), 'subscribe');
+    return () => {
+      this.uiStateListeners.delete(listener);
+    };
+  }
+
+  emitUiStateIfChanged(force = false, reason = 'tick') {
+    const signature = this.getUiStateSignature();
+    if (!force && signature === this.lastUiStateSignature) return;
+    this.lastUiStateSignature = signature;
+    if (this.uiStateListeners.size === 0) return;
+
+    const snapshot = this.getUiStateSnapshot();
+    for (const listener of this.uiStateListeners) {
+      try {
+        listener(snapshot, reason);
+      } catch (error) {
+        // Listener errors must not break the game loop.
+      }
+    }
+  }
+
+  isAimingState() {
+    return this.state === 'aiming' || this.state === 'aimingNext';
+  }
+
+  getEarlyShotTriggerY() {
+    return this.getCameraY() + this.canvas.height * EARLY_SHOT_TRIGGER_RATIO;
+  }
+
+  canStartEarlyAim() {
+    if (this.state !== 'playing') return false;
+    if (Number.isFinite(this.ballsLeft) && this.ballsLeft <= 0) return false;
+
+    const activeBalls = this.balls.filter(ball => ball && ball.active);
+    if (activeBalls.length === 0) return false;
+
+    const triggerY = this.getEarlyShotTriggerY();
+    return activeBalls.every(ball => ball.y >= triggerY);
+  }
+
   updateAim(e) {
     const rect = this.canvas.getBoundingClientRect();
     const scaleX = this.canvas.width / rect.width;
@@ -158,7 +234,7 @@ export class Game {
     }
 
     const x = (clientX - rect.left) * scaleX;
-    const y = (clientY - rect.top) * scaleY;
+    const y = (clientY - rect.top) * scaleY + this.getCameraY();
 
     // Calculate angle from launcher to touch point
     this.aimAngle = Utils.angleBetween(this.launchX, this.launchY, x, y);
@@ -175,17 +251,109 @@ export class Game {
   }
 
   updateTrajectory() {
+    const showFull = this.shouldShowFullTrajectory();
     this.trajectory = this.physics.predictTrajectory(
       this.launchX,
       this.launchY,
       this.aimAngle,
       PHYSICS_CONFIG.launchPower,
-      this.showFullTrajectory ? 1000 : 300,
-      !this.showFullTrajectory
+      showFull ? 1000 : 300,
+      !showFull
     );
   }
 
+  shouldShowFullTrajectory() {
+    return this.showFullTrajectory || this.ultraAimCharges > 0;
+  }
+
+  isSurvivalMode() {
+    return this.survivalRuntime.isEnabled();
+  }
+
+  getCameraY() {
+    return this.survivalRuntime.getCameraY();
+  }
+
+  updateLaunchPosition() {
+    this.launchX = this.canvas.width / 2;
+    this.launchY = 40 + this.getCameraY();
+  }
+
+  createRuntimeFlipper(config) {
+    return {
+      ...config,
+      enabled: true,
+      _flipperT: 0,
+      _flipperActivated: false,
+      _angularDelta: 0
+    };
+  }
+
+  createTemporaryFlipperConfig() {
+    return createDefaultFlipperConfig({
+      canvasHeight: this.canvas.height,
+      cameraY: this.getCameraY(),
+      bounce: PHYSICS_CONFIG.bounce,
+      enabled: true
+    });
+  }
+
+  refreshFlipperState() {
+    let flipperConfig = null;
+    if (this.baseFlipperConfig && this.baseFlipperConfig.enabled) {
+      flipperConfig = this.baseFlipperConfig;
+    } else if (this.temporaryFlipperActive) {
+      flipperConfig = this.createTemporaryFlipperConfig();
+    }
+
+    if (flipperConfig) {
+      this.flippers = this.createRuntimeFlipper(flipperConfig);
+      this.physics.setFlippers(this.flippers);
+    } else {
+      this.flippers = null;
+      this.physics.setFlippers(null);
+    }
+  }
+
+  getActiveHitPegIdSet() {
+    return new Set([...this.hitPegIds, ...this.turnHitPegIds]);
+  }
+
+  getSurvivalTargetsLeft(includePendingHits = true) {
+    if (!this.isSurvivalMode()) return this.getOrangePegsLeft();
+    const excluded = includePendingHits ? this.getActiveHitPegIdSet() : null;
+    return countSurvivalTargets(this.pegs, excluded);
+  }
+
+  checkSurvivalEndConditions() {
+    if (!this.isSurvivalMode()) return false;
+    if (this.state === 'won' || this.state === 'lost') return true;
+
+    const hitSet = this.getActiveHitPegIdSet();
+    for (const peg of this.pegs) {
+      if (hitSet.has(peg.id)) continue;
+      if (this.survivalRuntime.isPegBeyondLoseLine(peg, PHYSICS_CONFIG.pegRadius)) {
+        this.state = 'lost';
+        if (this.onGameEnd) this.onGameEnd('lost', this.score);
+        return true;
+      }
+    }
+
+    if (this.getSurvivalTargetsLeft(true) === 0) {
+      this.state = 'won';
+      if (this.onGameEnd) this.onGameEnd('won', this.score);
+      return true;
+    }
+
+    return false;
+  }
+
   loadLevel(levelData) {
+    const survivalSettings = ensureLevelSurvival(levelData, this.canvas.height);
+    this.survivalRuntime.resize(this.canvas.height);
+    this.survivalRuntime.configure(survivalSettings);
+    this.survivalRuntime.resetCamera(true);
+
     this.pegs = levelData.pegs.map(p => {
       const copy = { ...p };
       if (p.curveSlices) copy.curveSlices = p.curveSlices.map(s => ({ ...s }));
@@ -196,30 +364,37 @@ export class Game {
     this.animator.loadFromLevel(this.pegs, levelData.groups || []);
 
     // Load flippers
-    if (levelData.flippers && levelData.flippers.enabled) {
-      this.flippers = {
-        ...levelData.flippers,
-        _flipperT: 0,
-        _flipperActivated: false,
-        _angularDelta: 0
-      };
-      this.physics.setFlippers(this.flippers);
-    } else {
-      this.flippers = null;
-      this.physics.setFlippers(null);
-    }
+    const normalizedFlippers = normalizeFlipperConfig(levelData.flippers, {
+      canvasHeight: this.canvas.height,
+      bounce: PHYSICS_CONFIG.bounce
+    });
+    this.baseFlipperConfig = (normalizedFlippers && normalizedFlippers.enabled)
+      ? { ...normalizedFlippers, enabled: true }
+      : null;
+    this.temporaryFlipperTurns = 0;
+    this.temporaryFlipperActive = false;
+    this.refreshFlipperState();
+
+    this.physics.setBucketEnabled(!this.isSurvivalMode());
+    this.physics.setBallLossY(this.getCameraY() + this.canvas.height + 50);
 
     this.score = 0;
-    this.ballsLeft = 10;
+    this.ballsLeft = this.isSurvivalMode() ? Number.POSITIVE_INFINITY : 10;
+    this.initialBallCount = Number.isFinite(this.ballsLeft) ? this.ballsLeft : 10;
     this.hitPegIds = [];
     this.turnHitPegIds = [];
+    this.totalSurvivalTargets = this.isSurvivalMode() ? countSurvivalTargets(this.pegs) : 0;
     this.state = 'idle';
     this.trajectory = null;
+    this.ultraAimCharges = 0;
+    this.lastUiStateSignature = '';
 
+    this.updateLaunchPosition();
     this.resetBall();
   }
 
   resetBall() {
+    this.updateLaunchPosition();
     this.balls = [new Ball(this.launchX, this.launchY)];
     this.physics.setBalls(this.balls);
     this.balls = this.physics.balls;
@@ -233,20 +408,45 @@ export class Game {
   }
 
   launch() {
-    if (this.state !== 'aiming' || this.ballsLeft <= 0) return;
-    
-    this.state = 'playing';
-    for (const ball of this.balls) {
-      ball.launch(this.aimAngle);
+    if (!this.isAimingState()) return;
+    if (Number.isFinite(this.ballsLeft) && this.ballsLeft <= 0) return;
+
+    if (!this.showFullTrajectory && this.ultraAimCharges > 0) {
+      this.ultraAimCharges--;
     }
-    this.ballsLeft--;
-    this.turnHitPegIds = [];
+    if (!this.baseFlipperConfig && !this.temporaryFlipperActive && this.temporaryFlipperTurns > 0) {
+      this.temporaryFlipperTurns--;
+      this.temporaryFlipperActive = true;
+      this.refreshFlipperState();
+    }
+
+    if (this.state === 'aimingNext') {
+      const newBall = new Ball(this.launchX, this.launchY);
+      newBall.launch(this.aimAngle);
+      this.physics.addBall(newBall);
+      this.balls = this.physics.balls;
+      this.state = 'playing';
+    } else {
+      this.state = 'playing';
+      for (const ball of this.balls) {
+        ball.launch(this.aimAngle);
+      }
+      this.turnHitPegIds = [];
+      this.ballPositionHistory = [];
+    }
+
+    if (Number.isFinite(this.ballsLeft)) {
+      this.ballsLeft--;
+    }
     this.trajectory = null;
-    this.ballPositionHistory = [];
   }
 
   isOrangePeg(p) {
     return p.type === 'orange' || (p.type === 'bumper' && p.bumperOrange);
+  }
+
+  isPortalPeg(p) {
+    return p.type === 'portalBlue' || p.type === 'portalOrange';
   }
 
   getOrangePegsLeft() {
@@ -260,7 +460,7 @@ export class Game {
   }
 
   calculateScore(peg) {
-    if (peg.type === 'obstacle') return 0;
+    if (peg.type === 'obstacle' || this.isPortalPeg(peg)) return 0;
     // Permanent bumpers don't score; orange bumpers score as orange; disappear bumpers as blue
     if (peg.type === 'bumper') {
       if (peg.bumperOrange) return SCORE.orange;
@@ -271,7 +471,9 @@ export class Game {
     const baseScore = SCORE[peg.type] || SCORE.blue;
     
     // Multiplier based on orange pegs remaining
-    const orangeLeft = this.getOrangePegsLeft();
+    const orangeLeft = this.isSurvivalMode()
+      ? this.getSurvivalTargetsLeft(true)
+      : this.getOrangePegsLeft();
     let multiplier = 1;
     for (const [threshold, mult] of Object.entries(SCORE.multiplier)) {
       if (orangeLeft <= parseInt(threshold)) {
@@ -283,6 +485,11 @@ export class Game {
   }
 
   endTurn(bucketCatchCount = 0) {
+    if (!this.baseFlipperConfig && this.temporaryFlipperActive) {
+      this.temporaryFlipperActive = false;
+      this.refreshFlipperState();
+    }
+
     // Add turn hit pegs to total hit pegs (they disappear now)
     this.hitPegIds = [...this.hitPegIds, ...this.turnHitPegIds];
     
@@ -291,10 +498,24 @@ export class Game {
     const hitSet = new Set(this.hitPegIds);
     this.pegs = this.pegs.filter(p => {
       if (p.type === 'obstacle') return true;
+      if (this.isPortalPeg(p)) return true;
       if (p.type === 'bumper' && !p.bumperDisappear && !p.bumperOrange) return true;
       return !hitSet.has(p.id);
     });
     this.physics.setPegs(this.pegs);
+
+    if (this.isSurvivalMode()) {
+      if (this.getSurvivalTargetsLeft(true) === 0) {
+        this.state = 'won';
+        if (this.onGameEnd) this.onGameEnd('won', this.score);
+        return;
+      }
+
+      this.state = 'idle';
+      this.hitPegIds = [];
+      this.resetBall();
+      return;
+    }
     
     // Check win condition
     if (this.getOrangePegsLeft() === 0) {
@@ -343,18 +564,31 @@ export class Game {
   update(deltaTime) {
     // Animate pegs continuously (idle, aiming, playing) so the level feels alive
     const dt = Math.min((deltaTime || 16.67) / 1000, 0.1);
-    this.animator.tick(this.pegs, dt, { width: this.canvas.width, height: this.canvas.height });
+    const worldHeight = this.isSurvivalMode() ? this.survivalRuntime.getWorldHeight() : this.canvas.height;
+    this.animator.tick(this.pegs, dt, { width: this.canvas.width, height: worldHeight });
 
-    if (this.state !== 'playing') {
+    if (this.isSurvivalMode()) {
+      this.survivalRuntime.update(dt);
+    }
+    this.updateLaunchPosition();
+    this.physics.setBallLossY(this.getCameraY() + this.canvas.height + 50);
+
+    const runsPhysics = this.state === 'playing' || this.state === 'aimingNext';
+    if (!runsPhysics) {
+      if (this.balls.length === 1 && !this.balls[0].active) {
+        this.balls[0].x = this.launchX;
+        this.balls[0].y = this.launchY;
+      }
       // Keep bucket moving even while idle/aiming
       this.physics.updateBucket();
       // Keep flippers at rest position when not playing
       this.physics.updateFlippers(dt);
       // Recalculate trajectory every frame during aiming so it reflects
       // animated peg positions in real-time (not just on mouse move)
-      if (this.state === 'aiming') {
+      if (this.isAimingState()) {
         this.updateTrajectory();
       }
+      this.checkSurvivalEndConditions();
       return;
     }
 
@@ -397,10 +631,20 @@ export class Game {
     // Check for stuck balls trapped inside structures
     this.checkStuckBalls();
 
+    if (this.state === 'aimingNext') {
+      this.updateTrajectory();
+    }
+
+    if (this.checkSurvivalEndConditions()) {
+      return;
+    }
+
     // End turn when all balls are gone
     if (result.ballsRemaining === 0) {
       this.endTurn(result.bucketCatchCount);
     }
+
+    this.checkSurvivalEndConditions();
   }
 
   checkStuckBalls() {
@@ -476,25 +720,36 @@ export class Game {
 
   render() {
     const allHitIds = [...this.hitPegIds, ...this.turnHitPegIds];
+    const survivalMode = this.isSurvivalMode();
+    const survivalTargetsLeft = this.getSurvivalTargetsLeft(true);
+    const totalTargets = survivalMode ? this.totalSurvivalTargets : this.getTotalOrangePegs();
+    const trackerState = survivalMode ? this.survivalRuntime.getTrackerState() : null;
+    const centerLabel = survivalMode
+      ? `PEGS ${Math.max(0, totalTargets - survivalTargetsLeft)}/${totalTargets}`
+      : null;
 
     this.renderer.renderGame({
       pegs: this.pegs,
       hitPegIds: allHitIds,
       wrapCopyPegIds: this.animator.getAnimatedPegIds(),
       balls: this.balls,
-      bucket: this.physics.bucket,
+      bucket: survivalMode ? null : this.physics.bucket,
       flippers: this.flippers,
-      showLauncher: this.state === 'idle' || this.state === 'aiming',
+      cameraY: this.getCameraY(),
+      showLauncher: this.state === 'idle' || this.isAimingState(),
       launchX: this.launchX,
       launchY: this.launchY,
       aimAngle: this.aimAngle,
-      showAim: this.state === 'aiming',
-      trajectory: this.state === 'aiming' ? this.trajectory : null,
-      showFullTrajectory: this.showFullTrajectory,
+      showAim: this.isAimingState(),
+      trajectory: this.isAimingState() ? this.trajectory : null,
+      showFullTrajectory: this.shouldShowFullTrajectory(),
       score: this.score,
       ballsLeft: this.ballsLeft,
-      orangePegsLeft: this.getOrangePegsLeft(),
-      totalOrangePegs: this.getTotalOrangePegs(),
+      orangePegsLeft: survivalMode ? survivalTargetsLeft : this.getOrangePegsLeft(),
+      totalOrangePegs: totalTargets,
+      centerLabel,
+      survivalLoseLineY: survivalMode ? this.survivalRuntime.getLoseLineY() : null,
+      verticalProgress: trackerState,
       message: this.state === 'won' ? 'YOU WIN!' : (this.state === 'lost' ? 'GAME OVER' : null),
       subMessage: this.state === 'won' || this.state === 'lost' ? 'Tap to continue' : null
     });
@@ -505,6 +760,7 @@ export class Game {
     this.lastTime = currentTime;
 
     this.update(deltaTime);
+    this.emitUiStateIfChanged();
     this.render();
 
     this.animationId = requestAnimationFrame((t) => this.gameLoop(t));
@@ -527,14 +783,83 @@ export class Game {
   resize(width, height) {
     this.renderer.resize(width, height);
     this.physics.resize(width, height);
-    this.launchX = width / 2;
+    this.survivalRuntime.resize(height);
+    this.updateLaunchPosition();
+    this.physics.setBallLossY(this.getCameraY() + height + 50);
+    if (!this.baseFlipperConfig && this.temporaryFlipperActive) {
+      this.refreshFlipperState();
+    }
   }
 
   setShowFullTrajectory(show) {
     this.showFullTrajectory = show;
-    if (this.state === 'aiming') {
+    if (this.isAimingState()) {
       this.updateTrajectory();
     }
+  }
+
+  canGamble(ballCost = 1) {
+    if (!Number.isFinite(this.ballsLeft)) return false;
+    const cost = Math.max(1, Math.floor(ballCost));
+    if (!(this.state === 'idle' || this.state === 'aiming')) return false;
+    return this.ballsLeft > cost;
+  }
+
+  spendBallsForGamble(ballCost = 1) {
+    if (!this.canGamble(ballCost)) return false;
+    const cost = Math.max(1, Math.floor(ballCost));
+    this.ballsLeft -= cost;
+    return true;
+  }
+
+  convertRandomPegsToMultiball(targetCount = 3) {
+    const count = Math.max(1, Math.floor(targetCount));
+    const blocked = this.getActiveHitPegIdSet();
+    const candidates = this.pegs.filter(peg => {
+      if (blocked.has(peg.id)) return false;
+      if (this.isOrangePeg(peg)) return false;
+      if (this.isPortalPeg(peg)) return false;
+      if (peg.type === 'obstacle' || peg.type === 'bumper' || peg.type === 'multi') return false;
+      return true;
+    });
+
+    for (let i = candidates.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+    }
+
+    const converted = Math.min(count, candidates.length);
+    for (let i = 0; i < converted; i++) {
+      candidates[i].type = 'multi';
+    }
+    if (converted > 0) {
+      this.physics.setPegs(this.pegs);
+    }
+    return converted;
+  }
+
+  grantUltraAim(charges = 1) {
+    const gain = Math.max(1, Math.floor(charges));
+    this.ultraAimCharges = Math.min(99, this.ultraAimCharges + gain);
+    if (this.isAimingState()) {
+      this.updateTrajectory();
+    }
+    return this.ultraAimCharges;
+  }
+
+  grantTemporaryFlippers(turns = 1) {
+    if (this.baseFlipperConfig) return 0;
+    const gain = Math.max(1, Math.floor(turns));
+    this.temporaryFlipperTurns = Math.min(20, this.temporaryFlipperTurns + gain);
+
+    // If player activates perk while idle/aiming, enable immediately.
+    if (!this.temporaryFlipperActive && (this.state === 'idle' || this.isAimingState())) {
+      this.temporaryFlipperActive = true;
+      this.temporaryFlipperTurns = Math.max(0, this.temporaryFlipperTurns - 1);
+      this.refreshFlipperState();
+    }
+
+    return (this.temporaryFlipperActive ? 1 : 0) + this.temporaryFlipperTurns;
   }
 
   // Allow clicking to restart after game end
