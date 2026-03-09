@@ -8,21 +8,35 @@ const PERK_DEFINITIONS = [
     name: 'Tri Multi',
     icon: '🎱',
     color: '#ff4d9d',
-    defaultProbability: 34
+    defaultProbability: 20
   },
   {
     id: 'perk_aim',
     name: 'Ultra Aim',
     icon: '🎯',
     color: '#58a6ff',
-    defaultProbability: 33
+    defaultProbability: 20
   },
   {
     id: 'perk_flippers',
     name: 'Flippers',
     icon: '⌐⌐',
     color: '#c0c0c0',
-    defaultProbability: 33
+    defaultProbability: 20
+  },
+  {
+    id: 'perk_yoyo',
+    name: 'Yo-yo Thread',
+    icon: '🪀',
+    color: '#f2cc60',
+    defaultProbability: 20
+  },
+  {
+    id: 'perk_bomb',
+    name: 'Bomb Shockwave',
+    icon: '💣',
+    color: '#ff9b54',
+    defaultProbability: 20
   }
 ];
 
@@ -111,11 +125,12 @@ export class GambleSystem {
 
     this.lastSpinGrid = Array.from({ length: SLOT_ROWS }, () => Array.from({ length: SLOT_COLS }, () => null));
     this.lastWinningCells = new Set();
-    this.lastMessage = 'Press Gamble to spin slots for perks.';
+    this.lastMessage = 'Press Spin to roll the slots.';
     this.lastMessageType = 'info';
 
     this.ui = null;
     this.unsubscribeGameState = null;
+    this.handleResize = null;
   }
 
   mount() {
@@ -127,6 +142,10 @@ export class GambleSystem {
 
     this.ui = this.buildUi();
     this.statusBar.appendChild(this.ui.root);
+    this.setPanelExpanded(false);
+    this.syncHudWidth();
+    this.handleResize = () => this.syncHudWidth();
+    window.addEventListener('resize', this.handleResize);
 
     if (typeof this.game?.subscribeUiState === 'function') {
       this.unsubscribeGameState = this.game.subscribeUiState(() => this.refreshUi());
@@ -143,6 +162,11 @@ export class GambleSystem {
       this.ui.root.parentNode.removeChild(this.ui.root);
     }
     this.ui = null;
+
+    if (this.handleResize) {
+      window.removeEventListener('resize', this.handleResize);
+      this.handleResize = null;
+    }
 
     this.statusBar?.classList.remove('gamble-mode');
     if (this.pegCountEl) this.pegCountEl.style.display = '';
@@ -212,27 +236,30 @@ export class GambleSystem {
 
   buildUi() {
     const root = document.createElement('div');
-    root.className = 'gamble-hud';
+    root.className = 'gamble-hud collapsed';
 
-    const topRow = document.createElement('div');
-    topRow.className = 'gamble-top-row';
+    const perkToolbar = document.createElement('div');
+    perkToolbar.className = 'gamble-perk-toolbar';
+    root.appendChild(perkToolbar);
 
-    const spinButton = document.createElement('button');
-    spinButton.className = 'gamble-btn';
-    spinButton.textContent = `Gamble (-${this.settings.ballCost} ball)`;
-    spinButton.addEventListener('click', () => this.spin());
-    topRow.appendChild(spinButton);
+    const toggleButton = document.createElement('button');
+    toggleButton.type = 'button';
+    toggleButton.className = 'gamble-toggle-handle';
+    toggleButton.setAttribute('aria-label', 'Toggle slots panel');
+    toggleButton.setAttribute('aria-expanded', 'false');
+    const toggleArrow = document.createElement('span');
+    toggleArrow.className = 'gamble-toggle-arrow';
+    toggleArrow.textContent = '▴';
+    toggleButton.appendChild(toggleArrow);
+    root.appendChild(toggleButton);
 
-    const luckLabel = document.createElement('span');
-    luckLabel.className = 'gamble-luck';
-    topRow.appendChild(luckLabel);
+    const panel = document.createElement('div');
+    panel.className = 'gamble-panel';
+    root.appendChild(panel);
 
-    const settingsButton = document.createElement('button');
-    settingsButton.className = 'gamble-settings-btn';
-    settingsButton.textContent = '⚙';
-    topRow.appendChild(settingsButton);
-
-    root.appendChild(topRow);
+    const reelsWrap = document.createElement('div');
+    reelsWrap.className = 'gamble-reels-wrap';
+    panel.appendChild(reelsWrap);
 
     const grid = document.createElement('div');
     grid.className = 'gamble-grid';
@@ -248,24 +275,57 @@ export class GambleSystem {
         gridCells.push(cell);
       }
     }
-    root.appendChild(grid);
+    reelsWrap.appendChild(grid);
+
+    const infoRow = document.createElement('div');
+    infoRow.className = 'gamble-info-row';
+    panel.appendChild(infoRow);
+
+    const statsCase = document.createElement('div');
+    statsCase.className = 'gamble-stats-case';
+    infoRow.appendChild(statsCase);
+
+    const luckLabel = document.createElement('div');
+    luckLabel.className = 'gamble-luck';
+    statsCase.appendChild(luckLabel);
 
     const resultLabel = document.createElement('div');
     resultLabel.className = 'gamble-result';
     resultLabel.textContent = this.lastMessage;
-    root.appendChild(resultLabel);
+    statsCase.appendChild(resultLabel);
 
-    const inventory = document.createElement('div');
-    inventory.className = 'gamble-inventory';
-    root.appendChild(inventory);
+    const spinButton = document.createElement('button');
+    spinButton.type = 'button';
+    spinButton.className = 'gamble-btn';
+    spinButton.textContent = 'Spin';
+    spinButton.addEventListener('click', () => this.spin());
+    infoRow.appendChild(spinButton);
+
+    const infoSpacer = document.createElement('div');
+    infoSpacer.className = 'gamble-info-spacer';
+    infoRow.appendChild(infoSpacer);
+
+    const bottomRow = document.createElement('div');
+    bottomRow.className = 'gamble-bottom-row';
+    panel.appendChild(bottomRow);
+
+    const settingsButton = document.createElement('button');
+    settingsButton.type = 'button';
+    settingsButton.className = 'gamble-settings-btn';
+    settingsButton.textContent = '⚙';
+    settingsButton.title = 'Slots settings';
+    bottomRow.appendChild(settingsButton);
 
     const inventoryButtons = {};
-    for (const perk of this.perkDefinitions) {
+    for (let index = 0; index < this.perkDefinitions.length; index++) {
+      const perk = this.perkDefinitions[index];
       const button = document.createElement('button');
+      button.type = 'button';
       button.className = 'gamble-perk-chip';
       button.style.setProperty('--perk-color', perk.color);
+      button.setAttribute('aria-label', perk.name);
       button.addEventListener('click', () => this.consumePerk(perk.id));
-      inventory.appendChild(button);
+      perkToolbar.appendChild(button);
       inventoryButtons[perk.id] = button;
     }
 
@@ -402,14 +462,24 @@ export class GambleSystem {
       });
     }
 
-    root.appendChild(settingsPanel);
+    panel.appendChild(settingsPanel);
 
     settingsButton.addEventListener('click', () => {
+      if (root.classList.contains('collapsed')) {
+        this.setPanelExpanded(true);
+      }
       settingsPanel.classList.toggle('hidden');
+    });
+
+    toggleButton.addEventListener('click', () => {
+      this.setPanelExpanded(root.classList.contains('collapsed'));
     });
 
     return {
       root,
+      panel,
+      toggleButton,
+      toggleArrow,
       spinButton,
       luckLabel,
       settingsButton,
@@ -424,6 +494,32 @@ export class GambleSystem {
       jackpotRewardControl,
       probabilityControls
     };
+  }
+
+  setPanelExpanded(expanded) {
+    if (!this.ui) return;
+    const next = !!expanded;
+    this.ui.root.classList.toggle('expanded', next);
+    this.ui.root.classList.toggle('collapsed', !next);
+    this.ui.panel.hidden = !next;
+    this.ui.toggleButton.setAttribute('aria-expanded', next ? 'true' : 'false');
+    this.ui.toggleArrow.textContent = next ? '▾' : '▴';
+    if (!next) {
+      this.ui.settingsPanel.classList.add('hidden');
+    }
+  }
+
+  syncHudWidth() {
+    if (!this.ui?.root || !this.game?.canvas || !this.statusBar) return;
+    const canvasRect = this.game.canvas.getBoundingClientRect();
+    const statusRect = this.statusBar.getBoundingClientRect();
+    const width = Math.round(canvasRect.width || this.game.canvas.clientWidth || this.game.canvas.width || 0);
+    if (width <= 0) return;
+
+    const leftOffset = Math.max(0, Math.round(canvasRect.left - statusRect.left));
+    this.ui.root.style.width = `${width}px`;
+    this.ui.root.style.marginLeft = `${leftOffset}px`;
+    this.ui.root.style.marginRight = '0';
   }
 
   syncProbabilityInputs(controls) {
@@ -464,7 +560,11 @@ export class GambleSystem {
 
   canInteract() {
     const state = this.game?.state;
-    return state !== 'playing' && state !== 'aimingNext' && state !== 'won' && state !== 'lost';
+    return state !== 'playing' && state !== 'won' && state !== 'lost';
+  }
+
+  isDebugPerkOverrideEnabled() {
+    return !!this.game?.showFullTrajectory;
   }
 
   canSpin() {
@@ -577,13 +677,18 @@ export class GambleSystem {
       return;
     }
 
+    const debugOverride = this.isDebugPerkOverrideEnabled();
     const count = this.inventory[perkId] || 0;
-    if (count <= 0) return;
+    if (!debugOverride && count <= 0) return;
 
-    this.inventory[perkId] -= 1;
+    if (!debugOverride) {
+      this.inventory[perkId] -= 1;
+    }
     const applied = this.applyPerk(perkId);
     if (!applied.success) {
-      this.inventory[perkId] += 1;
+      if (!debugOverride) {
+        this.inventory[perkId] += 1;
+      }
       this.setMessage(applied.message, 'warn');
       this.refreshUi();
       return;
@@ -613,6 +718,17 @@ export class GambleSystem {
         }
         return { success: true, message: `Flippers enabled for ${shots} shot(s).` };
       }
+      case 'perk_yoyo': {
+        const uses = this.game.grantYoyoThreadUses(1);
+        if (uses <= 0) {
+          return { success: false, message: 'Yo-yo thread is already enabled on this level.' };
+        }
+        return { success: true, message: `Yo-yo thread armed. Pullback uses: ${uses}.` };
+      }
+      case 'perk_bomb': {
+        const charges = this.game.grantBombShockwaveCharges(1);
+        return { success: true, message: `Bomb armed. Charges: ${charges}.` };
+      }
       default:
         return { success: false, message: 'Unknown perk.' };
     }
@@ -620,15 +736,17 @@ export class GambleSystem {
 
   refreshUi() {
     if (!this.ui) return;
+    this.syncHudWidth();
 
     const interactionAllowed = this.canInteract();
     const canSpin = this.canSpin();
     this.ui.spinButton.disabled = !canSpin;
-    this.ui.spinButton.textContent = `Gamble (-${this.settings.ballCost} ball)`;
+    this.ui.spinButton.textContent = 'Spin';
+    this.ui.spinButton.title = `Spin slots (-${this.settings.ballCost} ball)`;
     this.ui.autoLuckToggle.checked = !!this.settings.autoLuckEnabled;
 
     const luck = this.getEffectiveLuck();
-    this.ui.luckLabel.textContent = `Luck ${luck.total} (M${luck.manual} + A${luck.auto})`;
+    this.ui.luckLabel.textContent = `Luck ${luck.total} (M${luck.manual} + A${luck.auto}) · Cost ${this.settings.ballCost}`;
 
     for (const cell of this.ui.gridCells) {
       const row = Number(cell.dataset.row);
@@ -644,12 +762,17 @@ export class GambleSystem {
     this.ui.resultLabel.textContent = this.lastMessage;
     this.ui.resultLabel.dataset.type = this.lastMessageType;
 
+    const debugOverride = this.isDebugPerkOverrideEnabled();
     for (const perk of this.perkDefinitions) {
       const button = this.ui.inventoryButtons[perk.id];
       const amount = this.inventory[perk.id] || 0;
-      button.textContent = `${perk.icon} ${amount}`;
-      button.title = `${perk.name} (${amount})`;
-      button.disabled = amount <= 0 || !interactionAllowed;
+      const displayAmount = debugOverride ? '∞' : String(amount);
+      button.textContent = perk.icon;
+      button.dataset.count = displayAmount;
+      button.title = debugOverride
+        ? `${perk.name} (debug unlimited)`
+        : `${perk.name} (${amount})`;
+      button.disabled = !interactionAllowed || (!debugOverride && amount <= 0);
     }
   }
 }

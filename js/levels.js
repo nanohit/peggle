@@ -4,6 +4,8 @@ import { Utils } from './utils.js';
 import { normalizeFlipperConfig } from './flipper-defaults.js';
 import { ensureLevelSurvival, normalizeSurvivalSettings } from './survival-mode.js';
 import { normalizeYoyoSettings } from './yoyo-thread.js';
+import { normalizeMultiballSpawnCount } from './multiball-settings.js';
+import { normalizeVisuals } from './visual-config.js';
 
 const STORAGE_KEY = 'peggle_levels';
 const TRAINING_KEY = 'peggle_training_data';
@@ -30,6 +32,7 @@ export class LevelManager {
       flippers: null,
       yoyo: normalizeYoyoSettings(null),
       survival: ensureLevelSurvival({}, 600),
+      visuals: normalizeVisuals(null),
       metadata: {
         created: new Date().toISOString().split('T')[0],
         modified: new Date().toISOString(),
@@ -139,6 +142,10 @@ export class LevelManager {
       newPeg.portalOneWay = !!peg.portalOneWay;
       newPeg.portalOneWayFlip = !!peg.portalOneWayFlip;
       newPeg.shape = 'circle'; // kept for backward compatibility; rendered/triggered as lines
+    }
+
+    if (peg.type === 'multi') {
+      newPeg.multiballSpawnCount = normalizeMultiballSpawnCount(peg.multiballSpawnCount);
     }
 
     level.pegs.push(newPeg);
@@ -442,6 +449,11 @@ export class LevelManager {
       level.flippers = normalizeFlipperConfig(level.flippers, { canvasHeight: 600 }) || null;
     }
     level.yoyo = normalizeYoyoSettings(level.yoyo);
+    for (const peg of level.pegs) {
+      if (peg && peg.type === 'multi') {
+        peg.multiballSpawnCount = normalizeMultiballSpawnCount(peg.multiballSpawnCount);
+      }
+    }
 
     level.metadata = level.metadata || {};
     if (!level.metadata.created) {
@@ -461,6 +473,7 @@ export class LevelManager {
     }
 
     ensureLevelSurvival(level, 600);
+    level.visuals = normalizeVisuals(level.visuals);
     return level;
   }
 

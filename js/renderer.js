@@ -110,6 +110,8 @@ export class Renderer {
     this.launchX = 0;
     this.launchY = 40;
 
+    // Configurable background (set via setBackground)
+    this.backgroundConfig = null;
   }
 
   resize(width, height) {
@@ -120,16 +122,26 @@ export class Renderer {
     this.launchX = width / 2;
   }
 
+  setBackground(config) {
+    this.backgroundConfig = config || null;
+  }
+
   clear() {
     const ctx = this.ctx;
-    
-    // Draw gradient background
-    const gradient = ctx.createLinearGradient(0, 0, 0, this.height);
-    gradient.addColorStop(0, COLORS.backgroundGradientTop);
-    gradient.addColorStop(1, COLORS.backgroundGradientBottom);
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, this.width, this.height);
-    
+    const bg = this.backgroundConfig;
+
+    if (bg && bg.type === 'solid') {
+      ctx.fillStyle = bg.colorTop || COLORS.backgroundGradientTop;
+      ctx.fillRect(0, 0, this.width, this.height);
+    } else {
+      // Gradient background (default or configured)
+      const gradient = ctx.createLinearGradient(0, 0, 0, this.height);
+      gradient.addColorStop(0, bg?.colorTop || COLORS.backgroundGradientTop);
+      gradient.addColorStop(1, bg?.colorBottom || COLORS.backgroundGradientBottom);
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, this.width, this.height);
+    }
+
     // Draw wall indicators
     ctx.strokeStyle = COLORS.wall;
     ctx.lineWidth = 2;

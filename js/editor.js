@@ -8,6 +8,10 @@ import { normalizeFlipperConfig } from './flipper-defaults.js';
 import { SurvivalRuntime } from './survival-runtime.js';
 import { ensureLevelSurvival } from './survival-mode.js';
 import {
+  MULTIBALL_DEFAULT_SPAWN_COUNT,
+  normalizeMultiballSpawnCount
+} from './multiball-settings.js';
+import {
   PegAnimator,
   MIN_VISIBLE_RATIO,
   ANIMATION_WRAP_VISIBLE_RATIO,
@@ -1703,6 +1707,9 @@ export class Editor {
       pegData.portalOneWay = false;
       pegData.portalOneWayFlip = false;
     }
+    if (this.selectedPegType === 'multi') {
+      pegData.multiballSpawnCount = MULTIBALL_DEFAULT_SPAWN_COUNT;
+    }
     if (!this.isPegPositionAllowed(pegData, pegData.x, pegData.y, pegData.angle, pegData.curveSlices)) return null;
     
     const peg = this.levelManager.addPeg(pegData);
@@ -1864,6 +1871,7 @@ export class Editor {
           delete peg.portalScale;
           delete peg.portalOneWay;
           delete peg.portalOneWayFlip;
+          delete peg.multiballSpawnCount;
         } else if (type === 'portalBlue' || type === 'portalOrange') {
           peg.shape = 'circle';
           if (peg.portalScale == null) peg.portalScale = 1.0;
@@ -1874,6 +1882,17 @@ export class Editor {
           delete peg.bumperDisappear;
           delete peg.bumperOrange;
           delete peg._bumperHitScale;
+          delete peg.multiballSpawnCount;
+        } else if (type === 'multi') {
+          peg.multiballSpawnCount = normalizeMultiballSpawnCount(peg.multiballSpawnCount);
+          delete peg.bumperBounce;
+          delete peg.bumperScale;
+          delete peg.bumperDisappear;
+          delete peg.bumperOrange;
+          delete peg._bumperHitScale;
+          delete peg.portalScale;
+          delete peg.portalOneWay;
+          delete peg.portalOneWayFlip;
         } else {
           // Clean up bumper properties when changing away
           delete peg.bumperBounce;
@@ -1884,6 +1903,7 @@ export class Editor {
           delete peg.portalScale;
           delete peg.portalOneWay;
           delete peg.portalOneWayFlip;
+          delete peg.multiballSpawnCount;
         }
       }
     }
@@ -2064,6 +2084,9 @@ export class Editor {
           pegData.portalOneWay = !!peg.portalOneWay;
           pegData.portalOneWayFlip = !!peg.portalOneWayFlip;
         }
+        if (peg.type === 'multi') {
+          pegData.multiballSpawnCount = normalizeMultiballSpawnCount(peg.multiballSpawnCount);
+        }
         const newPeg = this.levelManager.addPeg(pegData);
         if (newPeg) {
           newPegIds.add(newPeg.id);
@@ -2108,6 +2131,9 @@ export class Editor {
           pegData.portalScale = peg.portalScale;
           pegData.portalOneWay = !!peg.portalOneWay;
           pegData.portalOneWayFlip = !!peg.portalOneWayFlip;
+        }
+        if (peg.type === 'multi') {
+          pegData.multiballSpawnCount = normalizeMultiballSpawnCount(peg.multiballSpawnCount);
         }
         const newPeg = this.levelManager.addPeg(pegData);
         if (newPeg) {
@@ -2342,6 +2368,16 @@ export class Editor {
     return true;
   }
 
+  isSelectionAllMultiballs() {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level || this.selectedPegIds.size === 0) return false;
+    for (const pegId of this.selectedPegIds) {
+      const peg = level.pegs.find(p => p.id === pegId);
+      if (!peg || peg.type !== 'multi') return false;
+    }
+    return true;
+  }
+
   getSelectedBumperScales() {
     const level = this.levelManager.getCurrentLevel();
     if (!level) return new Map();
@@ -2445,6 +2481,33 @@ export class Editor {
           scale: peg.portalScale ?? 1.0,
           oneWay: !!peg.portalOneWay,
           oneWayFlip: !!peg.portalOneWayFlip
+        };
+      }
+    }
+    return null;
+  }
+
+  setSelectedMultiballSpawnCount(count) {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level) return;
+    const normalized = normalizeMultiballSpawnCount(count);
+    for (const pegId of this.selectedPegIds) {
+      const peg = level.pegs.find(p => p.id === pegId);
+      if (peg && peg.type === 'multi') {
+        peg.multiballSpawnCount = normalized;
+      }
+    }
+    this.levelManager.save();
+  }
+
+  getSelectedMultiballProperties() {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level || this.selectedPegIds.size === 0) return null;
+    for (const pegId of this.selectedPegIds) {
+      const peg = level.pegs.find(p => p.id === pegId);
+      if (peg && peg.type === 'multi') {
+        return {
+          spawnCount: normalizeMultiballSpawnCount(peg.multiballSpawnCount)
         };
       }
     }

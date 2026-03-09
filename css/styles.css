@@ -434,53 +434,85 @@ html, body {
 
 .status-bar.gamble-mode {
   display: block;
-  padding: 6px 8px;
+  padding: 0 0 10px;
+  background: linear-gradient(180deg, rgba(33, 38, 45, 0.96), rgba(13, 17, 23, 0.96));
 }
 
 .gamble-hud {
+  width: 400px;
+  margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  align-items: stretch;
+  gap: 4px;
 }
 
-.gamble-top-row {
+.gamble-hud.collapsed {
+  gap: 0;
+}
+
+.gamble-perk-toolbar {
   display: flex;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
 }
 
-.gamble-btn {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: linear-gradient(180deg, #2f5e63, #1f3f43);
-  color: #dffcff;
-  font-size: 11px;
-  font-weight: 600;
-  padding: 6px 8px;
+.gamble-toggle-handle {
+  width: 60px;
+  height: 18px;
+  border: 1px solid #3b434d;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #272f39, #151b23);
+  color: #c9d1d9;
   cursor: pointer;
-  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.gamble-btn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
+.gamble-toggle-arrow {
+  font-size: 12px;
+  line-height: 1;
 }
 
-.gamble-settings-btn {
-  width: 28px;
-  height: 28px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-tertiary);
-  color: var(--text-secondary);
-  cursor: pointer;
-  flex-shrink: 0;
+.gamble-panel {
+  width: 100%;
+  border: 1px solid #2f3741;
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(21, 27, 35, 0.98), rgba(10, 14, 19, 0.98));
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 8px;
+  max-height: 320px;
+  opacity: 1;
+  transform: translateY(0);
+  transition: max-height 0.22s ease, opacity 0.2s ease, transform 0.2s ease, padding 0.2s ease, border-color 0.2s ease;
+  overflow: hidden;
 }
 
-.gamble-luck {
-  color: var(--text-secondary);
-  font-size: 10px;
-  flex: 1;
+.gamble-hud.collapsed .gamble-panel {
+  max-height: 0;
+  opacity: 0;
+  transform: translateY(6px);
+  padding-top: 0;
+  padding-bottom: 0;
+  border-color: transparent;
+  pointer-events: none;
+}
+
+.gamble-panel[hidden] {
+  display: none !important;
+}
+
+.gamble-reels-wrap {
+  position: relative;
+  border: 1px solid #38414d;
+  border-radius: 10px;
+  background: radial-gradient(90% 120% at 50% 0%, rgba(60, 73, 89, 0.25), rgba(12, 16, 22, 0.95));
+  padding: 6px;
 }
 
 .gamble-grid {
@@ -490,14 +522,15 @@ html, body {
 }
 
 .gamble-cell {
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  border: 1px solid #414a58;
+  border-radius: 7px;
   text-align: center;
   padding: 4px 0;
   min-height: 22px;
-  background: rgba(13, 17, 23, 0.65);
-  color: var(--cell-color, var(--text-dim));
-  font-size: 13px;
+  background: rgba(7, 11, 17, 0.85);
+  color: var(--cell-color, #6e7681);
+  font-size: 14px;
+  line-height: 1.15;
 }
 
 .gamble-cell.winning {
@@ -505,10 +538,114 @@ html, body {
   box-shadow: 0 0 0 1px var(--cell-color, var(--accent));
 }
 
+.gamble-settings-btn {
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: rgba(21, 27, 35, 0.92);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.gamble-info-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
+.gamble-stats-case {
+  border: none;
+  background: transparent;
+  padding: 0;
+  min-width: 0;
+}
+
+.gamble-info-spacer {
+  width: 30px;
+  height: 1px;
+}
+
+.gamble-bottom-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.gamble-btn {
+  border: 1px solid #6f7783;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #f4f6fa, #d6dae0);
+  color: #0f1419;
+  font-size: 15px;
+  font-weight: 700;
+  height: 40px;
+  min-width: 108px;
+  padding: 0 14px;
+  cursor: pointer;
+  justify-self: center;
+}
+
+.gamble-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.gamble-perk-chip {
+  position: relative;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--perk-color, var(--border));
+  border-radius: 999px;
+  background: rgba(12, 18, 25, 0.95);
+  color: var(--text-primary);
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.gamble-perk-chip::after {
+  content: attr(data-count);
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  min-width: 14px;
+  height: 13px;
+  padding: 0 3px;
+  border-radius: 999px;
+  border: 1px solid var(--perk-color, var(--border));
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 8px;
+  line-height: 11px;
+  text-align: center;
+}
+
+.gamble-perk-chip:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.gamble-luck {
+  color: var(--text-secondary);
+  font-size: 10px;
+  text-align: left;
+  line-height: 1.2;
+}
+
 .gamble-result {
   color: var(--text-secondary);
   font-size: 10px;
-  min-height: 14px;
+  min-height: 12px;
+  text-align: left;
+  line-height: 1.2;
 }
 
 .gamble-result[data-type="win"] {
@@ -523,34 +660,10 @@ html, body {
   color: #ff8b8b;
 }
 
-.gamble-inventory {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.gamble-perk-chip {
-  border: 1px solid var(--perk-color, var(--border));
-  border-radius: 999px;
-  background: rgba(13, 17, 23, 0.65);
-  color: var(--text-primary);
-  font-size: 10px;
-  padding: 4px 8px;
-  min-width: 56px;
-  text-align: center;
-  cursor: pointer;
-}
-
-.gamble-perk-chip:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
 .gamble-settings-panel {
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: rgba(13, 17, 23, 0.7);
+  background: rgba(13, 17, 23, 0.78);
   padding: 6px;
   display: flex;
   flex-direction: column;
@@ -605,6 +718,30 @@ html, body {
 .gamble-toggle-row input[type="checkbox"] {
   width: 14px;
   height: 14px;
+}
+
+@media (max-width: 360px) {
+  .gamble-hud {
+    width: 100%;
+    margin-left: 0 !important;
+  }
+
+  .gamble-perk-toolbar {
+    gap: 4px;
+  }
+
+  .gamble-btn {
+    min-width: 92px;
+    height: 36px;
+    padding: 0 10px;
+    font-size: 14px;
+  }
+
+  .gamble-perk-chip {
+    width: 27px;
+    height: 27px;
+    font-size: 12px;
+  }
 }
 
 /* Quick Actions Overlay */

@@ -7,6 +7,11 @@ import { PegAnimator } from './animation.js';
 import { SurvivalRuntime } from './survival-runtime.js';
 import { createDefaultFlipperConfig, normalizeFlipperConfig } from './flipper-defaults.js';
 import { YoyoThreadSystem, normalizeYoyoSettings } from './yoyo-thread.js';
+import { buildBombShockwave } from './perk-bomb.js';
+import {
+  MULTIBALL_DEFAULT_SPAWN_COUNT,
+  normalizeMultiballSpawnCount
+} from './multiball-settings.js';
 import {
   countSurvivalTargets,
   ensureLevelSurvival
@@ -29,8 +34,6 @@ const SCORE = {
   }
 };
 
-const EARLY_SHOT_TRIGGER_RATIO = 1 / 3;
-
 export class Game {
   constructor(canvas) {
     this.canvas = canvas;
@@ -38,7 +41,7 @@ export class Game {
     this.physics = new PhysicsEngine(canvas.width, canvas.height);
     
     // Game state
-    this.state = 'idle'; // idle, aiming, aimingNext, playing, won, lost
+    this.state = 'idle'; // idle, aiming, playing, won, lost
     this.pegs = [];
     this.balls = [];
     this.score = 0;
@@ -68,11 +71,19 @@ export class Game {
     // Survival mode runtime (camera + scrolling)
     this.survivalRuntime = new SurvivalRuntime(canvas.height, { autoScroll: true });
     this.yoyoThread = new YoyoThreadSystem(canvas.width, canvas.height);
+    this.baseYoyoSettings = normalizeYoyoSettings(null);
+    this.yoyoPerkUsesRemaining = 0;
+    this.debugDrag = {
+      enabled: false,
+      dragging: false
+    };
     
     // Trajectory preview
     this.trajectory = null;
     this.showFullTrajectory = false;
     this.ultraAimCharges = 0;
+    this.queuedBombPerkCharges = 0;
+    this.armedBombPerk = false;
     
     // Animation
     this.animationId = null;
@@ -98,23 +109,26 @@ export class Game {
 
     // Touch/Mouse handling for aiming
     const handleStart = (e) => {
+      if (this._handleDebugDragStart(e)) return;
       if (this.state === 'won' || this.state === 'lost') {
         // Restart handling
         return;
       }
-      if (this.state !== 'idle' && !(this.state === 'playing' && this.canStartEarlyAim())) return;
+      if (this.state !== 'idle') return;
       e.preventDefault();
-      this.state = this.state === 'playing' ? 'aimingNext' : 'aiming';
+      this.state = 'aiming';
       this.updateAim(e);
     };
 
     const handleMove = (e) => {
+      if (this._handleDebugDragMove(e)) return;
       if (!this.isAimingState()) return;
       e.preventDefault();
       this.updateAim(e);
     };
 
     const handleEnd = (e) => {
+      if (this._handleDebugDragEnd(e)) return;
       if (!this.isAimingState()) return;
       e.preventDefault();
       this.launch();
@@ -128,17 +142,19 @@ export class Game {
     // Mouse events
     canvas.addEventListener('mousedown', handleStart, sig);
     canvas.addEventListener('mousemove', (e) => {
-      if (this.isAimingState()) handleMove(e);
+      if (this.isAimingState() || this.debugDrag.dragging) handleMove(e);
     }, sig);
     canvas.addEventListener('mouseup', handleEnd, sig);
 
     // Flipper activation — spacebar anytime, click/tap during playing
     const handleFlip = () => {
+      if (this.debugDrag.enabled) return;
       if (!this.flippers) return;
       if (this.state === 'won' || this.state === 'lost') return;
       this.flippers._flipperActivated = true;
     };
     const handleFlipEnd = () => {
+      if (this.debugDrag.enabled) return;
       if (!this.flippers) return;
       this.flippers._flipperActivated = false;
     };
@@ -151,15 +167,19 @@ export class Game {
     }, sig);
 
     canvas.addEventListener('mousedown', (e) => {
+      if (this.debugDrag.enabled) return;
       if (this.state === 'playing') handleFlip();
     }, sig);
     canvas.addEventListener('mouseup', (e) => {
+      if (this.debugDrag.enabled) return;
       if (this.state === 'playing') handleFlipEnd();
     }, sig);
     canvas.addEventListener('touchstart', (e) => {
+      if (this.debugDrag.enabled) return;
       if (this.state === 'playing') { e.preventDefault(); handleFlip(); }
     }, { passive: false, ...sig });
     canvas.addEventListener('touchend', (e) => {
+      if (this.debugDrag.enabled) return;
       if (this.state === 'playing') handleFlipEnd();
     }, sig);
   }
@@ -168,13 +188,14 @@ export class Game {
     return {
       state: this.state,
       ballsLeft: this.ballsLeft,
-      initialBallCount: this.initialBallCount
+      initialBallCount: this.initialBallCount,
+      showFullTrajectory: !!this.showFullTrajectory
     };
   }
 
   getUiStateSignature() {
     const snapshot = this.getUiStateSnapshot();
-    return `${snapshot.state}|${snapshot.ballsLeft}|${snapshot.initialBallCount}`;
+    return `${snapshot.state}|${snapshot.ballsLeft}|${snapshot.initialBallCount}|${snapshot.showFullTrajectory ? 1 : 0}`;
   }
 
   subscribeUiState(listener) {
@@ -203,40 +224,128 @@ export class Game {
   }
 
   isAimingState() {
-    return this.state === 'aiming' || this.state === 'aimingNext';
+    return this.state === 'aiming';
   }
 
-  getEarlyShotTriggerY() {
-    return this.getCameraY() + this.canvas.height * EARLY_SHOT_TRIGGER_RATIO;
-  }
-
-  canStartEarlyAim() {
-    if (this.state !== 'playing') return false;
-    if (Number.isFinite(this.ballsLeft) && this.ballsLeft <= 0) return false;
-
-    const activeBalls = this.balls.filter(ball => ball && ball.active);
-    if (activeBalls.length === 0) return false;
-
-    const triggerY = this.getEarlyShotTriggerY();
-    return activeBalls.every(ball => ball.y >= triggerY);
-  }
-
-  updateAim(e) {
+  getInputWorldPosition(e) {
     const rect = this.canvas.getBoundingClientRect();
     const scaleX = this.canvas.width / rect.width;
     const scaleY = this.canvas.height / rect.height;
-    
+
     let clientX, clientY;
-    if (e.touches) {
+    if (e.touches && e.touches.length > 0) {
       clientX = e.touches[0].clientX;
       clientY = e.touches[0].clientY;
+    } else if (e.changedTouches && e.changedTouches.length > 0) {
+      clientX = e.changedTouches[0].clientX;
+      clientY = e.changedTouches[0].clientY;
     } else {
       clientX = e.clientX;
       clientY = e.clientY;
     }
 
-    const x = (clientX - rect.left) * scaleX;
-    const y = (clientY - rect.top) * scaleY + this.getCameraY();
+    return {
+      x: (clientX - rect.left) * scaleX,
+      y: (clientY - rect.top) * scaleY + this.getCameraY()
+    };
+  }
+
+  _handleDebugDragStart(e) {
+    if (!this.debugDrag.enabled) return false;
+    if (this.state === 'won' || this.state === 'lost') return false;
+
+    e.preventDefault();
+    this.state = 'playing';
+    const pos = this.getInputWorldPosition(e);
+    const ball = this.ensureDebugDragBall();
+    this.debugDrag.dragging = true;
+    this.moveDebugDragBall(ball, pos.x, pos.y, true);
+    this.trajectory = null;
+    return true;
+  }
+
+  _handleDebugDragMove(e) {
+    if (!this.debugDrag.enabled || !this.debugDrag.dragging) return false;
+    e.preventDefault();
+    const pos = this.getInputWorldPosition(e);
+    const ball = this.ensureDebugDragBall();
+    this.moveDebugDragBall(ball, pos.x, pos.y, false);
+    return true;
+  }
+
+  _handleDebugDragEnd(e) {
+    if (!this.debugDrag.enabled || !this.debugDrag.dragging) return false;
+    e.preventDefault();
+    this.debugDrag.dragging = false;
+    const ball = this.ensureDebugDragBall();
+    ball.vx = 0;
+    ball.vy = 0;
+    return true;
+  }
+
+  ensureDebugDragBall() {
+    let ball = this.balls.find(b => b && b.isDebugDragBall);
+    if (ball) {
+      this.configureBallYoyoState(ball);
+      return ball;
+    }
+
+    this.updateLaunchPosition();
+    ball = this.balls[0] || new Ball(this.launchX, this.launchY);
+    ball.x = this.launchX;
+    ball.y = this.launchY;
+    ball.vx = 0;
+    ball.vy = 0;
+    ball.active = true;
+    ball.stuck = false;
+    ball.stuckFrames = 0;
+    ball.isDebugDragBall = true;
+    this.configureBallYoyoState(ball);
+
+    this.balls = [ball];
+    this.physics.setBalls(this.balls);
+    this.balls = this.physics.balls;
+
+    this.yoyoThread.clear();
+    this.yoyoThread.setLaunchAnchor(this.launchX, this.launchY);
+    if (ball.yoyoEligible !== false) {
+      this.yoyoThread.registerBallLaunch(ball, this.launchX, this.launchY);
+    }
+    return ball;
+  }
+
+  moveDebugDragBall(ball, targetX, targetY, resetVelocity = false) {
+    if (!ball) return;
+    const radius = ball.radius || PHYSICS_CONFIG.pegRadius;
+    const minX = radius;
+    const maxX = this.canvas.width - radius;
+    const minY = radius;
+    const maxY = Math.max(minY, this.physics.ballLossY - radius - 6);
+    const nextX = Utils.clamp(targetX, minX, maxX);
+    const nextY = Utils.clamp(targetY, minY, maxY);
+
+    if (resetVelocity) {
+      ball.vx = 0;
+      ball.vy = 0;
+    } else {
+      const dx = nextX - ball.x;
+      const dy = nextY - ball.y;
+      const maxVel = PHYSICS_CONFIG.maxVelocity;
+      ball.vx = Utils.clamp(dx * 0.55, -maxVel, maxVel);
+      ball.vy = Utils.clamp(dy * 0.55, -maxVel, maxVel);
+    }
+
+    ball.x = nextX;
+    ball.y = nextY;
+    ball.active = true;
+    ball.stuck = false;
+    ball.stuckFrames = 0;
+  }
+
+  updateAim(e) {
+    const pos = this.getInputWorldPosition(e);
+    const x = pos.x;
+    const y = pos.y;
 
     // Calculate angle from launcher to touch point
     this.aimAngle = Utils.angleBetween(this.launchX, this.launchY, x, y);
@@ -279,6 +388,100 @@ export class Game {
   updateLaunchPosition() {
     this.launchX = this.canvas.width / 2;
     this.launchY = 40 + this.getCameraY();
+  }
+
+  refreshYoyoThreadRuntimeConfig() {
+    const base = this.baseYoyoSettings || normalizeYoyoSettings(null);
+    const enabledByPerk = this.yoyoPerkUsesRemaining > 0;
+    this.yoyoThread.configure({
+      ...base,
+      enabled: !!base.enabled || enabledByPerk
+    });
+  }
+
+  configureBallYoyoState(ball) {
+    if (!ball) return;
+    if (this.baseYoyoSettings && this.baseYoyoSettings.enabled) {
+      ball.yoyoEligible = true;
+      ball.yoyoPerkBound = false;
+      return;
+    }
+    if (this.yoyoPerkUsesRemaining > 0) {
+      ball.yoyoEligible = true;
+      ball.yoyoPerkBound = true;
+      return;
+    }
+    ball.yoyoEligible = false;
+    ball.yoyoPerkBound = false;
+  }
+
+  disablePerkYoyoAcrossBalls() {
+    for (const ball of this.balls) {
+      if (!ball || !ball.yoyoPerkBound) continue;
+      ball.yoyoEligible = false;
+      ball.yoyoPerkBound = false;
+    }
+  }
+
+  applyYoyoReleaseEvents(releaseEvents) {
+    if (!Array.isArray(releaseEvents) || releaseEvents.length === 0) return;
+    if (this.baseYoyoSettings && this.baseYoyoSettings.enabled) return;
+
+    let consumed = 0;
+    for (const ballId of releaseEvents) {
+      if (this.yoyoPerkUsesRemaining <= 0) break;
+      const ball = this.balls.find(item => item && item.id === ballId);
+      if (!ball || !ball.yoyoPerkBound) continue;
+
+      this.yoyoPerkUsesRemaining = Math.max(0, this.yoyoPerkUsesRemaining - 1);
+      consumed++;
+      if (this.yoyoPerkUsesRemaining <= 0) {
+        this.disablePerkYoyoAcrossBalls();
+        break;
+      }
+    }
+
+    if (consumed > 0) {
+      this.refreshYoyoThreadRuntimeConfig();
+      this.emitUiStateIfChanged(true, 'yoyo-perk-consumed');
+    }
+  }
+
+  getBombPerkChargeCount() {
+    return this.queuedBombPerkCharges + (this.armedBombPerk ? 1 : 0);
+  }
+
+  armBombPerkForLaunch() {
+    if (this.armedBombPerk) return false;
+    if (this.queuedBombPerkCharges <= 0) return false;
+    this.queuedBombPerkCharges = Math.max(0, this.queuedBombPerkCharges - 1);
+    this.armedBombPerk = true;
+    this.emitUiStateIfChanged(true, 'bomb-perk-armed');
+    return true;
+  }
+
+  consumeBombPerkOnFirstContact(contactEvents) {
+    if (!this.armedBombPerk) return null;
+    if (!Array.isArray(contactEvents) || contactEvents.length === 0) return null;
+    const firstContact = contactEvents.find(event => event && event.ball && event.peg);
+    if (!firstContact) return null;
+
+    this.armedBombPerk = false;
+    this.emitUiStateIfChanged(true, 'bomb-perk-triggered');
+    return firstContact;
+  }
+
+  detonateBombShockwave(sourceBall, sourcePeg) {
+    const shockwave = buildBombShockwave(this.pegs, sourceBall, sourcePeg);
+    if (!Array.isArray(shockwave.targets) || shockwave.targets.length === 0) return 0;
+
+    let activatedCount = 0;
+    for (const peg of shockwave.targets) {
+      if (this.activatePeg(peg, sourceBall, { allowMultiball: true })) {
+        activatedCount++;
+      }
+    }
+    return activatedCount;
   }
 
   createRuntimeFlipper(config) {
@@ -350,16 +553,52 @@ export class Game {
     return false;
   }
 
+  applyYoyoSettings(rawSettings, options = null) {
+    this.baseYoyoSettings = normalizeYoyoSettings(rawSettings);
+    this.refreshYoyoThreadRuntimeConfig();
+    this.setDebugDragEnabled(!!this.baseYoyoSettings.debugDrag, options);
+  }
+
+  setDebugDragEnabled(enabled, options = null) {
+    const next = !!enabled;
+    if (this.debugDrag.enabled === next) return;
+    const skipReset = !!(options && options.skipReset);
+
+    this.debugDrag.enabled = next;
+    this.debugDrag.dragging = false;
+    if (skipReset) return;
+
+    if (next) {
+      this.state = 'idle';
+      this.yoyoThread.clear();
+      this.updateLaunchPosition();
+      this.yoyoThread.setLaunchAnchor(this.launchX, this.launchY);
+      this.resetBall();
+      return;
+    }
+
+    // Leave debug mode with a clean regular turn state.
+    this.state = 'idle';
+    this.yoyoThread.clear();
+    this.resetBall();
+  }
+
   loadLevel(levelData) {
     const survivalSettings = ensureLevelSurvival(levelData, this.canvas.height);
     const yoyoSettings = normalizeYoyoSettings(levelData.yoyo);
     this.survivalRuntime.resize(this.canvas.height);
     this.survivalRuntime.configure(survivalSettings);
     this.survivalRuntime.resetCamera(true);
-    this.yoyoThread.configure(yoyoSettings);
+    this.yoyoPerkUsesRemaining = 0;
+    this.queuedBombPerkCharges = 0;
+    this.armedBombPerk = false;
+    this.applyYoyoSettings(yoyoSettings, { skipReset: true });
 
     this.pegs = levelData.pegs.map(p => {
       const copy = { ...p };
+      if (copy.type === 'multi') {
+        copy.multiballSpawnCount = normalizeMultiballSpawnCount(copy.multiballSpawnCount);
+      }
       if (p.curveSlices) copy.curveSlices = p.curveSlices.map(s => ({ ...s }));
       if (p.animation) copy.animation = { ...p.animation };
       return copy;
@@ -391,6 +630,8 @@ export class Game {
     this.state = 'idle';
     this.trajectory = null;
     this.ultraAimCharges = 0;
+    this.queuedBombPerkCharges = 0;
+    this.armedBombPerk = false;
     this.lastUiStateSignature = '';
 
     this.updateLaunchPosition();
@@ -426,28 +667,22 @@ export class Game {
       this.temporaryFlipperActive = true;
       this.refreshFlipperState();
     }
+    this.armBombPerkForLaunch();
 
-    if (this.state === 'aimingNext') {
-      const newBall = new Ball(this.launchX, this.launchY);
-      newBall.launch(this.aimAngle);
-      newBall.yoyoEligible = true;
-      this.physics.addBall(newBall);
-      this.balls = this.physics.balls;
-      this.yoyoThread.registerBallLaunch(newBall, this.launchX, this.launchY);
-      this.state = 'playing';
-    } else {
-      this.state = 'playing';
-      for (const ball of this.balls) {
-        ball.launch(this.aimAngle);
-        ball.yoyoEligible = true;
+    this.state = 'playing';
+    for (const ball of this.balls) {
+      ball.launch(this.aimAngle);
+      this.configureBallYoyoState(ball);
+      if (ball.yoyoEligible !== false) {
         this.yoyoThread.registerBallLaunch(ball, this.launchX, this.launchY);
       }
-      this.turnHitPegIds = [];
-      this.ballPositionHistory = [];
     }
+    this.turnHitPegIds = [];
+    this.ballPositionHistory = [];
 
     if (Number.isFinite(this.ballsLeft)) {
       this.ballsLeft--;
+      this.emitUiStateIfChanged(true, 'launch');
     }
     this.trajectory = null;
   }
@@ -495,7 +730,48 @@ export class Game {
     return baseScore * multiplier;
   }
 
-  endTurn(bucketCatchCount = 0) {
+  isPermanentBumper(peg) {
+    return !!(peg && peg.type === 'bumper' && !peg.bumperDisappear && !peg.bumperOrange);
+  }
+
+  hasPegBeenActivated(pegId) {
+    if (!pegId) return false;
+    return this.turnHitPegIds.includes(pegId) || this.hitPegIds.includes(pegId);
+  }
+
+  activatePeg(peg, sourceBall = null, options = null) {
+    if (!peg || this.isPortalPeg(peg)) return false;
+    if (peg.type === 'bumper') {
+      peg._bumperHitScale = 1.3;
+    }
+
+    if (peg.type === 'obstacle' || this.isPermanentBumper(peg)) {
+      return false;
+    }
+    if (this.hasPegBeenActivated(peg.id)) {
+      return false;
+    }
+
+    const points = this.calculateScore(peg);
+    this.score += points;
+    this.turnHitPegIds.push(peg.id);
+    if (this.physics?.hitPegs && typeof this.physics.hitPegs.add === 'function') {
+      this.physics.hitPegs.add(peg.id);
+    }
+
+    if (this.onPegHit) this.onPegHit(peg, points);
+    if (this.onScoreChange) this.onScoreChange(this.score);
+
+    const allowMultiball = options?.allowMultiball !== false;
+    if (allowMultiball && peg.type === 'multi' && sourceBall) {
+      const spawnCount = normalizeMultiballSpawnCount(peg.multiballSpawnCount);
+      this.spawnMultiballs(sourceBall, spawnCount);
+    }
+
+    return true;
+  }
+
+  endTurn() {
     this.yoyoThread.clear();
 
     if (!this.baseFlipperConfig && this.temporaryFlipperActive) {
@@ -537,12 +813,7 @@ export class Game {
       return;
     }
 
-    // Free ball from bucket catch
-    if (bucketCatchCount > 0) {
-      this.ballsLeft += bucketCatchCount;
-    }
-
-    // Check lose condition
+    // Check lose condition (bucket catches already credited in onPhysicsUpdate)
     if (this.ballsLeft <= 0) {
       this.state = 'lost';
       if (this.onGameEnd) this.onGameEnd('lost', this.score);
@@ -555,21 +826,23 @@ export class Game {
     this.resetBall();
   }
 
-  spawnMultiballs(sourceBall, count = 5) {
+  spawnMultiballs(sourceBall, count = MULTIBALL_DEFAULT_SPAWN_COUNT) {
     if (!sourceBall) return;
+    const spawnCount = normalizeMultiballSpawnCount(count);
 
     const speed = Math.max(Utils.magnitude(sourceBall.vx, sourceBall.vy), PHYSICS_CONFIG.launchPower * 0.8);
     const baseAngle = Math.atan2(sourceBall.vy, sourceBall.vx);
     const spread = Math.PI / 2; // 90 degrees
 
-    for (let i = 0; i < count; i++) {
-      const t = count === 1 ? 0.5 : i / (count - 1);
+    for (let i = 0; i < spawnCount; i++) {
+      const t = spawnCount === 1 ? 0.5 : i / (spawnCount - 1);
       const angle = baseAngle - spread / 2 + t * spread;
       const newBall = new Ball(sourceBall.x, sourceBall.y);
       newBall.x += Math.cos(angle) * newBall.radius * 0.4;
       newBall.y += Math.sin(angle) * newBall.radius * 0.4;
       newBall.launch(angle, speed);
       newBall.yoyoEligible = false;
+      newBall.yoyoPerkBound = false;
       this.physics.addBall(newBall);
     }
     this.balls = this.physics.balls;
@@ -586,8 +859,25 @@ export class Game {
     }
     this.updateLaunchPosition();
     this.physics.setBallLossY(this.getCameraY() + this.canvas.height + 50);
+    const retractStartY = this.physics.bucketEnabled && this.physics.bucket
+      ? this.physics.bucket.y - this.physics.bucket.height / 2 - getBallRadius() - 24
+      : this.physics.ballLossY - Math.max(60, this.canvas.height * 0.12);
 
-    const runsPhysics = this.state === 'playing' || this.state === 'aimingNext';
+    if (this.debugDrag.enabled) {
+      // Debug mode: manual ball drag, no gravity/integration step.
+      this.physics.updateBucket();
+      this.physics.updateFlippers(dt);
+      const debugBall = this.ensureDebugDragBall();
+      if (!this.debugDrag.dragging) {
+        debugBall.vx = 0;
+        debugBall.vy = 0;
+      }
+      const yoyoReleaseEvents = this.yoyoThread.step(this.balls, this.pegs, dt, { retractStartY });
+      this.applyYoyoReleaseEvents(yoyoReleaseEvents);
+      return;
+    }
+
+    const runsPhysics = this.state === 'playing';
     if (!runsPhysics) {
       this.yoyoThread.clear();
       if (this.balls.length === 1 && !this.balls[0].active) {
@@ -612,29 +902,25 @@ export class Game {
 
     const result = this.physics.update();
     this.balls = this.physics.balls;
-    this.yoyoThread.step(this.balls, this.pegs, dt);
+    const bombContact = this.consumeBombPerkOnFirstContact(result.contactEvents);
 
     // Handle newly hit pegs
     for (const event of result.hitEvents) {
       const peg = event.peg;
+      this.yoyoThread.notePegContact(event.ball, peg);
 
       // Bumper collision: trigger scale-pulse animation (fires every hit)
       if (event.bumperAnimOnly) {
         peg._bumperHitScale = 1.3;
         continue;
       }
-
-      const points = this.calculateScore(peg);
-      this.score += points;
-      this.turnHitPegIds.push(peg.id);
-
-      if (this.onPegHit) this.onPegHit(peg, points);
-      if (this.onScoreChange) this.onScoreChange(this.score);
-
-      if (peg.type === 'multi') {
-        this.spawnMultiballs(event.ball, 5);
-      }
+      this.activatePeg(peg, event.ball, { allowMultiball: true });
     }
+    if (bombContact) {
+      this.detonateBombShockwave(bombContact.ball, bombContact.peg);
+    }
+    const yoyoReleaseEvents = this.yoyoThread.step(this.balls, this.pegs, dt, { retractStartY });
+    this.applyYoyoReleaseEvents(yoyoReleaseEvents);
 
     // Animate bumper hit scale decay
     for (const peg of this.pegs) {
@@ -647,17 +933,19 @@ export class Game {
     // Check for stuck balls trapped inside structures
     this.checkStuckBalls();
 
-    if (this.state === 'aimingNext') {
-      this.updateTrajectory();
-    }
-
     if (this.checkSurvivalEndConditions()) {
       return;
     }
 
+    // Credit bucket catches immediately so the ball counter updates in real time
+    if (result.bucketCatchCount > 0) {
+      this.ballsLeft += result.bucketCatchCount;
+      this.emitUiStateIfChanged(true, 'bucket-catch');
+    }
+
     // End turn when all balls are gone
     if (result.ballsRemaining === 0) {
-      this.endTurn(result.bucketCatchCount);
+      this.endTurn();
     }
 
     this.checkSurvivalEndConditions();
@@ -810,7 +1098,10 @@ export class Game {
   }
 
   setShowFullTrajectory(show) {
-    this.showFullTrajectory = show;
+    const next = !!show;
+    if (this.showFullTrajectory === next) return;
+    this.showFullTrajectory = next;
+    this.emitUiStateIfChanged(true, 'show-full-trajectory');
     if (this.isAimingState()) {
       this.updateTrajectory();
     }
@@ -849,11 +1140,28 @@ export class Game {
     const converted = Math.min(count, candidates.length);
     for (let i = 0; i < converted; i++) {
       candidates[i].type = 'multi';
+      candidates[i].multiballSpawnCount = MULTIBALL_DEFAULT_SPAWN_COUNT;
     }
     if (converted > 0) {
       this.physics.setPegs(this.pegs);
     }
     return converted;
+  }
+
+  grantBombShockwaveCharges(charges = 1) {
+    const gain = Math.max(1, Math.floor(charges));
+    this.queuedBombPerkCharges = Math.min(99, this.queuedBombPerkCharges + gain);
+    this.emitUiStateIfChanged(true, 'bomb-perk-granted');
+    return this.getBombPerkChargeCount();
+  }
+
+  grantYoyoThreadUses(uses = 1) {
+    if (this.baseYoyoSettings && this.baseYoyoSettings.enabled) return 0;
+    const gain = Math.max(1, Math.floor(uses));
+    this.yoyoPerkUsesRemaining = Math.min(99, this.yoyoPerkUsesRemaining + gain);
+    this.refreshYoyoThreadRuntimeConfig();
+    this.emitUiStateIfChanged(true, 'yoyo-perk-granted');
+    return this.yoyoPerkUsesRemaining;
   }
 
   grantUltraAim(charges = 1) {

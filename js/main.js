@@ -8,6 +8,13 @@ import { FLIPPER_DEFAULTS, createDefaultFlipperConfig, normalizeFlipperConfig } 
 import { ensureLevelSurvival, normalizeSurvivalSettings } from './survival-mode.js';
 import { GambleSystem } from './gamble-system.js';
 import { normalizeYoyoSettings } from './yoyo-thread.js';
+import {
+  MULTIBALL_MAX_SPAWN_COUNT,
+  MULTIBALL_MIN_SPAWN_COUNT,
+  normalizeMultiballSpawnCount
+} from './multiball-settings.js';
+import { VisualLayout } from './visual-layout.js';
+import { normalizeVisuals } from './visual-config.js';
 
 // Fixed aspect ratio: 3:4.5 (width:height)
 const ASPECT_RATIO = 3 / 4.5;
@@ -22,9 +29,11 @@ class PeggleApp {
     this.game = null;
     this.editor = null;
     this.gambleSystem = null;
-    
+    this.visualLayout = new VisualLayout();
+
     this.mode = 'editor'; // 'editor' or 'play'
-    
+
+    this.visualLayout.mount();
     this.setupCanvas();
     this.setupUI();
     this.initMode();
@@ -36,27 +45,66 @@ class PeggleApp {
   }
 
   resizeCanvas() {
-    const container = document.getElementById('canvasContainer');
-    const containerRect = container.getBoundingClientRect();
-    
-    // Calculate canvas size maintaining aspect ratio
-    let width = Math.min(containerRect.width, MAX_WIDTH);
-    let height = width / ASPECT_RATIO;
-    
-    // If height exceeds container, scale down
-    if (height > containerRect.height) {
-      height = containerRect.height;
-      width = height * ASPECT_RATIO;
+    // Size the 9:17 frame to fit the viewport, then size the canvas inside it
+    const viewport = document.getElementById('visualViewport');
+    const frame = document.getElementById('visualFrame');
+    if (!viewport || !frame) {
+      // Fallback if visual layout not mounted
+      const container = document.getElementById('canvasContainer');
+      const r = container.getBoundingClientRect();
+      let w = Math.min(r.width, MAX_WIDTH);
+      let h = w / ASPECT_RATIO;
+      if (h > r.height) { h = r.height; w = h * ASPECT_RATIO; }
+      this.canvas.width = w; this.canvas.height = h;
+      this.canvas.style.width = w + 'px'; this.canvas.style.height = h + 'px';
+      if (this.game) this.game.resize(w, h);
+      if (this.editor) this.editor.resize(w, h);
+      return;
     }
-    
-    // Set canvas size
+
+    const vpRect = viewport.getBoundingClientRect();
+
+    // Account for theme panel width
+    const panel = document.getElementById('themePanel');
+    const panelW = panel && !panel.classList.contains('hidden')
+      ? panel.getBoundingClientRect().width + 6 : 0;
+
+    const availW = vpRect.width - panelW;
+    const availH = vpRect.height;
+
+    // Fit 9:17 frame in available space
+    let fw = availW;
+    let fh = fw * (17 / 9);
+    if (fh > availH) {
+      fh = availH;
+      fw = fh * (9 / 17);
+    }
+    fw = Math.floor(fw);
+    fh = Math.floor(fh);
+
+    frame.style.width = fw + 'px';
+    frame.style.height = fh + 'px';
+
+    // Canvas fills 90% of frame width, maintains 2:3 aspect
+    let width = Math.min(Math.round(fw * 0.9), MAX_WIDTH);
+    let height = Math.round(width / ASPECT_RATIO);
+
+    // Canvas always fits vertically (2:3 is wider than 9:17)
+    // but clamp just in case
+    if (height > fh) {
+      height = fh;
+      width = Math.round(height * ASPECT_RATIO);
+    }
+
     this.canvas.width = width;
     this.canvas.height = height;
     this.canvas.style.width = width + 'px';
     this.canvas.style.height = height + 'px';
-    
+
     if (this.game) this.game.resize(width, height);
     if (this.editor) this.editor.resize(width, height);
+
+    this.visualLayout.resize(fw, fh);
 
     const level = this.levelManager.getCurrentLevel();
     if (level) {
@@ -313,6 +361,17 @@ class PeggleApp {
       this.showPhysicsSettings();
     });
 
+    // Visual layout: config change callback
+    this.visualLayout.onConfigChange = (config) => {
+      const level = this.levelManager.getCurrentLevel();
+      if (level) {
+        level.visuals = config;
+        this.levelManager.save();
+        const renderer = this.game?.renderer || this.editor?.renderer;
+        if (renderer) renderer.setBackground(config.background);
+      }
+    };
+
     // Level settings
     document.getElementById('levelName').addEventListener('change', (e) => {
       this.levelManager.updateCurrentLevel({ name: e.target.value });
@@ -327,6 +386,13 @@ class PeggleApp {
     if (yoyoToggle) {
       yoyoToggle.addEventListener('change', (e) => {
         this.updateLevelYoyoSettings({ enabled: e.target.checked });
+      });
+    }
+
+    const yoyoDebugDragToggle = document.getElementById('yoyoDebugDragToggle');
+    if (yoyoDebugDragToggle) {
+      yoyoDebugDragToggle.addEventListener('change', (e) => {
+        this.updateLevelYoyoSettings({ debugDrag: e.target.checked });
       });
     }
 
@@ -372,6 +438,9 @@ class PeggleApp {
 
     // Portal panel
     this.setupPortalPanel();
+
+    // Multiball panel
+    this.setupMultiballPanel();
 
     // Flipper panel
     this.setupFlipperPanel();
@@ -794,6 +863,52 @@ class PeggleApp {
     document.getElementById('portalPanel').classList.remove('visible');
   }
 
+  setupMultiballPanel() {
+    const countSlider = document.getElementById('multiballCountSlider');
+    const countInput = document.getElementById('multiballCountInput');
+    if (!countSlider || !countInput) return;
+    countSlider.min = String(MULTIBALL_MIN_SPAWN_COUNT);
+    countSlider.max = String(MULTIBALL_MAX_SPAWN_COUNT);
+    countInput.min = String(MULTIBALL_MIN_SPAWN_COUNT);
+    countInput.max = String(MULTIBALL_MAX_SPAWN_COUNT);
+
+    document.getElementById('closeMultiballPanel').addEventListener('click', () => {
+      this.closeMultiballPanel();
+    });
+
+    const applySpawnCount = (rawValue) => {
+      if (!this.editor) return;
+      const normalized = normalizeMultiballSpawnCount(rawValue);
+      countSlider.value = normalized;
+      countInput.value = normalized;
+      this.editor.setSelectedMultiballSpawnCount(normalized);
+    };
+
+    countSlider.addEventListener('input', () => {
+      const value = parseInt(countSlider.value, 10);
+      applySpawnCount(value);
+    });
+
+    countInput.addEventListener('input', () => {
+      const value = parseInt(countInput.value, 10);
+      applySpawnCount(value);
+    });
+  }
+
+  showMultiballPanel() {
+    const props = this.editor ? this.editor.getSelectedMultiballProperties() : null;
+    if (!props) return;
+
+    const value = normalizeMultiballSpawnCount(props.spawnCount);
+    document.getElementById('multiballCountSlider').value = value;
+    document.getElementById('multiballCountInput').value = value;
+    document.getElementById('multiballPanel').classList.add('visible');
+  }
+
+  closeMultiballPanel() {
+    document.getElementById('multiballPanel').classList.remove('visible');
+  }
+
   setupFlipperPanel() {
     document.getElementById('closeFlipperPanel').addEventListener('click', () => {
       this.closeFlipperPanel();
@@ -975,6 +1090,9 @@ class PeggleApp {
 
     const next = normalizeYoyoSettings({ ...(level.yoyo || {}), ...(partialSettings || {}) });
     this.levelManager.updateCurrentLevel({ yoyo: next });
+    if (this.mode === 'play' && this.game) {
+      this.game.applyYoyoSettings(next);
+    }
     this.updateLevelSettings();
   }
 
@@ -1064,6 +1182,12 @@ class PeggleApp {
     } else {
       this.closePortalPanel();
     }
+
+    if (count > 0 && this.editor.isSelectionAllMultiballs()) {
+      this.showMultiballPanel();
+    } else {
+      this.closeMultiballPanel();
+    }
   }
 
   showAnimationPanel() {
@@ -1149,6 +1273,13 @@ class PeggleApp {
 
   startEditor() {
     this.teardownGambleSystem();
+
+    // Clean up ball counter
+    if (this._unsubBallCounter) {
+      this._unsubBallCounter();
+      this._unsubBallCounter = null;
+    }
+    this.visualLayout.hideBallCounter();
 
     if (this.game) {
       this.game.stop();
@@ -1236,6 +1367,11 @@ class PeggleApp {
 
     // Keep side-panel settings in sync when switching/returning to editor.
     this.updateLevelSettings();
+    this._applyLevelVisuals();
+    this.visualLayout.setSpinMode(false);
+    this.visualLayout.setEditMode(false);
+    this.visualLayout.setPanelVisible(true);
+    this.resizeCanvas(); // re-fit frame with panel visible
   }
 
   startGame() {
@@ -1246,6 +1382,7 @@ class PeggleApp {
       this.closeAnimationPanel();
       this.closeBumperPanel();
       this.closePortalPanel();
+      this.closeMultiballPanel();
       this.closeFlipperPanel();
       this.editor.stop();
       this.editor = null;
@@ -1295,11 +1432,22 @@ class PeggleApp {
 
     this.game.start();
 
+    // Ball counter: subscribe to game state
+    this._unsubBallCounter = this.game.subscribeUiState((snapshot) => {
+      if (Number.isFinite(snapshot.ballsLeft)) {
+        this.visualLayout.updateBallCounter(snapshot.ballsLeft, snapshot.initialBallCount);
+      }
+    });
+
     // Update UI
     document.getElementById('playBtn').innerHTML = '✏️';
     document.getElementById('playBtn').title = 'Back to Editor';
     document.querySelector('.toolbar').style.display = 'none';
     this.setSurvivalPanelVisible(false);
+    this._applyLevelVisuals();
+    this.visualLayout.setEditMode(false);
+    this.visualLayout.setPanelVisible(false);
+    this.resizeCanvas(); // re-fit frame without panel
     this.mountGambleSystem();
   }
 
@@ -1331,6 +1479,18 @@ class PeggleApp {
       this.startEditor();
     }
   };
+
+  _applyLevelVisuals() {
+    const level = this.levelManager.getCurrentLevel();
+    const visuals = level ? normalizeVisuals(level.visuals) : normalizeVisuals(null);
+    this.visualLayout.setConfig(visuals);
+
+    // Apply background to whatever renderer is active
+    const renderer = this.game?.renderer || this.editor?.renderer;
+    if (renderer) {
+      renderer.setBackground(visuals.background);
+    }
+  }
 
   togglePlayMode() {
     if (this.mode === 'editor') {
@@ -1368,6 +1528,10 @@ class PeggleApp {
     const yoyoToggle = document.getElementById('yoyoThreadToggle');
     if (yoyoToggle) {
       yoyoToggle.checked = !!yoyoSettings.enabled;
+    }
+    const yoyoDebugDragToggle = document.getElementById('yoyoDebugDragToggle');
+    if (yoyoDebugDragToggle) {
+      yoyoDebugDragToggle.checked = !!yoyoSettings.debugDrag;
     }
 
     const survival = ensureLevelSurvival(level, this.canvas.height);

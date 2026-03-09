@@ -7,7 +7,11 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="theme-color" content="#0d1117">
   <title>Peggle Editor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif:wght@700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/styles.css">
+  <link rel="stylesheet" href="css/visual-layout.css">
 </head>
 <body>
   <div class="app">
@@ -146,6 +150,16 @@
           <label class="anim-toggle"><input type="checkbox" id="portalOneWayFlipToggle"> Invert one-sided direction</label>
         </div>
       </div>
+      <!-- Multiball properties panel (right side) -->
+      <div id="multiballPanel" class="bumper-panel">
+        <div class="bumper-panel-title">Multiball <button id="closeMultiballPanel" class="anim-close-btn">✕</button></div>
+        <div class="bumper-panel-body">
+          <div class="anim-slider">
+            <label>Extra Balls <input type="number" id="multiballCountInput" class="anim-num" value="1" step="1" min="1" max="10"></label>
+            <input type="range" id="multiballCountSlider" min="1" max="10" value="1" step="1">
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Status Bar -->
@@ -215,6 +229,10 @@
         <label class="menu-toggle-row">
           <span>Enable Yo-yo Thread</span>
           <input type="checkbox" id="yoyoThreadToggle">
+        </label>
+        <label class="menu-toggle-row">
+          <span>Yo-yo Debug Drag (No Gravity)</span>
+          <input type="checkbox" id="yoyoDebugDragToggle">
         </label>
         <button id="addToTrainingBtn" class="menu-btn primary">Add to Training</button>
       </div>

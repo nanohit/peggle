@@ -524,10 +524,12 @@ export class PhysicsEngine {
 
   update() {
     if (!this.balls || this.balls.length === 0) {
-      return { hitEvents: [], ballsRemaining: 0, bucketCatchCount: 0 };
+      return { hitEvents: [], contactEvents: [], ballsRemaining: 0, bucketCatchCount: 0 };
     }
 
     const hitEvents = [];
+    const contactEvents = [];
+    const contactKeys = new Set();
 
     // Maximum pixels a ball may travel per sub-step.
     // Must be smaller than the thinnest collidable object (~8 px flipper bar).
@@ -600,6 +602,11 @@ export class PhysicsEngine {
 
           if (collision) {
             this.resolveCollision(ball, collision, peg);
+            const contactKey = `${ball.id}:${peg.id}`;
+            if (!contactKeys.has(contactKey)) {
+              contactKeys.add(contactKey);
+              contactEvents.push({ peg, ball });
+            }
 
             const isBumper = peg.type === 'bumper';
 
@@ -645,6 +652,7 @@ export class PhysicsEngine {
 
     return {
       hitEvents,
+      contactEvents,
       ballsRemaining: this.balls.length,
       bucketCatchCount
     };

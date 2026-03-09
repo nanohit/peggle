@@ -1,0 +1,452 @@
+/* Visual Layout - 9:17 frame, decorative slots, theme panel */
+
+/* Viewport: holds frame + theme panel side by side */
+.visual-viewport {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  overflow: hidden;
+  min-height: 0;
+  position: relative;
+  background: var(--bg-primary);
+}
+
+/* Frame: strict 9:17, positioned container for canvas + slots */
+.visual-frame {
+  flex: none;
+  position: relative;
+  overflow: visible;
+  background: #0a0a14;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Canvas container inside frame — below decorative slots, overflow visible for editor panels */
+.visual-frame > .canvas-container {
+  flex: none;
+  position: relative;
+  z-index: 1;
+  overflow: visible;
+  background: transparent;
+}
+
+/* Slot clip layer — clips decorative assets to frame bounds */
+.visual-slot-clip {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: 4px;
+  z-index: 2;
+  pointer-events: none;
+}
+
+/* ─── Slot elements ─────────────────────────────── */
+
+.visual-slot {
+  position: absolute;
+  pointer-events: none;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  z-index: 2;
+  aspect-ratio: 1;
+  transition: box-shadow 0.15s, outline 0.15s;
+}
+
+/* In edit mode: slots become interactive */
+.visual-slot--editable {
+  pointer-events: auto;
+  cursor: grab;
+  outline: 1px dashed rgba(255, 255, 255, 0.25);
+  outline-offset: -1px;
+}
+
+.visual-slot--editable:hover {
+  outline-color: rgba(88, 166, 255, 0.5);
+}
+
+.visual-slot--selected {
+  outline: 2px solid #58a6ff !important;
+  outline-offset: -2px;
+  box-shadow: 0 0 12px rgba(88, 166, 255, 0.3);
+  z-index: 20 !important;
+}
+
+.visual-slot--editable:active {
+  cursor: grabbing;
+}
+
+/* Editing mode indicator on frame */
+.visual-frame--editing {
+  outline: 2px dashed rgba(88, 166, 255, 0.4);
+  outline-offset: -2px;
+}
+
+/* Spin mode: fade decorations */
+.visual-frame--spin .visual-slot {
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+/* ─── Theme Panel ───────────────────────────────── */
+
+.theme-panel {
+  width: 180px;
+  max-height: 100%;
+  overflow-y: auto;
+  flex-shrink: 0;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 11px;
+}
+
+.theme-panel.hidden {
+  display: none;
+}
+
+.theme-panel-title {
+  padding: 6px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border);
+}
+
+.theme-panel-body {
+  padding: 6px 8px 8px;
+}
+
+.theme-section {
+  margin-bottom: 8px;
+}
+
+.theme-section:last-child {
+  margin-bottom: 0;
+}
+
+.theme-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin-bottom: 4px;
+}
+
+.theme-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 3px 0;
+}
+
+.theme-row-label {
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.theme-select {
+  padding: 2px 4px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.theme-color {
+  width: 28px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  cursor: pointer;
+  background: none;
+}
+
+.theme-edit-btn {
+  width: 100%;
+  padding: 5px 0;
+  margin-bottom: 6px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 10px;
+  cursor: pointer;
+  text-align: center;
+}
+
+.theme-edit-btn:active {
+  background: var(--border);
+}
+
+/* Slot list in panel */
+.theme-slot-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.theme-slot-row {
+  padding: 4px 5px;
+  background: var(--bg-tertiary);
+  border: 1px solid transparent;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.theme-slot-row.selected {
+  border-color: var(--accent);
+  background: rgba(88, 166, 255, 0.08);
+}
+
+.theme-slot-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.theme-slot-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  min-width: 0;
+  flex: 1;
+}
+
+.theme-slot-toggle input[type="checkbox"] {
+  width: 12px;
+  height: 12px;
+  cursor: pointer;
+}
+
+.theme-slot-name {
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.theme-slot-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 3px;
+}
+
+.theme-slot-scale {
+  flex: 1;
+  height: 3px;
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--bg-primary);
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.theme-slot-scale::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+}
+
+/* Layer reorder buttons */
+.theme-slot-layer-btns {
+  display: flex;
+  gap: 1px;
+  flex-shrink: 0;
+}
+
+.theme-layer-btn {
+  width: 16px;
+  height: 14px;
+  padding: 0;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  color: var(--text-dim);
+  font-size: 7px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.theme-layer-btn:hover:not(:disabled) {
+  background: var(--border);
+  color: var(--text-primary);
+}
+
+.theme-layer-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+/* Scale number input */
+.theme-slot-scale-num {
+  width: 36px;
+  padding: 1px 2px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-primary);
+  font-size: 9px;
+  text-align: center;
+  -moz-appearance: textfield;
+}
+
+.theme-slot-scale-num::-webkit-inner-spin-button,
+.theme-slot-scale-num::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.theme-slot-upload,
+.theme-slot-reset {
+  padding: 1px 4px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-dim);
+  font-size: 8px;
+  cursor: pointer;
+}
+
+.theme-slot-upload:active,
+.theme-slot-reset:active {
+  background: var(--border);
+}
+
+/* ─── Ball Counter ──────────────────────────────── */
+
+.bc-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+}
+
+.bc-dot {
+  position: absolute;
+  width: var(--bc-dot-size, 11%);
+  height: var(--bc-dot-size, 11%);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  transition: left 0.5s ease-in-out, top 0.5s ease-in-out,
+              width 0.3s ease, height 0.3s ease,
+              opacity 0.4s ease, background 0.3s ease;
+}
+
+.bc-dot--filled {
+  background: #fff;
+  box-shadow: 0 0 4px rgba(255, 255, 255, 0.5);
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+.bc-dot--empty {
+  background: rgba(255, 255, 255, 0.15);
+  opacity: 0.4;
+  transform: translate(-50%, -50%) scale(0.7);
+}
+
+.bc-dot--popping {
+  animation: bc-pop 0.4s ease-out;
+}
+
+@keyframes bc-pop {
+  0%   { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+  50%  { transform: translate(-50%, -50%) scale(1.6); opacity: 0.6; }
+  100% { transform: translate(-50%, -50%) scale(0.7); opacity: 0.4; }
+}
+
+.bc-dot--appearing {
+  animation: bc-appear 0.4s ease-out;
+}
+
+@keyframes bc-appear {
+  0%   { transform: translate(-50%, -50%) scale(0); opacity: 0; }
+  60%  { transform: translate(-50%, -50%) scale(1.3); opacity: 1; }
+  100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+}
+
+.bc-number {
+  position: absolute;
+  inset: 15%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Noto Serif', Georgia, serif;
+  font-weight: 700;
+  color: #fff;
+  font-size: var(--bc-font-size, 20px);
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+  line-height: 1;
+}
+
+/* ─── Editor panels repositioned outside frame ──── */
+/* When panels are reparented into .visual-frame, position them
+   to the LEFT of the frame so they don't cover the gameplay area */
+
+.visual-frame > .anim-panel {
+  left: auto;
+  right: calc(100% + 6px);
+}
+
+.visual-frame > .bumper-panel {
+  left: auto;
+  right: calc(100% + 6px);
+}
+
+.visual-frame > .survival-panel {
+  left: auto;
+  right: calc(100% + 6px);
+  top: 8px;
+}
+
+/* ─── Responsive ────────────────────────────────── */
+
+/* On narrow screens, hide theme panel by default */
+@media (max-width: 540px) {
+  .theme-panel {
+    position: absolute;
+    right: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 20;
+    width: 160px;
+    max-height: 80%;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    background: rgba(22, 27, 34, 0.94);
+    display: none;
+  }
+
+  .theme-panel.visible-mobile {
+    display: block;
+  }
+}
+
+/* Scrollbar */
+.theme-panel::-webkit-scrollbar {
+  width: 3px;
+}
+.theme-panel::-webkit-scrollbar-track {
+  background: transparent;
+}
+.theme-panel::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 2px;
+}
