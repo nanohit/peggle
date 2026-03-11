@@ -154,10 +154,27 @@ export class Renderer {
       ctx.fillRect(0, 0, this.width, this.height);
     }
 
-    // Draw wall indicators
+    // Soft edge darkening at top and bottom (replaces hard stroke)
+    const edgeH = 18;
+    const topFade = ctx.createLinearGradient(0, 0, 0, edgeH);
+    topFade.addColorStop(0, 'rgba(0,0,0,0.45)');
+    topFade.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = topFade;
+    ctx.fillRect(0, 0, this.width, edgeH);
+
+    const botFade = ctx.createLinearGradient(0, this.height - edgeH, 0, this.height);
+    botFade.addColorStop(0, 'rgba(0,0,0,0)');
+    botFade.addColorStop(1, 'rgba(0,0,0,0.45)');
+    ctx.fillStyle = botFade;
+    ctx.fillRect(0, this.height - edgeH, this.width, edgeH);
+
+    // Side wall indicators only (no top/bottom stroke)
     ctx.strokeStyle = COLORS.wall;
     ctx.lineWidth = 2;
-    ctx.strokeRect(1, 1, this.width - 2, this.height - 2);
+    ctx.beginPath();
+    ctx.moveTo(1, 0); ctx.lineTo(1, this.height);
+    ctx.moveTo(this.width - 1, 0); ctx.lineTo(this.width - 1, this.height);
+    ctx.stroke();
   }
 
   drawGrid(cameraY = 0) {
@@ -1415,15 +1432,11 @@ export class Renderer {
       this.drawVerticalProgressTracker(state.verticalProgress);
     }
 
-    if (state.score !== undefined) {
-      this.drawScore(
-        state.score,
-        state.ballsLeft,
-        state.orangePegsLeft,
-        state.totalOrangePegs,
-        state.centerLabel || null
-      );
-    }
+    // Legacy HUD hidden — score/balls/orange pegs now shown via visual layout slots
+    // (drawScore method retained for logic compatibility)
+    // if (state.score !== undefined) {
+    //   this.drawScore(state.score, state.ballsLeft, state.orangePegsLeft, state.totalOrangePegs, state.centerLabel || null);
+    // }
 
     if (state.message) {
       this.drawMessage(state.message, state.subMessage);
