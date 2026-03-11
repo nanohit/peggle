@@ -260,6 +260,7 @@ export class PegAnimator {
     this.animations = [];               // compiled animation entries
     this.animatedPegIds = new Set();    // pegs affected by active animations
     this.elapsed = 0;
+    this._hitTriggerState = new Map();  // animIndex → { active, elapsed, forward }
   }
 
   loadFromLevel(pegs, groups = []) {
@@ -267,6 +268,7 @@ export class PegAnimator {
     this.animations = [];
     this.animatedPegIds.clear();
     this.elapsed = 0;
+    this._hitTriggerState = new Map();
 
     // Build peg lookup
     const pegMap = new Map();
@@ -318,7 +320,7 @@ export class PegAnimator {
         extentY = Math.max(extentY, Math.abs(orig.y - cy) + ex.y);
       }
 
-      this.animations.push({
+      const entry = {
         type: 'group',
         pegIds: memberIds,
         centerX: cx,
@@ -332,8 +334,15 @@ export class PegAnimator {
         wrap: anim.wrap !== false,
         inverse: !!anim.inverse,
         cycle: !!anim.cycle,
-        easingFn: anim.cycle ? linear : (EASING_FNS[anim.easing] || linear)
-      });
+        easingFn: anim.cycle ? linear : (EASING_FNS[anim.easing] || linear),
+        hitTrigger: !!anim.hitTrigger,
+        hitMode: anim.hitMode || 'cycle',
+        hitSteps: Math.max(1, Math.round(anim.hitSteps || 1)),
+      };
+      this.animations.push(entry);
+      if (entry.hitTrigger) {
+        this._hitTriggerState.set(this.animations.length - 1, { active: false, elapsed: 0, forward: true, step: 0, _prevStep: 0 });
+      }
       for (const pegId of memberIds) this.animatedPegIds.add(pegId);
     }
 
@@ -344,7 +353,7 @@ export class PegAnimator {
       const anim = p.animation;
       const ex = estimatePegExtents(p, p.x, p.y, p.angle || 0, p.curveSlices);
 
-      this.animations.push({
+      const entry = {
         type: 'individual',
         pegIds: [p.id],
         centerX: p.x,
@@ -358,8 +367,15 @@ export class PegAnimator {
         wrap: anim.wrap !== false,
         inverse: !!anim.inverse,
         cycle: !!anim.cycle,
-        easingFn: anim.cycle ? linear : (EASING_FNS[anim.easing] || linear)
-      });
+        easingFn: anim.cycle ? linear : (EASING_FNS[anim.easing] || linear),
+        hitTrigger: !!anim.hitTrigger,
+        hitMode: anim.hitMode || 'cycle',
+        hitSteps: Math.max(1, Math.round(anim.hitSteps || 1)),
+      };
+      this.animations.push(entry);
+      if (entry.hitTrigger) {
+        this._hitTriggerState.set(this.animations.length - 1, { active: false, elapsed: 0, forward: true, step: 0, _prevStep: 0 });
+      }
       this.animatedPegIds.add(p.id);
     }
   }
@@ -377,8 +393,57 @@ export class PegAnimator {
     const canWrapX = Number.isFinite(worldWidth) && worldWidth > 0;
     const canWrapY = Number.isFinite(worldHeight) && worldHeight > 0;
 
-    for (const anim of this.animations) {
+    for (let ai = 0; ai < this.animations.length; ai++) {
+      const anim = this.animations[ai];
       const duration = Math.max(anim.duration || 0, 0.001);
+
+      // Hit-triggered animations: use their own elapsed time
+      let animElapsed = this.elapsed;
+      if (anim.hitTrigger) {
+        const ht = this._hitTriggerState.get(ai);
+        if (!ht) continue;
+        if (!ht.active) {
+          // Not yet triggered — pegs stay at origin
+          continue;
+        }
+        ht.elapsed += dtSeconds;
+
+        if (anim.hitMode === 'single' || anim.hitMode === 'spin') {
+          const steps = anim.hitSteps || 1;
+          // Duration per step (full duration divided by steps)
+          const stepDur = duration / steps;
+          const rawT = Math.min(ht.elapsed / stepDur, 1);
+          const eased = anim.easingFn(rawT);
+
+          if (anim.hitMode === 'spin') {
+            // Spin: step increments forever, _singleT is unbounded
+            const increment = 1 / steps;
+            const prevVal = (ht._prevStep != null ? ht._prevStep : ht.step) * increment;
+            const targetVal = ht.step * increment;
+            ht._singleT = prevVal + (targetVal - prevVal) * eased;
+          } else if (steps > 1) {
+            // Multi-step single: animate between previous and current step fraction (0→1)
+            const targetFrac = ht.step / steps;
+            const prevFrac = (ht._prevStep != null ? ht._prevStep : ht.step) / steps;
+            ht._singleT = prevFrac + (targetFrac - prevFrac) * eased;
+          } else {
+            // Single step (original behavior): 0→1 or 1→0
+            ht._singleT = ht.forward ? eased : (1 - eased);
+          }
+
+          if (rawT >= 1) {
+            ht.active = false;
+            ht.elapsed = 0;
+            if (anim.hitMode === 'single' && steps <= 1) {
+              // Ping-pong: flip direction
+              ht.forward = !ht.forward;
+            }
+          }
+        } else {
+          // Cycle mode: loop continuously from moment of hit
+          animElapsed = ht.elapsed;
+        }
+      }
 
       let tx, ty, rot;
       // wrapRefDx/Dy = the FORWARD displacement used for crossOffset computation.
@@ -386,10 +451,22 @@ export class PegAnimator {
       // because the return leg crosses the same wall as the forward leg.
       let wrapRefDx = 0, wrapRefDy = 0;
 
-      if (anim.cycle && anim.wrap && (canWrapX || canWrapY)) {
+      // Single/spin hit trigger: compute tx/ty directly from _singleT and skip normal phase
+      if (anim.hitTrigger && (anim.hitMode === 'single' || anim.hitMode === 'spin')) {
+        const ht = this._hitTriggerState.get(ai);
+        const t = ht ? ht._singleT || 0 : 0;
+        const motion = (anim.wrap && (canWrapX || canWrapY))
+          ? resolveWrappedMotion(anim.dx, anim.dy, worldWidth, worldHeight, anim.inverse, anim.centerX, anim.centerY)
+          : { dx: anim.dx, dy: anim.dy };
+        tx = motion.dx * t;
+        ty = motion.dy * t;
+        rot = anim.rotation * t;
+        wrapRefDx = motion.dx;
+        wrapRefDy = motion.dy;
+      } else if (anim.cycle && anim.wrap && (canWrapX || canWrapY)) {
         const cx = anim.centerX, cy = anim.centerY;
-        const phase = (this.elapsed % duration) / duration; // 0→1 sawtooth
-        rot = anim.rotation * (this.elapsed / duration);
+        const phase = (animElapsed % duration) / duration; // 0→1 sawtooth
+        rot = anim.rotation * (animElapsed / duration);
 
         if (anim.inverse) {
           // Two-path cycle: forward via inverse path, return via normal path
@@ -435,7 +512,7 @@ export class PegAnimator {
       } else {
         // Normal ping-pong (or cycle without wrap, treated as ping-pong)
         const fullCycle = duration * 2;
-        const phase = (this.elapsed % fullCycle) / duration;
+        const phase = (animElapsed % fullCycle) / duration;
         const rawT = phase <= 1 ? phase : 2 - phase;
         const t = anim.easingFn(rawT);
 
@@ -572,6 +649,34 @@ export class PegAnimator {
           peg.curveSlices[i].nx = os.nx;
           peg.curveSlices[i].ny = os.ny;
         }
+      }
+    }
+  }
+
+  notifyHit(pegId) {
+    for (let ai = 0; ai < this.animations.length; ai++) {
+      const anim = this.animations[ai];
+      if (!anim.hitTrigger) continue;
+      if (!anim.pegIds.includes(pegId)) continue;
+      const ht = this._hitTriggerState.get(ai);
+      if (!ht || ht.active) continue; // Already running
+      ht.active = true;
+      ht.elapsed = 0;
+
+      if (anim.hitMode === 'spin') {
+        // Spin: each hit increments step forever (constant forward)
+        ht._prevStep = ht.step;
+        ht.step++;
+      } else if (anim.hitMode === 'single' && anim.hitSteps > 1) {
+        // Single with steps: ping-pong between 0 and hitSteps
+        ht._prevStep = ht.step;
+        if (ht.forward) {
+          ht.step = Math.min(ht.step + 1, anim.hitSteps);
+        } else {
+          ht.step = Math.max(ht.step - 1, 0);
+        }
+        if (ht.step >= anim.hitSteps) ht.forward = false;
+        else if (ht.step <= 0) ht.forward = true;
       }
     }
   }

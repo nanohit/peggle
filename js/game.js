@@ -932,9 +932,12 @@ export class Game {
       // Bumper collision: trigger scale-pulse animation (fires every hit)
       if (event.bumperAnimOnly) {
         peg._bumperHitScale = 1.3;
+        this.animator.notifyHit(peg.id);
         continue;
       }
       this.activatePeg(peg, event.ball, { allowMultiball: true });
+      // Notify animator for hit-triggered animations
+      this.animator.notifyHit(peg.id);
     }
     if (bombContact) {
       this.detonateBombShockwave(bombContact.ball, bombContact.peg);

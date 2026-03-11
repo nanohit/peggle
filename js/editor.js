@@ -2642,6 +2642,9 @@ export class Editor {
     this.animationEasing = existing?.easing || 'easeInOut';
     this.animationInverse = !!existing?.inverse;
     this.animationCycle = !!existing?.cycle;
+    this.animationHitTrigger = !!existing?.hitTrigger;
+    this.animationHitMode = existing?.hitMode || 'cycle';
+    this.animationHitSteps = existing?.hitSteps || 1;
     this.animationMode = true;
     this.animationPreview = false;
     this.animationPreviewAnimator = null;
@@ -2658,6 +2661,9 @@ export class Editor {
     this.animationPreviewAnimator = null;
     this.animationInverse = false;
     this.animationCycle = false;
+    this.animationHitTrigger = false;
+    this.animationHitMode = 'cycle';
+    this.animationHitSteps = 1;
   }
 
   getTargetAnimation() {
@@ -2679,7 +2685,10 @@ export class Editor {
       ...animData,
       wrap: animData?.wrap !== false,
       inverse: !!animData?.inverse,
-      cycle: !!animData?.cycle
+      cycle: !!animData?.cycle,
+      hitTrigger: !!animData?.hitTrigger,
+      hitMode: animData?.hitMode || 'cycle',
+      hitSteps: Math.max(1, Math.round(animData?.hitSteps || 1)),
     };
 
     this.saveUndoState();

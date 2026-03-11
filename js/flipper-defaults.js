@@ -1,10 +1,11 @@
 export const FLIPPER_DEFAULTS = Object.freeze({
-  yOffset: 55,
-  xOffset: 196,
-  length: 60,
-  width: 8,
-  restAngle: 23,
+  yOffset: 100,
+  xOffset: 198,
+  length: 70,
+  width: 7,
+  restAngle: 18,
   flipAngle: 30,
+  bounce: 0.50,
   scale: 1.8
 });
 
@@ -17,7 +18,7 @@ function clampNumber(value, min, max, fallback) {
 export function createDefaultFlipperConfig({
   canvasHeight = 600,
   cameraY = 0,
-  bounce = 0.65,
+  bounce = FLIPPER_DEFAULTS.bounce,
   enabled = true
 } = {}) {
   const y = cameraY + canvasHeight - FLIPPER_DEFAULTS.yOffset;

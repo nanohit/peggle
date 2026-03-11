@@ -663,6 +663,55 @@ class PeggleApp {
       this._syncAnimationCycleButton();
     });
 
+    // Hit trigger checkbox
+    const hitTriggerToggle = document.getElementById('animHitTriggerToggle');
+    const hitModeRow = document.getElementById('animHitModeRow');
+    const hitStepsRow = document.getElementById('animHitStepsRow');
+    const hitStepsInput = document.getElementById('animHitStepsInput');
+    const hitCycleBtn = document.getElementById('animHitCycleBtn');
+    const hitSingleBtn = document.getElementById('animHitSingleBtn');
+    const hitSpinBtn = document.getElementById('animHitSpinBtn');
+
+    const syncHitModeButtons = () => {
+      const mode = this.editor?.animationHitMode || 'cycle';
+      hitCycleBtn.classList.toggle('active', mode === 'cycle');
+      hitSingleBtn.classList.toggle('active', mode === 'single');
+      hitSpinBtn.classList.toggle('active', mode === 'spin');
+      // Steps visible for single and spin
+      const showSteps = !!(this.editor && this.editor.animationHitTrigger && (mode === 'single' || mode === 'spin'));
+      hitStepsRow.style.display = showSteps ? '' : 'none';
+    };
+
+    hitTriggerToggle.addEventListener('change', (e) => {
+      if (!this.editor || !this.editor.animationMode) return;
+      this.editor.animationHitTrigger = e.target.checked;
+      hitModeRow.style.display = e.target.checked ? '' : 'none';
+      syncHitModeButtons();
+    });
+
+    hitCycleBtn.addEventListener('click', () => {
+      if (!this.editor || !this.editor.animationMode) return;
+      this.editor.animationHitMode = 'cycle';
+      syncHitModeButtons();
+    });
+
+    hitSingleBtn.addEventListener('click', () => {
+      if (!this.editor || !this.editor.animationMode) return;
+      this.editor.animationHitMode = 'single';
+      syncHitModeButtons();
+    });
+
+    hitSpinBtn.addEventListener('click', () => {
+      if (!this.editor || !this.editor.animationMode) return;
+      this.editor.animationHitMode = 'spin';
+      syncHitModeButtons();
+    });
+
+    hitStepsInput.addEventListener('input', () => {
+      if (!this.editor || !this.editor.animationMode) return;
+      this.editor.animationHitSteps = Math.max(1, Math.min(36, Math.round(parseInt(hitStepsInput.value) || 1)));
+    });
+
     // Preview button
     document.getElementById('animPreviewBtn').addEventListener('click', () => {
       if (!this.editor) return;
@@ -698,10 +747,14 @@ class PeggleApp {
       const easing = cycle ? 'linear' : (document.getElementById('animEasingToggle').checked ? 'easeInOut' : 'linear');
       const inverse = !!this.editor.animationInverse;
 
+      const hitTrigger = !!this.editor.animationHitTrigger;
+      const hitMode = this.editor.animationHitMode || 'cycle';
+      const hitSteps = this.editor.animationHitSteps || 1;
+
       if (dx === 0 && dy === 0 && rot === 0) {
         this.editor.clearTargetAnimation();
       } else {
-        this.editor.setTargetAnimation({ dx, dy, rotation: rot, duration: dur, easing, inverse, cycle, wrap: true });
+        this.editor.setTargetAnimation({ dx, dy, rotation: rot, duration: dur, easing, inverse, cycle, wrap: true, hitTrigger, hitMode, hitSteps });
       }
       this.closeAnimationPanel();
     });
@@ -1245,6 +1298,7 @@ class PeggleApp {
     document.getElementById('animEasingToggle').checked = easing === 'easeInOut';
     this._syncAnimationInverseButton();
     this._syncAnimationCycleButton();
+    this._syncAnimationHitTrigger();
   }
 
   _syncAnimationInverseButton() {
@@ -1267,6 +1321,26 @@ class PeggleApp {
       easingToggle.disabled = cycleOn;
       if (cycleOn) easingToggle.checked = false;
     }
+  }
+
+  _syncAnimationHitTrigger() {
+    const toggle = document.getElementById('animHitTriggerToggle');
+    const modeRow = document.getElementById('animHitModeRow');
+    const stepsRow = document.getElementById('animHitStepsRow');
+    const stepsInput = document.getElementById('animHitStepsInput');
+    const cycleBtn = document.getElementById('animHitCycleBtn');
+    const singleBtn = document.getElementById('animHitSingleBtn');
+    const spinBtn = document.getElementById('animHitSpinBtn');
+    if (!toggle) return;
+    const on = !!(this.editor && this.editor.animationHitTrigger);
+    toggle.checked = on;
+    modeRow.style.display = on ? '' : 'none';
+    const mode = (this.editor && this.editor.animationHitMode) || 'cycle';
+    cycleBtn.classList.toggle('active', mode === 'cycle');
+    singleBtn.classList.toggle('active', mode === 'single');
+    spinBtn.classList.toggle('active', mode === 'spin');
+    stepsRow.style.display = (on && (mode === 'single' || mode === 'spin')) ? '' : 'none';
+    stepsInput.value = (this.editor && this.editor.animationHitSteps) || 1;
   }
 
   initMode() {

@@ -1465,6 +1465,24 @@ html, body {
   background: rgba(88, 166, 255, 0.2);
 }
 
+.anim-hit-mode-row {
+  display: flex;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.anim-btn-sm {
+  flex: 1;
+  padding: 3px 0;
+  font-size: 9px;
+}
+
+.anim-steps-label {
+  font-size: 10px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
 /* Bumper Properties Panel (right side) */
 .bumper-panel {
   position: absolute;
