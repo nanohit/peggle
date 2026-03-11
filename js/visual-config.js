@@ -2,9 +2,10 @@
 // Per-level visual theme configuration for decorative frame assets
 
 export const DEFAULT_BACKGROUND = {
-  type: 'gradient',
+  type: 'image',
   colorTop: '#16213e',
   colorBottom: '#1a1a2e',
+  image: 'visuals/backgrounds/background1.webp',
 };
 
 export const DEFAULT_FRAME_COLOR = '#0a0a14';
@@ -13,16 +14,20 @@ export const DEFAULT_FRAME_COLOR = '#0a0a14';
 // baseWidth: natural width as % of frame width at scale=1
 // defaultX/Y: default center position as % of frame (0-100)
 export const SLOT_DEFS = [
-  { id: 'topLeft',         label: 'Top Left',         basename: 'top_left',              baseWidth: 26, defaultX: 13, defaultY: 5 },
-  { id: 'topRight',        label: 'Top Right',        basename: 'top_right',             baseWidth: 26, defaultX: 87, defaultY: 5 },
-  { id: 'top',             label: 'Top Banner',       basename: 'top',                   baseWidth: 50, defaultX: 50, defaultY: 4 },
-  { id: 'character',       label: 'Character',        basename: 'character',             baseWidth: 22, defaultX: 50, defaultY: 8 },
-  { id: 'characterCircle', label: 'Character Circle', basename: 'character_circle',      baseWidth: 22, defaultX: 50, defaultY: 10 },
-  { id: 'leftCircle',      label: 'Left Circle',      basename: 'left_circle',           baseWidth: 16, defaultX: 8,  defaultY: 8 },
-  { id: 'rightCircle',     label: 'Right Circle',     basename: 'right-center_cirlce',   baseWidth: 16, defaultX: 92, defaultY: 8 },
-  { id: 'itemCircle',      label: 'Item Circle',      basename: 'item_cirlce',           baseWidth: 10, defaultX: 88, defaultY: 16 },
-  { id: 'arrow',           label: 'Arrow',            basename: 'arrow',                 baseWidth: 30, defaultX: 50, defaultY: 93 },
-  { id: 'ballCounter',     label: 'Ball Counter',     basename: null,                    baseWidth: 16, defaultX: 92, defaultY: 8, dynamic: true },
+  { id: 'columnLeft',       label: 'Column Left',      basename: 'column',                baseWidth: 5,  defaultX: 2.5,   defaultY: 50,    defaultScale: 1, column: true, defaultDarken: 30 },
+  { id: 'columnRight',      label: 'Column Right',     basename: 'column',                baseWidth: 5,  defaultX: 97.5,  defaultY: 50,    defaultScale: 1, column: true, mirror: true, defaultDarken: 30 },
+  { id: 'top',              label: 'Top Banner',       basename: 'top',                   baseWidth: 50, defaultX: 49.55, defaultY: 0,     defaultScale: 1.56 },
+  { id: 'topLeft',          label: 'Top Left',         basename: 'top_left',              baseWidth: 26, defaultX: 19.24, defaultY: 9.71,  defaultScale: 1.47 },
+  { id: 'topRight',         label: 'Top Right',        basename: 'top_right',             baseWidth: 26, defaultX: 81.43, defaultY: 9.48,  defaultScale: 1.47 },
+  { id: 'characterCircle',  label: 'Character Circle', basename: 'character_circle',      baseWidth: 22, defaultX: 49.55, defaultY: 11.77, defaultScale: 1.16 },
+  { id: 'healthCircle',     label: 'Health Circle',    basename: null,                    baseWidth: 12, defaultX: 49.43, defaultY: 11.76, defaultScale: 1.79, dynamic: true, defaultColor: '#ebffeb' },
+  { id: 'healthCharCircle', label: 'Health Ring',      basename: 'character_circle',       baseWidth: 20, defaultX: 49.55, defaultY: 11.77, defaultScale: 1.01 },
+  { id: 'character',        label: 'Character',        basename: 'character',             baseWidth: 22, defaultX: 49.55, defaultY: 11.3,  defaultScale: 0.83 },
+  { id: 'leftCircle',       label: 'Left Circle',      basename: 'left_circle',           baseWidth: 16, defaultX: 10.9,  defaultY: 5.76,  defaultScale: 1.35 },
+  { id: 'rightCircle',      label: 'Right Circle',     basename: 'right-center_cirlce',   baseWidth: 16, defaultX: 90.22, defaultY: 5.53,  defaultScale: 1.3 },
+  { id: 'itemCircle',       label: 'Item Circle',      basename: 'item_cirlce',           baseWidth: 10, defaultX: 88,    defaultY: 16,    defaultScale: 1 },
+  { id: 'arrow',            label: 'Arrow',            basename: 'arrow',                 baseWidth: 30, defaultX: 50,    defaultY: 93,    defaultScale: 1 },
+  { id: 'ballCounter',      label: 'Ball Counter',     basename: null,                    baseWidth: 16, defaultX: 90,    defaultY: 5.53,  defaultScale: 1.07, dynamic: true },
 ];
 
 export function resolveAssetPaths(basename) {
@@ -40,7 +45,9 @@ function defaultSlots() {
       customSrc: null,
       x: def.defaultX,
       y: def.defaultY,
-      scale: 1,
+      scale: def.defaultScale || 1,
+      color: def.defaultColor || null,
+      darken: def.defaultDarken || 0,
     };
   }
   return slots;
@@ -81,10 +88,12 @@ export function normalizeVisuals(raw, _skipSaved) {
   // Background
   const bg = raw.background;
   if (bg && typeof bg === 'object') {
+    const validTypes = ['solid', 'gradient', 'image'];
     result.background = {
-      type: bg.type === 'solid' ? 'solid' : 'gradient',
+      type: validTypes.includes(bg.type) ? bg.type : 'image',
       colorTop: typeof bg.colorTop === 'string' ? bg.colorTop : DEFAULT_BACKGROUND.colorTop,
       colorBottom: typeof bg.colorBottom === 'string' ? bg.colorBottom : DEFAULT_BACKGROUND.colorBottom,
+      image: typeof bg.image === 'string' ? bg.image : DEFAULT_BACKGROUND.image,
     };
   } else {
     result.background = { ...DEFAULT_BACKGROUND };
@@ -103,7 +112,9 @@ export function normalizeVisuals(raw, _skipSaved) {
         customSrc: typeof slot.customSrc === 'string' ? slot.customSrc : null,
         x: typeof slot.x === 'number' ? slot.x : def.defaultX,
         y: typeof slot.y === 'number' ? slot.y : def.defaultY,
-        scale: typeof slot.scale === 'number' ? Math.max(0.1, Math.min(5, slot.scale)) : 1,
+        scale: typeof slot.scale === 'number' ? Math.max(0.1, Math.min(5, slot.scale)) : (def.defaultScale || 1),
+        color: typeof slot.color === 'string' ? slot.color : (def.defaultColor || null),
+        darken: typeof slot.darken === 'number' ? Math.max(0, Math.min(100, slot.darken)) : (def.defaultDarken || 0),
       };
     } else {
       result.slots[def.id] = {
@@ -111,7 +122,9 @@ export function normalizeVisuals(raw, _skipSaved) {
         customSrc: null,
         x: def.defaultX,
         y: def.defaultY,
-        scale: 1,
+        scale: def.defaultScale || 1,
+        color: def.defaultColor || null,
+        darken: def.defaultDarken || 0,
       };
     }
   }

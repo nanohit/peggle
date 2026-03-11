@@ -45,20 +45,26 @@ class PeggleApp {
   }
 
   resizeCanvas() {
-    // Size the 9:17 frame to fit the viewport, then size the canvas inside it
+    // Fixed game-world size — the pixel buffer never changes so levels always
+    // render at the same coordinate space regardless of display size.
+    const worldW = MAX_WIDTH;                          // 400
+    const worldH = Math.round(MAX_WIDTH / ASPECT_RATIO); // 600
+
     const viewport = document.getElementById('visualViewport');
     const frame = document.getElementById('visualFrame');
     if (!viewport || !frame) {
       // Fallback if visual layout not mounted
       const container = document.getElementById('canvasContainer');
       const r = container.getBoundingClientRect();
-      let w = Math.min(r.width, MAX_WIDTH);
-      let h = w / ASPECT_RATIO;
-      if (h > r.height) { h = r.height; w = h * ASPECT_RATIO; }
-      this.canvas.width = w; this.canvas.height = h;
-      this.canvas.style.width = w + 'px'; this.canvas.style.height = h + 'px';
-      if (this.game) this.game.resize(w, h);
-      if (this.editor) this.editor.resize(w, h);
+      let dw = Math.min(r.width, worldW);
+      let dh = dw / ASPECT_RATIO;
+      if (dh > r.height) { dh = r.height; dw = dh * ASPECT_RATIO; }
+      this.canvas.width = worldW;
+      this.canvas.height = worldH;
+      this.canvas.style.width = Math.round(dw) + 'px';
+      this.canvas.style.height = Math.round(dh) + 'px';
+      if (this.game) this.game.resize(worldW, worldH);
+      if (this.editor) this.editor.resize(worldW, worldH);
       return;
     }
 
@@ -84,32 +90,35 @@ class PeggleApp {
 
     frame.style.width = fw + 'px';
     frame.style.height = fh + 'px';
+    // Scale factor for gamble UI — keeps DOM elements proportional to frame
+    // regardless of browser zoom. Reference: 444px (canvas 400 at 90% of frame).
+    frame.style.setProperty('--frame-scale', Math.min(1, fw / 444));
 
-    // Canvas fills 90% of frame width, maintains 2:3 aspect
-    let width = Math.min(Math.round(fw * 0.9), MAX_WIDTH);
-    let height = Math.round(width / ASPECT_RATIO);
-
-    // Canvas always fits vertically (2:3 is wider than 9:17)
-    // but clamp just in case
-    if (height > fh) {
-      height = fh;
-      width = Math.round(height * ASPECT_RATIO);
+    // Display size: 90% of frame width, maintaining game aspect ratio
+    let displayW = Math.round(fw * 0.9);
+    let displayH = Math.round(displayW / ASPECT_RATIO);
+    if (displayH > fh) {
+      displayH = fh;
+      displayW = Math.round(displayH * ASPECT_RATIO);
     }
 
-    this.canvas.width = width;
-    this.canvas.height = height;
-    this.canvas.style.width = width + 'px';
-    this.canvas.style.height = height + 'px';
+    // Pixel buffer is always the reference game-world size.
+    // CSS width/height scales the display; mouse-coordinate code already
+    // uses canvas.width / rect.width to handle the ratio.
+    this.canvas.width = worldW;
+    this.canvas.height = worldH;
+    this.canvas.style.width = displayW + 'px';
+    this.canvas.style.height = displayH + 'px';
 
-    if (this.game) this.game.resize(width, height);
-    if (this.editor) this.editor.resize(width, height);
+    if (this.game) this.game.resize(worldW, worldH);
+    if (this.editor) this.editor.resize(worldW, worldH);
 
     this.visualLayout.resize(fw, fh);
 
     const level = this.levelManager.getCurrentLevel();
     if (level) {
       const prev = level.survival ? { ...level.survival } : null;
-      const normalized = ensureLevelSurvival(level, height);
+      const normalized = ensureLevelSurvival(level, worldH);
       if (
         !prev ||
         prev.enabled !== normalized.enabled ||
@@ -361,11 +370,12 @@ class PeggleApp {
       this.showPhysicsSettings();
     });
 
-    // Visual layout: config change callback
+    // Visual layout: config change callback — deep clone so the level owns its
+    // own copy and future VisualLayout mutations don't silently change it.
     this.visualLayout.onConfigChange = (config) => {
       const level = this.levelManager.getCurrentLevel();
       if (level) {
-        level.visuals = config;
+        level.visuals = JSON.parse(JSON.stringify(config));
         this.levelManager.save();
         const renderer = this.game?.renderer || this.editor?.renderer;
         if (renderer) renderer.setBackground(config.background);
@@ -1280,6 +1290,7 @@ class PeggleApp {
       this._unsubBallCounter = null;
     }
     this.visualLayout.hideBallCounter();
+    this.visualLayout.hideHealthBar();
 
     if (this.game) {
       this.game.stop();
@@ -1432,10 +1443,13 @@ class PeggleApp {
 
     this.game.start();
 
-    // Ball counter: subscribe to game state
+    // Ball counter + health bar: subscribe to game state
     this._unsubBallCounter = this.game.subscribeUiState((snapshot) => {
       if (Number.isFinite(snapshot.ballsLeft)) {
         this.visualLayout.updateBallCounter(snapshot.ballsLeft, snapshot.initialBallCount);
+      }
+      if (Number.isFinite(snapshot.orangePegsLeft)) {
+        this.visualLayout.updateHealthBar(snapshot.orangePegsLeft, snapshot.totalOrangePegs);
       }
     });
 
@@ -1463,7 +1477,10 @@ class PeggleApp {
       levelManager: this.levelManager,
       statusBar,
       pegCountEl,
-      selectionCountEl
+      selectionCountEl,
+      host: this.visualLayout.frame,
+      visualLayout: this.visualLayout,
+      onLayoutChange: () => this.resizeCanvas()
     });
     this.gambleSystem.mount();
   }
@@ -1482,7 +1499,19 @@ class PeggleApp {
 
   _applyLevelVisuals() {
     const level = this.levelManager.getCurrentLevel();
-    const visuals = level ? normalizeVisuals(level.visuals) : normalizeVisuals(null);
+    const rawVisuals = level?.visuals;
+    const hasDefault = !!localStorage.getItem('peggle_visualDefaults');
+
+    // Log source for debugging persistence
+    if (rawVisuals && typeof rawVisuals === 'object' && rawVisuals.frameColor) {
+      console.log('[visuals] Loading per-level visuals for', level.name, '| frameColor:', rawVisuals.frameColor);
+    } else if (hasDefault) {
+      console.log('[visuals] No per-level visuals, using saved default');
+    } else {
+      console.log('[visuals] No per-level visuals, no saved default — using system default');
+    }
+
+    const visuals = level ? normalizeVisuals(rawVisuals) : normalizeVisuals(null);
     this.visualLayout.setConfig(visuals);
 
     // Apply background to whatever renderer is active

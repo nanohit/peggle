@@ -433,217 +433,348 @@ html, body {
 }
 
 .status-bar.gamble-mode {
-  display: block;
-  padding: 0 0 10px;
-  background: linear-gradient(180deg, rgba(33, 38, 45, 0.96), rgba(13, 17, 23, 0.96));
+  display: none;
 }
 
 .gamble-hud {
-  width: 400px;
-  margin: 0 auto;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 4px;
-}
-
-.gamble-hud.collapsed {
-  gap: 0;
-}
-
-.gamble-perk-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  width: 100%;
-}
-
-.gamble-toggle-handle {
-  width: 60px;
-  height: 18px;
-  border: 1px solid #3b434d;
-  border-radius: 999px;
-  background: linear-gradient(180deg, #272f39, #151b23);
-  color: #c9d1d9;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.gamble-toggle-arrow {
-  font-size: 12px;
-  line-height: 1;
-}
-
-.gamble-panel {
-  width: 100%;
-  border: 1px solid #2f3741;
-  border-radius: 12px;
-  background: linear-gradient(180deg, rgba(21, 27, 35, 0.98), rgba(10, 14, 19, 0.98));
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  padding: 8px;
-  max-height: 320px;
-  opacity: 1;
-  transform: translateY(0);
-  transition: max-height 0.22s ease, opacity 0.2s ease, transform 0.2s ease, padding 0.2s ease, border-color 0.2s ease;
+  /* --frame-scale is set by JS on .visual-frame (fw / 444).
+     All fixed-px sizes are multiplied by --s so the gamble UI scales
+     proportionally with the frame and never changes with browser zoom. */
+  --s: var(--frame-scale, 1);
+  --dock-collapsed-height: calc(88px * var(--s));
+  --dock-open-height: calc(198px * var(--s));
+  --board-width: 100%;
+  --board-layer-height: calc(44px * var(--s));
+  --board-offset-collapsed: calc(-70px * var(--s));
+  --board-offset-expanded: calc(180px * var(--s));
+  --board-surface-top: calc(12px * var(--s));
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
   overflow: hidden;
 }
 
-.gamble-hud.collapsed .gamble-panel {
-  max-height: 0;
+.gamble-backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background:
+    linear-gradient(180deg, rgba(8, 10, 18, 0.44) 0%, rgba(8, 10, 18, 0.24) 34%, rgba(8, 10, 18, 0.08) 62%, rgba(8, 10, 18, 0) 100%),
+    radial-gradient(80% 56% at 50% 100%, rgba(8, 16, 30, 0.28), rgba(8, 16, 30, 0));
   opacity: 0;
-  transform: translateY(6px);
-  padding-top: 0;
-  padding-bottom: 0;
-  border-color: transparent;
   pointer-events: none;
+  transition: opacity 0.3s ease;
 }
 
-.gamble-panel[hidden] {
-  display: none !important;
+.gamble-hud.expanded .gamble-backdrop {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.gamble-toggle-handle {
+  position: absolute;
+  /* Collapsed: mostly tucked into the dock, just the top peeking out */
+  bottom: var(--dock-collapsed-height);
+  left: 50%;
+  width: calc(92px * var(--s));
+  height: calc(54px * var(--s));
+  aspect-ratio: 281 / 166;
+  transform: translate(-50%, 82%);
+  border: 0;
+  background: transparent;
+  background-image: var(--gamble-arrow-asset);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
+  cursor: pointer;
+  pointer-events: auto;
+  filter: drop-shadow(0 10px 14px rgba(0, 0, 0, 0.42));
+  transition: bottom 0.42s cubic-bezier(0.22, 1, 0.36, 1), transform 0.26s ease, filter 0.2s ease;
+  z-index: 5;
+}
+
+.gamble-toggle-handle:active {
+  transform: translate(-50%, 82%) scale(0.96);
+}
+
+.gamble-board-layer {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--dock-collapsed-height) + var(--board-offset-collapsed));
+  width: var(--board-width);
+  height: var(--board-layer-height);
+  transform: translateX(-50%);
+  pointer-events: none;
+  z-index: 1;
+  transition: bottom 0.42s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.gamble-hud.expanded .gamble-board-layer {
+  bottom: calc(var(--dock-open-height) + var(--board-offset-expanded));
+}
+
+.gamble-board-surface {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: var(--board-surface-top);
+  z-index: 1;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(calc(100% + 44px));
+  transition: opacity 0.24s ease, transform 0.42s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.gamble-hud.expanded .gamble-toggle-handle {
+  /* Expanded: arrow sits right on top of the slots board image */
+  bottom: calc(var(--dock-open-height) + var(--board-offset-expanded) + var(--board-layer-height));
+  transform: translate(-50%, 82%);
+}
+
+.gamble-hud.expanded .gamble-toggle-handle:active {
+  transform: translate(-50%, 82%) scale(0.96);
+}
+
+.gamble-hud.expanded .gamble-board-surface {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
 }
 
 .gamble-reels-wrap {
   position: relative;
-  border: 1px solid #38414d;
-  border-radius: 10px;
-  background: radial-gradient(90% 120% at 50% 0%, rgba(60, 73, 89, 0.25), rgba(12, 16, 22, 0.95));
-  padding: 6px;
+  width: 100%;
+  aspect-ratio: 1280 / 619;
+  background-image: var(--gamble-board-asset);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  filter: drop-shadow(0 14px 28px rgba(0, 0, 0, 0.42));
 }
 
 .gamble-grid {
+  position: absolute;
+  inset: 9.5% 4.2% 8%;
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 4px;
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+  align-items: center;
+  justify-items: center;
 }
 
 .gamble-cell {
-  border: 1px solid #414a58;
-  border-radius: 7px;
-  text-align: center;
-  padding: 4px 0;
-  min-height: 22px;
-  background: rgba(7, 11, 17, 0.85);
-  color: var(--cell-color, #6e7681);
-  font-size: 14px;
-  line-height: 1.15;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--cell-color, #e6edf6);
+  font-size: calc(28px * var(--s));
+  line-height: 1;
+  text-shadow: 0 0 14px rgba(0, 0, 0, 0.68);
+  transition: transform 0.22s ease, filter 0.22s ease, opacity 0.22s ease;
 }
 
 .gamble-cell.winning {
-  border-color: var(--cell-color, var(--accent));
-  box-shadow: 0 0 0 1px var(--cell-color, var(--accent));
+  transform: scale(1.12);
+  filter: drop-shadow(0 0 8px var(--cell-color, #fff))
+          drop-shadow(0 0 18px rgba(255, 255, 255, 0.22));
 }
 
-.gamble-settings-btn {
-  width: 30px;
-  height: 30px;
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  background: rgba(21, 27, 35, 0.92);
-  color: var(--text-secondary);
-  cursor: pointer;
+.gamble-dock {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: var(--dock-collapsed-height);
+  padding: calc(18px * var(--s)) calc(8px * var(--s)) calc(10px * var(--s));
+  background: #1e1e1e;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 -18px 40px rgba(0, 0, 0, 0.52);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(10px * var(--s));
+  pointer-events: auto;
+  z-index: 3;
+  transition: height 0.42s cubic-bezier(0.22, 1, 0.36, 1), padding 0.42s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.gamble-info-row {
+.gamble-hud.collapsed .gamble-dock {
+  gap: 0;
+}
+
+.gamble-hud.expanded .gamble-dock {
+  height: var(--dock-open-height);
+  padding-top: calc(24px * var(--s));
+  padding-bottom: calc(14px * var(--s));
+}
+
+.gamble-perk-rail {
+  width: 100%;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  gap: 10px;
-  width: 100%;
+  gap: calc(6px * var(--s));
+  margin-top: auto;
 }
 
-.gamble-stats-case {
-  border: none;
-  background: transparent;
-  padding: 0;
+.gamble-perk-group {
+  display: flex;
+  align-items: center;
+  gap: calc(4px * var(--s));
   min-width: 0;
+  /* Allow chips to shrink so they never overflow the frame */
+  overflow: hidden;
 }
 
-.gamble-info-spacer {
-  width: 30px;
+.gamble-perk-group--left {
+  justify-content: flex-end;
+  padding-right: calc(4px * var(--s));
+}
+
+.gamble-perk-group--right {
+  justify-content: flex-start;
+  padding-left: calc(4px * var(--s));
+}
+
+.gamble-perk-center-gap {
+  width: calc(60px * var(--s));
   height: 1px;
 }
 
-.gamble-bottom-row {
-  width: 100%;
+.gamble-info-row {
+  width: min(92%, calc(320px * var(--s)));
   display: flex;
   align-items: center;
-  justify-content: flex-start;
+  justify-content: space-between;
+  gap: calc(12px * var(--s));
+  opacity: 0;
+  max-height: 0;
+  overflow: hidden;
+  pointer-events: none;
+  transform: translateY(10px);
+  transition: opacity 0.22s ease, max-height 0.22s ease, transform 0.22s ease;
+}
+
+.gamble-hud.expanded .gamble-info-row {
+  opacity: 1;
+  max-height: calc(56px * var(--s));
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.gamble-stats-case {
+  min-width: 0;
+}
+
+.gamble-info-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .gamble-btn {
-  border: 1px solid #6f7783;
-  border-radius: 999px;
-  background: linear-gradient(180deg, #f4f6fa, #d6dae0);
-  color: #0f1419;
-  font-size: 15px;
-  font-weight: 700;
-  height: 40px;
-  min-width: 108px;
-  padding: 0 14px;
+  width: min(68%, calc(246px * var(--s)));
+  max-width: calc(246px * var(--s));
+  max-height: 0;
+  aspect-ratio: 639 / 250;
+  border: 0;
+  background: transparent;
+  background-image: var(--gamble-spin-asset);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
+  color: transparent;
+  font-size: 0;
   cursor: pointer;
-  justify-self: center;
+  opacity: 0;
+  pointer-events: none;
+  filter: drop-shadow(0 10px 20px rgba(0, 0, 0, 0.4));
+  transition: opacity 0.22s ease, max-height 0.22s ease, transform 0.18s ease, filter 0.18s ease;
+}
+
+.gamble-hud.expanded .gamble-btn {
+  opacity: 1;
+  max-height: calc(96px * var(--s));
+  pointer-events: auto;
 }
 
 .gamble-btn:disabled {
-  opacity: 0.45;
+  opacity: 0.38;
+  filter: grayscale(0.45) saturate(0.7);
   cursor: not-allowed;
+}
+
+.gamble-btn:not(:disabled):active {
+  background-image: var(--gamble-spin-pressed-asset);
+  transform: translateY(2px) scale(0.98);
 }
 
 .gamble-perk-chip {
   position: relative;
-  width: 30px;
-  height: 30px;
-  border: 1px solid var(--perk-color, var(--border));
-  border-radius: 999px;
-  background: rgba(12, 18, 25, 0.95);
-  color: var(--text-primary);
-  font-size: 13px;
+  width: calc(50px * var(--s));
+  height: calc(50px * var(--s));
+  border: 0;
+  background: transparent;
+  background-image: var(--gamble-item-asset);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
+  color: #f6f6f9;
+  font-size: calc(22px * var(--s));
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0;
+  padding: 0 0 calc(2px * var(--s));
   cursor: pointer;
-  flex-shrink: 0;
+  flex-shrink: 1;
+  min-width: calc(32px * var(--s));
+  filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.35));
+  transition: transform 0.18s ease, opacity 0.18s ease, filter 0.18s ease;
 }
 
 .gamble-perk-chip::after {
   content: attr(data-count);
   position: absolute;
-  right: -4px;
-  bottom: -4px;
-  min-width: 14px;
-  height: 13px;
-  padding: 0 3px;
+  right: calc(-2px * var(--s));
+  bottom: calc(-2px * var(--s));
+  min-width: calc(20px * var(--s));
+  height: calc(18px * var(--s));
+  padding: 0 calc(4px * var(--s));
   border-radius: 999px;
-  border: 1px solid var(--perk-color, var(--border));
-  background: var(--bg-secondary);
-  color: var(--text-primary);
-  font-size: 8px;
-  line-height: 11px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(4, 5, 8, 0.88);
+  color: #f4f7fb;
+  font-size: calc(11px * var(--s));
+  line-height: calc(16px * var(--s));
   text-align: center;
 }
 
+.gamble-perk-chip:not(:disabled):active {
+  transform: translateY(1px) scale(0.95);
+}
+
 .gamble-perk-chip:disabled {
-  opacity: 0.42;
+  opacity: 0.38;
+  filter: grayscale(0.4) saturate(0.7);
   cursor: not-allowed;
 }
 
 .gamble-luck {
-  color: var(--text-secondary);
-  font-size: 10px;
+  color: #b9c2d3;
+  font-size: calc(9px * var(--s));
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   text-align: left;
   line-height: 1.2;
 }
 
 .gamble-result {
-  color: var(--text-secondary);
-  font-size: 10px;
-  min-height: 12px;
+  color: #dbe1ed;
+  font-size: calc(11px * var(--s));
+  min-height: calc(14px * var(--s));
   text-align: left;
   line-height: 1.2;
 }
@@ -660,14 +791,33 @@ html, body {
   color: #ff8b8b;
 }
 
+.gamble-settings-btn {
+  width: calc(30px * var(--s));
+  height: calc(30px * var(--s));
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  background: rgba(9, 12, 18, 0.8);
+  color: #d7dee8;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
 .gamble-settings-panel {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: rgba(13, 17, 23, 0.78);
-  padding: 6px;
+  position: absolute;
+  left: calc(12px * var(--s));
+  right: calc(12px * var(--s));
+  bottom: calc(var(--dock-open-height) + 14px * var(--s));
+  max-height: min(42%, calc(320px * var(--s)));
+  overflow-y: auto;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: calc(16px * var(--s));
+  background: linear-gradient(180deg, rgba(18, 24, 34, 0.96), rgba(8, 11, 17, 0.96));
+  padding: calc(10px * var(--s));
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: calc(8px * var(--s));
+  pointer-events: auto;
+  box-shadow: 0 18px 36px rgba(0, 0, 0, 0.34);
 }
 
 .gamble-settings-panel.hidden {
@@ -681,14 +831,14 @@ html, body {
 }
 
 .gamble-control label {
-  font-size: 9px;
-  color: var(--text-dim);
+  font-size: calc(10px * var(--s));
+  color: #9ea9bb;
 }
 
 .gamble-control-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: calc(6px * var(--s));
 }
 
 .gamble-control-row input[type="range"] {
@@ -697,52 +847,30 @@ html, body {
 }
 
 .gamble-control-row input[type="number"] {
-  width: 56px;
-  padding: 2px 4px;
-  border-radius: 4px;
-  border: 1px solid var(--border);
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
-  font-size: 10px;
+  width: calc(56px * var(--s));
+  padding: calc(2px * var(--s)) calc(4px * var(--s));
+  border-radius: calc(4px * var(--s));
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(4, 7, 12, 0.76);
+  color: #eff4fb;
+  font-size: calc(10px * var(--s));
 }
 
 .gamble-toggle-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
-  font-size: 9px;
-  color: var(--text-dim);
+  gap: calc(6px * var(--s));
+  font-size: calc(10px * var(--s));
+  color: #a2adbe;
 }
 
 .gamble-toggle-row input[type="checkbox"] {
-  width: 14px;
-  height: 14px;
+  width: calc(14px * var(--s));
+  height: calc(14px * var(--s));
 }
 
-@media (max-width: 360px) {
-  .gamble-hud {
-    width: 100%;
-    margin-left: 0 !important;
-  }
-
-  .gamble-perk-toolbar {
-    gap: 4px;
-  }
-
-  .gamble-btn {
-    min-width: 92px;
-    height: 36px;
-    padding: 0 10px;
-    font-size: 14px;
-  }
-
-  .gamble-perk-chip {
-    width: 27px;
-    height: 27px;
-    font-size: 12px;
-  }
-}
+/* Small-screen media query removed — --frame-scale handles proportional sizing */
 
 /* Quick Actions Overlay */
 .actions-overlay {

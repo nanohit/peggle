@@ -124,13 +124,25 @@ export class Renderer {
 
   setBackground(config) {
     this.backgroundConfig = config || null;
+    // Preload background image if type is 'image'
+    if (config?.type === 'image' && config.image) {
+      if (!this._bgImage || this._bgImageSrc !== config.image) {
+        this._bgImageSrc = config.image;
+        this._bgImage = null;
+        const img = new Image();
+        img.onload = () => { this._bgImage = img; };
+        img.src = config.image;
+      }
+    }
   }
 
   clear() {
     const ctx = this.ctx;
     const bg = this.backgroundConfig;
 
-    if (bg && bg.type === 'solid') {
+    if (bg?.type === 'image' && this._bgImage) {
+      ctx.drawImage(this._bgImage, 0, 0, this.width, this.height);
+    } else if (bg?.type === 'solid') {
       ctx.fillStyle = bg.colorTop || COLORS.backgroundGradientTop;
       ctx.fillRect(0, 0, this.width, this.height);
     } else {

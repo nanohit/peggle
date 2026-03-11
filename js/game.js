@@ -50,6 +50,8 @@ export class Game {
     this.turnHitPegIds = [];
     this.totalSurvivalTargets = 0;
     this.initialBallCount = 10;
+    this.initialOrangePegs = 0;
+    this.removedOrangePegs = 0;
 
     // Flippers
     this.flippers = null;
@@ -185,17 +187,26 @@ export class Game {
   }
 
   getUiStateSnapshot() {
+    const survivalMode = this.isSurvivalMode();
+    // Orange pegs left across the whole level: initial minus removed minus currently-hit-this-turn
+    const currentTurnOrangeHits = survivalMode ? 0
+      : this.turnHitPegIds.filter(id => this.pegs.find(p => p.id === id && this.isOrangePeg(p))).length;
+    const orangeLeft = survivalMode
+      ? this.getSurvivalTargetsLeft(true)
+      : Math.max(0, this.initialOrangePegs - this.removedOrangePegs - currentTurnOrangeHits);
     return {
       state: this.state,
       ballsLeft: this.ballsLeft,
       initialBallCount: this.initialBallCount,
-      showFullTrajectory: !!this.showFullTrajectory
+      showFullTrajectory: !!this.showFullTrajectory,
+      orangePegsLeft: orangeLeft,
+      totalOrangePegs: survivalMode ? this.totalSurvivalTargets : this.initialOrangePegs,
     };
   }
 
   getUiStateSignature() {
     const snapshot = this.getUiStateSnapshot();
-    return `${snapshot.state}|${snapshot.ballsLeft}|${snapshot.initialBallCount}|${snapshot.showFullTrajectory ? 1 : 0}`;
+    return `${snapshot.state}|${snapshot.ballsLeft}|${snapshot.initialBallCount}|${snapshot.showFullTrajectory ? 1 : 0}|${snapshot.orangePegsLeft}`;
   }
 
   subscribeUiState(listener) {
@@ -626,6 +637,8 @@ export class Game {
     this.initialBallCount = Number.isFinite(this.ballsLeft) ? this.ballsLeft : 10;
     this.hitPegIds = [];
     this.turnHitPegIds = [];
+    this.initialOrangePegs = this.getTotalOrangePegs();
+    this.removedOrangePegs = 0;
     this.totalSurvivalTargets = this.isSurvivalMode() ? countSurvivalTargets(this.pegs) : 0;
     this.state = 'idle';
     this.trajectory = null;
@@ -781,10 +794,17 @@ export class Game {
 
     // Add turn hit pegs to total hit pegs (they disappear now)
     this.hitPegIds = [...this.hitPegIds, ...this.turnHitPegIds];
-    
+
+    // Count orange pegs about to be removed (for health bar tracking)
+    const hitSet = new Set(this.hitPegIds);
+    for (const p of this.pegs) {
+      if (hitSet.has(p.id) && this.isOrangePeg(p)) {
+        this.removedOrangePegs++;
+      }
+    }
+
     // Remove hit pegs from pegs array (they're gone)
     // Obstacles and permanent bumpers stay
-    const hitSet = new Set(this.hitPegIds);
     this.pegs = this.pegs.filter(p => {
       if (p.type === 'obstacle') return true;
       if (this.isPortalPeg(p)) return true;
@@ -1013,6 +1033,9 @@ export class Game {
     }
 
     if (!lowestPeg) return;
+
+    // Track orange peg removal for health bar
+    if (this.isOrangePeg(lowestPeg)) this.removedOrangePegs++;
 
     // Remove the peg from play immediately so the ball can escape
     this.pegs = this.pegs.filter(p => p.id !== lowestPeg.id);

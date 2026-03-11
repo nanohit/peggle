@@ -393,9 +393,10 @@ export class LevelManager {
   // Save to localStorage
   save() {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.levels));
+      const json = JSON.stringify(this.levels);
+      localStorage.setItem(STORAGE_KEY, json);
     } catch (e) {
-      console.error('Failed to save levels:', e);
+      console.error('Failed to save levels:', e, '| size:', (() => { try { return JSON.stringify(this.levels).length; } catch(_) { return '?'; } })());
     }
   }
 
@@ -417,13 +418,23 @@ export class LevelManager {
         this.levels = Array.isArray(parsed)
           ? parsed.map(level => this.normalizeLevel(level)).filter(Boolean)
           : [];
+
+        // Log visual persistence check
+        for (const lvl of this.levels) {
+          const fc = lvl.visuals?.frameColor;
+          const isDefault = fc === '#0a0a14';
+          console.log(`[visuals] Loaded "${lvl.name}" | frameColor: ${fc}${isDefault ? ' (default)' : ' (custom)'}`);
+        }
+        const hasVisDef = !!localStorage.getItem('peggle_visualDefaults');
+        console.log(`[visuals] Saved visual defaults: ${hasVisDef ? 'yes' : 'no'}`);
+
         // Persist normalized schema (including survival defaults) for legacy levels.
         this.save();
         if (this.levels.length > 0) {
           this.currentLevelIndex = 0;
         }
       }
-      
+
       const trainingData = localStorage.getItem(TRAINING_KEY);
       if (trainingData) {
         this.trainingLevels = JSON.parse(trainingData);

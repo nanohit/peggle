@@ -38,6 +38,9 @@ export class VisualLayout {
     this._frameW = 0;
     this._frameH = 0;
     this._abortController = null;
+    this._slotRuntimeFx = {};
+    this.gambleUiMode = false;
+    this.gambleOverlayState = { open: false, target: null };
 
     /** @type {function(object):void|null} */
     this.onConfigChange = null;
@@ -79,17 +82,26 @@ export class VisualLayout {
       }
     }
 
-    // Slot clip layer — clips decorative assets to frame bounds
+    // Background slot layer — behind canvas (z-index 0) for columns etc.
+    this._slotBg = document.createElement('div');
+    this._slotBg.className = 'visual-slot-bg';
+    this.frame.appendChild(this._slotBg);
+
+    // Slot clip layer — clips decorative assets to frame bounds (z-index 2, above canvas)
     this._slotClip = document.createElement('div');
     this._slotClip.className = 'visual-slot-clip';
     this.frame.appendChild(this._slotClip);
 
-    // Create slot elements inside the clip layer
+    // Create slot elements — column slots go in bg layer, rest in clip layer
     for (const def of SLOT_DEFS) {
       const el = document.createElement('div');
       el.className = 'visual-slot';
       el.dataset.slotId = def.id;
-      this._slotClip.appendChild(el);
+      if (def.column) {
+        this._slotBg.appendChild(el);
+      } else {
+        this._slotClip.appendChild(el);
+      }
       this.slotElements[def.id] = el;
     }
 
@@ -126,6 +138,7 @@ export class VisualLayout {
     this.frame = null;
     this.panel = null;
     this._slotClip = null;
+    this._slotBg = null;
     this.slotElements = {};
     this.mounted = false;
   }
@@ -141,6 +154,7 @@ export class VisualLayout {
     this._frameW = frameW;
     this._frameH = frameH;
     // Slots use percentage positioning — CSS handles it. Nothing to recalculate.
+    this._applyGambleOverlayState();
   }
 
   setSpinMode(active) {
@@ -152,14 +166,56 @@ export class VisualLayout {
     if (this.frame) this.frame.classList.toggle('visual-frame--editing', this.editMode);
     if (!this.editMode) this.selectedSlotId = null;
     this._updateSlotInteractivity();
+    this._applyLayerOrder();
     if (this.panel) {
       const btn = this.panel.querySelector('#themeEditBtn');
       if (btn) btn.textContent = this.editMode ? 'Done Editing' : 'Edit Layout';
+    }
+    if (this.editMode) {
+      this._showDynamicSlotPreviews();
+    } else {
+      this._hideDynamicSlotPreviews();
+      this._logSlotPositions();
     }
   }
 
   setPanelVisible(visible) {
     if (this.panel) this.panel.classList.toggle('hidden', !visible);
+  }
+
+  setGambleUiMode(active) {
+    this.gambleUiMode = !!active;
+    if (this.frame) this.frame.classList.toggle('visual-frame--gamble-ui', this.gambleUiMode);
+    if (!this.gambleUiMode) {
+      this.setGambleOverlayState({ open: false });
+    } else {
+      this._applyGambleOverlayState();
+    }
+  }
+
+  setGambleOverlayState({ open = false, target = null } = {}) {
+    this.gambleOverlayState = {
+      open: !!open,
+      target: target && Number.isFinite(target.centerX) && Number.isFinite(target.centerY)
+        ? {
+          centerX: target.centerX,
+          centerY: target.centerY,
+          scale: Number.isFinite(target.scale) ? target.scale : 1
+        }
+        : null
+    };
+    if (this.frame) this.frame.classList.toggle('visual-frame--gamble-open', this.gambleOverlayState.open);
+    this._applyGambleOverlayState();
+  }
+
+  getSlotAssetUrl(slotId) {
+    const def = SLOT_DEFS.find(item => item.id === slotId);
+    if (!def || def.dynamic) return null;
+    const slotCfg = this.config?.slots?.[slotId];
+    if (slotCfg?.customSrc) return slotCfg.customSrc;
+    if (this._resolvedAssets[slotId]) return this._resolvedAssets[slotId];
+    if (!def.basename) return null;
+    return resolveAssetPaths(def.basename).webp;
   }
 
   getBackground() {
@@ -180,11 +236,16 @@ export class VisualLayout {
           <div class="theme-row">
             <span class="theme-row-label">Type</span>
             <select id="themeBgType" class="theme-select">
+              <option value="image">Image</option>
               <option value="gradient">Gradient</option>
               <option value="solid">Solid</option>
             </select>
           </div>
-          <div class="theme-row">
+          <div class="theme-row" id="themeBgImageRow">
+            <span class="theme-row-label">Image</span>
+            <button id="themeBgImageBtn" class="theme-edit-btn" style="font-size:10px;padding:2px 6px">Upload</button>
+          </div>
+          <div class="theme-row" id="themeBgTopRow">
             <span class="theme-row-label">Top</span>
             <input type="color" id="themeBgTop" value="#16213e" class="theme-color">
           </div>
@@ -204,7 +265,8 @@ export class VisualLayout {
           <div class="theme-label">Assets</div>
           <button id="themeEditBtn" class="theme-edit-btn">Edit Layout</button>
           <div id="themeSlotList" class="theme-slot-list"></div>
-          <button id="themeApplyDefaultBtn" class="theme-edit-btn" style="margin-top:6px">Apply as Default</button>
+          <button id="themeApplyLevelBtn" class="theme-edit-btn" style="margin-top:6px">Apply for Level</button>
+          <button id="themeAssignDefaultBtn" class="theme-edit-btn">Assign Default</button>
         </div>
       </div>
     `;
@@ -218,8 +280,25 @@ export class VisualLayout {
     this.panel.querySelector('#themeBgType').addEventListener('change', e => {
       if (!this.config) return;
       this.config.background.type = e.target.value;
-      this.panel.querySelector('#themeBgBottomRow').style.display = e.target.value === 'solid' ? 'none' : '';
+      this._syncBgRowVisibility();
       this._emitChange();
+    }, { signal: sig });
+
+    this.panel.querySelector('#themeBgImageBtn').addEventListener('click', () => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/*';
+      input.onchange = ev => {
+        const file = ev.target.files[0];
+        if (!file || !this.config) return;
+        const reader = new FileReader();
+        reader.onload = re => {
+          this.config.background.image = re.target.result;
+          this._emitChange();
+        };
+        reader.readAsDataURL(file);
+      };
+      input.click();
     }, { signal: sig });
 
     this.panel.querySelector('#themeBgTop').addEventListener('input', e => {
@@ -245,20 +324,52 @@ export class VisualLayout {
       this.setEditMode(!this.editMode);
     }, { signal: sig });
 
-    this.panel.querySelector('#themeApplyDefaultBtn').addEventListener('click', () => {
+    // Apply for Level — explicitly save current visuals to this level
+    this.panel.querySelector('#themeApplyLevelBtn').addEventListener('click', () => {
       if (!this.config) return;
+      this._emitChange(); // pushes deep-cloned config into level.visuals and saves
+      const btn = this.panel.querySelector('#themeApplyLevelBtn');
+      // Verify the save actually persisted
       try {
-        // Save current visuals as the user's default template
+        const stored = localStorage.getItem('peggle_levels');
+        if (stored) {
+          btn.textContent = 'Saved!';
+        } else {
+          btn.textContent = 'Error!';
+          console.error('[visuals] Apply for Level: peggle_levels missing from localStorage after save');
+        }
+      } catch (e) {
+        btn.textContent = 'Error!';
+        console.error('[visuals] Apply for Level: verification failed', e);
+      }
+      setTimeout(() => { btn.textContent = 'Apply for Level'; }, 1200);
+    }, { signal: sig });
+
+    // Assign Default — save current visuals as the global template for new levels
+    this.panel.querySelector('#themeAssignDefaultBtn').addEventListener('click', () => {
+      if (!this.config) return;
+      const btn = this.panel.querySelector('#themeAssignDefaultBtn');
+      try {
         const copy = JSON.parse(JSON.stringify(this.config));
         // Strip customSrc (data URLs are too large for a default)
         for (const id of Object.keys(copy.slots)) {
           delete copy.slots[id].customSrc;
         }
-        localStorage.setItem('peggle_visualDefaults', JSON.stringify(copy));
-        const btn = this.panel.querySelector('#themeApplyDefaultBtn');
-        btn.textContent = 'Saved!';
-        setTimeout(() => { btn.textContent = 'Apply as Default'; }, 1200);
-      } catch (_) {}
+        const json = JSON.stringify(copy);
+        localStorage.setItem('peggle_visualDefaults', json);
+        // Verify
+        const check = localStorage.getItem('peggle_visualDefaults');
+        if (check === json) {
+          btn.textContent = 'Saved!';
+        } else {
+          btn.textContent = 'Error!';
+          console.error('[visuals] Assign Default: verification mismatch');
+        }
+      } catch (e) {
+        btn.textContent = 'Error!';
+        console.error('[visuals] Assign Default: save failed', e);
+      }
+      setTimeout(() => { btn.textContent = 'Assign Default'; }, 1200);
     }, { signal: sig });
   }
 
@@ -283,6 +394,11 @@ export class VisualLayout {
       if (this.selectedSlotId === def.id) row.classList.add('selected');
       row.dataset.slotId = def.id;
 
+      const hasColor = def.id === 'healthCircle' || def.id === 'healthCharCircle';
+      const colorVal = slotCfg?.color || '#00e5ff';
+      const hasDarken = !!def.column;
+      const darkenVal = slotCfg?.darken || 0;
+
       row.innerHTML = `
         <div class="theme-slot-header">
           <label class="theme-slot-toggle">
@@ -300,6 +416,15 @@ export class VisualLayout {
           <button class="theme-slot-upload" title="Upload image">img</button>
           <button class="theme-slot-reset" title="Reset position">R</button>
         </div>
+        ${hasColor ? `<div class="theme-slot-color-row">
+          <span class="theme-row-label">Color</span>
+          <input type="color" class="theme-slot-color" value="${colorVal}">
+        </div>` : ''}
+        ${hasDarken ? `<div class="theme-slot-color-row">
+          <span class="theme-row-label">Darken</span>
+          <input type="range" class="theme-slot-darken" min="0" max="100" value="${darkenVal}" title="Darken %">
+          <span class="theme-slot-darken-val">${darkenVal}%</span>
+        </div>` : ''}
       `;
 
       // Visibility toggle
@@ -358,7 +483,8 @@ export class VisualLayout {
         if (this.config.slots[def.id]) {
           this.config.slots[def.id].x = def.defaultX;
           this.config.slots[def.id].y = def.defaultY;
-          this.config.slots[def.id].scale = 1;
+          this.config.slots[def.id].scale = def.defaultScale || 1;
+          this.config.slots[def.id].darken = def.defaultDarken || 0;
           this.config.slots[def.id].customSrc = null;
           this._resolvedAssets[def.id] = null;
           this._loadSlotAsset(def);
@@ -367,6 +493,32 @@ export class VisualLayout {
           this._emitChange();
         }
       });
+
+      // Color picker (for health slots)
+      const colorInput = row.querySelector('.theme-slot-color');
+      if (colorInput) {
+        colorInput.addEventListener('input', e => {
+          if (this.config.slots[def.id]) {
+            this.config.slots[def.id].color = e.target.value;
+            this._emitChange();
+          }
+        });
+      }
+
+      // Darken slider (for column slots)
+      const darkenInput = row.querySelector('.theme-slot-darken');
+      if (darkenInput) {
+        darkenInput.addEventListener('input', e => {
+          if (this.config.slots[def.id]) {
+            const v = parseInt(e.target.value);
+            this.config.slots[def.id].darken = v;
+            row.querySelector('.theme-slot-darken-val').textContent = v + '%';
+            const el = this.slotElements[def.id];
+            if (el) el.style.filter = `brightness(${1 - v / 100})`;
+            this._emitChange();
+          }
+        });
+      }
 
       // Click row to select
       row.addEventListener('click', e => {
@@ -412,11 +564,22 @@ export class VisualLayout {
     if (bgTop) bgTop.value = bg.colorTop;
     const bgBot = sel('#themeBgBottom');
     if (bgBot) bgBot.value = bg.colorBottom;
-    const botRow = sel('#themeBgBottomRow');
-    if (botRow) botRow.style.display = bg.type === 'solid' ? 'none' : '';
     const fc = sel('#themeFrameColor');
     if (fc) fc.value = this.config.frameColor;
+    this._syncBgRowVisibility();
     this._buildSlotList();
+  }
+
+  _syncBgRowVisibility() {
+    if (!this.panel || !this.config) return;
+    const type = this.config.background.type;
+    const sel = (id) => this.panel.querySelector(id);
+    const imgRow = sel('#themeBgImageRow');
+    const topRow = sel('#themeBgTopRow');
+    const botRow = sel('#themeBgBottomRow');
+    if (imgRow) imgRow.style.display = type === 'image' ? '' : 'none';
+    if (topRow) topRow.style.display = type === 'image' ? 'none' : '';
+    if (botRow) botRow.style.display = type === 'gradient' ? '' : 'none';
   }
 
   // ─── Slot rendering ────────────────────────────────────
@@ -429,6 +592,10 @@ export class VisualLayout {
       if (!el) continue;
 
       el.style.display = slotCfg?.visible !== false ? '' : 'none';
+      // Apply darken filter for column slots
+      if (slotCfg?.darken > 0) {
+        el.style.filter = `brightness(${1 - slotCfg.darken / 100})`;
+      }
       this._loadSlotAsset(def);
       this._positionSlot(def.id);
     }
@@ -445,7 +612,7 @@ export class VisualLayout {
     el.style.left = slotCfg.x + '%';
     el.style.top = slotCfg.y + '%';
     el.style.width = (def.baseWidth * scale) + '%';
-    el.style.transform = 'translate(-50%, -50%)';
+    this._applySlotTransform(slotId);
   }
 
   async _loadSlotAsset(def) {
@@ -592,6 +759,95 @@ export class VisualLayout {
     this._ballCountPrev = undefined;
   }
 
+  // ─── Health bar (orange pegs) ──────────────────────
+
+  updateHealthBar(orangeLeft, totalOrange) {
+    this._updateHealthCircle(orangeLeft, totalOrange);
+    this._updateHealthCharCircle(orangeLeft, totalOrange);
+  }
+
+  _updateHealthCircle(orangeLeft, totalOrange) {
+    const el = this.slotElements.healthCircle;
+    if (!el) return;
+    const slotCfg = this.config?.slots.healthCircle;
+    if (!slotCfg || slotCfg.visible === false) return;
+
+    const ratio = totalOrange > 0 ? orangeLeft / totalOrange : 1;
+    const color = slotCfg.color || '#00e5ff';
+
+    // Build inner DOM on first call:
+    // .health-clip (clips via clip-path) > .health-fill (colored circle with glow)
+    if (!el.querySelector('.health-clip')) {
+      el.innerHTML = '';
+      el.style.backgroundImage = 'none';
+      el.style.aspectRatio = '1';
+
+      const clip = document.createElement('div');
+      clip.className = 'health-clip';
+      const fill = document.createElement('div');
+      fill.className = 'health-fill';
+      clip.appendChild(fill);
+      el.appendChild(clip);
+    }
+
+    const fill = el.querySelector('.health-fill');
+    fill.style.background = color;
+    // Clip from top: at ratio=1 full circle, at ratio=0 nothing visible
+    fill.style.clipPath = `inset(${(1 - ratio) * 100}% 0 0 0)`;
+
+    // drop-shadow on the clip wrapper glows around the clipped shape edges
+    const clip = el.querySelector('.health-clip');
+    const glowPx = Math.round(4 * ratio + 2);
+    clip.style.filter = ratio > 0 ? `drop-shadow(0 0 ${glowPx}px ${color})` : 'none';
+  }
+
+  _updateHealthCharCircle() {
+    // Static copy of characterCircle — no glow, no scaling
+  }
+
+  hideHealthBar() {
+    const hc = this.slotElements.healthCircle;
+    if (hc) {
+      hc.innerHTML = '';
+      hc.style.backgroundImage = '';
+      hc.style.boxShadow = '';
+    }
+  }
+
+  // ─── Edit-mode previews for dynamic slots ─────────
+
+  _showDynamicSlotPreviews() {
+    // Show health circle at ~60% fill as preview
+    this._updateHealthCircle(6, 10);
+    // Show ball counter with sample data
+    this._ballCountPrev = 8;
+    this.updateBallCounter(8, 10);
+    this._dynamicPreviewActive = true;
+  }
+
+  _hideDynamicSlotPreviews() {
+    if (!this._dynamicPreviewActive) return;
+    this._dynamicPreviewActive = false;
+    // Clear dynamic content — game will re-render if playing
+    this.hideBallCounter();
+    this.hideHealthBar();
+  }
+
+  _logSlotPositions() {
+    if (!this.config) return;
+    const order = this.config.layerOrder;
+    console.log('%c[SLOT POSITIONS] Copy these as new defaults:', 'color: #0ff; font-weight: bold');
+    for (const slotId of order) {
+      const s = this.config.slots[slotId];
+      if (!s) continue;
+      const parts = [`x: ${+s.x.toFixed(2)}, y: ${+s.y.toFixed(2)}, scale: ${+s.scale.toFixed(2)}`];
+      if (s.color) parts.push(`color: '${s.color}'`);
+      if (s.darken) parts.push(`darken: ${s.darken}`);
+      console.log(`  ${slotId}: { ${parts.join(', ')} }`);
+    }
+    console.log('%c[LAYER ORDER] back→front:', 'color: #0ff; font-weight: bold', order.join(', '));
+  }
+
   _updateSlotInteractivity() {
     for (const def of SLOT_DEFS) {
       const el = this.slotElements[def.id];
@@ -704,6 +960,64 @@ export class VisualLayout {
   _emitChange() {
     if (this.onConfigChange && this.config) {
       this.onConfigChange(this.config);
+    }
+  }
+
+  _applySlotTransform(slotId) {
+    const el = this.slotElements[slotId];
+    if (!el) return;
+    const def = SLOT_DEFS.find(d => d.id === slotId);
+    const fx = this._slotRuntimeFx[slotId];
+    let transform = 'translate(-50%, -50%)';
+    if (fx) {
+      if (fx.translateX || fx.translateY) {
+        transform += ` translate(${Math.round(fx.translateX || 0)}px, ${Math.round(fx.translateY || 0)}px)`;
+      }
+      if (Number.isFinite(fx.scale) && fx.scale !== 1) {
+        transform += ` scale(${fx.scale})`;
+      }
+      if (Number.isFinite(fx.rotate) && fx.rotate !== 0) {
+        transform += ` rotate(${fx.rotate}deg)`;
+      }
+    }
+    if (def?.mirror) transform += ' scaleX(-1)';
+    el.style.transform = transform;
+  }
+
+  _setSlotRuntimeFx(slotId, fx) {
+    if (fx) {
+      this._slotRuntimeFx[slotId] = fx;
+    } else {
+      delete this._slotRuntimeFx[slotId];
+    }
+    this._applySlotTransform(slotId);
+  }
+
+  _applyGambleOverlayState() {
+    const target = this.gambleOverlayState?.target;
+    const frameRect = this.frame?.getBoundingClientRect?.();
+    if (!this.gambleUiMode || !this.gambleOverlayState?.open || !target || !frameRect) {
+      this._setSlotRuntimeFx('rightCircle', null);
+      this._setSlotRuntimeFx('ballCounter', null);
+      return;
+    }
+
+    for (const slotId of ['rightCircle', 'ballCounter']) {
+      const el = this.slotElements[slotId];
+      const slotCfg = this.config?.slots?.[slotId];
+      const def = SLOT_DEFS.find(item => item.id === slotId);
+      if (!el || !slotCfg || !def || slotCfg.visible === false) {
+        this._setSlotRuntimeFx(slotId, null);
+        continue;
+      }
+
+      const currentCenterX = frameRect.width * (slotCfg.x / 100);
+      const currentCenterY = frameRect.height * (slotCfg.y / 100);
+      this._setSlotRuntimeFx(slotId, {
+        translateX: target.centerX - currentCenterX,
+        translateY: target.centerY - currentCenterY,
+        scale: target.scale || 1
+      });
     }
   }
 }

@@ -34,6 +34,16 @@
   background: transparent;
 }
 
+/* Background slot layer — behind canvas for columns etc. */
+.visual-slot-bg {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: 4px;
+  z-index: 0;
+  pointer-events: none;
+}
+
 /* Slot clip layer — clips decorative assets to frame bounds */
 .visual-slot-clip {
   position: absolute;
@@ -52,9 +62,22 @@
   background-size: contain;
   background-repeat: no-repeat;
   background-position: center;
-  z-index: 2;
+  /* z-index set inline by _applyLayerOrder() */
   aspect-ratio: 1;
-  transition: box-shadow 0.15s, outline 0.15s;
+  transform-origin: center;
+  transition: box-shadow 0.15s, outline 0.15s,
+              transform 0.42s cubic-bezier(0.22, 1, 0.36, 1),
+              opacity 0.24s ease,
+              filter 0.24s ease;
+}
+
+/* Column slots: full-height vertical strips, not square */
+.visual-slot[data-slot-id="columnLeft"],
+.visual-slot[data-slot-id="columnRight"] {
+  aspect-ratio: unset;
+  height: 100%;
+  background-size: 100% 100%;
+  /* darken controlled inline via filter: brightness() from config */
 }
 
 /* In edit mode: slots become interactive */
@@ -90,6 +113,11 @@
 .visual-frame--spin .visual-slot {
   opacity: 0;
   transition: opacity 0.3s;
+}
+
+.visual-frame--gamble-ui .visual-slot[data-slot-id="arrow"],
+.visual-frame--gamble-ui .visual-slot[data-slot-id="itemCircle"] {
+  opacity: 0;
 }
 
 /* ─── Theme Panel ───────────────────────────────── */
@@ -394,6 +422,56 @@
   text-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
   pointer-events: none;
   line-height: 1;
+}
+
+/* ─── Health Bar (orange pegs indicator) ─────────── */
+
+.health-clip {
+  position: absolute;
+  inset: 0;
+  transition: filter 0.3s ease-out;
+}
+
+.health-fill {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  transition: clip-path 0.25s ease-out, background 0.3s ease;
+}
+
+/* Health circle: subtle glow transition */
+.visual-slot[data-slot-id="healthCircle"] {
+  transition: box-shadow 0.3s ease-out,
+              transform 0.42s cubic-bezier(0.22, 1, 0.36, 1),
+              opacity 0.24s ease,
+              filter 0.24s ease;
+}
+
+/* Health char circle: subtle glow */
+.visual-slot[data-slot-id="healthCharCircle"] {
+  transition: box-shadow 0.3s ease-out,
+              transform 0.42s cubic-bezier(0.22, 1, 0.36, 1),
+              opacity 0.24s ease,
+              filter 0.24s ease;
+}
+
+/* Color picker row in slot controls */
+.theme-slot-color-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-top: 3px;
+}
+
+.theme-slot-color {
+  width: 28px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  cursor: pointer;
+  background: none;
 }
 
 /* ─── Editor panels repositioned outside frame ──── */
