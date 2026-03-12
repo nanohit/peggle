@@ -83,6 +83,7 @@ export class Game {
     // Trajectory preview
     this.trajectory = null;
     this.showFullTrajectory = false;
+    this.aimLength = 300;
     this.ultraAimCharges = 0;
     this.queuedBombPerkCharges = 0;
     this.armedBombPerk = false;
@@ -360,27 +361,22 @@ export class Game {
 
     // Calculate angle from launcher to touch point
     this.aimAngle = Utils.angleBetween(this.launchX, this.launchY, x, y);
-    
-    // Clamp to downward angles only
-    if (this.aimAngle < 0) {
-      this.aimAngle = Math.max(this.aimAngle, -Math.PI + 0.15);
-    } else {
-      this.aimAngle = Math.min(this.aimAngle, Math.PI - 0.15);
-    }
-    
+
     // Update trajectory prediction
     this.updateTrajectory();
   }
 
   updateTrajectory() {
     const showFull = this.shouldShowFullTrajectory();
+    const steps = showFull ? 1000 : this.aimLength;
+    const stopAtHit = showFull ? false : (this.aimLength >= 300);
     this.trajectory = this.physics.predictTrajectory(
       this.launchX,
       this.launchY,
       this.aimAngle,
       PHYSICS_CONFIG.launchPower,
-      showFull ? 1000 : 300,
-      !showFull
+      steps,
+      stopAtHit
     );
   }
 
@@ -642,6 +638,7 @@ export class Game {
     this.totalSurvivalTargets = this.isSurvivalMode() ? countSurvivalTargets(this.pegs) : 0;
     this.state = 'idle';
     this.trajectory = null;
+    this.aimLength = typeof levelData.aimLength === 'number' ? levelData.aimLength : 300;
     this.ultraAimCharges = 0;
     this.queuedBombPerkCharges = 0;
     this.armedBombPerk = false;
@@ -929,9 +926,19 @@ export class Game {
       const peg = event.peg;
       this.yoyoThread.notePegContact(event.ball, peg);
 
+      // Portal teleport: notify animator, no peg activation
+      if (event.portalHit) {
+        this.animator.notifyHit(peg.id);
+        continue;
+      }
       // Bumper collision: trigger scale-pulse animation (fires every hit)
       if (event.bumperAnimOnly) {
         peg._bumperHitScale = 1.3;
+        this.animator.notifyHit(peg.id);
+        continue;
+      }
+      // Obstacle (grey peg): permanent, just notify animator
+      if (event.obstacleHit) {
         this.animator.notifyHit(peg.id);
         continue;
       }
@@ -1073,6 +1080,7 @@ export class Game {
       showAim: this.isAimingState(),
       trajectory: this.isAimingState() ? this.trajectory : null,
       showFullTrajectory: this.shouldShowFullTrajectory(),
+      aimLength: this.aimLength,
       yoyoThreads: this.yoyoThread.getRenderThreads(),
       score: this.score,
       ballsLeft: this.ballsLeft,
@@ -1128,6 +1136,13 @@ export class Game {
     if (this.showFullTrajectory === next) return;
     this.showFullTrajectory = next;
     this.emitUiStateIfChanged(true, 'show-full-trajectory');
+    if (this.isAimingState()) {
+      this.updateTrajectory();
+    }
+  }
+
+  setAimLength(steps) {
+    this.aimLength = Math.max(0, Math.min(300, Math.round(steps)));
     if (this.isAimingState()) {
       this.updateTrajectory();
     }

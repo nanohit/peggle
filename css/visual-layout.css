@@ -494,6 +494,12 @@
   top: 8px;
 }
 
+.visual-frame > .aim-length-panel {
+  left: auto;
+  right: calc(100% + 6px);
+  bottom: 8px;
+}
+
 /* ─── Responsive ────────────────────────────────── */
 
 /* On narrow screens, hide theme panel by default */

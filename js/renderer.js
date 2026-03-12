@@ -112,6 +112,12 @@ export class Renderer {
 
     // Configurable background (set via setBackground)
     this.backgroundConfig = null;
+
+    // Bucket image asset
+    this._bucketImg = null;
+    const bucketImg = new Image();
+    bucketImg.onload = () => { this._bucketImg = bucketImg; };
+    bucketImg.src = 'visuals/bucket.webp';
   }
 
   resize(width, height) {
@@ -617,12 +623,12 @@ export class Renderer {
     }
   }
 
-  drawTrajectory(trajectory, fullPath = false) {
+  drawTrajectory(trajectory, fullPath = false, aimLength = 300) {
     if (!trajectory || !trajectory.points || trajectory.points.length < 2) return;
-    
+
     const ctx = this.ctx;
     const points = trajectory.points;
-    
+
     if (fullPath) {
       // Draw full trajectory path
       ctx.strokeStyle = COLORS.trajectoryLine;
@@ -630,13 +636,13 @@ export class Renderer {
       ctx.setLineDash([4, 4]);
       ctx.beginPath();
       ctx.moveTo(points[0].x, points[0].y);
-      
+
       for (let i = 1; i < points.length; i++) {
         ctx.lineTo(points[i].x, points[i].y);
       }
       ctx.stroke();
       ctx.setLineDash([]);
-      
+
       // Draw dots at intervals
       ctx.fillStyle = COLORS.trajectoryDot;
       for (let i = 0; i < points.length; i += 10) {
@@ -644,7 +650,7 @@ export class Renderer {
         ctx.arc(points[i].x, points[i].y, 2, 0, Math.PI * 2);
         ctx.fill();
       }
-      
+
       // Mark hit points
       ctx.fillStyle = COLORS.orange;
       for (const hit of trajectory.hits) {
@@ -659,15 +665,15 @@ export class Renderer {
       ctx.setLineDash([6, 6]);
       ctx.beginPath();
       ctx.moveTo(points[0].x, points[0].y);
-      
+
       for (let i = 1; i < points.length; i++) {
         ctx.lineTo(points[i].x, points[i].y);
       }
       ctx.stroke();
       ctx.setLineDash([]);
-      
-      // Draw end point
-      if (points.length > 1) {
+
+      // Draw end dot only at full aim length (hit indicator)
+      if (aimLength >= 300 && points.length > 1) {
         const endPoint = points[points.length - 1];
         ctx.fillStyle = COLORS.trajectoryDot;
         ctx.beginPath();
@@ -722,25 +728,32 @@ export class Renderer {
     const ctx = this.ctx;
     const { x, y, width, height } = bucket;
 
-    // Bucket body
-    ctx.fillStyle = COLORS.bucket;
-    ctx.beginPath();
-    ctx.moveTo(x - width / 2, y - height / 2);
-    ctx.lineTo(x - width / 2 + 8, y + height / 2);
-    ctx.lineTo(x + width / 2 - 8, y + height / 2);
-    ctx.lineTo(x + width / 2, y - height / 2);
-    ctx.closePath();
-    ctx.fill();
-
-    // Inner
-    ctx.fillStyle = COLORS.bucketInner;
-    ctx.beginPath();
-    ctx.moveTo(x - width / 2 + 4, y - height / 2 + 4);
-    ctx.lineTo(x - width / 2 + 10, y + height / 2 - 2);
-    ctx.lineTo(x + width / 2 - 10, y + height / 2 - 2);
-    ctx.lineTo(x + width / 2 - 4, y - height / 2 + 4);
-    ctx.closePath();
-    ctx.fill();
+    if (this._bucketImg) {
+      // Draw the bucket.webp asset, scaled to fit the bucket bounds
+      // Image is wider than tall — use width as primary, derive height from aspect ratio
+      const imgAspect = this._bucketImg.width / this._bucketImg.height;
+      const drawW = width;
+      const drawH = drawW / imgAspect;
+      ctx.drawImage(this._bucketImg, x - drawW / 2, y + height / 2 - drawH, drawW, drawH);
+    } else {
+      // Fallback: original trapezoid shape
+      ctx.fillStyle = COLORS.bucket;
+      ctx.beginPath();
+      ctx.moveTo(x - width / 2, y - height / 2);
+      ctx.lineTo(x - width / 2 + 8, y + height / 2);
+      ctx.lineTo(x + width / 2 - 8, y + height / 2);
+      ctx.lineTo(x + width / 2, y - height / 2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = COLORS.bucketInner;
+      ctx.beginPath();
+      ctx.moveTo(x - width / 2 + 4, y - height / 2 + 4);
+      ctx.lineTo(x - width / 2 + 10, y + height / 2 - 2);
+      ctx.lineTo(x + width / 2 - 10, y + height / 2 - 2);
+      ctx.lineTo(x + width / 2 - 4, y - height / 2 + 4);
+      ctx.closePath();
+      ctx.fill();
+    }
   }
 
   drawFlippers(flippers, canvasWidth, selected) {
@@ -1012,7 +1025,7 @@ export class Renderer {
     }
   }
 
-  drawAnimationGhosts(ghosts, center, ghostCenter, offset, motion, _inverse = false) {
+  drawAnimationGhosts(ghosts, center, ghostCenter, offset, motion, _inverse = false, circularPath = false, circularFull = false) {
     if (!ghosts || ghosts.length === 0 || !center) return;
     const ctx = this.ctx;
     const radius = PHYSICS_CONFIG.pegRadius;
@@ -1029,48 +1042,89 @@ export class Renderer {
     const hasDelta = Math.abs(dx) > 0.001 || Math.abs(dy) > 0.001;
 
     if (hasDelta) {
-      const W = this.width, H = this.height;
+      if (circularPath) {
+        // Draw circular arc preview
+        const D = Math.sqrt(dx * dx + dy * dy);
+        const R = D / 2;
+        const arcCenterX = center.x + dx / 2;
+        const arcCenterY = center.y + dy / 2;
+        const theta = Math.atan2(dy, dx);
+        const startAngle = theta + Math.PI;
 
-      // Forward line: center → ghost destination (traces through walls)
-      ctx.strokeStyle = '#ffd60a';
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([6, 4]);
-      this.drawWrappedMotionLine(center, { dx, dy });
-      ctx.setLineDash([]);
-
-      // Reverse line: trace from center in OPPOSITE direction until hitting a wall
-      const rdx = -dx, rdy = -dy;
-      let wallAlpha = Infinity;
-
-      if (Math.abs(rdx) > 1e-6) {
-        const a = (rdx > 0 ? W - center.x : -center.x) / rdx;
-        if (a > 1e-6) wallAlpha = Math.min(wallAlpha, a);
-      }
-      if (Math.abs(rdy) > 1e-6) {
-        const a = (rdy > 0 ? H - center.y : -center.y) / rdy;
-        if (a > 1e-6) wallAlpha = Math.min(wallAlpha, a);
-      }
-
-      if (Number.isFinite(wallAlpha)) {
-        const wallX = center.x + rdx * wallAlpha;
-        const wallY = center.y + rdy * wallAlpha;
-
-        // Draw reverse dashed line (same color, slightly dimmer)
-        ctx.strokeStyle = 'rgba(255, 214, 10, 0.5)';
+        ctx.strokeStyle = '#ffd60a';
         ctx.lineWidth = 1.5;
         ctx.setLineDash([6, 4]);
         ctx.beginPath();
-        ctx.moveTo(center.x, center.y);
-        ctx.lineTo(wallX, wallY);
+        if (circularFull) {
+          // Full circle
+          ctx.arc(arcCenterX, arcCenterY, R, 0, Math.PI * 2);
+        } else {
+          // Semicircle: draw the arc from start to end (counterclockwise)
+          ctx.arc(arcCenterX, arcCenterY, R, startAngle, startAngle + Math.PI);
+        }
         ctx.stroke();
         ctx.setLineDash([]);
 
-        // Fat dot at wall intersection
-        ctx.fillStyle = '#ff3b30';
+        // Draw the other half dimmer (for semicircle, shows the unused half)
+        if (!circularFull) {
+          ctx.strokeStyle = 'rgba(255, 214, 10, 0.25)';
+          ctx.lineWidth = 1;
+          ctx.setLineDash([4, 6]);
+          ctx.beginPath();
+          ctx.arc(arcCenterX, arcCenterY, R, startAngle + Math.PI, startAngle + Math.PI * 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+
+        // Small dot at the arc center
+        ctx.fillStyle = 'rgba(255, 214, 10, 0.6)';
         ctx.beginPath();
-        ctx.arc(wallX, wallY, 6, 0, Math.PI * 2);
+        ctx.arc(arcCenterX, arcCenterY, 3, 0, Math.PI * 2);
         ctx.fill();
 
+      } else {
+        const W = this.width, H = this.height;
+
+        // Forward line: center → ghost destination (traces through walls)
+        ctx.strokeStyle = '#ffd60a';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([6, 4]);
+        this.drawWrappedMotionLine(center, { dx, dy });
+        ctx.setLineDash([]);
+
+        // Reverse line: trace from center in OPPOSITE direction until hitting a wall
+        const rdx = -dx, rdy = -dy;
+        let wallAlpha = Infinity;
+
+        if (Math.abs(rdx) > 1e-6) {
+          const a = (rdx > 0 ? W - center.x : -center.x) / rdx;
+          if (a > 1e-6) wallAlpha = Math.min(wallAlpha, a);
+        }
+        if (Math.abs(rdy) > 1e-6) {
+          const a = (rdy > 0 ? H - center.y : -center.y) / rdy;
+          if (a > 1e-6) wallAlpha = Math.min(wallAlpha, a);
+        }
+
+        if (Number.isFinite(wallAlpha)) {
+          const wallX = center.x + rdx * wallAlpha;
+          const wallY = center.y + rdy * wallAlpha;
+
+          // Draw reverse dashed line (same color, slightly dimmer)
+          ctx.strokeStyle = 'rgba(255, 214, 10, 0.5)';
+          ctx.lineWidth = 1.5;
+          ctx.setLineDash([6, 4]);
+          ctx.beginPath();
+          ctx.moveTo(center.x, center.y);
+          ctx.lineTo(wallX, wallY);
+          ctx.stroke();
+          ctx.setLineDash([]);
+
+          // Fat dot at wall intersection
+          ctx.fillStyle = '#ff3b30';
+          ctx.beginPath();
+          ctx.arc(wallX, wallY, 6, 0, Math.PI * 2);
+          ctx.fill();
+        }
       }
     }
 
@@ -1357,7 +1411,7 @@ export class Renderer {
 
     // Draw trajectory before ball
     if (state.trajectory) {
-      this.drawTrajectory(state.trajectory, state.showFullTrajectory);
+      this.drawTrajectory(state.trajectory, state.showFullTrajectory, state.aimLength);
     }
 
     if (state.yoyoThreads) {
@@ -1404,7 +1458,9 @@ export class Renderer {
         state.animationGhostCenter,
         state.animationGhostOffset,
         state.animationMotion,
-        state.animationInverse
+        state.animationInverse,
+        state.animationCircularPath,
+        state.animationCircularFull
       );
     }
 

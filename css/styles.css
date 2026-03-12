@@ -127,6 +127,20 @@ html, body {
   display: none;
 }
 
+.aim-length-panel {
+  position: absolute;
+  bottom: 8px;
+  left: max(8px, calc(50% - 380px));
+  width: 170px;
+  background: rgba(22, 27, 34, 0.92);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  z-index: 22;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  padding: 6px 8px;
+}
+
 .survival-panel.visible {
   display: block;
 }
@@ -441,7 +455,7 @@ html, body {
      All fixed-px sizes are multiplied by --s so the gamble UI scales
      proportionally with the frame and never changes with browser zoom. */
   --s: var(--frame-scale, 1);
-  --dock-collapsed-height: calc(88px * var(--s));
+  --dock-collapsed-height: calc(118px * var(--s));
   --dock-open-height: calc(198px * var(--s));
   --board-width: 100%;
   --board-layer-height: calc(44px * var(--s));
@@ -474,14 +488,15 @@ html, body {
 
 .gamble-toggle-handle {
   position: absolute;
-  /* Collapsed: mostly tucked into the dock, just the top peeking out */
-  bottom: var(--dock-collapsed-height);
+  bottom: 0;
   left: 50%;
-  width: calc(92px * var(--s));
-  height: calc(54px * var(--s));
-  aspect-ratio: 281 / 166;
-  transform: translate(-50%, 82%);
+  width: calc(110px * var(--s));
+  height: calc(64px * var(--s));
+  aspect-ratio: 281 / 155;
+  transform: translate(-50%, 0);
   border: 0;
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
   background: transparent;
   background-image: var(--gamble-arrow-asset);
   background-position: center;
@@ -490,12 +505,15 @@ html, body {
   cursor: pointer;
   pointer-events: auto;
   filter: drop-shadow(0 10px 14px rgba(0, 0, 0, 0.42));
-  transition: bottom 0.42s cubic-bezier(0.22, 1, 0.36, 1), transform 0.26s ease, filter 0.2s ease;
-  z-index: 5;
+  transition: bottom 0.42s cubic-bezier(0.22, 1, 0.36, 1),
+              background-image 0.15s ease,
+              transform 0.26s ease,
+              filter 0.2s ease;
+  z-index: 4;
 }
 
 .gamble-toggle-handle:active {
-  transform: translate(-50%, 82%) scale(0.96);
+  transform: translate(-50%, 0) scale(0.96);
 }
 
 .gamble-board-layer {
@@ -527,13 +545,15 @@ html, body {
 }
 
 .gamble-hud.expanded .gamble-toggle-handle {
-  /* Expanded: arrow sits right on top of the slots board image */
-  bottom: calc(var(--dock-open-height) + var(--board-offset-expanded) + var(--board-layer-height));
-  transform: translate(-50%, 82%);
+  /* Expanded: arrow_down, behind the slots board, bottom edge at board top */
+  background-image: var(--gamble-arrow-down-asset);
+  bottom: calc(var(--dock-open-height) + var(--board-offset-expanded) + var(--board-layer-height) - 24px * var(--s));
+  transform: translate(-50%, 0);
+  z-index: 0;
 }
 
 .gamble-hud.expanded .gamble-toggle-handle:active {
-  transform: translate(-50%, 82%) scale(0.96);
+  transform: translate(-50%, 0) scale(0.96);
 }
 
 .gamble-hud.expanded .gamble-board-surface {
@@ -588,7 +608,7 @@ html, body {
   right: 0;
   bottom: 0;
   height: var(--dock-collapsed-height);
-  padding: calc(18px * var(--s)) calc(8px * var(--s)) calc(10px * var(--s));
+  padding: calc(8px * var(--s)) calc(8px * var(--s)) calc(10px * var(--s));
   background: #1e1e1e;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow: 0 -18px 40px rgba(0, 0, 0, 0.52);
@@ -617,7 +637,8 @@ html, body {
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: calc(6px * var(--s));
-  margin-top: auto;
+  position: relative;
+  z-index: 5;
 }
 
 .gamble-perk-group {
@@ -640,7 +661,7 @@ html, body {
 }
 
 .gamble-perk-center-gap {
-  width: calc(60px * var(--s));
+  width: calc(36px * var(--s));
   height: 1px;
 }
 
@@ -714,23 +735,24 @@ html, body {
 
 .gamble-perk-chip {
   position: relative;
-  width: calc(50px * var(--s));
-  height: calc(50px * var(--s));
+  width: calc(66px * var(--s));
+  height: calc(66px * var(--s));
   border: 0;
+  outline: none;
   background: transparent;
   background-image: var(--gamble-item-asset);
   background-position: center;
   background-repeat: no-repeat;
   background-size: contain;
   color: #f6f6f9;
-  font-size: calc(22px * var(--s));
+  font-size: calc(28px * var(--s));
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 0 0 calc(2px * var(--s));
   cursor: pointer;
   flex-shrink: 1;
-  min-width: calc(32px * var(--s));
+  min-width: calc(44px * var(--s));
   filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.35));
   transition: transform 0.18s ease, opacity 0.18s ease, filter 0.18s ease;
 }
@@ -740,15 +762,15 @@ html, body {
   position: absolute;
   right: calc(-2px * var(--s));
   bottom: calc(-2px * var(--s));
-  min-width: calc(20px * var(--s));
-  height: calc(18px * var(--s));
-  padding: 0 calc(4px * var(--s));
+  min-width: calc(22px * var(--s));
+  height: calc(20px * var(--s));
+  padding: 0 calc(5px * var(--s));
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.18);
   background: rgba(4, 5, 8, 0.88);
   color: #f4f7fb;
-  font-size: calc(11px * var(--s));
-  line-height: calc(16px * var(--s));
+  font-size: calc(12px * var(--s));
+  line-height: calc(18px * var(--s));
   text-align: center;
 }
 
@@ -1021,6 +1043,7 @@ html, body {
   height: 16px;
   cursor: pointer;
 }
+
 
 .menu-subsection {
   margin-bottom: 10px;

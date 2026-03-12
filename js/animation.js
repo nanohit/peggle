@@ -254,6 +254,24 @@ export function estimatePegExtents(peg, centerX, centerY, angle = 0, slices = nu
   };
 }
 
+// Compute displacement along a circular arc.
+// The vector (dx, dy) defines the diameter: start→end.
+// t is 0→1 progress along the arc.
+// arcSpan: Math.PI for semicircle, 2*Math.PI for full circle.
+// Returns { tx, ty } displacement from the start position.
+function circularDisplacement(dx, dy, t, arcSpan) {
+  const D = Math.sqrt(dx * dx + dy * dy);
+  if (D < 0.001) return { tx: 0, ty: 0 };
+  const R = D / 2;
+  const theta = Math.atan2(dy, dx);
+  const startAngle = theta + Math.PI;
+  const angle = startAngle + t * arcSpan;
+  return {
+    tx: dx / 2 + R * Math.cos(angle),
+    ty: dy / 2 + R * Math.sin(angle)
+  };
+}
+
 export class PegAnimator {
   constructor() {
     this.originalPositions = new Map(); // pegId → {x, y, angle, curveSlices?}
@@ -338,6 +356,8 @@ export class PegAnimator {
         hitTrigger: !!anim.hitTrigger,
         hitMode: anim.hitMode || 'cycle',
         hitSteps: Math.max(1, Math.round(anim.hitSteps || 1)),
+        circularPath: !!anim.circularPath,
+        circularFull: !!anim.circularFull,
       };
       this.animations.push(entry);
       if (entry.hitTrigger) {
@@ -371,6 +391,8 @@ export class PegAnimator {
         hitTrigger: !!anim.hitTrigger,
         hitMode: anim.hitMode || 'cycle',
         hitSteps: Math.max(1, Math.round(anim.hitSteps || 1)),
+        circularPath: !!anim.circularPath,
+        circularFull: !!anim.circularFull,
       };
       this.animations.push(entry);
       if (entry.hitTrigger) {
@@ -451,8 +473,40 @@ export class PegAnimator {
       // because the return leg crosses the same wall as the forward leg.
       let wrapRefDx = 0, wrapRefDy = 0;
 
+      // Circular path: object follows a circular arc defined by the displacement vector
+      if (anim.circularPath) {
+        const arcSpan = anim.circularFull ? Math.PI * 2 : Math.PI;
+
+        if (anim.hitTrigger && (anim.hitMode === 'single' || anim.hitMode === 'spin')) {
+          const ht = this._hitTriggerState.get(ai);
+          const t = ht ? ht._singleT || 0 : 0;
+          const circ = circularDisplacement(anim.dx, anim.dy, t, arcSpan);
+          tx = circ.tx;
+          ty = circ.ty;
+          rot = anim.rotation * t;
+        } else if (anim.circularFull) {
+          // Full circle: continuous sawtooth phase
+          const phase = (animElapsed % duration) / duration;
+          const circ = circularDisplacement(anim.dx, anim.dy, phase, arcSpan);
+          tx = circ.tx;
+          ty = circ.ty;
+          rot = anim.rotation * (animElapsed / duration);
+        } else {
+          // Half circle: ping-pong along semicircular arc
+          const fullCycle = duration * 2;
+          const phase = (animElapsed % fullCycle) / duration;
+          const rawT = phase <= 1 ? phase : 2 - phase;
+          const t = anim.easingFn(rawT);
+          const circ = circularDisplacement(anim.dx, anim.dy, t, arcSpan);
+          tx = circ.tx;
+          ty = circ.ty;
+          rot = anim.rotation * t;
+        }
+        wrapRefDx = anim.dx;
+        wrapRefDy = anim.dy;
+
       // Single/spin hit trigger: compute tx/ty directly from _singleT and skip normal phase
-      if (anim.hitTrigger && (anim.hitMode === 'single' || anim.hitMode === 'spin')) {
+      } else if (anim.hitTrigger && (anim.hitMode === 'single' || anim.hitMode === 'spin')) {
         const ht = this._hitTriggerState.get(ai);
         const t = ht ? ht._singleT || 0 : 0;
         const motion = (anim.wrap && (canWrapX || canWrapY))
@@ -527,10 +581,10 @@ export class PegAnimator {
         wrapRefDy = motion.dy;
       }
 
-      // Mirror-wrap: trace path with wall reflections
+      // Mirror-wrap: trace path with wall reflections (skip for circular paths)
       const W = worldWidth || 0;
       const H = worldHeight || 0;
-      const doWrap = anim.wrap && (canWrapX || canWrapY);
+      const doWrap = anim.wrap && (canWrapX || canWrapY) && !anim.circularPath;
       const traced = doWrap
         ? mirrorWrapTrace(anim.centerX, anim.centerY, tx, ty, W, H)
         : { x: anim.centerX + tx, y: anim.centerY + ty, mirrorX: false, mirrorY: false };

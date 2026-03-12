@@ -246,8 +246,9 @@ export class PhysicsEngine {
       y: height - 25,
       width: 70,
       height: 16,
-      direction: 1,
-      speed: 1.5
+      speed: 1.5,
+      // Sine-based oscillation: _phase tracks position in cycle [0, 2*PI)
+      _phase: Math.PI / 2 // start centered (sin(PI/2) = 1 → middle)
     };
   }
 
@@ -509,7 +510,7 @@ export class PhysicsEngine {
 
       ballLike.portalCooldown = 6;
       this._clampBallLikeSpeed(ballLike);
-      return true;
+      return { entry, exit };
     }
 
     return previewOnly ? null : false;
@@ -583,7 +584,13 @@ export class PhysicsEngine {
         // Pass sub-step progress so flipper angle is interpolated between
         // its previous and current frame positions (prevents sweep-through).
         this.checkFlipperCollisions(ball, (step + 1) / numSteps, frac);
-        this.tryPortalTeleport(ball, prevX, prevY);
+        const portalResult = this.tryPortalTeleport(ball, prevX, prevY);
+        if (portalResult && portalResult.entry) {
+          hitEvents.push({ peg: portalResult.entry, ball, portalHit: true });
+          if (portalResult.exit) {
+            hitEvents.push({ peg: portalResult.exit, ball, portalHit: true });
+          }
+        }
 
         // Peg collisions - portals are line triggers and do not collide.
         for (const peg of this.pegs) {
@@ -612,6 +619,8 @@ export class PhysicsEngine {
 
             if (isBumper) {
               hitEvents.push({ peg, ball, isBumper: true, bumperAnimOnly: true });
+            } else if (peg.type === 'obstacle') {
+              hitEvents.push({ peg, ball, obstacleHit: true });
             }
 
             const isPermanentBumper = isBumper && !peg.bumperDisappear && !peg.bumperOrange;
@@ -768,13 +777,16 @@ export class PhysicsEngine {
   updateBucket() {
     if (!this.bucketEnabled) return;
     const timeScale = PHYSICS_CONFIG.timeScale;
-    this.bucket.x += this.bucket.direction * this.bucket.speed * timeScale;
-    
-    if (this.bucket.x + this.bucket.width / 2 > this.width) {
-      this.bucket.direction = -1;
-    } else if (this.bucket.x - this.bucket.width / 2 < 0) {
-      this.bucket.direction = 1;
-    }
+    const b = this.bucket;
+    const halfW = b.width / 2;
+    // Advance phase — speed maps to angular velocity
+    // Full cycle = left edge → right edge → left edge
+    // Range of motion: halfW to (this.width - halfW)
+    const range = this.width - b.width;
+    // Angular speed: speed * timeScale mapped so the visual speed feels similar
+    b._phase += (b.speed * timeScale * Math.PI) / (range || 1);
+    // x oscillates with sine easing (smooth at edges)
+    b.x = halfW + range * (0.5 + 0.5 * Math.sin(b._phase));
   }
 
   checkBucketCatch(ball) {

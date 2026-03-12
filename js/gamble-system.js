@@ -4,7 +4,8 @@ const STORAGE_KEY = 'peggle_gamble_settings_v1';
 const SLOTS_BOARD_ASSET = 'visuals/slots_background.webp';
 const SPIN_BUTTON_ASSET = 'visuals/spin_button.webp';
 const SPIN_BUTTON_PRESSED_ASSET = 'visuals/spin_button_pressed.webp';
-const DEFAULT_ARROW_ASSET = 'visuals/assets_webtp/arrow.webp';
+const ARROW_UP_ASSET = 'visuals/arrow_up.webp';
+const ARROW_DOWN_ASSET = 'visuals/arrow_down.webp';
 const DEFAULT_ITEM_ASSET = 'visuals/assets_webtp/item_cirlce.webp';
 
 const PERK_DEFINITIONS = [
@@ -557,16 +558,21 @@ export class GambleSystem {
 
   applyThemeAssets() {
     if (!this.ui?.root) return;
-    const arrowAsset = resolveUiAssetUrl(this.visualLayout?.getSlotAssetUrl?.('arrow') || DEFAULT_ARROW_ASSET);
+    const arrowUpAsset = resolveUiAssetUrl(ARROW_UP_ASSET);
+    const arrowDownAsset = resolveUiAssetUrl(ARROW_DOWN_ASSET);
     const itemAsset = resolveUiAssetUrl(this.visualLayout?.getSlotAssetUrl?.('itemCircle') || DEFAULT_ITEM_ASSET);
     const boardAsset = resolveUiAssetUrl(SLOTS_BOARD_ASSET);
     const spinAsset = resolveUiAssetUrl(SPIN_BUTTON_ASSET);
     const spinPressedAsset = resolveUiAssetUrl(SPIN_BUTTON_PRESSED_ASSET);
-    this.ui.root.style.setProperty('--gamble-arrow-asset', `url("${arrowAsset}")`);
+    this.ui.root.style.setProperty('--gamble-arrow-asset', `url("${arrowUpAsset}")`);
+    this.ui.root.style.setProperty('--gamble-arrow-down-asset', `url("${arrowDownAsset}")`);
     this.ui.root.style.setProperty('--gamble-item-asset', `url("${itemAsset}")`);
     this.ui.root.style.setProperty('--gamble-board-asset', `url("${boardAsset}")`);
     this.ui.root.style.setProperty('--gamble-spin-asset', `url("${spinAsset}")`);
     this.ui.root.style.setProperty('--gamble-spin-pressed-asset', `url("${spinPressedAsset}")`);
+    // Preload arrow_down so it's ready when panel expands
+    const img = new Image();
+    img.src = arrowDownAsset;
   }
 
   syncOverlayLayout() {

@@ -460,6 +460,8 @@ export class LevelManager {
       level.flippers = normalizeFlipperConfig(level.flippers, { canvasHeight: 600 }) || null;
     }
     level.yoyo = normalizeYoyoSettings(level.yoyo);
+    if (typeof level.aimLength !== 'number') level.aimLength = 300;
+    level.aimLength = Math.max(0, Math.min(300, Math.round(level.aimLength)));
     for (const peg of level.pegs) {
       if (peg && peg.type === 'multi') {
         peg.multiballSpawnCount = normalizeMultiballSpawnCount(peg.multiballSpawnCount);

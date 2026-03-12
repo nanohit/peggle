@@ -57,6 +57,16 @@
           <div class="survival-hint">Hold Shift for 5-step snapping</div>
         </div>
       </div>
+      <!-- Aim length slider -->
+      <div id="aimLengthPanel" class="aim-length-panel">
+        <div class="survival-control">
+          <label for="aimLengthSlider">Aim Length</label>
+          <div class="survival-control-row">
+            <input type="range" id="aimLengthSlider" min="0" max="300" step="1" value="300">
+            <input type="number" id="aimLengthInput" min="0" max="300" step="1" value="300">
+          </div>
+        </div>
+      </div>
       <!-- Animation side panel (inside canvas-container so canvas stays visible) -->
       <div id="animPanel" class="anim-panel">
         <div class="anim-panel-title">Animate <button id="closeAnimPanel" class="anim-close-btn">✕</button></div>
@@ -80,6 +90,11 @@
           <label class="anim-toggle"><input type="checkbox" id="animEasingToggle" checked> Ease</label>
           <button id="animInverseBtn" class="anim-btn anim-btn-toggle" type="button">Inverse: OFF</button>
           <button id="animCycleBtn" class="anim-btn anim-btn-toggle" type="button">Cycle: OFF</button>
+          <button id="animCircleBtn" class="anim-btn anim-btn-toggle" type="button">Circle: OFF</button>
+          <div id="animCircleModeRow" class="anim-hit-mode-row" style="display:none">
+            <button id="animCircleHalfBtn" class="anim-btn anim-btn-toggle anim-btn-sm active" type="button">Half</button>
+            <button id="animCircleFullBtn" class="anim-btn anim-btn-toggle anim-btn-sm" type="button">Full</button>
+          </div>
           <label class="anim-toggle"><input type="checkbox" id="animHitTriggerToggle"> On Hit</label>
           <div id="animHitModeRow" class="anim-hit-mode-row" style="display:none">
             <button id="animHitCycleBtn" class="anim-btn anim-btn-toggle anim-btn-sm active" type="button">Loop</button>

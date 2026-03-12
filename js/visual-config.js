@@ -26,7 +26,7 @@ export const SLOT_DEFS = [
   { id: 'leftCircle',       label: 'Left Circle',      basename: 'left_circle',           baseWidth: 16, defaultX: 10.9,  defaultY: 5.76,  defaultScale: 1.35 },
   { id: 'rightCircle',      label: 'Right Circle',     basename: 'right-center_cirlce',   baseWidth: 16, defaultX: 90.22, defaultY: 5.53,  defaultScale: 1.3 },
   { id: 'itemCircle',       label: 'Item Circle',      basename: 'item_cirlce',           baseWidth: 10, defaultX: 88,    defaultY: 16,    defaultScale: 1 },
-  { id: 'arrow',            label: 'Arrow',            basename: 'arrow',                 baseWidth: 30, defaultX: 50,    defaultY: 93,    defaultScale: 1 },
+  { id: 'arrow',            label: 'Arrow',            basename: null,                    baseWidth: 30, defaultX: 50,    defaultY: 100,   defaultScale: 1, dynamic: true, hidden: true },
   { id: 'ballCounter',      label: 'Ball Counter',     basename: null,                    baseWidth: 16, defaultX: 90,    defaultY: 5.53,  defaultScale: 1.07, dynamic: true },
 ];
 

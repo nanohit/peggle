@@ -457,6 +457,7 @@ class PeggleApp {
 
     // Survival mode panel
     this.setupSurvivalPanel();
+    this.setupAimLengthPanel();
 
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
@@ -663,6 +664,40 @@ class PeggleApp {
       this._syncAnimationCycleButton();
     });
 
+    // Circle path button
+    const circleBtn = document.getElementById('animCircleBtn');
+    const circleModeRow = document.getElementById('animCircleModeRow');
+    const circleHalfBtn = document.getElementById('animCircleHalfBtn');
+    const circleFullBtn = document.getElementById('animCircleFullBtn');
+
+    const syncCircleButtons = () => {
+      const on = !!(this.editor && this.editor.animationCircularPath);
+      circleBtn.classList.toggle('active', on);
+      circleBtn.textContent = on ? 'Circle: ON' : 'Circle: OFF';
+      circleModeRow.style.display = on ? '' : 'none';
+      const full = !!(this.editor && this.editor.animationCircularFull);
+      circleHalfBtn.classList.toggle('active', !full);
+      circleFullBtn.classList.toggle('active', full);
+    };
+
+    circleBtn.addEventListener('click', () => {
+      if (!this.editor || !this.editor.animationMode) return;
+      this.editor.animationCircularPath = !this.editor.animationCircularPath;
+      syncCircleButtons();
+    });
+
+    circleHalfBtn.addEventListener('click', () => {
+      if (!this.editor || !this.editor.animationMode) return;
+      this.editor.animationCircularFull = false;
+      syncCircleButtons();
+    });
+
+    circleFullBtn.addEventListener('click', () => {
+      if (!this.editor || !this.editor.animationMode) return;
+      this.editor.animationCircularFull = true;
+      syncCircleButtons();
+    });
+
     // Hit trigger checkbox
     const hitTriggerToggle = document.getElementById('animHitTriggerToggle');
     const hitModeRow = document.getElementById('animHitModeRow');
@@ -750,11 +785,13 @@ class PeggleApp {
       const hitTrigger = !!this.editor.animationHitTrigger;
       const hitMode = this.editor.animationHitMode || 'cycle';
       const hitSteps = this.editor.animationHitSteps || 1;
+      const circularPath = !!this.editor.animationCircularPath;
+      const circularFull = !!this.editor.animationCircularFull;
 
       if (dx === 0 && dy === 0 && rot === 0) {
         this.editor.clearTargetAnimation();
       } else {
-        this.editor.setTargetAnimation({ dx, dy, rotation: rot, duration: dur, easing, inverse, cycle, wrap: true, hitTrigger, hitMode, hitSteps });
+        this.editor.setTargetAnimation({ dx, dy, rotation: rot, duration: dur, easing, inverse, cycle, wrap: true, hitTrigger, hitMode, hitSteps, circularPath, circularFull });
       }
       this.closeAnimationPanel();
     });
@@ -1133,6 +1170,34 @@ class PeggleApp {
     panel.classList.toggle('visible', !!visible);
   }
 
+  setupAimLengthPanel() {
+    const slider = document.getElementById('aimLengthSlider');
+    const numInput = document.getElementById('aimLengthInput');
+    if (!slider || !numInput) return;
+
+    const apply = (rawValue) => {
+      const value = Math.max(0, Math.min(300, Math.round(parseFloat(rawValue) || 300)));
+      slider.value = value;
+      numInput.value = value;
+      const level = this.levelManager.getCurrentLevel();
+      if (level) {
+        this.levelManager.updateCurrentLevel({ aimLength: value });
+      }
+      if (this.game) this.game.setAimLength(value);
+    };
+
+    slider.addEventListener('input', () => {
+      numInput.value = slider.value;
+    });
+    slider.addEventListener('change', () => apply(slider.value));
+    numInput.addEventListener('change', () => apply(numInput.value));
+  }
+
+  setAimLengthPanelVisible(visible) {
+    const panel = document.getElementById('aimLengthPanel');
+    if (panel) panel.style.display = visible ? '' : 'none';
+  }
+
   updateLevelSurvivalSettings(partialSettings) {
     const level = this.levelManager.getCurrentLevel();
     if (!level) return;
@@ -1298,6 +1363,7 @@ class PeggleApp {
     document.getElementById('animEasingToggle').checked = easing === 'easeInOut';
     this._syncAnimationInverseButton();
     this._syncAnimationCycleButton();
+    this._syncAnimationCircleButton();
     this._syncAnimationHitTrigger();
   }
 
@@ -1320,6 +1386,23 @@ class PeggleApp {
     if (easingToggle) {
       easingToggle.disabled = cycleOn;
       if (cycleOn) easingToggle.checked = false;
+    }
+  }
+
+  _syncAnimationCircleButton() {
+    const circleBtn = document.getElementById('animCircleBtn');
+    if (!circleBtn) return;
+    const on = !!(this.editor && this.editor.animationCircularPath);
+    circleBtn.classList.toggle('active', on);
+    circleBtn.textContent = on ? 'Circle: ON' : 'Circle: OFF';
+    const modeRow = document.getElementById('animCircleModeRow');
+    if (modeRow) modeRow.style.display = on ? '' : 'none';
+    const halfBtn = document.getElementById('animCircleHalfBtn');
+    const fullBtn = document.getElementById('animCircleFullBtn');
+    if (halfBtn && fullBtn) {
+      const full = !!(this.editor && this.editor.animationCircularFull);
+      halfBtn.classList.toggle('active', !full);
+      fullBtn.classList.toggle('active', full);
     }
   }
 
@@ -1436,6 +1519,7 @@ class PeggleApp {
     document.getElementById('playBtn').title = 'Play Level';
     document.querySelector('.toolbar').style.display = 'flex';
     this.setSurvivalPanelVisible(true);
+    this.setAimLengthPanelVisible(true);
 
     // Sync tool button states
     document.getElementById('gridBtn').classList.toggle('active', this.editor.showGrid);
@@ -1497,11 +1581,12 @@ class PeggleApp {
     // Apply trajectory setting
     const trajectoryToggle = document.getElementById('trajectoryToggle');
     this.game.setShowFullTrajectory(trajectoryToggle.checked);
-    
+
     // Resize to current dimensions
     this.resizeCanvas();
-    
+
     this.game.loadLevel(level);
+    this.game.setAimLength(typeof level.aimLength === 'number' ? level.aimLength : 300);
     
     this.game.onGameEnd = (result, score) => {
       setTimeout(() => {
@@ -1532,6 +1617,7 @@ class PeggleApp {
     document.getElementById('playBtn').title = 'Back to Editor';
     document.querySelector('.toolbar').style.display = 'none';
     this.setSurvivalPanelVisible(false);
+    this.setAimLengthPanelVisible(false);
     this._applyLevelVisuals();
     this.visualLayout.setEditMode(false);
     this.visualLayout.setPanelVisible(false);
@@ -1627,6 +1713,11 @@ class PeggleApp {
 
     document.getElementById('levelName').value = level.name;
     document.getElementById('levelDifficulty').value = level.difficulty || 1;
+    const aimVal = typeof level.aimLength === 'number' ? level.aimLength : 300;
+    const aimSlider = document.getElementById('aimLengthSlider');
+    const aimInput = document.getElementById('aimLengthInput');
+    if (aimSlider) aimSlider.value = aimVal;
+    if (aimInput) aimInput.value = aimVal;
     const yoyoSettings = normalizeYoyoSettings(level.yoyo);
     const yoyoToggle = document.getElementById('yoyoThreadToggle');
     if (yoyoToggle) {

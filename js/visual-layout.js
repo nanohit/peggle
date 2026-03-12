@@ -73,7 +73,7 @@ export class VisualLayout {
     // Frame has overflow:visible so they can pop out, and they position
     // relative to the frame (same dimensions as old canvas-container).
     this._reparentedPanels = [];
-    const panelIds = ['animPanel', 'bumperPanel', 'flipperPanel', 'portalPanel', 'multiballPanel', 'survivalPanel'];
+    const panelIds = ['animPanel', 'bumperPanel', 'flipperPanel', 'portalPanel', 'multiballPanel', 'survivalPanel', 'aimLengthPanel'];
     for (const pid of panelIds) {
       const panelEl = document.getElementById(pid);
       if (panelEl && container.contains(panelEl)) {
@@ -384,7 +384,7 @@ export class VisualLayout {
 
     for (const slotId of displayOrder) {
       const def = SLOT_DEFS.find(d => d.id === slotId);
-      if (!def) continue;
+      if (!def || def.hidden) continue;
       const slotCfg = this.config.slots[def.id];
       const scaleVal = Math.round((slotCfg?.scale || 1) * 100);
       const layerIdx = order.indexOf(slotId);
@@ -591,7 +591,7 @@ export class VisualLayout {
       const el = this.slotElements[def.id];
       if (!el) continue;
 
-      el.style.display = slotCfg?.visible !== false ? '' : 'none';
+      el.style.display = (def.hidden || slotCfg?.visible === false) ? 'none' : '';
       // Apply darken filter for column slots
       if (slotCfg?.darken > 0) {
         el.style.filter = `brightness(${1 - slotCfg.darken / 100})`;

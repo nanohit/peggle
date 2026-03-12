@@ -2282,6 +2282,8 @@ export class Editor {
       animationGhostCenter: (this.animationMode && !this.animationPreview) ? this.getAnimationGhostCenter() : null,
       animationMotion: (this.animationMode && !this.animationPreview) ? this.resolveAnimationMotion() : null,
       animationInverse: this.animationMode && !this.animationPreview ? this.animationInverse : false,
+      animationCircularPath: this.animationMode && !this.animationPreview ? this.animationCircularPath : false,
+      animationCircularFull: this.animationMode && !this.animationPreview ? this.animationCircularFull : false,
       animationGhostOffset: this.animationGhostOffset,
       groups: level ? level.groups : [],
       // Flippers
@@ -2645,6 +2647,8 @@ export class Editor {
     this.animationHitTrigger = !!existing?.hitTrigger;
     this.animationHitMode = existing?.hitMode || 'cycle';
     this.animationHitSteps = existing?.hitSteps || 1;
+    this.animationCircularPath = !!existing?.circularPath;
+    this.animationCircularFull = !!existing?.circularFull;
     this.animationMode = true;
     this.animationPreview = false;
     this.animationPreviewAnimator = null;
@@ -2664,6 +2668,8 @@ export class Editor {
     this.animationHitTrigger = false;
     this.animationHitMode = 'cycle';
     this.animationHitSteps = 1;
+    this.animationCircularPath = false;
+    this.animationCircularFull = false;
   }
 
   getTargetAnimation() {
@@ -2689,6 +2695,8 @@ export class Editor {
       hitTrigger: !!animData?.hitTrigger,
       hitMode: animData?.hitMode || 'cycle',
       hitSteps: Math.max(1, Math.round(animData?.hitSteps || 1)),
+      circularPath: !!animData?.circularPath,
+      circularFull: !!animData?.circularFull,
     };
 
     this.saveUndoState();
@@ -2722,6 +2730,8 @@ export class Editor {
     this.animationGhostOffset = { dx: 0, dy: 0 };
     this.animationRotation = 0;
     this.animationInverse = false;
+    this.animationCircularPath = false;
+    this.animationCircularFull = false;
   }
 
   getAnimationCenter() {
@@ -2834,7 +2844,9 @@ export class Editor {
       easing: this.animationCycle ? 'linear' : this.animationEasing,
       inverse: this.animationInverse,
       cycle: this.animationCycle,
-      wrap: true
+      wrap: true,
+      circularPath: this.animationCircularPath,
+      circularFull: this.animationCircularFull,
     };
 
     // Temporarily assign animation
