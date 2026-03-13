@@ -98,12 +98,12 @@ export class Renderer {
     this.ctx = canvas.getContext('2d');
     this.width = canvas.width;
     this.height = canvas.height;
-    
+
     // Editor state
     this.showGrid = false;
     this.gridSize = 20;
     this.selectedPegIds = new Set();
-    
+
     // Aim state
     this.aimAngle = Math.PI / 2;
     this.showAim = false;
@@ -112,6 +112,14 @@ export class Renderer {
 
     // Configurable background (set via setBackground)
     this.backgroundConfig = null;
+    this._bgCacheCanvas = null;
+    this._bgCacheDirty = true;
+    this._bgCacheKey = '';
+
+    // Glow sprite cache: pre-rendered blur effects stamped via drawImage()
+    // instead of per-frame ctx.shadowBlur (which is software-rasterized on
+    // Chrome/Safari and extremely slow).
+    this._glowCache = new Map();
 
     // Bucket image asset
     this._bucketImg = null;
@@ -126,25 +134,147 @@ export class Renderer {
     this.canvas.width = width;
     this.canvas.height = height;
     this.launchX = width / 2;
+    this._bgCacheDirty = true;
+  }
+
+  // --- Glow sprite cache ---
+  // Returns { img, half } for circle glows.
+  // The img is an offscreen canvas with the blur pre-rendered once.
+  _circleGlow(color, radius, blur) {
+    const key = `c|${color}|${radius}|${blur}`;
+    let e = this._glowCache.get(key);
+    if (e) return e;
+    const margin = Math.ceil(blur * 1.5) + 2;
+    const size = Math.ceil((radius + margin) * 2);
+    const oc = document.createElement('canvas');
+    oc.width = size; oc.height = size;
+    const g = oc.getContext('2d');
+    const c = size / 2;
+    g.shadowColor = color;
+    g.shadowBlur = blur;
+    g.fillStyle = color;
+    g.beginPath();
+    g.arc(c, c, radius, 0, Math.PI * 2);
+    g.fill();
+    e = { img: oc, half: c };
+    this._glowCache.set(key, e);
+    return e;
+  }
+
+  // Returns { img, hw, hh } for rect glows.
+  _rectGlow(color, w, h, blur, cr) {
+    const rw = Math.round(w);
+    const rh = Math.round(h);
+    const key = `r|${color}|${rw}|${rh}|${blur}|${cr || 0}`;
+    let e = this._glowCache.get(key);
+    if (e) return e;
+    const margin = Math.ceil(blur * 1.5) + 2;
+    const cw = rw + margin * 2;
+    const ch = rh + margin * 2;
+    const oc = document.createElement('canvas');
+    oc.width = cw; oc.height = ch;
+    const g = oc.getContext('2d');
+    g.shadowColor = color;
+    g.shadowBlur = blur;
+    g.fillStyle = color;
+    g.beginPath();
+    g.roundRect((cw - rw) / 2, (ch - rh) / 2, rw, rh, cr || 0);
+    g.fill();
+    e = { img: oc, hw: cw / 2, hh: ch / 2 };
+    this._glowCache.set(key, e);
+    return e;
+  }
+
+  // Line glow for portals: thick blurred stroke cached as sprite.
+  _lineGlow(color, halfLen, lineWidth, blur) {
+    const hl = Math.round(halfLen);
+    const lw = Math.round(lineWidth * 10) / 10;
+    const key = `l|${color}|${hl}|${lw}|${blur}`;
+    let e = this._glowCache.get(key);
+    if (e) return e;
+    const margin = Math.ceil(blur * 1.5) + 2;
+    const cw = Math.ceil(hl * 2 + margin * 2);
+    const ch = Math.ceil(lw + margin * 2);
+    const oc = document.createElement('canvas');
+    oc.width = cw; oc.height = ch;
+    const g = oc.getContext('2d');
+    g.shadowColor = color;
+    g.shadowBlur = blur;
+    g.strokeStyle = color;
+    g.lineWidth = lw;
+    g.lineCap = 'round';
+    g.beginPath();
+    g.moveTo(margin, ch / 2);
+    g.lineTo(cw - margin, ch / 2);
+    g.stroke();
+    e = { img: oc, hw: cw / 2, hh: ch / 2 };
+    this._glowCache.set(key, e);
+    return e;
+  }
+
+  // Cached bumper body: ring + radial gradient + specular glare.
+  _bumperBodySprite(r, ringColor, bodyColorOuter, bodyColorMid) {
+    const rr = Math.round(r * 10) / 10;
+    const key = `b|${rr}|${ringColor}|${bodyColorOuter}|${bodyColorMid}`;
+    let e = this._glowCache.get(key);
+    if (e) return e;
+    const pad = 2;
+    const size = Math.ceil((rr + pad) * 2);
+    const oc = document.createElement('canvas');
+    oc.width = size; oc.height = size;
+    const g = oc.getContext('2d');
+    const c = size / 2;
+    // Outer ring
+    g.beginPath();
+    g.arc(c, c, rr, 0, Math.PI * 2);
+    g.fillStyle = ringColor;
+    g.fill();
+    // Inner gradient body
+    const innerR = rr * 0.7;
+    const grad = g.createRadialGradient(c, c, 0, c, c, innerR);
+    grad.addColorStop(0, '#ffffff');
+    grad.addColorStop(0.4, bodyColorMid);
+    grad.addColorStop(1, bodyColorOuter);
+    g.beginPath();
+    g.arc(c, c, innerR, 0, Math.PI * 2);
+    g.fillStyle = grad;
+    g.fill();
+    // Specular glare
+    g.beginPath();
+    g.arc(c, c, innerR * 0.3, 0, Math.PI * 2);
+    g.fillStyle = 'rgba(255, 255, 255, 0.45)';
+    g.fill();
+    e = { img: oc, half: c };
+    this._glowCache.set(key, e);
+    return e;
   }
 
   setBackground(config) {
     this.backgroundConfig = config || null;
+    this._bgCacheDirty = true;
     // Preload background image if type is 'image'
     if (config?.type === 'image' && config.image) {
       if (!this._bgImage || this._bgImageSrc !== config.image) {
         this._bgImageSrc = config.image;
         this._bgImage = null;
         const img = new Image();
-        img.onload = () => { this._bgImage = img; };
+        img.onload = () => { this._bgImage = img; this._bgCacheDirty = true; };
         img.src = config.image;
       }
     }
   }
 
-  clear() {
-    const ctx = this.ctx;
+  _ensureBgCache() {
     const bg = this.backgroundConfig;
+    const key = `${this.width}|${this.height}|${bg?.type}|${bg?.colorTop}|${bg?.colorBottom}|${bg?.image ? 1 : 0}`;
+    if (!this._bgCacheDirty && this._bgCacheKey === key && this._bgCacheCanvas) return;
+
+    if (!this._bgCacheCanvas || this._bgCacheCanvas.width !== this.width || this._bgCacheCanvas.height !== this.height) {
+      this._bgCacheCanvas = document.createElement('canvas');
+      this._bgCacheCanvas.width = this.width;
+      this._bgCacheCanvas.height = this.height;
+    }
+    const ctx = this._bgCacheCanvas.getContext('2d');
 
     if (bg?.type === 'image' && this._bgImage) {
       ctx.drawImage(this._bgImage, 0, 0, this.width, this.height);
@@ -152,7 +282,6 @@ export class Renderer {
       ctx.fillStyle = bg.colorTop || COLORS.backgroundGradientTop;
       ctx.fillRect(0, 0, this.width, this.height);
     } else {
-      // Gradient background (default or configured)
       const gradient = ctx.createLinearGradient(0, 0, 0, this.height);
       gradient.addColorStop(0, bg?.colorTop || COLORS.backgroundGradientTop);
       gradient.addColorStop(1, bg?.colorBottom || COLORS.backgroundGradientBottom);
@@ -160,7 +289,7 @@ export class Renderer {
       ctx.fillRect(0, 0, this.width, this.height);
     }
 
-    // Soft edge darkening at top and bottom (replaces hard stroke)
+    // Soft edge darkening
     const edgeH = 18;
     const topFade = ctx.createLinearGradient(0, 0, 0, edgeH);
     topFade.addColorStop(0, 'rgba(0,0,0,0.45)');
@@ -174,13 +303,21 @@ export class Renderer {
     ctx.fillStyle = botFade;
     ctx.fillRect(0, this.height - edgeH, this.width, edgeH);
 
-    // Side wall indicators only (no top/bottom stroke)
+    // Side wall indicators
     ctx.strokeStyle = COLORS.wall;
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(1, 0); ctx.lineTo(1, this.height);
     ctx.moveTo(this.width - 1, 0); ctx.lineTo(this.width - 1, this.height);
     ctx.stroke();
+
+    this._bgCacheKey = key;
+    this._bgCacheDirty = false;
+  }
+
+  clear() {
+    this._ensureBgCache();
+    this.ctx.drawImage(this._bgCacheCanvas, 0, 0);
   }
 
   drawGrid(cameraY = 0) {
@@ -263,28 +400,9 @@ export class Renderer {
       ctx.save();
       ctx.translate(peg.x, peg.y);
 
-      // Thick outer ring (stroked inward to fill the edge)
-      ctx.beginPath();
-      ctx.arc(0, 0, r, 0, Math.PI * 2);
-      ctx.fillStyle = ringColor;
-      ctx.fill();
-
-      // Inner body fill (smaller circle inside the ring)
-      const innerR = r * 0.7;
-      const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, innerR);
-      grad.addColorStop(0, '#ffffff');
-      grad.addColorStop(0.4, bodyColorMid);
-      grad.addColorStop(1, bodyColorOuter);
-      ctx.beginPath();
-      ctx.arc(0, 0, innerR, 0, Math.PI * 2);
-      ctx.fillStyle = grad;
-      ctx.fill();
-
-      // Specular glare (centered)
-      ctx.beginPath();
-      ctx.arc(0, 0, innerR * 0.3, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
-      ctx.fill();
+      // Cached bumper body sprite (ring + gradient + glare)
+      const bumperSprite = this._bumperBodySprite(r, ringColor, bodyColorOuter, bodyColorMid);
+      ctx.drawImage(bumperSprite.img, -bumperSprite.half, -bumperSprite.half);
 
       // Hit glow for disappearing bumpers (drawn under the pulse)
       if (isHit && (peg.bumperDisappear || peg.bumperOrange)) {
@@ -301,19 +419,17 @@ export class Renderer {
       if (peg._bumperHitScale && peg._bumperHitScale > 1.01) {
         const pulseAlpha = Math.min(1, (peg._bumperHitScale - 1) * 5);
         ctx.globalAlpha = pulseAlpha;
-        ctx.shadowColor = '#ffffff';
-        ctx.shadowBlur = 30;
+        const flashGlow = this._circleGlow('#ffffff', r, 30);
+        ctx.drawImage(flashGlow.img, -flashGlow.half, -flashGlow.half);
         ctx.beginPath();
         ctx.arc(0, 0, r, 0, Math.PI * 2);
         ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
         ctx.fill();
-        ctx.shadowBlur = 0;
         ctx.globalAlpha = 1;
       }
 
       // Selection indicator
       if (isSelected) {
-        ctx.shadowBlur = 0;
         ctx.strokeStyle = COLORS.selection;
         ctx.lineWidth = 2;
         ctx.beginPath();
@@ -337,8 +453,8 @@ export class Renderer {
       ctx.rotate(peg.angle || 0);
 
       if (!isHit) {
-        ctx.shadowColor = glowColor;
-        ctx.shadowBlur = 16;
+        const lg = this._lineGlow(glowColor, halfLen, lineWidth, 16);
+        ctx.drawImage(lg.img, -lg.hw, -lg.hh);
       }
 
       ctx.strokeStyle = lineColor;
@@ -353,7 +469,6 @@ export class Renderer {
       if (peg.portalOneWay) {
         const blockedSign = peg.portalOneWayFlip ? -1 : 1;
         const yOff = blockedSign * (lineWidth * 0.9 + 2);
-        ctx.shadowBlur = 0;
         ctx.strokeStyle = 'rgba(170, 170, 170, 0.9)';
         ctx.lineWidth = Math.max(2, lineWidth * 0.45);
         ctx.beginPath();
@@ -363,7 +478,6 @@ export class Renderer {
       }
 
       // Direction marker along portal tangent.
-      ctx.shadowBlur = 0;
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
       ctx.lineWidth = 2;
       ctx.beginPath();
@@ -392,15 +506,19 @@ export class Renderer {
       const sl = peg.curveSlices;
       ctx.save();
 
-      // Glow
-      if (!isHit) { ctx.shadowColor = colors.glow; ctx.shadowBlur = 12; }
+      // Fake glow: draw expanded ribbon at low alpha with glow color
+      if (!isHit) {
+        ctx.globalAlpha = 0.35;
+        this.drawCurvedBrickPath(ctx, sl, halfH + 6, -halfH - 6);
+        ctx.fillStyle = colors.glow;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
 
       // Main fill
       this.drawCurvedBrickPath(ctx, sl, halfH, -halfH);
       ctx.fillStyle = isHit ? colors.hit : colors.main;
       ctx.fill();
-
-      ctx.shadowBlur = 0;
 
       // Selection ring
       if (isSelected) {
@@ -413,9 +531,7 @@ export class Renderer {
       // Hit glow overlay
       if (isHit && peg.type !== 'obstacle') {
         ctx.globalAlpha = 0.6;
-        ctx.shadowColor = colors.hit;
-        ctx.shadowBlur = 20;
-        this.drawCurvedBrickPath(ctx, sl, halfH, -halfH);
+        this.drawCurvedBrickPath(ctx, sl, halfH + 8, -halfH - 8);
         ctx.fillStyle = colors.hit;
         ctx.fill();
       }
@@ -429,15 +545,15 @@ export class Renderer {
     ctx.translate(peg.x, peg.y);
     ctx.rotate(peg.angle || 0);
 
-    // Glow effect
-    if (!isHit) {
-      ctx.shadowColor = colors.glow;
-      ctx.shadowBlur = 12;
-    }
-
     if (peg.shape === 'brick') {
       const w = peg.width || PHYSICS_CONFIG.pegRadius * 4;
       const h = peg.height || PHYSICS_CONFIG.pegRadius * 1.2;
+
+      // Cached glow sprite
+      if (!isHit) {
+        const rg = this._rectGlow(colors.glow, w, h, 12, 2);
+        ctx.drawImage(rg.img, -rg.hw, -rg.hh);
+      }
 
       ctx.beginPath();
       ctx.roundRect(-w/2, -h/2, w, h, 2);
@@ -445,12 +561,17 @@ export class Renderer {
       ctx.fill();
 
       // Inner highlight
-      ctx.shadowBlur = 0;
       ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
       ctx.beginPath();
       ctx.roundRect(-w/2 + 2, -h/2 + 1, w - 4, h/3, 1);
       ctx.fill();
     } else {
+      // Cached circle glow sprite
+      if (!isHit) {
+        const cg = this._circleGlow(colors.glow, radius, 12);
+        ctx.drawImage(cg.img, -cg.half, -cg.half);
+      }
+
       // Draw circle peg
       ctx.beginPath();
       ctx.arc(0, 0, radius, 0, Math.PI * 2);
@@ -458,7 +579,6 @@ export class Renderer {
       ctx.fill();
 
       // Inner highlight
-      ctx.shadowBlur = 0;
       ctx.beginPath();
       ctx.arc(-radius * 0.25, -radius * 0.25, radius * 0.35, 0, Math.PI * 2);
       ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
@@ -467,7 +587,6 @@ export class Renderer {
 
     // Selection indicator
     if (isSelected) {
-      ctx.shadowBlur = 0;
       ctx.strokeStyle = COLORS.selection;
       ctx.lineWidth = 2;
 
@@ -482,20 +601,22 @@ export class Renderer {
       }
     }
 
-    // Hit state - brighter glow
+    // Hit state - brighter glow (cached sprite)
     if (isHit && peg.type !== 'obstacle') {
       ctx.globalAlpha = 0.6;
-      ctx.shadowColor = colors.hit;
-      ctx.shadowBlur = 20;
 
       if (peg.shape === 'brick') {
         const w = peg.width || PHYSICS_CONFIG.brickWidth;
         const h = peg.height || PHYSICS_CONFIG.brickHeight;
+        const rg = this._rectGlow(colors.hit, w, h, 20, 3);
+        ctx.drawImage(rg.img, -rg.hw, -rg.hh);
         ctx.beginPath();
         ctx.roundRect(-w/2, -h/2, w, h, 3);
         ctx.fillStyle = colors.hit;
         ctx.fill();
       } else {
+        const cg = this._circleGlow(colors.hit, radius, 20);
+        ctx.drawImage(cg.img, -cg.half, -cg.half);
         ctx.beginPath();
         ctx.arc(0, 0, radius, 0, Math.PI * 2);
         ctx.fillStyle = colors.hit;
@@ -578,9 +699,9 @@ export class Renderer {
 
     const ctx = this.ctx;
 
-    // Ball glow
-    ctx.shadowColor = COLORS.ballGlow;
-    ctx.shadowBlur = 15;
+    // Ball glow (cached sprite)
+    const bg = this._circleGlow(COLORS.ballGlow, ball.radius, 15);
+    ctx.drawImage(bg.img, ball.x - bg.half, ball.y - bg.half);
 
     // Ball body
     ctx.beginPath();
@@ -589,7 +710,6 @@ export class Renderer {
     ctx.fill();
 
     // Highlight
-    ctx.shadowBlur = 0;
     ctx.beginPath();
     ctx.arc(ball.x - ball.radius * 0.25, ball.y - ball.radius * 0.25, ball.radius * 0.35, 0, Math.PI * 2);
     ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';

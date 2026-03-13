@@ -34,6 +34,22 @@ const SCORE = {
   }
 };
 
+function getSimHzOverride() {
+  if (typeof window === 'undefined') return null;
+  let raw = null;
+  try {
+    const url = new URL(window.location.href);
+    raw = url.searchParams.get('simHz');
+  } catch (error) {
+    raw = null;
+  }
+  if (raw == null && typeof window.SIM_HZ !== 'undefined') {
+    raw = window.SIM_HZ;
+  }
+  const hz = parseFloat(raw);
+  return Number.isFinite(hz) && hz > 0 ? hz : null;
+}
+
 export class Game {
   constructor(canvas) {
     this.canvas = canvas;
@@ -91,6 +107,19 @@ export class Game {
     // Animation
     this.animationId = null;
     this.lastTime = 0;
+    this.accumulatorMs = 0;
+    this.fixedStepMs = 1000 / 120;
+    this.maxFrameSteps = 8;
+    this.maxFrameDeltaMs = 250;
+    this._rafSamples = [];
+    this._rafSampleSize = 20;
+    this._bestRafMs = this.fixedStepMs;
+    this._simOverrideHz = getSimHzOverride();
+    if (this._simOverrideHz) {
+      this.fixedStepMs = 1000 / this._simOverrideHz;
+      this._bestRafMs = this.fixedStepMs;
+    }
+    this.maxFrameSteps = this._deriveMaxFrameSteps(this.fixedStepMs);
     
     // Callbacks
     this.onGameEnd = null;
@@ -870,6 +899,7 @@ export class Game {
     const dt = Math.min((deltaTime || 16.67) / 1000, 0.1);
     const worldHeight = this.isSurvivalMode() ? this.survivalRuntime.getWorldHeight() : this.canvas.height;
     this.animator.tick(this.pegs, dt, { width: this.canvas.width, height: worldHeight });
+    this.physics.markPegGridDirty();
 
     if (this.isSurvivalMode()) {
       this.survivalRuntime.update(dt);
@@ -882,7 +912,7 @@ export class Game {
 
     if (this.debugDrag.enabled) {
       // Debug mode: manual ball drag, no gravity/integration step.
-      this.physics.updateBucket();
+      this.physics.updateBucket(dt);
       this.physics.updateFlippers(dt);
       const debugBall = this.ensureDebugDragBall();
       if (!this.debugDrag.dragging) {
@@ -902,7 +932,7 @@ export class Game {
         this.balls[0].y = this.launchY;
       }
       // Keep bucket moving even while idle/aiming
-      this.physics.updateBucket();
+      this.physics.updateBucket(dt);
       // Keep flippers at rest position when not playing
       this.physics.updateFlippers(dt);
       // Recalculate trajectory every frame during aiming so it reflects
@@ -917,7 +947,7 @@ export class Game {
     // Update flippers before physics so collision uses current position
     this.physics.updateFlippers(dt);
 
-    const result = this.physics.update();
+    const result = this.physics.update(dt);
     this.balls = this.physics.balls;
     const bombContact = this.consumeBombPerkOnFirstContact(result.contactEvents);
 
@@ -1092,21 +1122,123 @@ export class Game {
       message: this.state === 'won' ? 'YOU WIN!' : (this.state === 'lost' ? 'GAME OVER' : null),
       subMessage: this.state === 'won' || this.state === 'lost' ? 'Tap to continue' : null
     });
+
+    // Draw FPS overlay directly on canvas (visible on mobile without devtools)
+    this._drawPerfOverlay();
+  }
+
+  _drawPerfOverlay() {
+    const ctx = this.renderer?.ctx;
+    if (!ctx) return;
+    const updateMs = this._perfUpdateMs || 0;
+    const renderMs = this._perfRenderMs || 0;
+    const frameMs = this._perfFrameMs || 16.67;
+    const fps = (1000 / frameMs).toFixed(0);
+    const steps = this._perfPhysicsSteps || 0;
+
+    ctx.save();
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(0, this.canvas.height - 42, 180, 42);
+    ctx.fillStyle = '#0f0';
+    ctx.fillText(`FPS: ${fps}  delta: ${frameMs.toFixed(1)}ms`, 4, this.canvas.height - 40);
+    ctx.fillText(`update: ${updateMs.toFixed(2)}ms  render: ${renderMs.toFixed(2)}ms`, 4, this.canvas.height - 28);
+    ctx.fillText(`steps: ${steps}  pegs: ${this.pegs.length}  state: ${this.state}`, 4, this.canvas.height - 16);
+    ctx.restore();
+  }
+
+  _deriveMaxFrameSteps(stepMs = this.fixedStepMs) {
+    const target = Math.round(100 / Math.max(1, stepMs));
+    return Math.max(8, Math.min(12, target));
+  }
+
+  _sampleRaf(deltaMs) {
+    if (this._simOverrideHz) return;
+    if (!Number.isFinite(deltaMs)) return;
+    if (deltaMs < 5 || deltaMs > 50) return;
+
+    this._rafSamples.push(deltaMs);
+    if (this._rafSamples.length > this._rafSampleSize) {
+      this._rafSamples.shift();
+    }
+    // Collect samples for diagnostics only — do NOT mutate fixedStepMs.
+    // Physics always runs at 120 steps/sec; the accumulator handles variable frame rates.
   }
 
   gameLoop(currentTime) {
-    const deltaTime = currentTime - this.lastTime;
-    this.lastTime = currentTime;
+    const now = Number.isFinite(currentTime) ? currentTime : performance.now();
+    const hadLastTime = Number.isFinite(this.lastTime) && this.lastTime !== 0;
+    let deltaMs = this.fixedStepMs;
+    if (hadLastTime) {
+      deltaMs = now - this.lastTime;
+    }
+    this.lastTime = now;
 
-    this.update(deltaTime);
+    if (hadLastTime) {
+      this._sampleRaf(deltaMs);
+    }
+
+    if (!Number.isFinite(deltaMs) || deltaMs < 0) {
+      deltaMs = this.fixedStepMs;
+    }
+    if (this.maxFrameDeltaMs && deltaMs > this.maxFrameDeltaMs) {
+      deltaMs = this.maxFrameDeltaMs;
+    }
+
+    const _t0 = performance.now();
+
+    const useFixedStep = this.state === 'playing';
+    let physicsSteps = 0;
+    if (useFixedStep) {
+      const maxAccum = this.fixedStepMs * this.maxFrameSteps;
+      this.accumulatorMs = Math.min(this.accumulatorMs + deltaMs, maxAccum);
+
+      while (this.accumulatorMs >= this.fixedStepMs && physicsSteps < this.maxFrameSteps) {
+        this.update(this.fixedStepMs);
+        this.accumulatorMs -= this.fixedStepMs;
+        physicsSteps++;
+      }
+    } else {
+      this.accumulatorMs = 0;
+      this.update(deltaMs);
+    }
+
+    const _t1 = performance.now();
+
     this.emitUiStateIfChanged();
     this.render();
+
+    const _t2 = performance.now();
+
+    // --- Performance diagnostics ---
+    this._perfUpdateMs = _t1 - _t0;
+    this._perfRenderMs = _t2 - _t1;
+    this._perfFrameMs = deltaMs;
+    this._perfPhysicsSteps = physicsSteps;
+    if (!this._perfLog) this._perfLog = { frames: 0, nextDump: now + 2000 };
+    this._perfLog.frames++;
+    if (now >= this._perfLog.nextDump) {
+      const elapsed = now - (this._perfLog.nextDump - 2000);
+      const fps = (this._perfLog.frames / elapsed * 1000).toFixed(1);
+      const ctx = this.renderer?.ctx;
+      const ctxAttrs = ctx?.canvas ? `${ctx.canvas.width}x${ctx.canvas.height} css:${ctx.canvas.style.width}x${ctx.canvas.style.height}` : '?';
+      console.log(
+        `[PERF] fps=${fps} rafDelta=${deltaMs.toFixed(1)}ms update=${this._perfUpdateMs.toFixed(2)}ms render=${this._perfRenderMs.toFixed(2)}ms ` +
+        `physSteps=${physicsSteps} pegs=${this.pegs.length} balls=${this.balls.length} state=${this.state} ` +
+        `canvas=${ctxAttrs} fixedStep=${this.fixedStepMs.toFixed(2)}ms`
+      );
+      this._perfLog.frames = 0;
+      this._perfLog.nextDump = now + 2000;
+    }
 
     this.animationId = requestAnimationFrame((t) => this.gameLoop(t));
   }
 
   start() {
     if (this.animationId) return;
+    this.accumulatorMs = 0;
     this.lastTime = performance.now();
     this.animationId = requestAnimationFrame((t) => this.gameLoop(t));
   }
@@ -1116,6 +1248,7 @@ export class Game {
       cancelAnimationFrame(this.animationId);
       this.animationId = null;
     }
+    this.accumulatorMs = 0;
     this.abortController.abort();
   }
 

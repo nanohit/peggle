@@ -23,8 +23,8 @@ const MAX_WIDTH = 400;
 class PeggleApp {
   constructor() {
     this.canvas = document.getElementById('gameCanvas');
-    this.ctx = this.canvas.getContext('2d');
-    
+    this.ctx = this.canvas.getContext('2d', { alpha: false });
+
     this.levelManager = new LevelManager();
     this.game = null;
     this.editor = null;
@@ -37,6 +37,46 @@ class PeggleApp {
     this.setupCanvas();
     this.setupUI();
     this.initMode();
+
+    // One-time diagnostics
+    this._logDiagnostics();
+  }
+
+  _logDiagnostics() {
+    const c = this.canvas;
+    const ctx = this.ctx;
+    const dpr = window.devicePixelRatio || 1;
+    const rect = c.getBoundingClientRect();
+    const ctxSettings = ctx.getContextAttributes ? ctx.getContextAttributes() : 'N/A';
+    console.log('=== PEGGLE DIAGNOSTICS ===');
+    console.log(`Canvas buffer: ${c.width}x${c.height}`);
+    console.log(`Canvas CSS: ${rect.width.toFixed(0)}x${rect.height.toFixed(0)}`);
+    console.log(`devicePixelRatio: ${dpr}`);
+    console.log(`Context attributes:`, ctxSettings);
+    console.log(`User agent: ${navigator.userAgent}`);
+    console.log(`Screen: ${screen.width}x${screen.height} (${screen.colorDepth}bit)`);
+    // Check if canvas is offscreen/hidden
+    console.log(`Canvas visible: offsetWidth=${c.offsetWidth} offsetHeight=${c.offsetHeight}`);
+    // Check for potential CSS performance killers around canvas
+    const canvasStyles = getComputedStyle(c);
+    console.log(`Canvas filter: ${canvasStyles.filter}`);
+    console.log(`Canvas transform: ${canvasStyles.transform}`);
+    console.log(`Canvas opacity: ${canvasStyles.opacity}`);
+    console.log(`Canvas will-change: ${canvasStyles.willChange}`);
+    // Check parent chain for backdrop-filter
+    let el = c.parentElement;
+    let depth = 0;
+    while (el && depth < 10) {
+      const s = getComputedStyle(el);
+      const bf = s.backdropFilter || s.webkitBackdropFilter;
+      const f = s.filter;
+      if ((bf && bf !== 'none') || (f && f !== 'none')) {
+        console.log(`  Parent[${depth}] ${el.tagName}.${el.className.split(' ')[0]}: backdrop-filter=${bf} filter=${f}`);
+      }
+      el = el.parentElement;
+      depth++;
+    }
+    console.log('=========================');
   }
 
   setupCanvas() {

@@ -2295,8 +2295,41 @@ export class Editor {
   }
 
   start() {
-    const loop = () => {
+    this._edPerfLog = { frames: 0, nextDump: performance.now() + 2000, lastTime: 0 };
+    const loop = (ts) => {
+      const now = ts || performance.now();
+      const delta = this._edPerfLog.lastTime ? (now - this._edPerfLog.lastTime) : 16.67;
+      this._edPerfLog.lastTime = now;
+
+      const t0 = performance.now();
       this.render();
+      const t1 = performance.now();
+
+      // FPS overlay on editor canvas
+      const ctx = this.renderer?.ctx;
+      if (ctx) {
+        const fps = (1000 / delta).toFixed(0);
+        const rms = (t1 - t0).toFixed(2);
+        ctx.save();
+        ctx.font = '10px monospace';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.fillRect(0, this.canvas.height - 30, 180, 30);
+        ctx.fillStyle = '#0f0';
+        ctx.fillText(`ED FPS: ${fps}  delta: ${delta.toFixed(1)}ms`, 4, this.canvas.height - 28);
+        ctx.fillText(`render: ${rms}ms  pegs: ${this.levelManager.getCurrentLevel()?.pegs?.length || 0}`, 4, this.canvas.height - 16);
+        ctx.restore();
+      }
+
+      this._edPerfLog.frames++;
+      if (now >= this._edPerfLog.nextDump) {
+        const elapsed = now - (this._edPerfLog.nextDump - 2000);
+        console.log(`[ED-PERF] fps=${(this._edPerfLog.frames / elapsed * 1000).toFixed(1)} renderMs=${(t1-t0).toFixed(2)}`);
+        this._edPerfLog.frames = 0;
+        this._edPerfLog.nextDump = now + 2000;
+      }
+
       this.animationId = requestAnimationFrame(loop);
     };
     loop();

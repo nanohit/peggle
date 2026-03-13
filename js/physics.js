@@ -250,6 +250,13 @@ export class PhysicsEngine {
       // Sine-based oscillation: _phase tracks position in cycle [0, 2*PI)
       _phase: Math.PI / 2 // start centered (sin(PI/2) = 1 → middle)
     };
+    this.portalPegs = [];
+    this._pegGrid = null;
+    this._pegGridCellSize = 0;
+    this._pegGridStamp = null;
+    this._pegGridStampId = 1;
+    this._pegGridCandidates = [];
+    this._maxPegCollisionRadius = PHYSICS_CONFIG.pegRadius;
   }
 
   setBall(ball) {
@@ -268,6 +275,14 @@ export class PhysicsEngine {
   setPegs(pegs) {
     this.pegs = pegs;
     this.hitPegs.clear();
+    this.portalPegs = Array.isArray(this.pegs)
+      ? this.pegs.filter(p => this.isPortalPeg(p))
+      : [];
+    this._pegGridDirty = true;
+  }
+
+  markPegGridDirty() {
+    this._pegGridDirty = true;
   }
 
   setFlippers(flippers) {
@@ -297,6 +312,135 @@ export class PhysicsEngine {
   getPortalHalfLength(portal) {
     if (!portal) return PHYSICS_CONFIG.pegRadius;
     return PHYSICS_CONFIG.pegRadius * (portal.portalScale || 1);
+  }
+
+  _getPegGridCellSize() {
+    const pegSize = PHYSICS_CONFIG.pegRadius * 4;
+    const brickW = PHYSICS_CONFIG.brickWidth || 0;
+    const brickH = PHYSICS_CONFIG.brickHeight || 0;
+    return Math.max(24, pegSize, brickW, brickH);
+  }
+
+  _getPegBounds(peg) {
+    if (!peg) return null;
+    if (peg.shape === 'brick') {
+      const w = Number.isFinite(peg.width) ? peg.width : PHYSICS_CONFIG.brickWidth;
+      const h = Number.isFinite(peg.height) ? peg.height : PHYSICS_CONFIG.brickHeight;
+      const hw = w / 2;
+      const hh = h / 2;
+      const angle = peg.angle || 0;
+      const c = Math.cos(angle);
+      const s = Math.sin(angle);
+      const extX = Math.abs(c) * hw + Math.abs(s) * hh;
+      const extY = Math.abs(s) * hw + Math.abs(c) * hh;
+      const radius = Math.hypot(extX, extY);
+      return {
+        minX: peg.x - extX,
+        maxX: peg.x + extX,
+        minY: peg.y - extY,
+        maxY: peg.y + extY,
+        radius
+      };
+    }
+
+    const r = this.getPegCollisionRadius(peg);
+    return {
+      minX: peg.x - r,
+      maxX: peg.x + r,
+      minY: peg.y - r,
+      maxY: peg.y + r,
+      radius: r
+    };
+  }
+
+  _buildPegGrid() {
+    if (!this._pegGridDirty && this._pegGrid) return;
+    this._pegGridDirty = false;
+
+    const pegs = this.pegs;
+    if (!Array.isArray(pegs) || pegs.length === 0) {
+      this._pegGrid = null;
+      this._maxPegCollisionRadius = PHYSICS_CONFIG.pegRadius;
+      return;
+    }
+
+    const cellSize = this._getPegGridCellSize();
+    this._pegGridCellSize = cellSize;
+    const grid = new Map();
+    let maxRadius = PHYSICS_CONFIG.pegRadius;
+
+    for (let i = 0; i < pegs.length; i++) {
+      const peg = pegs[i];
+      if (this.isPortalPeg(peg)) continue;
+      const bounds = this._getPegBounds(peg);
+      if (!bounds) continue;
+      if (Number.isFinite(bounds.radius)) {
+        maxRadius = Math.max(maxRadius, bounds.radius);
+      }
+      const minCellX = Math.floor(bounds.minX / cellSize);
+      const maxCellX = Math.floor(bounds.maxX / cellSize);
+      const minCellY = Math.floor(bounds.minY / cellSize);
+      const maxCellY = Math.floor(bounds.maxY / cellSize);
+
+      for (let cx = minCellX; cx <= maxCellX; cx++) {
+        for (let cy = minCellY; cy <= maxCellY; cy++) {
+          const key = `${cx},${cy}`;
+          let bucket = grid.get(key);
+          if (!bucket) {
+            bucket = [];
+            grid.set(key, bucket);
+          }
+          bucket.push(i);
+        }
+      }
+    }
+
+    this._pegGrid = grid;
+    this._maxPegCollisionRadius = maxRadius;
+    if (!this._pegGridStamp || this._pegGridStamp.length < pegs.length) {
+      this._pegGridStamp = new Int32Array(pegs.length);
+    }
+    if (!this._pegGridCandidates) this._pegGridCandidates = [];
+  }
+
+  _getPegCandidateIndices(ball) {
+    if (!this._pegGrid || !ball || !Number.isFinite(ball.x) || !Number.isFinite(ball.y)) return null;
+    const cellSize = this._pegGridCellSize;
+    if (!Number.isFinite(cellSize) || cellSize <= 0) return null;
+
+    const searchRadius = (ball.radius || getBallRadius()) + this._maxPegCollisionRadius;
+    const minCellX = Math.floor((ball.x - searchRadius) / cellSize);
+    const maxCellX = Math.floor((ball.x + searchRadius) / cellSize);
+    const minCellY = Math.floor((ball.y - searchRadius) / cellSize);
+    const maxCellY = Math.floor((ball.y + searchRadius) / cellSize);
+
+    let stampId = (this._pegGridStampId || 0) + 1;
+    if (stampId > 1e9) {
+      this._pegGridStamp.fill(0);
+      stampId = 1;
+    }
+    this._pegGridStampId = stampId;
+
+    const out = this._pegGridCandidates;
+    out.length = 0;
+
+    for (let cx = minCellX; cx <= maxCellX; cx++) {
+      for (let cy = minCellY; cy <= maxCellY; cy++) {
+        const bucket = this._pegGrid.get(`${cx},${cy}`);
+        if (!bucket) continue;
+        for (let bi = 0; bi < bucket.length; bi++) {
+          const idx = bucket[bi];
+          if (this._pegGridStamp[idx] === stampId) continue;
+          this._pegGridStamp[idx] = stampId;
+          out.push(idx);
+        }
+      }
+    }
+
+    if (out.length > 1) {
+      out.sort((a, b) => a - b);
+    }
+    return out;
   }
 
   findPortalExit(entryPortal) {
@@ -441,12 +585,12 @@ export class PhysicsEngine {
   tryPortalTeleport(ballLike, prevX = ballLike?.x, prevY = ballLike?.y, options = null) {
     if (!ballLike) return false;
     if (!Number.isFinite(prevX) || !Number.isFinite(prevY)) return false;
-    if (!this.pegs || this.pegs.length === 0) return false;
+    const portals = (this.portalPegs && this.portalPegs.length > 0) ? this.portalPegs : this.pegs;
+    if (!portals || portals.length === 0) return false;
     const previewOnly = !!(options && options.previewOnly);
     const canTeleport = (ballLike.portalCooldown || 0) <= 0;
 
-    for (const entry of this.pegs) {
-      if (!this.isPortalPeg(entry)) continue;
+    for (const entry of portals) {
       const crossing = this.getPortalCrossing(ballLike, prevX, prevY, entry);
       if (!crossing) continue;
 
@@ -523,7 +667,7 @@ export class PhysicsEngine {
     this.bucket.y = height - 25;
   }
 
-  update() {
+  update(dtSeconds = 1 / 60) {
     if (!this.balls || this.balls.length === 0) {
       return { hitEvents: [], contactEvents: [], ballsRemaining: 0, bucketCatchCount: 0 };
     }
@@ -531,6 +675,7 @@ export class PhysicsEngine {
     const hitEvents = [];
     const contactEvents = [];
     const contactKeys = new Set();
+    this._buildPegGrid();
 
     // Maximum pixels a ball may travel per sub-step.
     // Must be smaller than the thinnest collidable object (~8 px flipper bar).
@@ -593,40 +738,83 @@ export class PhysicsEngine {
         }
 
         // Peg collisions - portals are line triggers and do not collide.
-        for (const peg of this.pegs) {
-          if (this.isPortalPeg(peg)) continue;
-          let collision;
+        const candidates = this._getPegCandidateIndices(ball);
+        const pegSource = candidates ? null : this.pegs;
+        if (candidates) {
+          for (let ci = 0; ci < candidates.length; ci++) {
+            const peg = this.pegs[candidates[ci]];
+            if (!peg) continue;
+            let collision;
 
-          if (peg.shape === 'brick') {
-            collision = circleRectCollision(ball, peg);
-          } else {
-            collision = Utils.circleCollision(ball, {
-              x: peg.x,
-              y: peg.y,
-              radius: this.getPegCollisionRadius(peg)
-            });
+            if (peg.shape === 'brick') {
+              collision = circleRectCollision(ball, peg);
+            } else {
+              collision = Utils.circleCollision(ball, {
+                x: peg.x,
+                y: peg.y,
+                radius: this.getPegCollisionRadius(peg)
+              });
+            }
+
+            if (collision) {
+              this.resolveCollision(ball, collision, peg);
+              const contactKey = `${ball.id}:${peg.id}`;
+              if (!contactKeys.has(contactKey)) {
+                contactKeys.add(contactKey);
+                contactEvents.push({ peg, ball });
+              }
+
+              const isBumper = peg.type === 'bumper';
+
+              if (isBumper) {
+                hitEvents.push({ peg, ball, isBumper: true, bumperAnimOnly: true });
+              } else if (peg.type === 'obstacle') {
+                hitEvents.push({ peg, ball, obstacleHit: true });
+              }
+
+              const isPermanentBumper = isBumper && !peg.bumperDisappear && !peg.bumperOrange;
+              if (peg.type !== 'obstacle' && !isPermanentBumper && !this.hitPegs.has(peg.id)) {
+                this.hitPegs.add(peg.id);
+                hitEvents.push({ peg, ball });
+              }
+            }
           }
+        } else if (pegSource && pegSource.length > 0) {
+          for (const peg of pegSource) {
+            if (this.isPortalPeg(peg)) continue;
+            let collision;
 
-          if (collision) {
-            this.resolveCollision(ball, collision, peg);
-            const contactKey = `${ball.id}:${peg.id}`;
-            if (!contactKeys.has(contactKey)) {
-              contactKeys.add(contactKey);
-              contactEvents.push({ peg, ball });
+            if (peg.shape === 'brick') {
+              collision = circleRectCollision(ball, peg);
+            } else {
+              collision = Utils.circleCollision(ball, {
+                x: peg.x,
+                y: peg.y,
+                radius: this.getPegCollisionRadius(peg)
+              });
             }
 
-            const isBumper = peg.type === 'bumper';
+            if (collision) {
+              this.resolveCollision(ball, collision, peg);
+              const contactKey = `${ball.id}:${peg.id}`;
+              if (!contactKeys.has(contactKey)) {
+                contactKeys.add(contactKey);
+                contactEvents.push({ peg, ball });
+              }
 
-            if (isBumper) {
-              hitEvents.push({ peg, ball, isBumper: true, bumperAnimOnly: true });
-            } else if (peg.type === 'obstacle') {
-              hitEvents.push({ peg, ball, obstacleHit: true });
-            }
+              const isBumper = peg.type === 'bumper';
 
-            const isPermanentBumper = isBumper && !peg.bumperDisappear && !peg.bumperOrange;
-            if (peg.type !== 'obstacle' && !isPermanentBumper && !this.hitPegs.has(peg.id)) {
-              this.hitPegs.add(peg.id);
-              hitEvents.push({ peg, ball });
+              if (isBumper) {
+                hitEvents.push({ peg, ball, isBumper: true, bumperAnimOnly: true });
+              } else if (peg.type === 'obstacle') {
+                hitEvents.push({ peg, ball, obstacleHit: true });
+              }
+
+              const isPermanentBumper = isBumper && !peg.bumperDisappear && !peg.bumperOrange;
+              if (peg.type !== 'obstacle' && !isPermanentBumper && !this.hitPegs.has(peg.id)) {
+                this.hitPegs.add(peg.id);
+                hitEvents.push({ peg, ball });
+              }
             }
           }
         }
@@ -637,7 +825,7 @@ export class PhysicsEngine {
     this.handleBallCollisions();
 
     // Update bucket position
-    this.updateBucket();
+    this.updateBucket(dtSeconds);
 
     // Check for bucket catches and ball losses
     let bucketCatchCount = 0;
@@ -774,7 +962,7 @@ export class PhysicsEngine {
     }
   }
 
-  updateBucket() {
+  updateBucket(dtSeconds = 1 / 60) {
     if (!this.bucketEnabled) return;
     const timeScale = PHYSICS_CONFIG.timeScale;
     const b = this.bucket;
@@ -783,8 +971,11 @@ export class PhysicsEngine {
     // Full cycle = left edge → right edge → left edge
     // Range of motion: halfW to (this.width - halfW)
     const range = this.width - b.width;
+    const baseStep = 1 / 60;
+    const dt = Number.isFinite(dtSeconds) ? dtSeconds : baseStep;
+    const stepScale = dt / baseStep;
     // Angular speed: speed * timeScale mapped so the visual speed feels similar
-    b._phase += (b.speed * timeScale * Math.PI) / (range || 1);
+    b._phase += ((b.speed * timeScale * Math.PI) / (range || 1)) * stepScale;
     // x oscillates with sine easing (smooth at edges)
     b.x = halfW + range * (0.5 + 0.5 * Math.sin(b._phase));
   }
@@ -1008,37 +1199,76 @@ export class PhysicsEngine {
         break;
       }
 
-      // Check peg collisions
-      for (const peg of this.pegs) {
-        if (this.isPortalPeg(peg)) continue;
-        let collision;
+      // Check peg collisions (using spatial grid when available)
+      this._buildPegGrid();
+      const candidates = this._getPegCandidateIndices(simBall);
+      let hitPeg = false;
+      if (candidates) {
+        for (let ci = 0; ci < candidates.length; ci++) {
+          const peg = this.pegs[candidates[ci]];
+          if (!peg) continue;
+          let collision;
 
-        if (peg.shape === 'brick') {
-          collision = circleRectCollision(simBall, peg);
-        } else {
-          collision = Utils.circleCollision(simBall, {
-            x: peg.x,
-            y: peg.y,
-            radius: this.getPegCollisionRadius(peg)
-          });
-        }
-
-        if (collision) {
-          // Resolve collision for continued simulation
-          simBall.x += collision.normal.x * (collision.depth + 0.5);
-          simBall.y += collision.normal.y * (collision.depth + 0.5);
-
-          const bounce = PHYSICS_CONFIG.bounce;
-          simBall.vx -= (1 + bounce) * collision.relativeVelocityNormal * collision.normal.x;
-          simBall.vy -= (1 + bounce) * collision.relativeVelocityNormal * collision.normal.y;
-
-          simulatedHits.push({ x: simBall.x, y: simBall.y, pegId: peg.id });
-
-          if (stopAtFirstHit) {
-            points.push({ x: simBall.x, y: simBall.y });
-            return { points, hits: simulatedHits };
+          if (peg.shape === 'brick') {
+            collision = circleRectCollision(simBall, peg);
+          } else {
+            collision = Utils.circleCollision(simBall, {
+              x: peg.x,
+              y: peg.y,
+              radius: this.getPegCollisionRadius(peg)
+            });
           }
-          break;
+
+          if (collision) {
+            simBall.x += collision.normal.x * (collision.depth + 0.5);
+            simBall.y += collision.normal.y * (collision.depth + 0.5);
+
+            const bounce = PHYSICS_CONFIG.bounce;
+            simBall.vx -= (1 + bounce) * collision.relativeVelocityNormal * collision.normal.x;
+            simBall.vy -= (1 + bounce) * collision.relativeVelocityNormal * collision.normal.y;
+
+            simulatedHits.push({ x: simBall.x, y: simBall.y, pegId: peg.id });
+
+            if (stopAtFirstHit) {
+              points.push({ x: simBall.x, y: simBall.y });
+              return { points, hits: simulatedHits };
+            }
+            hitPeg = true;
+            break;
+          }
+        }
+      } else {
+        for (const peg of this.pegs) {
+          if (this.isPortalPeg(peg)) continue;
+          let collision;
+
+          if (peg.shape === 'brick') {
+            collision = circleRectCollision(simBall, peg);
+          } else {
+            collision = Utils.circleCollision(simBall, {
+              x: peg.x,
+              y: peg.y,
+              radius: this.getPegCollisionRadius(peg)
+            });
+          }
+
+          if (collision) {
+            simBall.x += collision.normal.x * (collision.depth + 0.5);
+            simBall.y += collision.normal.y * (collision.depth + 0.5);
+
+            const bounce = PHYSICS_CONFIG.bounce;
+            simBall.vx -= (1 + bounce) * collision.relativeVelocityNormal * collision.normal.x;
+            simBall.vy -= (1 + bounce) * collision.relativeVelocityNormal * collision.normal.y;
+
+            simulatedHits.push({ x: simBall.x, y: simBall.y, pegId: peg.id });
+
+            if (stopAtFirstHit) {
+              points.push({ x: simBall.x, y: simBall.y });
+              return { points, hits: simulatedHits };
+            }
+            hitPeg = true;
+            break;
+          }
         }
       }
 
