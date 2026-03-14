@@ -186,6 +186,11 @@ class PeggleApp {
       this.togglePlayMode();
     });
 
+    // Bake button — serialize level to localStorage, open player.html
+    document.getElementById('bakeBtn').addEventListener('click', () => {
+      this.bakeLevel();
+    });
+
     // Peg type buttons
     document.querySelectorAll('.peg-btn').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -1727,6 +1732,39 @@ class PeggleApp {
     } else {
       this.startEditor();
     }
+  }
+
+  async bakeLevel() {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level || level.pegs.length === 0) {
+      alert('Add some pegs first!');
+      return;
+    }
+
+    // Deep-clone so we don't mutate the editor's copy
+    const snapshot = JSON.parse(JSON.stringify(level));
+
+    // Also store in localStorage as fallback
+    const safeName = (snapshot.name || 'untitled').replace(/[^a-zA-Z0-9_-]/g, '_');
+    localStorage.setItem('baked:' + safeName, JSON.stringify(snapshot));
+
+    // Compress JSON → deflate → base64url → URL hash
+    const json = JSON.stringify(snapshot);
+    const encoded = new TextEncoder().encode(json);
+    const cs = new CompressionStream('deflate');
+    const writer = cs.writable.getWriter();
+    writer.write(encoded);
+    writer.close();
+    const compressed = new Uint8Array(await new Response(cs.readable).arrayBuffer());
+
+    // Safe base64 encoding (no spread — avoids stack overflow on large arrays)
+    let binary = '';
+    for (let i = 0; i < compressed.length; i++) binary += String.fromCharCode(compressed[i]);
+    const b64 = btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+    console.log(`[bake] JSON ${json.length} bytes → compressed ${compressed.length} → base64url ${b64.length}`);
+    const url = 'player.html#' + b64;
+    window.open(url, '_blank');
   }
 
   toggleMenu() {
