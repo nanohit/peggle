@@ -15,6 +15,8 @@ import {
 } from './multiball-settings.js';
 import { VisualLayout } from './visual-layout.js';
 import { normalizeVisuals } from './visual-config.js';
+import { CampaignManager } from './campaign-manager.js';
+import { api } from './api.js';
 
 // Fixed aspect ratio: 3:4.5 (width:height)
 const ASPECT_RATIO = 3 / 4.5;
@@ -26,20 +28,71 @@ class PeggleApp {
     this.ctx = this.canvas.getContext('2d', { alpha: false });
 
     this.levelManager = new LevelManager();
+    this.campaignManager = new CampaignManager();
     this.game = null;
     this.editor = null;
     this.gambleSystem = null;
     this.visualLayout = new VisualLayout();
+    this._editingCampaignId = null;
 
     this.mode = 'editor'; // 'editor' or 'play'
 
     this.visualLayout.mount();
+    this._injectAdminPanel();
     this.setupCanvas();
     this.setupUI();
     this.initMode();
 
     // One-time diagnostics
     this._logDiagnostics();
+  }
+
+  _injectAdminPanel() {
+    const viewport = this.visualLayout.viewport;
+    if (!viewport) return;
+
+    const panel = document.createElement('div');
+    panel.className = 'admin-panel';
+    panel.id = 'adminPanel';
+    panel.innerHTML = `
+      <div class="admin-panel-title">Editor</div>
+      <div class="admin-panel-body">
+        <div class="theme-section">
+          <div class="theme-label">Level Settings</div>
+          <input type="text" id="levelName" class="admin-input" placeholder="Level Name">
+          <select id="levelDifficulty" class="admin-select">
+            <option value="1">Easy</option>
+            <option value="2">Medium</option>
+            <option value="3">Hard</option>
+            <option value="4">Expert</option>
+            <option value="5">Extreme</option>
+          </select>
+          <label class="admin-toggle"><input type="checkbox" id="yoyoThreadToggle"> Yo-yo Thread</label>
+          <label class="admin-toggle"><input type="checkbox" id="yoyoDebugDragToggle"> Yo-yo Debug Drag</label>
+          <button id="addToTrainingBtn" class="admin-btn">Add to Training</button>
+          <button id="themeDefaultBtn" class="admin-btn">Default Theme</button>
+        </div>
+        <div class="theme-section">
+          <div class="theme-label">Levels</div>
+          <button id="newLevelBtn" class="admin-btn">+ New Level</button>
+          <button id="levelListBtn" class="admin-btn">Level List</button>
+          <button id="campaignBtn" class="admin-btn">Campaigns</button>
+        </div>
+        <div class="theme-section">
+          <div class="theme-label">Settings</div>
+          <button id="physicsBtn" class="admin-btn">Physics</button>
+          <button id="clearBtn" class="admin-btn admin-btn--danger">Clear All Pegs</button>
+        </div>
+        <div class="theme-section">
+          <div class="theme-label">Import / Export</div>
+          <button id="exportBtn" class="admin-btn">Export Level</button>
+          <button id="importBtn" class="admin-btn">Import Level</button>
+          <button id="exportTrainingBtn" class="admin-btn">Export Training</button>
+        </div>
+      </div>
+    `;
+    viewport.appendChild(panel);
+    this.adminPanel = panel;
   }
 
   _logDiagnostics() {
@@ -110,29 +163,42 @@ class PeggleApp {
 
     const vpRect = viewport.getBoundingClientRect();
 
-    // Account for theme panel width
+    // Account for theme panel + admin panel widths
     const panel = document.getElementById('themePanel');
     const panelW = panel && !panel.classList.contains('hidden')
       ? panel.getBoundingClientRect().width + 6 : 0;
+    const adminP = document.getElementById('adminPanel');
+    const adminW = adminP && !adminP.classList.contains('hidden')
+      ? adminP.getBoundingClientRect().width + 6 : 0;
 
-    const availW = vpRect.width - panelW;
+    const availW = vpRect.width - panelW - adminW;
     const availH = vpRect.height;
 
-    // Fit 9:17 frame in available space
+    // Fit 9:17 frame in available space (mobile: keep full width, compress height if needed)
     let fw = availW;
     let fh = fw * (17 / 9);
+    const isNarrow = availW <= 520;
+    let compact = false;
     if (fh > availH) {
-      fh = availH;
-      fw = fh * (9 / 17);
+      if (isNarrow) {
+        fh = availH;
+        compact = true;
+      } else {
+        fh = availH;
+        fw = fh * (9 / 17);
+      }
     }
     fw = Math.floor(fw);
     fh = Math.floor(fh);
+    const squeeze = compact ? Math.min(1, fh / (fw * (17 / 9))) : 1;
 
     frame.style.width = fw + 'px';
     frame.style.height = fh + 'px';
     // Scale factor for gamble UI — keeps DOM elements proportional to frame
     // regardless of browser zoom. Reference: 444px (canvas 400 at 90% of frame).
     frame.style.setProperty('--frame-scale', Math.min(1, fw / 444));
+    frame.style.setProperty('--frame-squeeze', squeeze.toFixed(4));
+    frame.classList.toggle('visual-frame--compact', compact);
 
     // Display size: 90% of frame width, maintaining game aspect ratio
     let displayW = Math.round(fw * 0.9);
@@ -140,6 +206,31 @@ class PeggleApp {
     if (displayH > fh) {
       displayH = fh;
       displayW = Math.round(displayH * ASPECT_RATIO);
+    }
+
+    // In compact play mode: nudge canvas up so bucket clears the gamble dock
+    if (compact && this.mode === 'play') {
+      const frameScale = Math.min(1, fw / 444);
+      // Match CSS --hud-squeeze: clamp(0.82, squeeze, 1)
+      const hudSqueeze = Math.max(0.82, squeeze);
+      const dockH = Math.ceil(96 * frameScale * hudSqueeze);
+      const dockTop = fh - dockH;
+      // Bucket sits at ~Y=585 in 600-unit world
+      const centeredTop = (fh - displayH) / 2;
+      const bucketY = centeredTop + displayH * (585 / worldH);
+      let nudge = Math.max(0, Math.ceil(bucketY - dockTop));
+      // Don't nudge so far that canvas top goes below 2px
+      const maxNudge = Math.max(0, Math.floor(centeredTop - 2));
+      if (nudge > maxNudge) {
+        // Shrink canvas to fit
+        const availH = dockTop - 2;
+        displayH = Math.floor(availH / (585 / worldH));
+        displayW = Math.round(displayH * ASPECT_RATIO);
+        nudge = 0;
+      }
+      frame.style.setProperty('--compact-canvas-nudge', nudge + 'px');
+    } else {
+      frame.style.removeProperty('--compact-canvas-nudge');
     }
 
     // Pixel buffer is always the reference game-world size.
@@ -176,11 +267,6 @@ class PeggleApp {
   }
 
   setupUI() {
-    // Menu button
-    document.getElementById('menuBtn').addEventListener('click', () => {
-      this.toggleMenu();
-    });
-
     // Play button
     document.getElementById('playBtn').addEventListener('click', () => {
       this.togglePlayMode();
@@ -382,23 +468,24 @@ class PeggleApp {
     // Menu actions
     document.getElementById('newLevelBtn').addEventListener('click', () => {
       this.newLevel();
-      this.closeMenu();
     });
 
     document.getElementById('levelListBtn').addEventListener('click', () => {
       this.showLevelList();
     });
 
+    document.getElementById('campaignBtn').addEventListener('click', () => {
+      this.showCampaignList();
+    });
+
     document.getElementById('clearBtn').addEventListener('click', () => {
       if (confirm('Clear all pegs?')) {
         if (this.editor) this.editor.clearAllPegs();
-        this.closeMenu();
       }
     });
 
     document.getElementById('exportBtn').addEventListener('click', () => {
       this.exportLevel();
-      this.closeMenu();
     });
 
     document.getElementById('importBtn').addEventListener('click', () => {
@@ -407,7 +494,6 @@ class PeggleApp {
 
     document.getElementById('exportTrainingBtn').addEventListener('click', () => {
       this.exportTrainingData();
-      this.closeMenu();
     });
 
     // Physics settings button
@@ -465,11 +551,9 @@ class PeggleApp {
       }
     });
 
-    // Close menu when clicking outside
-    document.getElementById('menuOverlay').addEventListener('click', (e) => {
-      if (e.target.id === 'menuOverlay') {
-        this.closeMenu();
-      }
+    // Default Theme button — reset visuals to defaults (not pegs)
+    document.getElementById('themeDefaultBtn').addEventListener('click', () => {
+      this._resetThemeToDefault();
     });
 
     // Close level list
@@ -584,7 +668,6 @@ class PeggleApp {
     document.getElementById('powerValue').textContent = PHYSICS_CONFIG.launchPower.toFixed(1);
     
     document.getElementById('physicsOverlay').classList.add('visible');
-    this.closeMenu();
   }
 
   closePhysicsSettings() {
@@ -1585,6 +1668,7 @@ class PeggleApp {
     this.visualLayout.setSpinMode(false);
     this.visualLayout.setEditMode(false);
     this.visualLayout.setPanelVisible(true);
+    if (this.adminPanel) this.adminPanel.classList.remove('hidden');
     this.resizeCanvas(); // re-fit frame with panel visible
   }
 
@@ -1666,6 +1750,7 @@ class PeggleApp {
     this._applyLevelVisuals();
     this.visualLayout.setEditMode(false);
     this.visualLayout.setPanelVisible(false);
+    if (this.adminPanel) this.adminPanel.classList.add('hidden');
     this.resizeCanvas(); // re-fit frame without panel
     this.mountGambleSystem();
   }
@@ -1744,9 +1829,15 @@ class PeggleApp {
     // Deep-clone so we don't mutate the editor's copy
     const snapshot = JSON.parse(JSON.stringify(level));
 
-    // Also store in localStorage as fallback
+    // Store in localStorage as local cache
     const safeName = (snapshot.name || 'untitled').replace(/[^a-zA-Z0-9_-]/g, '_');
     localStorage.setItem('baked:' + safeName, JSON.stringify(snapshot));
+
+    // Persist to remote KV
+    api.saveLevel(safeName, snapshot).then(ok => {
+      if (ok) console.log('[bake] Synced to remote:', safeName);
+      else console.warn('[bake] Remote sync failed for:', safeName);
+    });
 
     // Compress JSON → deflate → base64url → URL hash
     const json = JSON.stringify(snapshot);
@@ -1767,17 +1858,13 @@ class PeggleApp {
     window.open(url, '_blank');
   }
 
-  toggleMenu() {
-    const overlay = document.getElementById('menuOverlay');
-    overlay.classList.toggle('visible');
-    
-    if (overlay.classList.contains('visible')) {
-      this.updateLevelSettings();
-    }
-  }
-
-  closeMenu() {
-    document.getElementById('menuOverlay').classList.remove('visible');
+  _resetThemeToDefault() {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level) return;
+    if (!confirm('Reset theme/visuals to default? Pegs and gameplay are unchanged.')) return;
+    level.visuals = normalizeVisuals(null, true);
+    this.levelManager.save();
+    this._applyLevelVisuals();
   }
 
   updateLevelTitle() {
@@ -1876,7 +1963,6 @@ class PeggleApp {
           this.startEditor();
         }
         this.closeLevelList();
-        this.closeMenu();
       });
 
       item.querySelector('.duplicate-btn').addEventListener('click', (e) => {
@@ -1945,7 +2031,6 @@ class PeggleApp {
           if (this.mode === 'editor') {
             this.startEditor();
           }
-          this.closeMenu();
         } else {
           alert('Failed to import level');
         }
@@ -1960,13 +2045,247 @@ class PeggleApp {
     const data = this.levelManager.exportTrainingData();
     const blob = new Blob([data], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
-    
+
     const a = document.createElement('a');
     a.href = url;
     a.download = `peggle_training_data_${new Date().toISOString().split('T')[0]}.json`;
     a.click();
-    
+
     URL.revokeObjectURL(url);
+  }
+
+  // ─── Campaign Management ─────────────────────────────────
+
+  showCampaignList() {
+    const campaigns = this.campaignManager.getAll();
+    const list = document.getElementById('campaignItems');
+    list.innerHTML = '';
+
+    if (campaigns.length === 0) {
+      list.innerHTML = '<div class="campaign-empty-hint">No campaigns yet. Create one to organize baked levels into a playable chain.</div>';
+    }
+
+    for (const campaign of campaigns) {
+      const item = document.createElement('div');
+      item.className = 'level-item';
+
+      item.innerHTML = `
+        <div class="level-item-info">
+          <span class="level-item-name">${campaign.name}</span>
+          <span class="level-item-meta">${campaign.levelNames.length} level${campaign.levelNames.length !== 1 ? 's' : ''}</span>
+        </div>
+        <div class="level-item-actions">
+          <button class="level-action-btn edit-btn" title="Edit">&#9998;</button>
+          <button class="level-action-btn delete-btn" title="Delete">&#128465;</button>
+        </div>
+      `;
+
+      item.querySelector('.level-item-info').addEventListener('click', () => {
+        this.openCampaignEditor(campaign.id);
+      });
+      item.querySelector('.edit-btn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.openCampaignEditor(campaign.id);
+      });
+      item.querySelector('.delete-btn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (confirm(`Delete campaign "${campaign.name}"?`)) {
+          this.campaignManager.delete(campaign.id);
+          this.showCampaignList();
+        }
+      });
+
+      list.appendChild(item);
+    }
+
+    // Wire up header buttons
+    document.getElementById('newCampaignBtn').onclick = () => {
+      const c = this.campaignManager.create('New Campaign');
+      this.openCampaignEditor(c.id);
+    };
+    document.getElementById('closeCampaignList').onclick = () => this.closeCampaignList();
+
+    document.getElementById('campaignOverlay').classList.add('visible');
+  }
+
+  closeCampaignList() {
+    document.getElementById('campaignOverlay').classList.remove('visible');
+  }
+
+  openCampaignEditor(campaignId) {
+    this._editingCampaignId = campaignId;
+    const campaign = this.campaignManager.getById(campaignId);
+    if (!campaign) return;
+
+    this.closeCampaignList();
+
+    const nameInput = document.getElementById('campaignNameInput');
+    nameInput.value = campaign.name;
+    nameInput.oninput = () => {
+      this.campaignManager.update(campaignId, { name: nameInput.value });
+    };
+
+    document.getElementById('closeCampaignEdit').onclick = () => {
+      this.closeCampaignEditor();
+      this.showCampaignList();
+    };
+
+    document.getElementById('campaignExportBtn').onclick = () => {
+      this.exportCampaign(campaignId);
+    };
+
+    document.getElementById('campaignPlayBtn').onclick = () => {
+      this.playCampaign(campaignId);
+    };
+
+    this._renderCampaignLevels(campaignId);
+    this._renderAvailableLevels(campaignId);
+
+    document.getElementById('campaignEditOverlay').classList.add('visible');
+  }
+
+  closeCampaignEditor() {
+    this._editingCampaignId = null;
+    document.getElementById('campaignEditOverlay').classList.remove('visible');
+  }
+
+  _editCampaignLevel(bakedName) {
+    // Try to find existing level with matching name in editor
+    const levels = this.levelManager.getAllLevels();
+    const match = levels.find(l => {
+      const safe = (l.name || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+      return safe === bakedName || l.name === bakedName;
+    });
+
+    if (match) {
+      this.levelManager.setCurrentLevelById(match.id);
+    } else {
+      // Import baked data as new editor level
+      const raw = localStorage.getItem('baked:' + bakedName);
+      if (!raw) { alert('Baked level data not found: ' + bakedName); return; }
+      const imported = this.levelManager.importLevel(raw);
+      if (!imported) { alert('Failed to import level'); return; }
+      this.levelManager.setCurrentLevelById(imported.id);
+    }
+
+    this.closeCampaignEditor();
+    this.closeCampaignList();
+    this.updateLevelTitle();
+    this.startEditor();
+  }
+
+  _renderCampaignLevels(campaignId) {
+    const campaign = this.campaignManager.getById(campaignId);
+    if (!campaign) return;
+
+    const list = document.getElementById('campaignLevelItems');
+    const hint = document.getElementById('campaignEmptyHint');
+    list.innerHTML = '';
+    hint.style.display = campaign.levelNames.length === 0 ? '' : 'none';
+
+    campaign.levelNames.forEach((name, index) => {
+      const item = document.createElement('div');
+      item.className = 'campaign-level-item';
+
+      item.innerHTML = `
+        <span class="campaign-level-num">${index + 1}</span>
+        <span class="campaign-level-name">${name}</span>
+        <div class="campaign-level-actions">
+          <button class="campaign-action-btn campaign-edit-level-btn" title="Edit in Editor">&#9998;</button>
+          <button class="campaign-action-btn" title="Move Up" ${index === 0 ? 'disabled' : ''}>&#9650;</button>
+          <button class="campaign-action-btn" title="Move Down" ${index === campaign.levelNames.length - 1 ? 'disabled' : ''}>&#9660;</button>
+          <button class="campaign-action-btn campaign-remove-btn" title="Remove">&#10005;</button>
+        </div>
+      `;
+
+      // Edit level in editor
+      item.querySelector('.campaign-edit-level-btn').addEventListener('click', () => {
+        this._editCampaignLevel(name);
+      });
+
+      const moveBtns = item.querySelectorAll('.campaign-action-btn:not(.campaign-edit-level-btn):not(.campaign-remove-btn)');
+      moveBtns[0].addEventListener('click', () => {
+        this.campaignManager.moveLevel(campaignId, index, index - 1);
+        this._renderCampaignLevels(campaignId);
+      });
+      moveBtns[1].addEventListener('click', () => {
+        this.campaignManager.moveLevel(campaignId, index, index + 1);
+        this._renderCampaignLevels(campaignId);
+      });
+      item.querySelector('.campaign-remove-btn').addEventListener('click', () => {
+        this.campaignManager.removeLevel(campaignId, index);
+        this._renderCampaignLevels(campaignId);
+        this._renderAvailableLevels(campaignId);
+      });
+
+      list.appendChild(item);
+    });
+  }
+
+  async _renderAvailableLevels(campaignId) {
+    const localNames = this.campaignManager.getBakedLevelNames();
+    const list = document.getElementById('availableLevelItems');
+    list.innerHTML = '<div class="campaign-empty-hint">Loading...</div>';
+
+    // Merge local + remote level names
+    const remoteNames = await api.listLevels();
+    const bakedNames = [...new Set([...localNames, ...remoteNames])].sort();
+
+    list.innerHTML = '';
+    if (bakedNames.length === 0) {
+      list.innerHTML = '<div class="campaign-empty-hint">No baked levels found. Use the Bake button to bake levels first.</div>';
+      return;
+    }
+
+    for (const name of bakedNames) {
+      const item = document.createElement('div');
+      item.className = 'campaign-level-item campaign-available-item';
+      item.innerHTML = `
+        <span class="campaign-level-name">${name}</span>
+        <button class="campaign-action-btn campaign-add-btn" title="Add to Campaign">+</button>
+      `;
+
+      item.querySelector('.campaign-add-btn').addEventListener('click', () => {
+        this.campaignManager.addLevel(campaignId, name);
+        this._renderCampaignLevels(campaignId);
+      });
+
+      list.appendChild(item);
+    }
+  }
+
+  exportCampaign(campaignId) {
+    const data = this.campaignManager.exportCampaign(campaignId);
+    if (!data || data.levels.length === 0) {
+      alert('Campaign has no resolvable levels. Bake the levels first.');
+      return;
+    }
+
+    const json = JSON.stringify(data, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${(data.name || 'campaign').replace(/[^a-z0-9]/gi, '_')}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async playCampaign(campaignId) {
+    // Sync campaign metadata to remote so player can resolve it
+    const campaign = this.campaignManager.getById(campaignId);
+    if (campaign) {
+      const safeName = (campaign.name || 'untitled').replace(/[^a-zA-Z0-9_-]/g, '_');
+      await api.saveCampaign(safeName, campaign);
+    }
+
+    // Also publish locally as fallback
+    const safeName = this.campaignManager.publishLocal(campaignId);
+    if (!safeName) {
+      alert('Campaign has no resolvable levels. Bake the levels first.');
+      return;
+    }
+    window.open('player.html?campaign=' + encodeURIComponent(safeName), '_blank');
   }
 }
 

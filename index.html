@@ -17,7 +17,6 @@
   <div class="app">
     <!-- Header -->
     <header class="header">
-      <button id="menuBtn" class="header-btn" title="Menu">☰</button>
       <h1 id="levelTitle" class="level-title">Level 1</h1>
       <div style="display:flex;gap:6px">
         <button id="bakeBtn" class="header-btn" title="Bake &amp; Open in Player">🔥</button>
@@ -241,51 +240,6 @@
     </div>
   </div>
 
-  <!-- Menu Overlay -->
-  <div id="menuOverlay" class="menu-overlay">
-    <div class="menu-panel">
-      <div class="menu-section">
-        <div class="menu-section-title">Level Settings</div>
-        <input type="text" id="levelName" class="menu-input" placeholder="Level Name">
-        <select id="levelDifficulty" class="menu-select">
-          <option value="1">Difficulty: 1 - Easy</option>
-          <option value="2">Difficulty: 2 - Medium</option>
-          <option value="3">Difficulty: 3 - Hard</option>
-          <option value="4">Difficulty: 4 - Expert</option>
-          <option value="5">Difficulty: 5 - Extreme</option>
-        </select>
-        <label class="menu-toggle-row">
-          <span>Enable Yo-yo Thread</span>
-          <input type="checkbox" id="yoyoThreadToggle">
-        </label>
-        <label class="menu-toggle-row">
-          <span>Yo-yo Debug Drag (No Gravity)</span>
-          <input type="checkbox" id="yoyoDebugDragToggle">
-        </label>
-        <button id="addToTrainingBtn" class="menu-btn primary">Add to Training</button>
-      </div>
-
-      <div class="menu-section">
-        <div class="menu-section-title">Levels</div>
-        <button id="newLevelBtn" class="menu-btn">+ New Level</button>
-        <button id="levelListBtn" class="menu-btn">📋 Level List</button>
-      </div>
-
-      <div class="menu-section">
-        <div class="menu-section-title">Settings</div>
-        <button id="physicsBtn" class="menu-btn">⚙️ Physics Settings</button>
-        <button id="clearBtn" class="menu-btn danger">🗑️ Clear All Pegs</button>
-      </div>
-
-      <div class="menu-section">
-        <div class="menu-section-title">Import / Export</div>
-        <button id="exportBtn" class="menu-btn">💾 Export Level</button>
-        <button id="importBtn" class="menu-btn">📂 Import Level</button>
-        <button id="exportTrainingBtn" class="menu-btn">📊 Export Training Data</button>
-      </div>
-    </div>
-  </div>
-
   <!-- Level List Overlay -->
   <div id="levelListOverlay" class="level-list-overlay">
     <div class="level-list-header">
@@ -298,12 +252,48 @@
     </div>
   </div>
 
+  <!-- Campaign List Overlay -->
+  <div id="campaignOverlay" class="campaign-overlay">
+    <div class="campaign-header">
+      <button id="closeCampaignList" class="header-btn">&larr;</button>
+      <h2 class="level-list-title">Campaigns</h2>
+      <button id="newCampaignBtn" class="header-btn" title="New Campaign">+</button>
+    </div>
+    <div class="campaign-content">
+      <div id="campaignItems"></div>
+    </div>
+  </div>
+
+  <!-- Campaign Editor Overlay -->
+  <div id="campaignEditOverlay" class="campaign-overlay">
+    <div class="campaign-header">
+      <button id="closeCampaignEdit" class="header-btn">&larr;</button>
+      <input type="text" id="campaignNameInput" class="menu-input campaign-name-input" placeholder="Campaign Name">
+      <div style="display:flex;gap:6px">
+        <button id="campaignExportBtn" class="header-btn" title="Export JSON">&#128190;</button>
+        <button id="campaignPlayBtn" class="header-btn" title="Play Campaign">&#9654;</button>
+      </div>
+    </div>
+    <div class="campaign-edit-body">
+      <div class="campaign-section">
+        <div class="campaign-section-title">Levels in Campaign</div>
+        <div id="campaignLevelItems" class="campaign-level-list"></div>
+        <div class="campaign-empty-hint" id="campaignEmptyHint">No levels added yet. Bake levels first, then add them below.</div>
+      </div>
+      <div class="campaign-section">
+        <div class="campaign-section-title">Available Baked Levels</div>
+        <div id="availableLevelItems" class="campaign-level-list"></div>
+      </div>
+    </div>
+  </div>
+
   <!-- Physics Settings Overlay -->
   <div id="physicsOverlay" class="physics-overlay">
     <div class="physics-panel">
       <div class="physics-header">
-        <h2>Physics Settings</h2>
-        <button id="closePhysicsPanel" class="header-btn">✕</button>
+        <button id="closePhysicsPanel" class="header-btn">&larr;</button>
+        <h2>Physics</h2>
+        <div style="width: 36px;"></div>
       </div>
       <div class="physics-content">
         <div class="slider-group">
@@ -319,8 +309,8 @@
           <input type="range" id="speedSlider" min="25" max="200" value="100">
         </div>
         <div class="slider-group">
-          <label>Peg Size: <span id="sizeValue">10</span></label>
-          <input type="range" id="sizeSlider" min="5" max="20" value="10">
+          <label>Peg Size: <span id="sizeValue">9</span></label>
+          <input type="range" id="sizeSlider" min="5" max="20" value="9">
         </div>
         <div class="slider-group">
           <label>Launch Power: <span id="powerValue">8.0</span></label>

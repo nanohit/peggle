@@ -1,4 +1,6 @@
 // Baked level player — full visual frame + HUD + gamble, no editor/menus/theme panel.
+// Supports: single level (hash), level names (?level=), campaigns (?campaign=).
+// On defeat: level mirrors horizontally and replays. Second defeat restores original.
 
 import { Game } from './game.js';
 import { VisualLayout } from './visual-layout.js';
@@ -10,12 +12,11 @@ const FRAME_RATIO = 9 / 17;
 const WORLD_W = 400;
 const WORLD_H = Math.round(WORLD_W / ASPECT_RATIO); // 600
 
-// --- Data loading (3 sources, priority order) ---
+// --- Data loading (multiple sources, priority order) ---
 
-// 1) Decompress level data from URL hash (deflate + base64url)
+// Decompress level data from URL hash (deflate + base64url)
 async function loadFromHash() {
   const hash = location.hash.slice(1);
-  console.log(`[player] hash length: ${hash.length}`);
   if (!hash) return null;
   try {
     const b64 = hash.replace(/-/g, '+').replace(/_/g, '/');
@@ -32,8 +33,8 @@ async function loadFromHash() {
   } catch (e) { console.error('[player] hash decode failed:', e); return null; }
 }
 
-// 2) Load by name from localStorage
-function loadFromStorage(name) {
+// Load single baked level by name
+function loadBakedLevel(name) {
   const stored = localStorage.getItem('baked:' + name);
   if (stored) {
     try { return JSON.parse(stored); } catch { /* fall through */ }
@@ -41,8 +42,12 @@ function loadFromStorage(name) {
   return null;
 }
 
-// 3) Fetch from /levels/ (future hosting)
-async function loadFromFetch(name) {
+// Fetch from server (API first, then static file fallback)
+async function fetchLevel(name) {
+  try {
+    const res = await fetch('/api/levels?name=' + encodeURIComponent(name));
+    if (res.ok) return await res.json();
+  } catch { /* fall through */ }
   try {
     const res = await fetch('/levels/' + encodeURIComponent(name) + '.json');
     if (res.ok) return await res.json();
@@ -50,9 +55,41 @@ async function loadFromFetch(name) {
   return null;
 }
 
+// Load campaign by name: localStorage → API (resolved) → static file
+async function loadCampaign(name) {
+  // Try localStorage first
+  const stored = localStorage.getItem('campaign:' + name);
+  if (stored) {
+    try {
+      const data = JSON.parse(stored);
+      if (data && Array.isArray(data.levels) && data.levels.length > 0) return data;
+    } catch { /* fall through */ }
+  }
+  // Try API (resolves campaign + fetches all level data)
+  try {
+    const res = await fetch('/api/campaigns?name=' + encodeURIComponent(name) + '&resolve=true');
+    if (res.ok) {
+      const data = await res.json();
+      if (data && Array.isArray(data.levels) && data.levels.length > 0) return data;
+    }
+  } catch { /* fall through */ }
+  // Fallback: static file
+  try {
+    const res = await fetch('/campaigns/' + encodeURIComponent(name) + '.json');
+    if (res.ok) {
+      const data = await res.json();
+      if (data && Array.isArray(data.levels) && data.levels.length > 0) return data;
+    }
+  } catch { /* fall through */ }
+  return null;
+}
+
+function getQueryParam(key) {
+  return new URLSearchParams(window.location.search).get(key);
+}
+
 function getRequestedNames() {
-  const params = new URLSearchParams(window.location.search);
-  const raw = params.get('level') || params.get('levels');
+  const raw = getQueryParam('level') || getQueryParam('levels');
   if (!raw) return [];
   return raw.split(',').map(s => s.trim()).filter(Boolean);
 }
@@ -60,6 +97,73 @@ function getRequestedNames() {
 function showError(msg) {
   document.body.style.cssText = 'display:flex;justify-content:center;align-items:center;color:#fff;font:18px sans-serif;text-align:center;padding:20px;';
   document.body.textContent = msg;
+}
+
+// --- Mirror level data horizontally ---
+
+function mirrorLevel(levelData, canvasWidth = WORLD_W) {
+  const m = JSON.parse(JSON.stringify(levelData));
+
+  for (const peg of m.pegs) {
+    peg.x = canvasWidth - peg.x;
+
+    if (peg.shape === 'brick') {
+      peg.angle = -peg.angle;
+    }
+
+    if (peg.curveSlices && peg.curveSlices.length > 0) {
+      for (const s of peg.curveSlices) {
+        s.x = canvasWidth - s.x;
+        s.nx = -s.nx;
+      }
+      peg.curveSlices.reverse();
+    }
+
+    if (peg.animation) {
+      if (peg.animation.dx) peg.animation.dx = -peg.animation.dx;
+      if (peg.animation.rotation) peg.animation.rotation = -peg.animation.rotation;
+    }
+  }
+
+  // Mirror group animations
+  if (Array.isArray(m.groups)) {
+    for (const group of m.groups) {
+      if (group.animation) {
+        if (group.animation.dx) group.animation.dx = -group.animation.dx;
+        if (group.animation.rotation) group.animation.rotation = -group.animation.rotation;
+      }
+    }
+  }
+
+  // Bezier control points (if any)
+  if (m.bezierCurves && typeof m.bezierCurves === 'object') {
+    for (const key of Object.keys(m.bezierCurves)) {
+      const curve = m.bezierCurves[key];
+      if (Array.isArray(curve.points)) {
+        for (const pt of curve.points) {
+          if (typeof pt.x === 'number') pt.x = canvasWidth - pt.x;
+        }
+      }
+    }
+  }
+
+  return m;
+}
+
+// --- Pause menu ---
+
+function createPauseOverlay() {
+  const overlay = document.createElement('div');
+  overlay.className = 'pause-overlay';
+  overlay.id = 'pauseOverlay';
+  overlay.innerHTML = `
+    <div class="pause-panel">
+      <div class="pause-title">Paused</div>
+      <button class="pause-btn" id="pauseResumeBtn">Resume</button>
+      <button class="pause-btn" id="pauseRestartBtn">Restart Level</button>
+    </div>
+  `;
+  return overlay;
 }
 
 // --- Main ---
@@ -74,23 +178,32 @@ async function resolve() {
     return;
   }
 
-  // Priority 2+3: ?level=name → localStorage → fetch
+  // Priority 2: ?campaign=name → load full campaign
+  const campaignName = getQueryParam('campaign');
+  if (campaignName) {
+    const campaign = await loadCampaign(campaignName);
+    if (!campaign) { showError('Campaign not found: ' + campaignName); return; }
+    bootWithLevels(campaign.levels, campaign.name);
+    return;
+  }
+
+  // Priority 3: ?level=name1,name2 → individual baked levels
   const names = getRequestedNames();
   if (names.length === 0) {
-    showError('No level specified.\nUse ?level=name or paste a baked URL.');
+    showError('No level specified.\nUse ?level=name, ?campaign=name, or paste a baked URL.');
     return;
   }
 
   const levels = [];
   for (const name of names) {
-    const data = loadFromStorage(name) || await loadFromFetch(name);
+    const data = loadBakedLevel(name) || await fetchLevel(name);
     if (!data) { showError('Level not found: ' + name); return; }
     levels.push(data);
   }
   bootWithLevels(levels);
 }
 
-async function bootWithLevels(levels) {
+async function bootWithLevels(levels, campaignName) {
 
   const canvas = document.getElementById('gameCanvas');
   canvas.getContext('2d', { alpha: false });
@@ -101,6 +214,10 @@ async function bootWithLevels(levels) {
   visualLayout.setPanelVisible(false);
   visualLayout.setEditMode(false);
 
+  // Create and attach pause overlay
+  const pauseOverlay = createPauseOverlay();
+  document.body.appendChild(pauseOverlay);
+
   function resize() {
     const viewport = document.getElementById('visualViewport');
     const frame = document.getElementById('visualFrame');
@@ -109,21 +226,55 @@ async function bootWithLevels(levels) {
     const vw = window.innerWidth;
     const vh = window.innerHeight;
 
-    // Fit 9:17 frame in viewport
+    // Fit 9:17 frame in viewport (mobile: keep full width, compress height if needed)
     let fw = vw;
     let fh = fw / FRAME_RATIO;
-    if (fh > vh) { fh = vh; fw = fh * FRAME_RATIO; }
+    const isNarrow = vw <= 520;
+    let compact = false;
+    if (fh > vh) {
+      if (isNarrow) {
+        fh = vh;
+        compact = true;
+      } else {
+        fh = vh;
+        fw = fh * FRAME_RATIO;
+      }
+    }
     fw = Math.floor(fw);
     fh = Math.floor(fh);
+    const squeeze = compact ? Math.min(1, fh / (fw / FRAME_RATIO)) : 1;
 
     frame.style.width = fw + 'px';
     frame.style.height = fh + 'px';
     frame.style.setProperty('--frame-scale', String(Math.min(1, fw / 444)));
+    frame.style.setProperty('--frame-squeeze', squeeze.toFixed(4));
+    frame.classList.toggle('visual-frame--compact', compact);
 
     // Canvas display: 90% of frame width, game aspect ratio
     let displayW = Math.round(fw * 0.9);
     let displayH = Math.round(displayW / ASPECT_RATIO);
     if (displayH > fh) { displayH = fh; displayW = Math.round(displayH * ASPECT_RATIO); }
+
+    // In compact mode: nudge canvas up so bucket clears the gamble dock
+    if (compact) {
+      const frameScale = Math.min(1, fw / 444);
+      const hudSqueeze = Math.max(0.82, squeeze);
+      const dockH = Math.ceil(96 * frameScale * hudSqueeze);
+      const dockTop = fh - dockH;
+      const centeredTop = (fh - displayH) / 2;
+      const bucketY = centeredTop + displayH * (585 / WORLD_H);
+      let nudge = Math.max(0, Math.ceil(bucketY - dockTop));
+      const maxNudge = Math.max(0, Math.floor(centeredTop - 2));
+      if (nudge > maxNudge) {
+        const availH = dockTop - 2;
+        displayH = Math.floor(availH / (585 / WORLD_H));
+        displayW = Math.round(displayH * ASPECT_RATIO);
+        nudge = 0;
+      }
+      frame.style.setProperty('--compact-canvas-nudge', nudge + 'px');
+    } else {
+      frame.style.removeProperty('--compact-canvas-nudge');
+    }
 
     canvas.width = WORLD_W;
     canvas.height = WORLD_H;
@@ -138,9 +289,64 @@ async function bootWithLevels(levels) {
   let game = null;
   let gambleSystem = null;
   let unsubUiState = null;
+  let mirrorState = false; // alternates on defeat
+  // Deep-clone originals so mirror can always reference pristine data
+  const originalLevels = levels.map(l => JSON.parse(JSON.stringify(l)));
 
   resize();
   window.addEventListener('resize', resize);
+
+  // --- Pause logic ---
+
+  let paused = false;
+
+  function showPause() {
+    if (paused || !game) return;
+    if (game.state === 'won' || game.state === 'lost') return;
+    paused = true;
+    game.pause();
+    pauseOverlay.classList.add('visible');
+  }
+
+  function hidePause() {
+    if (!paused) return;
+    paused = false;
+    pauseOverlay.classList.remove('visible');
+    if (game) game.resume();
+  }
+
+  function restartFromPause() {
+    hidePause();
+    startLevel(currentIndex);
+  }
+
+  pauseOverlay.querySelector('#pauseResumeBtn').addEventListener('click', hidePause);
+  pauseOverlay.querySelector('#pauseRestartBtn').addEventListener('click', restartFromPause);
+  // Click on backdrop (outside panel) also resumes
+  pauseOverlay.addEventListener('click', (e) => {
+    if (e.target === pauseOverlay) hidePause();
+  });
+
+  // Make topLeft and leftCircle slots trigger pause in play mode
+  function setupPauseTriggers() {
+    for (const slotId of ['topLeft', 'leftCircle']) {
+      const el = visualLayout.slotElements[slotId];
+      if (!el) continue;
+      el.classList.add('visual-slot--pause-trigger');
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        showPause();
+      });
+      el.addEventListener('touchend', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        showPause();
+      });
+    }
+  }
+  setupPauseTriggers();
+
+  // --- Gamble system ---
 
   function mountGamble() {
     if (!game) return;
@@ -161,13 +367,19 @@ async function bootWithLevels(levels) {
     if (gambleSystem) { gambleSystem.dispose(); gambleSystem = null; }
   }
 
+  // --- Level lifecycle ---
+
   function startLevel(index) {
-    const levelData = levels[index];
+    // Resolve level data (mirror if needed)
+    const original = originalLevels[index];
+    const levelData = mirrorState ? mirrorLevel(original) : JSON.parse(JSON.stringify(original));
 
     // Cleanup previous
     teardownGamble();
     if (unsubUiState) { unsubUiState(); unsubUiState = null; }
     if (game) { game.stop(); }
+    paused = false;
+    pauseOverlay.classList.remove('visible');
 
     game = new Game(canvas);
 
@@ -193,14 +405,25 @@ async function bootWithLevels(levels) {
 
     game.onGameEnd = (result, score) => {
       setTimeout(() => {
-        if (result === 'won' && currentIndex < levels.length - 1) {
-          const advance = () => { currentIndex++; startLevel(currentIndex); };
-          canvas.addEventListener('click', advance, { once: true });
-          canvas.addEventListener('touchstart', advance, { once: true });
+        if (result === 'won') {
+          // Reset mirror for next level
+          mirrorState = false;
+          if (currentIndex < levels.length - 1) {
+            const advance = () => { currentIndex++; startLevel(currentIndex); };
+            canvas.addEventListener('click', advance, { once: true });
+            canvas.addEventListener('touchstart', advance, { once: true });
+          } else {
+            // All levels completed — tap to replay from start
+            const replay = () => { currentIndex = 0; mirrorState = false; startLevel(0); };
+            canvas.addEventListener('click', replay, { once: true });
+            canvas.addEventListener('touchstart', replay, { once: true });
+          }
         } else {
-          const restart = () => startLevel(currentIndex);
-          canvas.addEventListener('click', restart, { once: true });
-          canvas.addEventListener('touchstart', restart, { once: true });
+          // Defeat — toggle mirror and restart same level
+          mirrorState = !mirrorState;
+          const retry = () => startLevel(currentIndex);
+          canvas.addEventListener('click', retry, { once: true });
+          canvas.addEventListener('touchstart', retry, { once: true });
         }
       }, 1000);
     };

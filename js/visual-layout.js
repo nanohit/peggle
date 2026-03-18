@@ -24,6 +24,18 @@ async function preloadAsset(basename) {
   return null;
 }
 
+const FRAME_HEIGHT_RATIO = 17 / 9;
+// Only the central character group + banner shift up in compact mode.
+// topLeft/topRight/leftCircle/rightCircle stay put (they clip if shifted).
+// itemCircle/ballCounter stay put (they're in the HUD area).
+const COMPACT_TOP_SLOTS = new Set([
+  'top',
+  'characterCircle',
+  'healthCircle',
+  'healthCharCircle',
+  'character',
+]);
+
 export class VisualLayout {
   constructor() {
     this.viewport = null;
@@ -37,6 +49,8 @@ export class VisualLayout {
     this._resolvedAssets = {};
     this._frameW = 0;
     this._frameH = 0;
+    this._frameSqueeze = 1;
+    this._compactShift = 0;
     this._abortController = null;
     this._slotRuntimeFx = {};
     this.gambleUiMode = false;
@@ -153,7 +167,14 @@ export class VisualLayout {
   resize(frameW, frameH) {
     this._frameW = frameW;
     this._frameH = frameH;
-    // Slots use percentage positioning — CSS handles it. Nothing to recalculate.
+    const prevShift = this._compactShift;
+    const idealH = frameW > 0 ? frameW * FRAME_HEIGHT_RATIO : 0;
+    const squeeze = idealH > 0 ? Math.min(1, frameH / idealH) : 1;
+    this._frameSqueeze = squeeze;
+    this._compactShift = Math.max(0, Math.min(6, (1 - squeeze) * 60));
+    if (Math.abs(prevShift - this._compactShift) > 0.001) {
+      this._refreshSlotPositions();
+    }
     this._applyGambleOverlayState();
   }
 
@@ -166,6 +187,7 @@ export class VisualLayout {
     if (this.frame) this.frame.classList.toggle('visual-frame--editing', this.editMode);
     if (!this.editMode) this.selectedSlotId = null;
     this._updateSlotInteractivity();
+    this._refreshSlotPositions();
     this._applyLayerOrder();
     if (this.panel) {
       const btn = this.panel.querySelector('#themeEditBtn');
@@ -602,6 +624,20 @@ export class VisualLayout {
     this._applyLayerOrder();
   }
 
+  _refreshSlotPositions() {
+    if (!this.config) return;
+    for (const def of SLOT_DEFS) {
+      this._positionSlot(def.id);
+    }
+  }
+
+  _getAdjustedSlotY(slotId, rawY) {
+    if (this.editMode) return rawY;
+    if (this._compactShift <= 0 || !COMPACT_TOP_SLOTS.has(slotId)) return rawY;
+    // Allow negative values — slot-clip overflow:hidden clips naturally
+    return rawY - this._compactShift;
+  }
+
   _positionSlot(slotId) {
     const def = SLOT_DEFS.find(d => d.id === slotId);
     const slotCfg = this.config?.slots[slotId];
@@ -610,7 +646,7 @@ export class VisualLayout {
 
     const scale = slotCfg.scale || 1;
     el.style.left = slotCfg.x + '%';
-    el.style.top = slotCfg.y + '%';
+    el.style.top = this._getAdjustedSlotY(slotId, slotCfg.y) + '%';
     el.style.width = (def.baseWidth * scale) + '%';
     this._applySlotTransform(slotId);
   }
@@ -1012,7 +1048,8 @@ export class VisualLayout {
       }
 
       const currentCenterX = frameRect.width * (slotCfg.x / 100);
-      const currentCenterY = frameRect.height * (slotCfg.y / 100);
+      const adjustedY = this._getAdjustedSlotY(slotId, slotCfg.y);
+      const currentCenterY = frameRect.height * (adjustedY / 100);
       this._setSlotRuntimeFx(slotId, {
         translateX: target.centerX - currentCenterX,
         translateY: target.centerY - currentCenterY,

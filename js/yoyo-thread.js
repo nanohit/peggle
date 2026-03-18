@@ -271,14 +271,254 @@ export class YoyoThreadSystem {
     // Kept for compatibility. Current rope solver is fully geometric each frame.
   }
 
+  notePortalTeleport(ball, entryPeg, exitPeg) {
+    if (!this.settings.enabled || !ball || !entryPeg || !exitPeg) return;
+
+    const state = this.states.get(ball.id);
+    if (!state || state.mode === 'released') return;
+    if (!state.portalSegments) state.portalSegments = [];
+
+    // --- Unwinding: exit is near the entry of the last frozen segment ---
+    // This means the ball went backwards through the portal pair (O→B after B→O).
+    if (state.portalSegments.length > 0) {
+      const last = state.portalSegments[state.portalSegments.length - 1];
+      if (Utils.distance(exitPeg.x, exitPeg.y, last.entryX, last.entryY) < 40) {
+        const popped = state.portalSegments.pop();
+        state.anchorX = popped.anchorX;
+        state.anchorY = popped.anchorY;
+        this._rebuildActiveNodes(state, ball);
+        return;
+      }
+    }
+
+    // --- Duplicate detection: re-entering the same portal we already have ---
+    // When ball bounces B→O→B→O, the second B entry matches the first B entry.
+    // Trim the stack back to that point so we replace instead of accumulating.
+    for (let i = state.portalSegments.length - 1; i >= 0; i--) {
+      const seg = state.portalSegments[i];
+      if (Utils.distance(entryPeg.x, entryPeg.y, seg.entryX, seg.entryY) < 40) {
+        // Re-entering the same portal. Restore anchor from this segment
+        // and trim everything from this index onward.
+        state.anchorX = seg.anchorX;
+        state.anchorY = seg.anchorY;
+        state.portalSegments.length = i;
+        break;
+      }
+    }
+
+    // --- Forward portal traversal: save current rope as live Verlet segment ---
+
+    // Offset rope endpoints to the portal SURFACE so the rope treats portals
+    // as solid obstacles. Without this, the anchor sits inside the portal's
+    // obstacle brick and nodes fight the collision solver → shaking/spinning.
+    const surfaceOffset = PHYSICS_CONFIG.pegRadius * 0.35 + this.settings.collisionMargin + 2;
+
+    // Entry portal: pin the frozen segment's endpoint on the approach side
+    const entryAngle = entryPeg.angle || 0;
+    const entryNx = -Math.sin(entryAngle);
+    const entryNy = Math.cos(entryAngle);
+    const toAnchorDx = state.anchorX - entryPeg.x;
+    const toAnchorDy = state.anchorY - entryPeg.y;
+    const entrySide = (toAnchorDx * entryNx + toAnchorDy * entryNy) >= 0 ? 1 : -1;
+    const entryPinX = entryPeg.x + entryNx * entrySide * surfaceOffset;
+    const entryPinY = entryPeg.y + entryNy * entrySide * surfaceOffset;
+
+    let segNodes;
+    if (state.nodes && state.nodes.length >= 2) {
+      // Clone current nodes as live Verlet nodes (preserving px/py for momentum).
+      // Replace last node with entry portal surface so rope reaches the portal edge.
+      segNodes = state.nodes.map(n => makeNode(n.x, n.y));
+      const lastNode = segNodes[segNodes.length - 1];
+      lastNode.x = entryPinX;
+      lastNode.y = entryPinY;
+      lastNode.px = entryPinX;
+      lastNode.py = entryPinY;
+    } else {
+      segNodes = this._buildLinearNodes(
+        state.anchorX, state.anchorY, entryPinX, entryPinY,
+        Math.max(4, this.settings.minNodes)
+      );
+    }
+    // Pin first node to segment anchor
+    segNodes[0].x = state.anchorX;
+    segNodes[0].y = state.anchorY;
+    segNodes[0].px = state.anchorX;
+    segNodes[0].py = state.anchorY;
+
+    const segRopeLen = this._computeNodePathLength(segNodes);
+
+    state.portalSegments.push({
+      nodes: segNodes,
+      ropeLength: segRopeLen,
+      anchorX: state.anchorX,
+      anchorY: state.anchorY,
+      entryX: entryPeg.x,
+      entryY: entryPeg.y,
+      exitX: exitPeg.x,
+      exitY: exitPeg.y,
+      entryPinX,
+      entryPinY
+    });
+
+    // Exit portal: place active anchor on the ball's side of the portal surface
+    const exitAngle = exitPeg.angle || 0;
+    const exitNx = -Math.sin(exitAngle);
+    const exitNy = Math.cos(exitAngle);
+    const toBallDx = ball.x - exitPeg.x;
+    const toBallDy = ball.y - exitPeg.y;
+    const exitSide = (toBallDx * exitNx + toBallDy * exitNy) >= 0 ? 1 : -1;
+    state.anchorX = exitPeg.x + exitNx * exitSide * surfaceOffset;
+    state.anchorY = exitPeg.y + exitNy * exitSide * surfaceOffset;
+    this._rebuildActiveNodes(state, ball);
+
+    // If total rope across segments already exceeds the budget, start retracting
+    // immediately so the ball doesn't keep extending from the exit side.
+    const totalBudget = this._portalRopeBudget(state);
+    const usedInSegments = this._portalSegmentsLength(state);
+    if (usedInSegments + state.ropeLength >= totalBudget && state.mode === 'extending') {
+      state.mode = 'retracting';
+      state.retractStartDist = Math.max(1, Utils.distance(state.anchorX, state.anchorY, ball.x, ball.y));
+      state.retractNodeCount = Math.max(8, state.nodes.length || this.settings.minNodes);
+    }
+  }
+
+  _rebuildActiveNodes(state, ball) {
+    const dist = Utils.distance(state.anchorX, state.anchorY, ball.x, ball.y);
+    state.ropeLength = Math.max(dist + this.settings.extendSlackPixels, this.settings.ropeSegmentLength * 2);
+    state.nodes = this._buildLinearNodes(state.anchorX, state.anchorY, ball.x, ball.y,
+      Math.max(this.settings.minNodes, Math.ceil(dist / this.settings.ropeSegmentLength) + 1));
+    state.prevBallX = ball.x;
+    state.prevBallY = ball.y;
+  }
+
+  _portalSegmentsLength(state) {
+    if (!state.portalSegments || state.portalSegments.length === 0) return 0;
+    let total = 0;
+    for (const seg of state.portalSegments) {
+      total += seg.ropeLength || 0;
+    }
+    return total;
+  }
+
+  _portalRopeBudget(state) {
+    // Total allowed rope across all segments + active.
+    // Based on canvas height and trigger ratio with some headroom.
+    const originalDist = Utils.distance(
+      state.originalAnchorX || this.launchAnchor.x,
+      state.originalAnchorY || this.launchAnchor.y,
+      state.anchorX, state.anchorY
+    );
+    // Budget = height-based trigger distance + original anchor-to-current-anchor distance.
+    // This allows enough rope for the original drop plus the portal jump, but no more.
+    return this.height * this.settings.triggerDropRatio + originalDist * 0.5;
+  }
+
+  _simulatePortalSegment(seg, obstacles) {
+    const nodes = seg.nodes;
+    if (!nodes || nodes.length < 2) return;
+
+    const lastIndex = nodes.length - 1;
+    const segRest = Math.max(0.0001, seg.ropeLength / lastIndex);
+    const ropeRadius = this.settings.ropeThickness * 0.5 + this.settings.collisionMargin;
+
+    // Pin at surface positions when available, so rope endpoints stay outside
+    // the portal obstacle brick instead of inside it.
+    const pinAX = seg.anchorX;
+    const pinAY = seg.anchorY;
+    const pinBX = seg.entryPinX != null ? seg.entryPinX : seg.entryX;
+    const pinBY = seg.entryPinY != null ? seg.entryPinY : seg.entryY;
+
+    // Pin both endpoints every iteration
+    const pinEndpoints = () => {
+      nodes[0].x = pinAX;
+      nodes[0].y = pinAY;
+      nodes[0].px = pinAX;
+      nodes[0].py = pinAY;
+      nodes[lastIndex].x = pinBX;
+      nodes[lastIndex].y = pinBY;
+      nodes[lastIndex].px = pinBX;
+      nodes[lastIndex].py = pinBY;
+    };
+
+    // Light inertial update (damped, both endpoints pinned so this just settles interior)
+    for (let i = 1; i < lastIndex; i++) {
+      const node = nodes[i];
+      const vx = (node.x - node.px) * 0.85;
+      const vy = (node.y - node.py) * 0.85;
+      node.px = node.x;
+      node.py = node.y;
+      node.x += vx;
+      node.y += vy;
+    }
+
+    // Solver iterations (fewer than main rope — these are pinned on both ends)
+    const iterations = 8;
+    for (let iter = 0; iter < iterations; iter++) {
+      pinEndpoints();
+
+      // Distance constraints
+      for (let i = 0; i < lastIndex; i++) {
+        const a = nodes[i];
+        const b = nodes[i + 1];
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const dist = Math.sqrt(dx * dx + dy * dy) || 0.0001;
+        const diff = clamp((dist - segRest) / dist, -0.22, 0.35);
+        const halfDiff = diff * 0.5;
+        if (i > 0) {
+          a.x += dx * halfDiff;
+          a.y += dy * halfDiff;
+        }
+        if (i + 1 < lastIndex) {
+          b.x -= dx * halfDiff;
+          b.y -= dy * halfDiff;
+        }
+      }
+
+      // Obstacle collisions for interior nodes
+      for (let i = 1; i < lastIndex; i++) {
+        const node = nodes[i];
+        for (const obs of obstacles) {
+          if (obs.kind === 'circle') {
+            this._resolveNodeCircle(node, obs, ropeRadius, false);
+          } else {
+            this._resolveNodeBrick(node, obs, ropeRadius, false);
+          }
+        }
+      }
+    }
+
+    pinEndpoints();
+  }
+
+  _simulateAllPortalSegments(state, obstacles) {
+    if (!state.portalSegments || state.portalSegments.length === 0) return;
+    for (const seg of state.portalSegments) {
+      this._simulatePortalSegment(seg, obstacles);
+    }
+  }
+
   getRenderThreads() {
     if (!this.settings.enabled) return [];
 
     const threads = [];
     for (const state of this.states.values()) {
       const ball = state.ballRef;
-      if (!ball || !ball.active || !state.visible || !Array.isArray(state.nodes) || state.nodes.length < 2) continue;
+      if (!ball || !ball.active || !state.visible) continue;
 
+      // Live portal segments (rope sections that went through portals)
+      if (state.portalSegments) {
+        for (const seg of state.portalSegments) {
+          if (!seg.nodes || seg.nodes.length < 2) continue;
+          const pts = this._buildRenderPoints(seg.nodes);
+          if (pts && pts.length >= 2) {
+            threads.push({ ballId: state.ballId, mode: state.mode, points: pts });
+          }
+        }
+      }
+
+      // Active segment (from current anchor to ball)
+      if (!Array.isArray(state.nodes) || state.nodes.length < 2) continue;
       const points = this._buildRenderPoints(state.nodes);
       if (!points || points.length < 2) continue;
 
@@ -302,6 +542,8 @@ export class YoyoThreadSystem {
       ballRef: ball,
       anchorX: ax,
       anchorY: ay,
+      originalAnchorX: ax,
+      originalAnchorY: ay,
       mode: 'extending',
       visible: true,
       releaseTimer: 0,
@@ -310,7 +552,8 @@ export class YoyoThreadSystem {
       retractStartDist: 0,
       prevBallX: ball.x,
       prevBallY: ball.y,
-      retractNodeCount: 0
+      retractNodeCount: 0,
+      portalSegments: []
     };
   }
 
@@ -335,6 +578,9 @@ export class YoyoThreadSystem {
       if (state.releaseTimer <= 0 && drop >= this.settings.rearmDrop && ball.vy > 0.05) {
         state.mode = 'extending';
         state.visible = true;
+        state.portalSegments = [];
+        state.anchorX = state.originalAnchorX || this.launchAnchor.x;
+        state.anchorY = state.originalAnchorY || this.launchAnchor.y;
         state.ropeLength = Utils.distance(state.anchorX, state.anchorY, ball.x, ball.y) + this.settings.extendSlackPixels;
         state.nodes.length = 0;
         state.retractStartDist = 0;
@@ -356,16 +602,36 @@ export class YoyoThreadSystem {
       const nodePathLen = this._computeNodePathLength(state.nodes);
       // Keep rope at least as long as direct, but preserve wrap-induced extra length.
       // Cap at 2.5x direct to prevent unbounded growth from solver jitter.
-      const maxWrapLen = direct * 2.5;
+      // When portal segments exist, tighten the cap based on remaining rope budget.
+      const hasPortalSegs = state.portalSegments && state.portalSegments.length > 0;
+      let maxWrapLen;
+      if (hasPortalSegs) {
+        const usedInSegments = this._portalSegmentsLength(state);
+        const budget = this._portalRopeBudget(state);
+        const remaining = Math.max(direct, budget - usedInSegments);
+        maxWrapLen = remaining;
+      } else {
+        maxWrapLen = direct * 2.5;
+      }
       state.ropeLength = Math.max(direct, Math.min(nodePathLen, maxWrapLen));
 
       const fallbackTriggerY = state.anchorY + this.height * this.settings.triggerDropRatio;
       const triggerY = Number.isFinite(retractStartY) ? retractStartY : fallbackTriggerY;
-      if (ball.y >= triggerY && ball.vy > -0.2) {
+      let shouldRetract = ball.y >= triggerY && ball.vy > -0.2;
+      // With portal segments, also retract when total rope hits the budget.
+      if (!shouldRetract && hasPortalSegs) {
+        const totalLen = this._portalSegmentsLength(state) + state.ropeLength;
+        const budget = this._portalRopeBudget(state);
+        if (totalLen >= budget && ball.vy > -0.2) {
+          shouldRetract = true;
+        }
+      }
+      if (shouldRetract) {
         state.mode = 'retracting';
         state.retractStartDist = Math.max(1, Utils.distance(ball.x, ball.y, state.anchorX, state.anchorY));
         state.retractNodeCount = Math.max(8, state.nodes.length || this.settings.minNodes);
       }
+      this._simulateAllPortalSegments(state, obstacles);
       state.prevBallX = ball.x;
       state.prevBallY = ball.y;
       return;
@@ -389,11 +655,60 @@ export class YoyoThreadSystem {
       && Math.abs(ball.x - state.anchorX) <= this.settings.releaseRadius * 1.5
       && ball.vy < 1;
     if (nearAnchor || nearAnchorBand) {
+      // If there are portal segments, unwind through the portal instead of releasing.
+      // The ball is near the current anchor (exit portal). Teleport the ball to the
+      // entry point of the last segment so it continues retracting toward the launcher.
+      if (state.portalSegments && state.portalSegments.length > 0) {
+        const popped = state.portalSegments.pop();
+
+        // Teleport ball to the entry portal surface of the popped segment
+        // (that's where the rope entered the portal from the other side).
+        // Use the surface pin position so the ball lands outside the portal obstacle.
+        ball.x = popped.entryPinX != null ? popped.entryPinX : popped.entryX;
+        ball.y = popped.entryPinY != null ? popped.entryPinY : popped.entryY;
+        ball.vx = 0;
+        ball.vy = 0;
+
+        // Restore anchor to where this segment started
+        state.anchorX = popped.anchorX;
+        state.anchorY = popped.anchorY;
+
+        // Take over this segment's nodes (they're already simulated/settled)
+        // as the active rope, so the ball retracts along the wrapped path.
+        if (popped.nodes && popped.nodes.length >= 2) {
+          // Reverse the nodes so [0]=anchor, [last]=ball (entry portal)
+          // The segment stored them as anchor→entry, which is correct direction already.
+          state.nodes = popped.nodes;
+          // Update last node to ball position
+          const last = state.nodes[state.nodes.length - 1];
+          last.x = ball.x;
+          last.y = ball.y;
+          last.px = ball.x;
+          last.py = ball.y;
+          // Use the actual settled path length — nodes may have tightened during simulation.
+          const settledLen = this._computeNodePathLength(state.nodes);
+          state.ropeLength = Math.min(popped.ropeLength, settledLen + this.settings.extendSlackPixels);
+        } else {
+          const dist = Utils.distance(state.anchorX, state.anchorY, ball.x, ball.y);
+          state.ropeLength = Math.max(dist + this.settings.extendSlackPixels, this.settings.ropeSegmentLength * 2);
+          state.nodes = this._buildLinearNodes(state.anchorX, state.anchorY, ball.x, ball.y,
+            Math.max(this.settings.minNodes, Math.ceil(dist / this.settings.ropeSegmentLength) + 1));
+        }
+
+        state.retractStartDist = Math.max(1, Utils.distance(state.anchorX, state.anchorY, ball.x, ball.y));
+        state.prevBallX = ball.x;
+        state.prevBallY = ball.y;
+        return;
+      }
+
       state.mode = 'released';
       state.visible = false;
       state.releaseTimer = this.settings.rearmDelay;
       state.nodes.length = 0;
       state.retractStartDist = 0;
+      state.portalSegments = [];
+      state.anchorX = state.originalAnchorX || this.launchAnchor.x;
+      state.anchorY = state.originalAnchorY || this.launchAnchor.y;
       state.prevBallX = ball.x;
       state.prevBallY = ball.y;
       state.retractNodeCount = 0;
@@ -406,6 +721,7 @@ export class YoyoThreadSystem {
       return;
     }
 
+    this._simulateAllPortalSegments(state, obstacles);
     state.prevBallX = ball.x;
     state.prevBallY = ball.y;
   }
@@ -1045,6 +1361,22 @@ export class YoyoThreadSystem {
       // there's too little surface for stable node-based wrapping.
       const wrapPad = 3.5;
 
+      // Portals are line triggers — treat as thin bricks so rope wraps around them.
+      if (peg.type === 'portalBlue' || peg.type === 'portalOrange') {
+        const halfLen = PHYSICS_CONFIG.pegRadius * (peg.portalScale || 1);
+        const angle = peg.angle || 0;
+        out.push({
+          kind: 'brick',
+          x: peg.x,
+          y: peg.y,
+          halfW: halfLen + wrapPad,
+          halfH: PHYSICS_CONFIG.pegRadius * 0.35 + wrapPad,
+          cos: Math.cos(angle),
+          sin: Math.sin(angle)
+        });
+        continue;
+      }
+
       if (peg.shape === 'brick') {
         const width = peg.width || PHYSICS_CONFIG.brickWidth;
         const height = peg.height || PHYSICS_CONFIG.brickHeight;
@@ -1125,7 +1457,6 @@ export class YoyoThreadSystem {
   _isWrappablePeg(peg) {
     if (!peg) return false;
     if (!Number.isFinite(peg.x) || !Number.isFinite(peg.y)) return false;
-    if (peg.type === 'portalBlue' || peg.type === 'portalOrange') return false;
     return true;
   }
 

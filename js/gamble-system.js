@@ -591,11 +591,17 @@ export class GambleSystem {
     if (boardLayerRect.width <= 0) return;
 
     const rootStyles = window.getComputedStyle(this.ui.root);
+    const readPx = (name, fallback) => {
+      const raw = rootStyles.getPropertyValue(name);
+      const v = parseFloat(raw);
+      return Number.isFinite(v) ? v : fallback;
+    };
     const s = parseFloat(rootStyles.getPropertyValue('--frame-scale')) || 1;
-    const dockOpenHeight = 198 * s;
-    const boardOffsetExpanded = 180 * s;
-    const boardLayerHeight = 44 * s;
-    const boardSurfaceTop = 12 * s;
+    const hudSqueeze = parseFloat(rootStyles.getPropertyValue('--hud-squeeze')) || 1;
+    const dockOpenHeight = readPx('--dock-open-height', 196 * s);
+    const boardOffsetExpanded = readPx('--board-offset-expanded', 200 * s);
+    const boardLayerHeight = readPx('--board-layer-height', 44 * s);
+    const boardSurfaceTop = readPx('--board-surface-top', 12 * s);
 
     const boardHeight = boardLayerRect.width * (619 / 1280);
     const boardLayerBottom = dockOpenHeight + boardOffsetExpanded;
@@ -605,7 +611,7 @@ export class GambleSystem {
     const centerX = toggleRect.width > 0
       ? Math.round(toggleRect.left - rootRect.left + (toggleRect.width / 2))
       : Math.round(rootRect.width / 2);
-    const minY = 96 * s;
+    const minY = 96 * s * hudSqueeze;
     const centerY = Math.max(
       minY,
       Math.round(boardTop - Math.max(minY, boardHeight * 0.58))

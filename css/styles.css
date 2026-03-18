@@ -455,13 +455,14 @@ html, body {
      All fixed-px sizes are multiplied by --s so the gamble UI scales
      proportionally with the frame and never changes with browser zoom. */
   --s: var(--frame-scale, 1);
-  --dock-collapsed-height: calc(118px * var(--s));
-  --dock-open-height: calc(198px * var(--s));
+  --hud-squeeze: clamp(0.82, var(--frame-squeeze, 1), 1);
+  --dock-collapsed-height: calc(96px * var(--s) * var(--hud-squeeze));
+  --dock-open-height: calc(196px * var(--s) * var(--hud-squeeze));
   --board-width: 100%;
-  --board-layer-height: calc(44px * var(--s));
-  --board-offset-collapsed: calc(-70px * var(--s));
-  --board-offset-expanded: calc(180px * var(--s));
-  --board-surface-top: calc(12px * var(--s));
+  --board-layer-height: calc(44px * var(--s) * var(--hud-squeeze));
+  --board-offset-collapsed: calc(-70px * var(--s) * var(--hud-squeeze));
+  --board-offset-expanded: calc(200px * var(--s) * var(--hud-squeeze));
+  --board-surface-top: calc(12px * var(--s) * var(--hud-squeeze));
   position: absolute;
   inset: 0;
   z-index: 1;
@@ -547,7 +548,7 @@ html, body {
 .gamble-hud.expanded .gamble-toggle-handle {
   /* Expanded: arrow_down, behind the slots board, bottom edge at board top */
   background-image: var(--gamble-arrow-down-asset);
-  bottom: calc(var(--dock-open-height) + var(--board-offset-expanded) + var(--board-layer-height) - 24px * var(--s));
+  bottom: calc(var(--dock-open-height) + var(--board-offset-expanded) + var(--board-layer-height) - 24px * var(--s) * var(--hud-squeeze));
   transform: translate(-50%, 0);
   z-index: 0;
 }
@@ -608,14 +609,14 @@ html, body {
   right: 0;
   bottom: 0;
   height: var(--dock-collapsed-height);
-  padding: calc(8px * var(--s)) calc(8px * var(--s)) calc(10px * var(--s));
+  padding: calc(4px * var(--s) * var(--hud-squeeze)) calc(8px * var(--s)) calc(10px * var(--s) * var(--hud-squeeze));
   background: #1e1e1e;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow: 0 -18px 40px rgba(0, 0, 0, 0.52);
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: calc(10px * var(--s));
+  gap: calc(10px * var(--s) * var(--hud-squeeze));
   pointer-events: auto;
   z-index: 3;
   transition: height 0.42s cubic-bezier(0.22, 1, 0.36, 1), padding 0.42s cubic-bezier(0.22, 1, 0.36, 1);
@@ -627,8 +628,8 @@ html, body {
 
 .gamble-hud.expanded .gamble-dock {
   height: var(--dock-open-height);
-  padding-top: calc(24px * var(--s));
-  padding-bottom: calc(14px * var(--s));
+  padding-top: calc(16px * var(--s) * var(--hud-squeeze));
+  padding-bottom: calc(14px * var(--s) * var(--hud-squeeze));
 }
 
 .gamble-perk-rail {
@@ -681,7 +682,7 @@ html, body {
 
 .gamble-hud.expanded .gamble-info-row {
   opacity: 1;
-  max-height: calc(56px * var(--s));
+  max-height: calc(56px * var(--s) * var(--hud-squeeze));
   pointer-events: auto;
   transform: translateY(0);
 }
@@ -718,7 +719,7 @@ html, body {
 
 .gamble-hud.expanded .gamble-btn {
   opacity: 1;
-  max-height: calc(96px * var(--s));
+  max-height: calc(96px * var(--s) * var(--hud-squeeze));
   pointer-events: auto;
 }
 
@@ -1108,13 +1109,19 @@ html, body {
 /* Level List Overlay */
 .level-list-overlay {
   position: fixed;
-  inset: 0;
+  top: 44px;
+  right: 0;
+  bottom: 0;
+  width: 320px;
+  max-width: 100vw;
   background: var(--bg-primary);
   z-index: 200;
   display: flex;
   flex-direction: column;
   transform: translateX(100%);
   transition: transform 0.25s ease-out;
+  border-left: 1px solid var(--border);
+  box-shadow: -4px 0 20px rgba(0, 0, 0, 0.4);
 }
 
 .level-list-overlay.visible {
@@ -1211,43 +1218,42 @@ html, body {
 /* Physics Settings Overlay */
 .physics-overlay {
   position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.7);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
-  opacity: 0;
-  visibility: hidden;
-  transition: opacity 0.2s, visibility 0.2s;
-  z-index: 150;
+  top: 44px;
+  right: 0;
+  bottom: 0;
+  width: 320px;
+  max-width: 100vw;
+  background: var(--bg-primary);
+  z-index: 200;
+  transform: translateX(100%);
+  transition: transform 0.25s ease;
+  overflow-y: auto;
 }
 
 .physics-overlay.visible {
-  opacity: 1;
-  visibility: visible;
+  transform: translateX(0);
 }
 
 .physics-panel {
   background: var(--bg-secondary);
-  border-radius: 14px;
   width: 100%;
-  max-width: 320px;
-  border: 1px solid var(--border);
-  overflow: hidden;
+  border-left: 1px solid var(--border);
 }
 
 .physics-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 14px;
+  height: 44px;
+  padding: 0 10px;
   border-bottom: 1px solid var(--border);
 }
 
 .physics-header h2 {
   font-size: 14px;
   font-weight: 600;
+  flex: 1;
+  text-align: center;
 }
 
 .physics-content {
@@ -1596,4 +1602,165 @@ html, body {
     width: 40px;
     height: 40px;
   }
+}
+
+/* ─── Campaign Overlays ─────────────────────────────── */
+
+.campaign-overlay {
+  position: fixed;
+  top: 44px;
+  right: 0;
+  bottom: 0;
+  width: 320px;
+  max-width: 100vw;
+  background: var(--bg-primary);
+  z-index: 210;
+  display: flex;
+  flex-direction: column;
+  transform: translateX(100%);
+  transition: transform 0.25s ease-out;
+  border-left: 1px solid var(--border);
+  box-shadow: -4px 0 20px rgba(0, 0, 0, 0.4);
+}
+
+.campaign-overlay.visible {
+  transform: translateX(0);
+}
+
+.campaign-header {
+  display: flex;
+  align-items: center;
+  height: 44px;
+  padding: 0 10px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  gap: 8px;
+}
+
+.campaign-name-input {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  font-size: 14px;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  padding: 0 8px;
+}
+
+.campaign-content,
+.campaign-edit-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px;
+}
+
+.campaign-section {
+  margin-bottom: 16px;
+}
+
+.campaign-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+
+.campaign-level-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.campaign-level-item {
+  display: flex;
+  align-items: center;
+  padding: 8px 10px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  gap: 8px;
+}
+
+.campaign-level-num {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--bg-primary);
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.campaign-level-name {
+  flex: 1;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.campaign-level-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.campaign-action-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.campaign-action-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.campaign-action-btn:active:not(:disabled) {
+  background: var(--border);
+}
+
+.campaign-remove-btn {
+  color: #f85149;
+}
+
+.campaign-add-btn {
+  background: var(--accent);
+  color: var(--bg-primary);
+  border-color: var(--accent);
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.campaign-available-item {
+  opacity: 0.8;
+}
+
+.campaign-empty-hint {
+  font-size: 12px;
+  color: var(--text-dim);
+  padding: 12px;
+  text-align: center;
+}
+
+.campaign-edit-level-btn {
+  color: var(--accent) !important;
 }

@@ -388,8 +388,27 @@ export class Game {
     const x = pos.x;
     const y = pos.y;
 
-    // Calculate angle from launcher to touch point
-    this.aimAngle = Utils.angleBetween(this.launchX, this.launchY, x, y);
+    // Calculate aim angle with gravity compensation so trajectory
+    // passes through the cursor position, not just aims in its direction
+    const dx = x - this.launchX;
+    const dy = y - this.launchY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist < 5) {
+      this.aimAngle = Math.PI / 2;
+    } else {
+      const g = PHYSICS_CONFIG.gravity;
+      const v = PHYSICS_CONFIG.launchPower;
+      // Estimate ticks to reach target, accounting for friction at midpoint
+      const rawTicks = dist / v;
+      const frictionMid = Math.pow(PHYSICS_CONFIG.friction, rawTicks * 0.5);
+      const effectiveV = v * (1 + frictionMid) / 2;
+      const ticks = dist / effectiveV;
+      // Vertical gravity drop over that time
+      const drop = 0.5 * g * ticks * ticks;
+      // Aim above cursor to compensate (lower Y = higher on screen)
+      this.aimAngle = Utils.angleBetween(this.launchX, this.launchY, x, y - drop);
+    }
 
     // Update trajectory prediction
     this.updateTrajectory();
@@ -956,8 +975,11 @@ export class Game {
       const peg = event.peg;
       this.yoyoThread.notePegContact(event.ball, peg);
 
-      // Portal teleport: notify animator, no peg activation
+      // Portal teleport: notify animator and yoyo thread, no peg activation
       if (event.portalHit) {
+        if (event.portalExit) {
+          this.yoyoThread.notePortalTeleport(event.ball, event.peg, event.portalExit);
+        }
         this.animator.notifyHit(peg.id);
         continue;
       }
@@ -1238,6 +1260,7 @@ export class Game {
 
   start() {
     if (this.animationId) return;
+    this._paused = false;
     this.accumulatorMs = 0;
     this.lastTime = performance.now();
     this.animationId = requestAnimationFrame((t) => this.gameLoop(t));
@@ -1248,8 +1271,28 @@ export class Game {
       cancelAnimationFrame(this.animationId);
       this.animationId = null;
     }
+    this._paused = false;
     this.accumulatorMs = 0;
     this.abortController.abort();
+  }
+
+  pause() {
+    if (!this.animationId || this._paused) return;
+    cancelAnimationFrame(this.animationId);
+    this.animationId = null;
+    this._paused = true;
+  }
+
+  resume() {
+    if (!this._paused) return;
+    this._paused = false;
+    this.accumulatorMs = 0;
+    this.lastTime = performance.now();
+    this.animationId = requestAnimationFrame((t) => this.gameLoop(t));
+  }
+
+  isPaused() {
+    return !!this._paused;
   }
 
   resize(width, height) {

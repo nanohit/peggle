@@ -7,14 +7,14 @@ export const PHYSICS_CONFIG = {
   gravity: 0.12,
   friction: 0.998,
   bounce: 0.65,
-  pegRadius: 10,
+  pegRadius: 9,
   maxVelocity: 15,
   launchPower: 8,
   timeScale: 1.0,  // Speed multiplier
-  
+
   // Brick dimensions (when shape is 'brick')
-  brickWidth: 40,
-  brickHeight: 12
+  brickWidth: 36,
+  brickHeight: 11
 };
 
 // Get ball radius (always same as peg radius)
@@ -731,7 +731,7 @@ export class PhysicsEngine {
         this.checkFlipperCollisions(ball, (step + 1) / numSteps, frac);
         const portalResult = this.tryPortalTeleport(ball, prevX, prevY);
         if (portalResult && portalResult.entry) {
-          hitEvents.push({ peg: portalResult.entry, ball, portalHit: true });
+          hitEvents.push({ peg: portalResult.entry, ball, portalHit: true, portalExit: portalResult.exit || null });
           if (portalResult.exit) {
             hitEvents.push({ peg: portalResult.exit, ball, portalHit: true });
           }
@@ -1153,6 +1153,11 @@ export class PhysicsEngine {
   predictTrajectory(startX, startY, angle, power, maxSteps = 500, stopAtFirstHit = true) {
     const points = [];
     const simulatedHits = [];
+    const timeScale = PHYSICS_CONFIG.timeScale;
+    const frictionScale = Math.pow(PHYSICS_CONFIG.friction, timeScale);
+    const flipperBounce = (this.flippers && this.flippers.bounce != null)
+      ? this.flippers.bounce : PHYSICS_CONFIG.bounce;
+    const MAX_STEP_PX = 4; // match actual physics sub-step size
 
     // Create simulated ball
     const simBall = {
@@ -1165,125 +1170,157 @@ export class PhysicsEngine {
       speedCapBoost: 0
     };
 
+    this._buildPegGrid();
+
     for (let i = 0; i < maxSteps; i++) {
       points.push({ x: simBall.x, y: simBall.y });
 
-      // Apply physics
-      simBall.vy += PHYSICS_CONFIG.gravity;
-      simBall.vx *= PHYSICS_CONFIG.friction;
-      simBall.vy *= PHYSICS_CONFIG.friction;
+      // Phase 1: update velocity (gravity + friction + speed clamp) — matching Ball.updateVelocity()
+      simBall.vy += PHYSICS_CONFIG.gravity * timeScale;
+      simBall.vx *= frictionScale;
+      simBall.vy *= frictionScale;
+
+      // Speed clamp — matches Ball.updateVelocity() maxSpeed check
+      const speed = Math.sqrt(simBall.vx * simBall.vx + simBall.vy * simBall.vy);
+      const maxSpeed = PHYSICS_CONFIG.maxVelocity + (simBall.speedCapBoost || 0);
+      if (speed > maxSpeed) {
+        const sc = maxSpeed / speed;
+        simBall.vx *= sc;
+        simBall.vy *= sc;
+      }
+      // Decay speedCapBoost like actual physics
+      if (simBall.speedCapBoost > 0) {
+        simBall.speedCapBoost *= 0.9;
+        if (simBall.speedCapBoost < 0.05) simBall.speedCapBoost = 0;
+      }
       if (simBall.portalCooldown > 0) simBall.portalCooldown--;
 
-      const prevX = simBall.x;
-      const prevY = simBall.y;
-      simBall.x += simBall.vx;
-      simBall.y += simBall.vy;
+      // Phase 2: sub-stepped position advancement — matching actual physics
+      const frameSpeed = Math.sqrt(simBall.vx * simBall.vx + simBall.vy * simBall.vy) * timeScale;
+      const numSteps = Math.max(1, Math.ceil(frameSpeed / MAX_STEP_PX));
+      const frac = 1 / numSteps;
 
-      // Wall collisions
-      if (simBall.x - simBall.radius < 0) {
-        simBall.x = simBall.radius;
-        simBall.vx = Math.abs(simBall.vx) * PHYSICS_CONFIG.bounce;
-      }
-      if (simBall.x + simBall.radius > this.width) {
-        simBall.x = this.width - simBall.radius;
-        simBall.vx = -Math.abs(simBall.vx) * PHYSICS_CONFIG.bounce;
-      }
-      if (simBall.y - simBall.radius < 0) {
-        simBall.y = simBall.radius;
-        simBall.vy = Math.abs(simBall.vy) * PHYSICS_CONFIG.bounce;
-      }
+      let stopped = false;
+      for (let step = 0; step < numSteps; step++) {
+        const prevX = simBall.x;
+        const prevY = simBall.y;
+        simBall.x += simBall.vx * timeScale * frac;
+        simBall.y += simBall.vy * timeScale * frac;
 
-      const portalHit = this.tryPortalTeleport(simBall, prevX, prevY, { previewOnly: true });
-      if (portalHit && portalHit.hit) {
-        points.push({ x: portalHit.x, y: portalHit.y });
-        break;
-      }
-
-      // Check peg collisions (using spatial grid when available)
-      this._buildPegGrid();
-      const candidates = this._getPegCandidateIndices(simBall);
-      let hitPeg = false;
-      if (candidates) {
-        for (let ci = 0; ci < candidates.length; ci++) {
-          const peg = this.pegs[candidates[ci]];
-          if (!peg) continue;
-          let collision;
-
-          if (peg.shape === 'brick') {
-            collision = circleRectCollision(simBall, peg);
-          } else {
-            collision = Utils.circleCollision(simBall, {
-              x: peg.x,
-              y: peg.y,
-              radius: this.getPegCollisionRadius(peg)
-            });
-          }
-
-          if (collision) {
-            simBall.x += collision.normal.x * (collision.depth + 0.5);
-            simBall.y += collision.normal.y * (collision.depth + 0.5);
-
-            const bounce = PHYSICS_CONFIG.bounce;
-            simBall.vx -= (1 + bounce) * collision.relativeVelocityNormal * collision.normal.x;
-            simBall.vy -= (1 + bounce) * collision.relativeVelocityNormal * collision.normal.y;
-
-            simulatedHits.push({ x: simBall.x, y: simBall.y, pegId: peg.id });
-
-            if (stopAtFirstHit) {
-              points.push({ x: simBall.x, y: simBall.y });
-              return { points, hits: simulatedHits };
-            }
-            hitPeg = true;
-            break;
-          }
+        // Wall collisions
+        if (simBall.x - simBall.radius < 0) {
+          simBall.x = simBall.radius;
+          simBall.vx = Math.abs(simBall.vx) * PHYSICS_CONFIG.bounce;
         }
-      } else {
-        for (const peg of this.pegs) {
-          if (this.isPortalPeg(peg)) continue;
-          let collision;
-
-          if (peg.shape === 'brick') {
-            collision = circleRectCollision(simBall, peg);
-          } else {
-            collision = Utils.circleCollision(simBall, {
-              x: peg.x,
-              y: peg.y,
-              radius: this.getPegCollisionRadius(peg)
-            });
-          }
-
-          if (collision) {
-            simBall.x += collision.normal.x * (collision.depth + 0.5);
-            simBall.y += collision.normal.y * (collision.depth + 0.5);
-
-            const bounce = PHYSICS_CONFIG.bounce;
-            simBall.vx -= (1 + bounce) * collision.relativeVelocityNormal * collision.normal.x;
-            simBall.vy -= (1 + bounce) * collision.relativeVelocityNormal * collision.normal.y;
-
-            simulatedHits.push({ x: simBall.x, y: simBall.y, pegId: peg.id });
-
-            if (stopAtFirstHit) {
-              points.push({ x: simBall.x, y: simBall.y });
-              return { points, hits: simulatedHits };
-            }
-            hitPeg = true;
-            break;
-          }
+        if (simBall.x + simBall.radius > this.width) {
+          simBall.x = this.width - simBall.radius;
+          simBall.vx = -Math.abs(simBall.vx) * PHYSICS_CONFIG.bounce;
         }
-      }
+        if (simBall.y - simBall.radius < 0) {
+          simBall.y = simBall.radius;
+          simBall.vy = Math.abs(simBall.vy) * PHYSICS_CONFIG.bounce;
+        }
 
-      // Stop trajectory at flippers — user controls them so prediction beyond is meaningless
-      const flipperRects = this.getFlipperRects();
-      let hitFlipper = false;
-      for (const rect of flipperRects) {
-        const collision = circleRectOverlap(simBall, rect);
-        if (collision) {
-          points.push({ x: simBall.x, y: simBall.y });
-          hitFlipper = true;
+        // Portal check
+        const portalHit = this.tryPortalTeleport(simBall, prevX, prevY, { previewOnly: true });
+        if (portalHit && portalHit.hit) {
+          points.push({ x: portalHit.x, y: portalHit.y });
+          stopped = true;
           break;
         }
-      }
-      if (hitFlipper) break;
+
+        // Flipper collisions
+        const flipperRects = this.getFlipperRects();
+        for (const rect of flipperRects) {
+          const collision = circleRectOverlap(simBall, rect);
+          if (collision) {
+            simBall.x += collision.normal.x * (collision.depth + 0.5);
+            simBall.y += collision.normal.y * (collision.depth + 0.5);
+            const dvn = simBall.vx * collision.normal.x + simBall.vy * collision.normal.y;
+            if (dvn < 0) {
+              simBall.vx -= (1 + flipperBounce) * dvn * collision.normal.x;
+              simBall.vy -= (1 + flipperBounce) * dvn * collision.normal.y;
+            }
+            this.clampBallSpeed(simBall);
+            break;
+          }
+        }
+
+        // Peg collisions
+        const candidates = this._getPegCandidateIndices(simBall);
+        if (candidates) {
+          for (let ci = 0; ci < candidates.length; ci++) {
+            const peg = this.pegs[candidates[ci]];
+            if (!peg || this.isPortalPeg(peg)) continue;
+            let collision;
+
+            if (peg.shape === 'brick') {
+              collision = circleRectCollision(simBall, peg);
+            } else {
+              collision = Utils.circleCollision(simBall, {
+                x: peg.x,
+                y: peg.y,
+                radius: this.getPegCollisionRadius(peg)
+              });
+            }
+
+            if (collision) {
+              simBall.x += collision.normal.x * (collision.depth + 0.5);
+              simBall.y += collision.normal.y * (collision.depth + 0.5);
+
+              const bounce = (peg.type === 'bumper' && peg.bumperBounce != null)
+                ? peg.bumperBounce : PHYSICS_CONFIG.bounce;
+              simBall.vx -= (1 + bounce) * collision.relativeVelocityNormal * collision.normal.x;
+              simBall.vy -= (1 + bounce) * collision.relativeVelocityNormal * collision.normal.y;
+              this.clampBallSpeed(simBall);
+
+              simulatedHits.push({ x: simBall.x, y: simBall.y, pegId: peg.id });
+
+              if (stopAtFirstHit) {
+                points.push({ x: simBall.x, y: simBall.y });
+                return { points, hits: simulatedHits };
+              }
+              break;
+            }
+          }
+        } else {
+          for (const peg of this.pegs) {
+            if (this.isPortalPeg(peg)) continue;
+            let collision;
+
+            if (peg.shape === 'brick') {
+              collision = circleRectCollision(simBall, peg);
+            } else {
+              collision = Utils.circleCollision(simBall, {
+                x: peg.x,
+                y: peg.y,
+                radius: this.getPegCollisionRadius(peg)
+              });
+            }
+
+            if (collision) {
+              simBall.x += collision.normal.x * (collision.depth + 0.5);
+              simBall.y += collision.normal.y * (collision.depth + 0.5);
+
+              const bounce = (peg.type === 'bumper' && peg.bumperBounce != null)
+                ? peg.bumperBounce : PHYSICS_CONFIG.bounce;
+              simBall.vx -= (1 + bounce) * collision.relativeVelocityNormal * collision.normal.x;
+              simBall.vy -= (1 + bounce) * collision.relativeVelocityNormal * collision.normal.y;
+              this.clampBallSpeed(simBall);
+
+              simulatedHits.push({ x: simBall.x, y: simBall.y, pegId: peg.id });
+
+              if (stopAtFirstHit) {
+                points.push({ x: simBall.x, y: simBall.y });
+                return { points, hits: simulatedHits };
+              }
+              break;
+            }
+          }
+        }
+      } // end sub-step loop
+
+      if (stopped) break;
 
       // Ball fell below active loss threshold (camera-aware in survival mode)
       if (simBall.y > this.ballLossY) {
