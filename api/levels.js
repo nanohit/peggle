@@ -1,11 +1,30 @@
-import { Redis } from '@upstash/redis';
-const kv = Redis.fromEnv();
+import Redis from 'ioredis';
+
+let redis;
+function getRedis() {
+  if (!redis) redis = new Redis(process.env.REDIS_URL);
+  return redis;
+}
+
+async function kvGet(key) {
+  const raw = await getRedis().get(key);
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch { return raw; }
+}
+
+async function kvSet(key, value) {
+  await getRedis().set(key, JSON.stringify(value));
+}
+
+async function kvDel(key) {
+  await getRedis().del(key);
+}
 
 const INDEX_KEY = 'level:__index';
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 
 function checkAdmin(req) {
-  if (!ADMIN_TOKEN) return true; // no token configured = open access
+  if (!ADMIN_TOKEN) return true;
   const auth = req.headers.authorization;
   return auth === `Bearer ${ADMIN_TOKEN}`;
 }
@@ -15,12 +34,10 @@ export default async function handler(req, res) {
     if (req.method === 'GET') {
       const { name } = req.query;
       if (!name) {
-        // List all level names
-        const names = (await kv.get(INDEX_KEY)) || [];
+        const names = (await kvGet(INDEX_KEY)) || [];
         return res.json({ names });
       }
-      // Get single level
-      const data = await kv.get(`level:${name}`);
+      const data = await kvGet(`level:${name}`);
       if (!data) return res.status(404).json({ error: 'Not found' });
       return res.json(data);
     }
@@ -30,14 +47,13 @@ export default async function handler(req, res) {
       const { name, data } = req.body;
       if (!name || !data) return res.status(400).json({ error: 'name and data required' });
 
-      await kv.set(`level:${name}`, data);
+      await kvSet(`level:${name}`, data);
 
-      // Update index
-      const names = (await kv.get(INDEX_KEY)) || [];
+      const names = (await kvGet(INDEX_KEY)) || [];
       if (!names.includes(name)) {
         names.push(name);
         names.sort();
-        await kv.set(INDEX_KEY, names);
+        await kvSet(INDEX_KEY, names);
       }
 
       return res.json({ ok: true });
@@ -48,12 +64,11 @@ export default async function handler(req, res) {
       const { name } = req.query;
       if (!name) return res.status(400).json({ error: 'name required' });
 
-      await kv.del(`level:${name}`);
+      await kvDel(`level:${name}`);
 
-      // Update index
-      const names = (await kv.get(INDEX_KEY)) || [];
+      const names = (await kvGet(INDEX_KEY)) || [];
       const filtered = names.filter(n => n !== name);
-      await kv.set(INDEX_KEY, filtered);
+      await kvSet(INDEX_KEY, filtered);
 
       return res.json({ ok: true });
     }

@@ -1,5 +1,24 @@
-import { Redis } from '@upstash/redis';
-const kv = Redis.fromEnv();
+import Redis from 'ioredis';
+
+let redis;
+function getRedis() {
+  if (!redis) redis = new Redis(process.env.REDIS_URL);
+  return redis;
+}
+
+async function kvGet(key) {
+  const raw = await getRedis().get(key);
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch { return raw; }
+}
+
+async function kvSet(key, value) {
+  await getRedis().set(key, JSON.stringify(value));
+}
+
+async function kvDel(key) {
+  await getRedis().del(key);
+}
 
 const INDEX_KEY = 'campaign:__index';
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
@@ -16,26 +35,23 @@ export default async function handler(req, res) {
       const { name, resolve } = req.query;
 
       if (!name) {
-        // List all campaigns (name + level count)
-        const names = (await kv.get(INDEX_KEY)) || [];
+        const names = (await kvGet(INDEX_KEY)) || [];
         const campaigns = [];
         for (const n of names) {
-          const c = await kv.get(`campaign:${n}`);
+          const c = await kvGet(`campaign:${n}`);
           if (c) campaigns.push({ name: n, levelCount: (c.levelNames || []).length });
         }
         return res.json({ campaigns });
       }
 
-      // Get single campaign
-      const campaign = await kv.get(`campaign:${name}`);
+      const campaign = await kvGet(`campaign:${name}`);
       if (!campaign) return res.status(404).json({ error: 'Not found' });
 
-      // If resolve=true, fetch full level data for the player
       if (resolve === 'true') {
         const levelNames = campaign.levelNames || [];
         const levels = [];
         for (const ln of levelNames) {
-          const levelData = await kv.get(`level:${ln}`);
+          const levelData = await kvGet(`level:${ln}`);
           if (levelData) levels.push(levelData);
         }
         return res.json({ name: campaign.name || name, levels });
@@ -49,14 +65,13 @@ export default async function handler(req, res) {
       const { name, data } = req.body;
       if (!name || !data) return res.status(400).json({ error: 'name and data required' });
 
-      await kv.set(`campaign:${name}`, data);
+      await kvSet(`campaign:${name}`, data);
 
-      // Update index
-      const names = (await kv.get(INDEX_KEY)) || [];
+      const names = (await kvGet(INDEX_KEY)) || [];
       if (!names.includes(name)) {
         names.push(name);
         names.sort();
-        await kv.set(INDEX_KEY, names);
+        await kvSet(INDEX_KEY, names);
       }
 
       return res.json({ ok: true });
@@ -67,11 +82,11 @@ export default async function handler(req, res) {
       const { name } = req.query;
       if (!name) return res.status(400).json({ error: 'name required' });
 
-      await kv.del(`campaign:${name}`);
+      await kvDel(`campaign:${name}`);
 
-      const names = (await kv.get(INDEX_KEY)) || [];
+      const names = (await kvGet(INDEX_KEY)) || [];
       const filtered = names.filter(n => n !== name);
-      await kv.set(INDEX_KEY, filtered);
+      await kvSet(INDEX_KEY, filtered);
 
       return res.json({ ok: true });
     }
