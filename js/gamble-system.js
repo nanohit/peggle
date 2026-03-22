@@ -142,10 +142,11 @@ export class GambleSystem {
       probability: this.settings.perkProbabilities[perk.id]
     })));
 
-    this.lastSpinGrid = Array.from({ length: SLOT_ROWS }, () => Array.from({ length: SLOT_COLS }, () => null));
+    this.lastSpinGrid = this.createInitialSpinGrid();
     this.lastWinningCells = new Set();
     this.lastMessage = 'Press Spin to roll the slots.';
     this.lastMessageType = 'info';
+    this._reelAnimation = null;
 
     this.ui = null;
     this.unsubscribeGameState = null;
@@ -177,6 +178,7 @@ export class GambleSystem {
   }
 
   dispose() {
+    this._cancelReelAnimation();
     if (this.unsubscribeGameState) {
       this.unsubscribeGameState();
       this.unsubscribeGameState = null;
@@ -260,6 +262,53 @@ export class GambleSystem {
     }
   }
 
+  getPerkById(symbolId) {
+    if (typeof symbolId !== 'string') return null;
+    return this.perkDefinitions.find(perk => perk.id === symbolId) || null;
+  }
+
+  getRandomPerk() {
+    if (!Array.isArray(this.perkDefinitions) || this.perkDefinitions.length === 0) return null;
+    const index = Math.floor(Math.random() * this.perkDefinitions.length);
+    return this.perkDefinitions[index] || null;
+  }
+
+  createInitialSpinGrid() {
+    return Array.from({ length: SLOT_ROWS }, () => Array.from({ length: SLOT_COLS }, () => {
+      const perk = this.getRandomPerk();
+      return perk ? perk.id : null;
+    }));
+  }
+
+  ensureCellPerk(row, col) {
+    if (!Array.isArray(this.lastSpinGrid)) {
+      this.lastSpinGrid = Array.from({ length: SLOT_ROWS }, () => Array.from({ length: SLOT_COLS }, () => null));
+    }
+    if (!Array.isArray(this.lastSpinGrid[row])) {
+      this.lastSpinGrid[row] = Array.from({ length: SLOT_COLS }, () => null);
+    }
+    let perk = this.getPerkById(this.lastSpinGrid[row][col]);
+    if (perk) return perk;
+    perk = this.getRandomPerk();
+    if (perk) {
+      this.lastSpinGrid[row][col] = perk.id;
+    }
+    return perk;
+  }
+
+  renderCellSymbol(cell, perk) {
+    if (!cell) return;
+    if (perk) {
+      cell.textContent = perk.icon;
+      cell.style.setProperty('--cell-color', perk.color);
+      cell.classList.remove('placeholder');
+      return;
+    }
+    cell.textContent = '';
+    cell.style.setProperty('--cell-color', '#6e7681');
+    cell.classList.add('placeholder');
+  }
+
   buildUi() {
     const root = document.createElement('div');
     root.className = 'gamble-hud collapsed';
@@ -268,7 +317,19 @@ export class GambleSystem {
     backdrop.type = 'button';
     backdrop.className = 'gamble-backdrop';
     backdrop.setAttribute('aria-label', 'Close slots panel');
-    backdrop.addEventListener('click', () => this.setPanelExpanded(false));
+    backdrop.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.setPanelExpanded(false);
+    });
+    backdrop.addEventListener('touchstart', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+    }, { passive: false });
+    backdrop.addEventListener('touchend', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      this.setPanelExpanded(false);
+    }, { passive: false });
     root.appendChild(backdrop);
 
     const boardLayer = document.createElement('div');
@@ -292,7 +353,8 @@ export class GambleSystem {
         cell.className = 'gamble-cell';
         cell.dataset.row = String(row);
         cell.dataset.col = String(col);
-        cell.textContent = '·';
+        const perk = this.ensureCellPerk(row, col);
+        this.renderCellSymbol(cell, perk);
         grid.appendChild(cell);
         gridCells.push(cell);
       }
@@ -304,13 +366,24 @@ export class GambleSystem {
     toggleButton.className = 'gamble-toggle-handle';
     toggleButton.setAttribute('aria-label', 'Toggle slots panel');
     toggleButton.setAttribute('aria-expanded', 'false');
-    toggleButton.addEventListener('click', () => {
+    toggleButton.addEventListener('click', (e) => {
+      e.stopPropagation();
       this.setPanelExpanded(root.classList.contains('collapsed'));
     });
+    toggleButton.addEventListener('touchstart', (e) => {
+      e.stopPropagation();
+    }, { passive: false });
+    toggleButton.addEventListener('touchend', (e) => {
+      e.stopPropagation();
+    }, { passive: false });
     root.appendChild(toggleButton);
 
     const dock = document.createElement('div');
     dock.className = 'gamble-dock';
+    // Prevent touch events on dock from leaking to canvas below
+    dock.addEventListener('touchstart', (e) => { e.stopPropagation(); }, { passive: false });
+    dock.addEventListener('touchend', (e) => { e.stopPropagation(); }, { passive: false });
+    dock.addEventListener('touchmove', (e) => { e.stopPropagation(); }, { passive: false });
     root.appendChild(dock);
 
     const perkRail = document.createElement('div');
@@ -673,6 +746,7 @@ export class GambleSystem {
   }
 
   canSpin() {
+    if (this._reelAnimation) return false;
     return this.canInteract() && !!this.game?.canGamble?.(this.settings.ballCost);
   }
 
@@ -686,6 +760,7 @@ export class GambleSystem {
   }
 
   spin() {
+    if (this._reelAnimation) return;
     if (!this.canSpin()) {
       this.setMessage('Cannot gamble while ball is in flight or balls are too low.', 'warn');
       this.refreshUi();
@@ -702,7 +777,192 @@ export class GambleSystem {
     const luck = this.getEffectiveLuck();
     this.applyProbabilitySettings();
     const { grid, wins } = this.engine.spin(luck.total);
-    this.lastSpinGrid = grid;
+    this._animateReels(grid, wins, luck);
+  }
+
+  _cancelReelAnimation() {
+    if (!this._reelAnimation) return;
+    if (this._reelAnimation.rafId) {
+      cancelAnimationFrame(this._reelAnimation.rafId);
+    }
+    if (this._reelAnimation.reels) {
+      for (const r of this._reelAnimation.reels) {
+        r.container?.remove();
+      }
+    }
+    this._reelAnimation = null;
+    if (this.ui) {
+      for (const cell of this.ui.gridCells) {
+        cell.style.visibility = '';
+      }
+    }
+  }
+
+  _animateReels(finalGrid, wins, luck) {
+    this._cancelReelAnimation();
+    if (!this.ui) {
+      this.lastSpinGrid = finalGrid;
+      this.lastWinningCells = this.engine.getWinningCells(wins);
+      const { rewards } = this.resolveRewards(wins);
+      this.addRewards(rewards);
+      this.refreshUi();
+      return;
+    }
+
+    this.ui.spinButton.disabled = true;
+    this.setMessage('', 'info');
+    this.lastWinningCells = new Set();
+    const winningCells = this.engine.getWinningCells(wins);
+
+    const grid = this.ui.gridCells[0]?.parentElement;
+    if (!grid) {
+      this.lastSpinGrid = finalGrid;
+      this.lastWinningCells = this.engine.getWinningCells(wins);
+      const { rewards } = this.resolveRewards(wins);
+      this.addRewards(rewards);
+      this.refreshUi();
+      return;
+    }
+    const cellFontSize = getComputedStyle(this.ui.gridCells[0]).fontSize;
+    const gridRect = grid.getBoundingClientRect();
+    const cellHeightPx = gridRect.height > 0 ? (gridRect.height / SLOT_ROWS) : 1;
+
+    // Snapshot what's currently on screen so the strip starts seamlessly.
+    // If a cell has no real symbol (placeholder), use a random perk icon
+    // so the strip is NEVER empty — always shows real symbols.
+    const curContent = [];
+    for (let col = 0; col < SLOT_COLS; col++) {
+      curContent[col] = [];
+      for (let row = 0; row < SLOT_ROWS; row++) {
+        const perk = this.ensureCellPerk(row, col);
+        curContent[col][row] = {
+          text: perk ? perk.icon : '',
+          color: perk ? perk.color : '#6e7681'
+        };
+      }
+    }
+
+    // Strip layout (top → bottom): [final 3] [random buffer] [current 3]
+    // Starts showing current symbols at the bottom (translateY very negative).
+    // Scrolls downward (translateY → 0) so symbols cascade DOWN through window.
+    // Ends showing final symbols at the top.
+    const BUFFER = 12;
+    const TOTAL = SLOT_ROWS + BUFFER + SLOT_ROWS;
+    const STRIP_H_PX = cellHeightPx * TOTAL;
+    const INITIAL_Y = -(TOTAL - SLOT_ROWS) * cellHeightPx;
+    const FINAL_Y = 0;
+
+    const BASE_DURATION_MS = 920;
+    const COL_EXTRA_MS = 50;
+    const startTime = performance.now();
+
+    const reels = [];
+    for (let col = 0; col < SLOT_COLS; col++) {
+      const colCellRect = this.ui.gridCells[col]?.getBoundingClientRect();
+      const leftPx = colCellRect ? (colCellRect.left - gridRect.left) : (gridRect.width * col / SLOT_COLS);
+      const widthPx = colCellRect ? colCellRect.width : (gridRect.width / SLOT_COLS);
+
+      const container = document.createElement('div');
+      container.style.cssText =
+        `position:absolute;left:${leftPx}px;width:${widthPx}px;top:0;bottom:0;overflow:hidden;`;
+
+      const strip = document.createElement('div');
+      strip.style.cssText =
+        `position:absolute;left:0;right:0;top:0;height:${STRIP_H_PX}px;` +
+        `display:flex;flex-direction:column;will-change:transform;` +
+        `transform:translateY(${INITIAL_Y}px)`;
+
+      for (let i = 0; i < TOTAL; i++) {
+        const sym = document.createElement('div');
+        sym.style.cssText =
+          `flex:0 0 ${cellHeightPx}px;height:${cellHeightPx}px;display:flex;align-items:center;` +
+          `justify-content:center;font-size:${cellFontSize};line-height:1;` +
+          `text-shadow:0 0 14px rgba(0,0,0,0.68)`;
+
+        if (i < SLOT_ROWS) {
+          // Top of strip = final result symbols
+          const perk = this.getPerkById(finalGrid[i][col]) || this.getRandomPerk();
+          sym.textContent = perk ? perk.icon : '';
+          sym.style.color = perk ? perk.color : '#6e7681';
+        } else if (i >= TOTAL - SLOT_ROWS) {
+          // Bottom of strip = current on-screen symbols (seamless start)
+          const row = i - (TOTAL - SLOT_ROWS);
+          sym.textContent = curContent[col][row].text;
+          sym.style.color = curContent[col][row].color;
+        } else {
+          // Middle = random symbols that scroll past
+          const perk = this.getRandomPerk();
+          sym.textContent = perk ? perk.icon : '';
+          sym.style.color = perk ? perk.color : '#6e7681';
+        }
+        strip.appendChild(sym);
+      }
+
+      container.appendChild(strip);
+      grid.appendChild(container);
+
+      reels.push({
+        container,
+        strip,
+        pos: INITIAL_Y,
+        durationMs: BASE_DURATION_MS + col * COL_EXTRA_MS,
+        stopped: false
+      });
+    }
+
+    // Hide real cells — overlays are now covering them with identical content
+    for (const cell of this.ui.gridCells) {
+      cell.classList.remove('winning');
+      cell.style.visibility = 'hidden';
+    }
+
+    const tick = (now) => {
+      const elapsed = now - startTime;
+
+      for (let col = 0; col < SLOT_COLS; col++) {
+        const r = reels[col];
+        if (r.stopped) continue;
+
+        // Fast launch, then smooth deceleration to stop.
+        const t = Math.min(1, elapsed / r.durationMs);
+        const eased = 1 - Math.pow(1 - t, 3); // easeOutCubic
+        r.pos = INITIAL_Y + (FINAL_Y - INITIAL_Y) * eased;
+
+        if (t >= 1) {
+          r.pos = FINAL_Y;
+          r.stopped = true;
+          // Reveal real cells with final values, remove overlay
+          for (let row = 0; row < SLOT_ROWS; row++) {
+            const idx = row * SLOT_COLS + col;
+            const cell = this.ui.gridCells[idx];
+            const perk = this.getPerkById(finalGrid[row][col]) || this.getRandomPerk();
+            this.renderCellSymbol(cell, perk);
+            const key = `${row},${col}`;
+            cell.classList.toggle('winning', winningCells.has(key));
+            cell.style.visibility = '';
+          }
+          r.container.remove();
+          continue;
+        }
+
+        r.strip.style.transform = `translateY(${r.pos}px)`;
+      }
+
+      if (reels.every(r => r.stopped)) {
+        this._reelAnimation = null;
+        this._onReelsFinished(finalGrid, wins, luck);
+        return;
+      }
+
+      this._reelAnimation.rafId = requestAnimationFrame(tick);
+    };
+
+    this._reelAnimation = { reels };
+    this._reelAnimation.rafId = requestAnimationFrame(tick);
+  }
+
+  _onReelsFinished(finalGrid, wins, luck) {
+    this.lastSpinGrid = finalGrid;
     this.lastWinningCells = this.engine.getWinningCells(wins);
 
     const { rewards, jackpot } = this.resolveRewards(wins);
@@ -714,6 +974,12 @@ export class GambleSystem {
       this.setMessage(`JACKPOT! ${formatRewardSummary(rewards, this.perkDefinitions)}`, 'win');
     } else {
       this.setMessage(`Won: ${formatRewardSummary(rewards, this.perkDefinitions)}`, 'win');
+    }
+
+    if (this.ui) {
+      for (const cell of this.ui.gridCells) {
+        cell.style.visibility = '';
+      }
     }
 
     this.refreshUi();
@@ -854,15 +1120,16 @@ export class GambleSystem {
     const luck = this.getEffectiveLuck();
     this.ui.luckLabel.textContent = `Luck ${luck.total} (M${luck.manual} + A${luck.auto}) · Cost ${this.settings.ballCost}`;
 
-    for (const cell of this.ui.gridCells) {
-      const row = Number(cell.dataset.row);
-      const col = Number(cell.dataset.col);
-      const symbolId = this.lastSpinGrid?.[row]?.[col] || null;
-      const perk = this.perkDefinitions.find(item => item.id === symbolId);
-      cell.textContent = perk ? perk.icon : '·';
-      cell.style.setProperty('--cell-color', perk ? perk.color : '#6e7681');
-      const key = `${row},${col}`;
-      cell.classList.toggle('winning', this.lastWinningCells.has(key));
+    // Skip grid cell updates while reel animation is running
+    if (!this._reelAnimation) {
+      for (const cell of this.ui.gridCells) {
+        const row = Number(cell.dataset.row);
+        const col = Number(cell.dataset.col);
+        const perk = this.ensureCellPerk(row, col);
+        this.renderCellSymbol(cell, perk);
+        const key = `${row},${col}`;
+        cell.classList.toggle('winning', this.lastWinningCells.has(key));
+      }
     }
 
     this.ui.resultLabel.textContent = this.lastMessage;

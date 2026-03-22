@@ -57,7 +57,8 @@ export class Game {
     this.physics = new PhysicsEngine(canvas.width, canvas.height);
     
     // Game state
-    this.state = 'idle'; // idle, aiming, playing, won, lost
+    this.state = 'idle'; // idle, aiming, confirmAim, playing, won, lost
+    this.confirmShoot = false; // When true, release locks aim; second tap fires
     this.pegs = [];
     this.balls = [];
     this.score = 0;
@@ -139,44 +140,106 @@ export class Game {
     const canvas = this.canvas;
     const sig = { signal: this.abortController.signal };
 
-    // Touch/Mouse handling for aiming
-    const handleStart = (e) => {
+    // --- Touch input (standard + confirm-shoot with tap vs drag detection) ---
+    let touchDragged = false;
+
+    canvas.addEventListener('touchstart', (e) => {
       if (this._handleDebugDragStart(e)) return;
-      if (this.state === 'won' || this.state === 'lost') {
-        // Restart handling
+      if (this.state === 'won' || this.state === 'lost') return;
+      touchDragged = false;
+      if (this.state === 'confirmAim') {
+        // Second touch starts — will check on touchend if it was a tap or drag
+        e.preventDefault();
         return;
       }
       if (this.state !== 'idle') return;
       e.preventDefault();
       this.state = 'aiming';
       this.updateAim(e);
-    };
+    }, { passive: false, ...sig });
 
-    const handleMove = (e) => {
+    canvas.addEventListener('touchmove', (e) => {
       if (this._handleDebugDragMove(e)) return;
-      if (!this.isAimingState()) return;
+      touchDragged = true;
+      if (this.state === 'confirmAim') {
+        // Dragging in confirmAim → re-aim
+        e.preventDefault();
+        this.state = 'aiming';
+        this.updateAim(e);
+        return;
+      }
+      if (this.state !== 'aiming') return;
       e.preventDefault();
       this.updateAim(e);
-    };
+    }, { passive: false, ...sig });
 
-    const handleEnd = (e) => {
+    canvas.addEventListener('touchend', (e) => {
       if (this._handleDebugDragEnd(e)) return;
-      if (!this.isAimingState()) return;
+      if (this.state === 'confirmAim' && !touchDragged) {
+        // Second touch was a tap → fire
+        e.preventDefault();
+        this.launch();
+        return;
+      }
+      if (this.state !== 'aiming') return;
+      e.preventDefault();
+      if (this.confirmShoot) {
+        this.state = 'confirmAim';
+      } else {
+        this.launch();
+      }
+    }, { passive: false, ...sig });
+
+    // --- Mouse input (confirm-shoot: aim follows cursor freely, click = fire) ---
+    canvas.addEventListener('mousedown', (e) => {
+      if (this._handleDebugDragStart(e)) return;
+      if (this.state === 'won' || this.state === 'lost') return;
+      if (this.confirmShoot) {
+        // In confirm mode, click fires (from any aiming state)
+        if (this.isAimingState()) {
+          e.preventDefault();
+          this.launch();
+          return;
+        }
+        // Start free-aim on first click if idle
+        if (this.state === 'idle') {
+          e.preventDefault();
+          this.state = 'aiming';
+          this.updateAim(e);
+        }
+        return;
+      }
+      // Normal mode: mousedown starts aiming
+      if (this.state !== 'idle') return;
+      e.preventDefault();
+      this.state = 'aiming';
+      this.updateAim(e);
+    }, sig);
+
+    canvas.addEventListener('mousemove', (e) => {
+      if (this.debugDrag.dragging) { this._handleDebugDragMove(e); return; }
+      if (this.confirmShoot) {
+        // In confirm mode, aim always follows mouse when idle or aiming
+        if (this.state === 'idle') {
+          this.state = 'aiming';
+        }
+        if (this.state === 'aiming' || this.state === 'confirmAim') {
+          this.state = 'aiming';
+          this.updateAim(e);
+        }
+        return;
+      }
+      // Normal mode
+      if (this.state === 'aiming') this.updateAim(e);
+    }, sig);
+
+    canvas.addEventListener('mouseup', (e) => {
+      if (this._handleDebugDragEnd(e)) return;
+      if (this.confirmShoot) return; // Handled in mousedown
+      if (this.state !== 'aiming') return;
       e.preventDefault();
       this.launch();
-    };
-
-    // Touch events
-    canvas.addEventListener('touchstart', handleStart, { passive: false, ...sig });
-    canvas.addEventListener('touchmove', handleMove, { passive: false, ...sig });
-    canvas.addEventListener('touchend', handleEnd, { passive: false, ...sig });
-
-    // Mouse events
-    canvas.addEventListener('mousedown', handleStart, sig);
-    canvas.addEventListener('mousemove', (e) => {
-      if (this.isAimingState() || this.debugDrag.dragging) handleMove(e);
     }, sig);
-    canvas.addEventListener('mouseup', handleEnd, sig);
 
     // Flipper activation — spacebar anytime, click/tap during playing
     const handleFlip = () => {
@@ -265,7 +328,7 @@ export class Game {
   }
 
   isAimingState() {
-    return this.state === 'aiming';
+    return this.state === 'aiming' || this.state === 'confirmAim';
   }
 
   getInputWorldPosition(e) {
@@ -385,32 +448,41 @@ export class Game {
 
   updateAim(e) {
     const pos = this.getInputWorldPosition(e);
-    const x = pos.x;
-    const y = pos.y;
+    const tx = pos.x;
+    const ty = pos.y;
 
-    // Calculate aim angle with gravity compensation so trajectory
-    // passes through the cursor position, not just aims in its direction
-    const dx = x - this.launchX;
-    const dy = y - this.launchY;
+    const dx = tx - this.launchX;
+    const dy = ty - this.launchY;
     const dist = Math.sqrt(dx * dx + dy * dy);
 
     if (dist < 5) {
       this.aimAngle = Math.PI / 2;
     } else {
+      // Find launch angle so the trajectory passes through cursor (tx,ty).
+      // Simulate at a candidate angle, see where the ball is at distance `dist`,
+      // measure the miss, correct the target. Two passes converge well.
       const g = PHYSICS_CONFIG.gravity;
       const v = PHYSICS_CONFIG.launchPower;
-      // Estimate ticks to reach target, accounting for friction at midpoint
-      const rawTicks = dist / v;
-      const frictionMid = Math.pow(PHYSICS_CONFIG.friction, rawTicks * 0.5);
-      const effectiveV = v * (1 + frictionMid) / 2;
-      const ticks = dist / effectiveV;
-      // Vertical gravity drop over that time
-      const drop = 0.5 * g * ticks * ticks;
-      // Aim above cursor to compensate (lower Y = higher on screen)
-      this.aimAngle = Utils.angleBetween(this.launchX, this.launchY, x, y - drop);
+      const f = PHYSICS_CONFIG.friction;
+      let cx = tx, cy = ty; // corrected target
+      for (let pass = 0; pass < 2; pass++) {
+        const angle = Math.atan2(cy - this.launchY, cx - this.launchX);
+        let bx = 0, by = 0, bvx = Math.cos(angle) * v, bvy = Math.sin(angle) * v;
+        for (let t = 0; t < 500; t++) {
+          bvy += g;
+          bvx *= f;
+          bvy *= f;
+          bx += bvx;
+          by += bvy;
+          if (bx * bx + by * by >= dist * dist) break;
+        }
+        // Miss = where ball ended up vs where cursor is (relative to launch)
+        cx += (tx - this.launchX) - bx;
+        cy += (ty - this.launchY) - by;
+      }
+      this.aimAngle = Math.atan2(cy - this.launchY, cx - this.launchX);
     }
 
-    // Update trajectory prediction
     this.updateTrajectory();
   }
 
@@ -714,7 +786,7 @@ export class Game {
   }
 
   launch() {
-    if (!this.isAimingState()) return;
+    if (this.state !== 'aiming' && this.state !== 'confirmAim') return;
     if (Number.isFinite(this.ballsLeft) && this.ballsLeft <= 0) return;
 
     if (!this.showFullTrajectory && this.ultraAimCharges > 0) {
@@ -1141,8 +1213,8 @@ export class Game {
       centerLabel,
       survivalLoseLineY: survivalMode ? this.survivalRuntime.getLoseLineY() : null,
       verticalProgress: trackerState,
-      message: this.state === 'won' ? 'YOU WIN!' : (this.state === 'lost' ? 'GAME OVER' : null),
-      subMessage: this.state === 'won' || this.state === 'lost' ? 'Tap to continue' : null
+      message: this.state === 'won' ? 'Ритуал совершён' : (this.state === 'lost' ? 'Игра окончена' : null),
+      subMessage: this.state === 'won' ? 'Продолжить' : (this.state === 'lost' ? 'Продолжить' : null)
     });
 
     // Draw FPS overlay directly on canvas (visible on mobile without devtools)

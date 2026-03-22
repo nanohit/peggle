@@ -36,6 +36,14 @@ class PeggleApp {
     this._editingCampaignId = null;
 
     this.mode = 'editor'; // 'editor' or 'play'
+    this._syncTimer = null;
+
+    // Hook into LevelManager.save to auto-sync current level to remote
+    const origSave = this.levelManager.save.bind(this.levelManager);
+    this.levelManager.save = () => {
+      origSave();
+      this._debouncedRemoteSync();
+    };
 
     this.visualLayout.mount();
     this._injectAdminPanel();
@@ -93,6 +101,52 @@ class PeggleApp {
     `;
     viewport.appendChild(panel);
     this.adminPanel = panel;
+  }
+
+  async _pullRemoteLevels() {
+    try {
+      const remoteNames = await api.listLevels();
+      if (!remoteNames || remoteNames.length === 0) return;
+      const localNames = new Set();
+      for (const l of this.levelManager.getAllLevels()) {
+        localNames.add((l.name || '').replace(/[^a-zA-Z0-9_-]/g, '_'));
+        localNames.add(l.name || '');
+      }
+      let added = 0;
+      for (const name of remoteNames) {
+        if (localNames.has(name)) continue;
+        const data = await api.getLevel(name);
+        if (data && Array.isArray(data.pegs)) {
+          // Import remote level into local editor
+          if (!data.id) data.id = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+          const normalized = this.levelManager.normalizeLevel(data);
+          if (normalized) {
+            this.levelManager.levels.push(normalized);
+            added++;
+          }
+        }
+      }
+      if (added > 0) {
+        this.levelManager.save();
+        console.log(`[pull] Imported ${added} remote levels`);
+      }
+    } catch (e) {
+      console.warn('[pull] Failed to pull remote levels:', e);
+    }
+  }
+
+  _debouncedRemoteSync() {
+    if (this._syncTimer) clearTimeout(this._syncTimer);
+    this._syncTimer = setTimeout(() => {
+      this._syncTimer = null;
+      const level = this.levelManager.getCurrentLevel();
+      if (!level) return;
+      const safeName = (level.name || 'untitled').replace(/[^a-zA-Z0-9_-]/g, '_');
+      const snapshot = JSON.parse(JSON.stringify(level));
+      api.saveLevel(safeName, snapshot).then(ok => {
+        if (ok) console.log('[auto-sync] Saved to remote:', safeName);
+      });
+    }, 2000); // 2s debounce to avoid spamming during rapid edits
   }
 
   _logDiagnostics() {
@@ -1562,6 +1616,9 @@ class PeggleApp {
 
     // Start in editor mode
     this.startEditor();
+
+    // Async: pull remote levels into local cache
+    this._pullRemoteLevels();
     this.updateLevelTitle();
     this.updateLevelSettings();
   }

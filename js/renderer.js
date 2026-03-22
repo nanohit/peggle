@@ -506,10 +506,10 @@ export class Renderer {
       const sl = peg.curveSlices;
       ctx.save();
 
-      // Fake glow: draw expanded ribbon at low alpha with glow color
+      // Fake glow: thin expanded ribbon at low alpha
       if (!isHit) {
         ctx.globalAlpha = 0.35;
-        this.drawCurvedBrickPath(ctx, sl, halfH + 6, -halfH - 6);
+        this.drawCurvedBrickPath(ctx, sl, halfH + 2, -halfH - 2);
         ctx.fillStyle = colors.glow;
         ctx.fill();
         ctx.globalAlpha = 1;
@@ -528,12 +528,13 @@ export class Renderer {
         ctx.stroke();
       }
 
-      // Hit glow overlay
+      // Hit glow: tight stroke on the brick edge
       if (isHit && peg.type !== 'obstacle') {
-        ctx.globalAlpha = 0.6;
-        this.drawCurvedBrickPath(ctx, sl, halfH + 8, -halfH - 8);
-        ctx.fillStyle = colors.hit;
-        ctx.fill();
+        ctx.globalAlpha = 0.5;
+        this.drawCurvedBrickPath(ctx, sl, halfH, -halfH);
+        ctx.strokeStyle = colors.hit;
+        ctx.lineWidth = 2;
+        ctx.stroke();
       }
 
       ctx.restore();
@@ -601,26 +602,18 @@ export class Renderer {
       }
     }
 
-    // Hit state - brighter glow (cached sprite)
+    // Hit state - tight glow matching brick/circle shape
     if (isHit && peg.type !== 'obstacle') {
-      ctx.globalAlpha = 0.6;
+      ctx.globalAlpha = 0.45;
 
       if (peg.shape === 'brick') {
         const w = peg.width || PHYSICS_CONFIG.brickWidth;
         const h = peg.height || PHYSICS_CONFIG.brickHeight;
-        const rg = this._rectGlow(colors.hit, w, h, 20, 3);
+        const rg = this._rectGlow(colors.hit, w, h, 6, 2);
         ctx.drawImage(rg.img, -rg.hw, -rg.hh);
-        ctx.beginPath();
-        ctx.roundRect(-w/2, -h/2, w, h, 3);
-        ctx.fillStyle = colors.hit;
-        ctx.fill();
       } else {
-        const cg = this._circleGlow(colors.hit, radius, 20);
+        const cg = this._circleGlow(colors.hit, radius, 6);
         ctx.drawImage(cg.img, -cg.half, -cg.half);
-        ctx.beginPath();
-        ctx.arc(0, 0, radius, 0, Math.PI * 2);
-        ctx.fillStyle = colors.hit;
-        ctx.fill();
       }
     }
 
@@ -972,14 +965,14 @@ export class Renderer {
 
     // Main text
     ctx.fillStyle = COLORS.text;
-    ctx.font = 'bold 28px -apple-system, sans-serif';
+    ctx.font = "bold 28px 'Noto Serif', Georgia, serif";
     ctx.textAlign = 'center';
     ctx.fillText(text, this.width / 2, this.height / 2 - 15);
 
     // Subtext
     if (subtext) {
       ctx.fillStyle = COLORS.textDim;
-      ctx.font = '14px -apple-system, sans-serif';
+      ctx.font = "14px 'Noto Serif', Georgia, serif";
       ctx.fillText(subtext, this.width / 2, this.height / 2 + 15);
     }
   }

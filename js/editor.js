@@ -378,6 +378,13 @@ export class Editor {
           break;
           
         case 'draw':
+          // Guard: if mode changed away from draw mid-interaction, abort draw
+          if (this.mode !== 'draw') {
+            this.ghostBricks = [];
+            this.drawPath = [];
+            this.interactionType = null;
+            break;
+          }
           // In bezier edit phase, drag should only move controls (not draw strokes).
           if (this.drawShapeMode === 'bezier' && this.bezierDraft) {
             break;
@@ -456,6 +463,12 @@ export class Editor {
           break;
           
         case 'draw':
+          // Guard: if mode changed away from draw mid-interaction, discard
+          if (this.mode !== 'draw') {
+            this.ghostBricks = [];
+            this.drawPath = [];
+            break;
+          }
           if (this.drawShapeMode === 'bezier') {
             if (!this.bezierDraft) {
               const start = this.drawPath[0];
@@ -583,39 +596,34 @@ export class Editor {
         this.rotateSelectedPegs(-Math.PI / 12);
       } else if (e.key === 'd' && !e.ctrlKey && !e.metaKey) {
         const enteringDraw = this.mode !== 'draw';
-        if (!enteringDraw) this.clearBezierDraft();
-        this.mode = enteringDraw ? 'draw' : 'place';
-        if (this.onModeChange) this.onModeChange(this.mode);
+        this.setMode(enteringDraw ? 'draw' : 'place');
       } else if (e.key === 'c' && !e.ctrlKey && !e.metaKey) {
         if (this.mode === 'draw' && this.drawShapeMode === 'circle') {
+          // Toggle off: exit draw mode entirely
           this.drawShapeMode = 'free';
-          this.clearBezierDraft();
+          this.setMode('place');
         } else {
-          this.mode = 'draw';
           this.drawShapeMode = 'circle';
-          this.clearBezierDraft();
-          if (this.onModeChange) this.onModeChange(this.mode);
+          this.setMode('draw');
         }
       } else if (e.key === 'w' && !e.ctrlKey && !e.metaKey) {
         if (this.mode === 'draw' && this.drawShapeMode === 'sine') {
+          // Toggle off: exit draw mode entirely
           this.drawShapeMode = 'free';
-          this.clearBezierDraft();
+          this.setMode('place');
         } else {
-          this.mode = 'draw';
           this.drawShapeMode = 'sine';
-          this.clearBezierDraft();
-          if (this.onModeChange) this.onModeChange(this.mode);
+          this.setMode('draw');
         }
       } else if (e.key === 'b' && !e.ctrlKey && !e.metaKey) {
         if (this.mode === 'draw' && this.drawShapeMode === 'bezier') {
+          // Toggle off: exit draw mode entirely
           this.drawShapeMode = 'free';
-          this.clearBezierDraft();
+          this.setMode('place');
         } else {
-          this.mode = 'draw';
           this.drawShapeMode = 'bezier';
           this.selectedShape = 'brick';
-          this.clearBezierDraft();
-          if (this.onModeChange) this.onModeChange(this.mode);
+          this.setMode('draw');
         }
       } else if (e.key === 'Enter' && this.mode === 'draw' && this.drawShapeMode === 'bezier') {
         e.preventDefault();
@@ -1030,7 +1038,6 @@ export class Editor {
     const h1 = transform ? this.applyRigidTransform(data.h1, transform) : { x: data.h1.x, y: data.h1.y };
     const h2 = transform ? this.applyRigidTransform(data.h2, transform) : { x: data.h2.x, y: data.h2.y };
 
-    this.mode = 'draw';
     this.drawShapeMode = 'bezier';
     this.activeBezierGroupId = groupId;
     this.bezierDraft = {
@@ -1048,7 +1055,7 @@ export class Editor {
     this.selectedShape = 'brick';
     this._bezierDragStart = null;
     this.updateBezierDraftPath();
-    if (this.onModeChange) this.onModeChange(this.mode);
+    this.setMode('draw');
     return true;
   }
 
@@ -2364,8 +2371,14 @@ export class Editor {
   setMode(mode) {
     if (this.mode === 'draw' && mode !== 'draw') {
       this.clearBezierDraft();
+      // Ensure any in-progress draw interaction is killed
+      if (this.isInteracting && this.interactionType === 'draw') {
+        this.isInteracting = false;
+        this.interactionType = null;
+      }
     }
     this.mode = mode;
+    if (this.onModeChange) this.onModeChange(mode);
   }
 
   toggleGrid() {

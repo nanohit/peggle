@@ -156,11 +156,35 @@ function createPauseOverlay() {
   const overlay = document.createElement('div');
   overlay.className = 'pause-overlay';
   overlay.id = 'pauseOverlay';
+
+  const BASE = 'visuals/pause_menu/webp/';
+
   overlay.innerHTML = `
     <div class="pause-panel">
-      <div class="pause-title">Paused</div>
-      <button class="pause-btn" id="pauseResumeBtn">Resume</button>
-      <button class="pause-btn" id="pauseRestartBtn">Restart Level</button>
+      <img class="pause-bg" src="${BASE}pause_modal_background.webp" alt="" draggable="false">
+      <div class="pause-content">
+        <div class="pause-title">Пауза</div>
+        <button class="pause-img-btn" id="pauseResumeBtn">
+          <img class="pause-img-btn__normal" src="${BASE}continue.webp" alt="Продолжить" draggable="false">
+          <img class="pause-img-btn__pressed" src="${BASE}continue_pressed1.webp" alt="" draggable="false">
+        </button>
+        <button class="pause-img-btn" id="pauseRestartBtn">
+          <img class="pause-img-btn__normal" src="${BASE}again.webp" alt="Заново" draggable="false">
+          <img class="pause-img-btn__pressed" src="${BASE}again_pressed.webp" alt="" draggable="false">
+        </button>
+        <div class="pause-hint">
+          <span class="pause-hint__text">Второе нажатие<br>для выстрела</span>
+          <label class="pause-check" id="pauseConfirmCheck">
+            <input type="checkbox" id="pauseConfirmInput">
+            <img class="pause-check__off" src="${BASE}check.webp" alt="" draggable="false">
+            <img class="pause-check__on" src="${BASE}check_checked.webp" alt="" draggable="false">
+          </label>
+        </div>
+        <button class="pause-img-btn" id="pauseLevelBtn">
+          <img class="pause-img-btn__normal" src="${BASE}level.webp" alt="Уровни" draggable="false">
+          <img class="pause-img-btn__pressed" src="${BASE}level_pressed.webp" alt="" draggable="false">
+        </button>
+      </div>
     </div>
   `;
   return overlay;
@@ -214,9 +238,9 @@ async function bootWithLevels(levels, campaignName) {
   visualLayout.setPanelVisible(false);
   visualLayout.setEditMode(false);
 
-  // Create and attach pause overlay
+  // Create and attach pause overlay (inside the visual frame so it covers the game area)
   const pauseOverlay = createPauseOverlay();
-  document.body.appendChild(pauseOverlay);
+  visualLayout.frame.appendChild(pauseOverlay);
 
   function resize() {
     const viewport = document.getElementById('visualViewport');
@@ -306,12 +330,14 @@ async function bootWithLevels(levels, campaignName) {
     paused = true;
     game.pause();
     pauseOverlay.classList.add('visible');
+    visualLayout.frame.classList.add('visual-frame--paused');
   }
 
   function hidePause() {
     if (!paused) return;
     paused = false;
     pauseOverlay.classList.remove('visible');
+    visualLayout.frame.classList.remove('visual-frame--paused');
     if (game) game.resume();
   }
 
@@ -322,6 +348,35 @@ async function bootWithLevels(levels, campaignName) {
 
   pauseOverlay.querySelector('#pauseResumeBtn').addEventListener('click', hidePause);
   pauseOverlay.querySelector('#pauseRestartBtn').addEventListener('click', restartFromPause);
+  // Level list button — go back to level select (if available)
+  pauseOverlay.querySelector('#pauseLevelBtn').addEventListener('click', () => {
+    hidePause();
+    // Navigate back: if we came from a campaign, go to its page; otherwise just reload without params
+    const campaignParam = new URLSearchParams(location.search).get('campaign');
+    if (campaignParam) {
+      location.href = location.pathname + '?campaign=' + encodeURIComponent(campaignParam) + '&select=1';
+    } else {
+      location.href = location.pathname;
+    }
+  });
+  // Confirm-shoot checkbox (second tap to fire)
+  const confirmInput = pauseOverlay.querySelector('#pauseConfirmInput');
+  confirmInput.checked = !!localStorage.getItem('peggle_confirmShoot');
+  confirmInput.addEventListener('change', () => {
+    if (confirmInput.checked) {
+      localStorage.setItem('peggle_confirmShoot', '1');
+    } else {
+      localStorage.removeItem('peggle_confirmShoot');
+    }
+    if (game) {
+      game.confirmShoot = confirmInput.checked;
+      // Reset aiming state so the mode switch applies cleanly
+      if (game.isAimingState()) {
+        game.state = 'idle';
+        game.trajectory = null;
+      }
+    }
+  });
   // Click on backdrop (outside panel) also resumes
   pauseOverlay.addEventListener('click', (e) => {
     if (e.target === pauseOverlay) hidePause();
@@ -380,8 +435,10 @@ async function bootWithLevels(levels, campaignName) {
     if (game) { game.stop(); }
     paused = false;
     pauseOverlay.classList.remove('visible');
+    visualLayout.frame.classList.remove('visual-frame--paused');
 
     game = new Game(canvas);
+    game.confirmShoot = !!localStorage.getItem('peggle_confirmShoot');
 
     // Apply visuals (background + frame + slots)
     const visuals = normalizeVisuals(levelData.visuals);
@@ -405,25 +462,33 @@ async function bootWithLevels(levels, campaignName) {
 
     game.onGameEnd = (result, score) => {
       setTimeout(() => {
+        // Guard: only fire once (touchstart + click can both trigger on mobile)
+        let fired = false;
+        const onceAction = (action) => {
+          const guarded = () => {
+            if (fired) return;
+            fired = true;
+            canvas.removeEventListener('click', guarded);
+            canvas.removeEventListener('touchstart', guarded);
+            action();
+          };
+          canvas.addEventListener('click', guarded, { once: true });
+          canvas.addEventListener('touchstart', guarded, { once: true });
+        };
+
         if (result === 'won') {
           // Reset mirror for next level
           mirrorState = false;
           if (currentIndex < levels.length - 1) {
-            const advance = () => { currentIndex++; startLevel(currentIndex); };
-            canvas.addEventListener('click', advance, { once: true });
-            canvas.addEventListener('touchstart', advance, { once: true });
+            onceAction(() => { currentIndex++; startLevel(currentIndex); });
           } else {
             // All levels completed — tap to replay from start
-            const replay = () => { currentIndex = 0; mirrorState = false; startLevel(0); };
-            canvas.addEventListener('click', replay, { once: true });
-            canvas.addEventListener('touchstart', replay, { once: true });
+            onceAction(() => { currentIndex = 0; mirrorState = false; startLevel(0); });
           }
         } else {
           // Defeat — toggle mirror and restart same level
           mirrorState = !mirrorState;
-          const retry = () => startLevel(currentIndex);
-          canvas.addEventListener('click', retry, { once: true });
-          canvas.addEventListener('touchstart', retry, { once: true });
+          onceAction(() => startLevel(currentIndex));
         }
       }, 1000);
     };

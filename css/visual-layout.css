@@ -55,7 +55,7 @@
   inset: 0;
   overflow: hidden;
   border-radius: 4px;
-  z-index: 2;
+  z-index: auto;
   pointer-events: none;
 }
 
@@ -670,16 +670,13 @@
 /* ─── Pause menu overlay ─── */
 
 .pause-overlay {
-  position: fixed;
+  position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.65);
   z-index: 500;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.2s ease;
+  transition: opacity 0.25s ease;
 }
 
 .pause-overlay.visible {
@@ -687,39 +684,157 @@
   pointer-events: auto;
 }
 
+/* Character portrait elements: always on top (gameplay + pause) */
+.visual-slot[data-slot-id="character"],
+.visual-slot[data-slot-id="characterCircle"],
+.visual-slot[data-slot-id="healthCircle"],
+.visual-slot[data-slot-id="healthCharCircle"] {
+  z-index: 501 !important;
+}
+
+/* Panel: absolutely positioned so bg circle aligns with character portrait */
 .pause-panel {
-  background: #161b22;
-  border: 1px solid #30363d;
-  border-radius: 14px;
-  padding: 28px 32px;
-  min-width: 200px;
+  position: absolute;
+  width: 72%;
+  aspect-ratio: 600 / 1217;
+  left: 49.5%;
+  top: 3.7%;
+  transform: translateX(-50%);
+}
+
+/* Ornate background frame image */
+.pause-bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Content layer on top of BG image — pushed below the circle area */
+.pause-content {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 14px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+  justify-content: center;
+  padding: 16% 12% 6%;
+  gap: 3.5%;
+  box-sizing: border-box;
 }
 
+/* Title */
 .pause-title {
-  font-size: 22px;
-  font-weight: 700;
-  color: #f0f6fc;
-  letter-spacing: 0.5px;
+  font-family: 'Noto Serif', serif;
+  font-size: clamp(18px, 5vw, 28px);
+  font-weight: 500;
+  color: #f0f0f0;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
+  letter-spacing: 1px;
+  text-align: center;
 }
 
-.pause-btn {
-  width: 100%;
-  padding: 10px 0;
-  border-radius: 8px;
-  border: 1px solid #30363d;
-  background: #21262d;
-  color: #f0f6fc;
-  font-size: 14px;
-  font-weight: 600;
+/* Image buttons (continue, again, level) */
+.pause-img-btn {
+  display: block;
+  width: 92%;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: none;
   cursor: pointer;
-  transition: background 0.15s;
+  position: relative;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.pause-btn:active {
-  background: #30363d;
+.pause-img-btn .pause-img-btn__normal {
+  width: 100%;
+  height: auto;
+  display: block;
+  user-select: none;
+  /* Clip extra transparent padding on wider source images (continue.webp=841px vs others~730px) */
+  aspect-ratio: 736 / 215;
+  object-fit: cover;
+}
+
+.pause-img-btn .pause-img-btn__pressed {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  user-select: none;
+  opacity: 0;
+}
+
+.pause-img-btn:active .pause-img-btn__normal {
+  opacity: 0;
+}
+
+.pause-img-btn:active .pause-img-btn__pressed {
+  opacity: 1;
+}
+
+/* Hint row (text + checkbox) */
+.pause-hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8%;
+  width: 80%;
+  padding: 0 2%;
+}
+
+.pause-hint__text {
+  font-family: 'Noto Serif', serif;
+  font-size: clamp(9px, 2.5vw, 13px);
+  font-weight: 300;
+  color: #8a8a8a;
+  line-height: 1.3;
+  text-shadow: none;
+  flex: 1;
+}
+
+/* Ornate checkbox */
+.pause-check {
+  position: relative;
+  width: clamp(28px, 9vw, 48px);
+  height: clamp(28px, 9vw, 48px);
+  flex: none;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.pause-check input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.pause-check img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  user-select: none;
+}
+
+.pause-check__on {
+  display: none;
+}
+
+.pause-check input:checked ~ .pause-check__off {
+  display: none;
+}
+
+.pause-check input:checked ~ .pause-check__on {
+  display: block;
 }
