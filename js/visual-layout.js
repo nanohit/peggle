@@ -324,6 +324,7 @@ export class VisualLayout {
           <div id="themeSlotList" class="theme-slot-list"></div>
           <button id="themeApplyLevelBtn" class="theme-edit-btn" style="margin-top:6px">Apply for Level</button>
           <button id="themeAssignDefaultBtn" class="theme-edit-btn">Assign Default</button>
+          <button id="themeRestoreDefaultBtn" class="theme-edit-btn">Restore Default</button>
         </div>
       </div>
     `;
@@ -425,6 +426,19 @@ export class VisualLayout {
         console.error('[visuals] Assign Default: save failed', e);
       }
       setTimeout(() => { btn.textContent = 'Assign Default'; }, 1200);
+    }, { signal: sig });
+
+    // Restore Default — reset current level visuals to the saved default template
+    this.panel.querySelector('#themeRestoreDefaultBtn').addEventListener('click', () => {
+      const btn = this.panel.querySelector('#themeRestoreDefaultBtn');
+      const saved = localStorage.getItem('peggle_visualDefaults');
+      const defaults = normalizeVisuals(saved ? JSON.parse(saved) : null, true);
+      this.setConfig(defaults);
+      this._syncPanelValues();
+      this._buildSlotList();
+      this._emitChange();
+      btn.textContent = 'Restored!';
+      setTimeout(() => { btn.textContent = 'Restore Default'; }, 1200);
     }, { signal: sig });
   }
 

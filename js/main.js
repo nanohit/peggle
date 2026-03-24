@@ -2331,30 +2331,56 @@ class PeggleApp {
   }
 
   async _renderAvailableLevels(campaignId) {
-    const localNames = this.campaignManager.getBakedLevelNames();
     const list = document.getElementById('availableLevelItems');
     list.innerHTML = '<div class="campaign-empty-hint">Loading...</div>';
 
-    // Merge local + remote level names
+    // Gather editor levels (primary source) + baked-only levels (remote or local bakes without editor copy)
+    const editorLevels = this.levelManager.getAllLevels();
+    const editorSafeNames = new Set(editorLevels.map(l => (l.name || '').replace(/[^a-zA-Z0-9_-]/g, '_')));
+
+    const localBaked = this.campaignManager.getBakedLevelNames();
     const remoteNames = await api.listLevels();
-    const bakedNames = [...new Set([...localNames, ...remoteNames])].sort();
+    const allBaked = [...new Set([...localBaked, ...remoteNames])].sort();
+
+    // Build unified list: editor levels first, then baked-only levels not in editor
+    const entries = [];
+    for (const level of editorLevels) {
+      const safeName = (level.name || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+      entries.push({ name: safeName, displayName: level.name, source: 'editor' });
+    }
+    for (const name of allBaked) {
+      if (!editorSafeNames.has(name)) {
+        entries.push({ name, displayName: name, source: 'baked' });
+      }
+    }
 
     list.innerHTML = '';
-    if (bakedNames.length === 0) {
-      list.innerHTML = '<div class="campaign-empty-hint">No baked levels found. Use the Bake button to bake levels first.</div>';
+    if (entries.length === 0) {
+      list.innerHTML = '<div class="campaign-empty-hint">No levels found. Create levels in the editor first.</div>';
       return;
     }
 
-    for (const name of bakedNames) {
+    for (const entry of entries) {
       const item = document.createElement('div');
       item.className = 'campaign-level-item campaign-available-item';
       item.innerHTML = `
-        <span class="campaign-level-name">${name}</span>
+        <span class="campaign-level-name">${entry.displayName}</span>
         <button class="campaign-action-btn campaign-add-btn" title="Add to Campaign">+</button>
       `;
 
-      item.querySelector('.campaign-add-btn').addEventListener('click', () => {
-        this.campaignManager.addLevel(campaignId, name);
+      item.querySelector('.campaign-add-btn').addEventListener('click', async () => {
+        // Auto-bake editor level when adding to campaign
+        if (entry.source === 'editor') {
+          const editorLevel = editorLevels.find(l =>
+            (l.name || '').replace(/[^a-zA-Z0-9_-]/g, '_') === entry.name
+          );
+          if (editorLevel) {
+            const snapshot = JSON.parse(JSON.stringify(editorLevel));
+            localStorage.setItem('baked:' + entry.name, JSON.stringify(snapshot));
+            api.saveLevel(entry.name, snapshot); // fire-and-forget
+          }
+        }
+        this.campaignManager.addLevel(campaignId, entry.name);
         this._renderCampaignLevels(campaignId);
       });
 
