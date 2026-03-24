@@ -702,6 +702,13 @@
   transform: translateX(-50%);
 }
 
+/* Mobile: panel needs to sit higher to align circle with portrait */
+@media (max-width: 520px) {
+  .pause-panel {
+    top: 0.8%;
+  }
+}
+
 /* Ornate background frame image */
 .pause-bg {
   position: absolute;
