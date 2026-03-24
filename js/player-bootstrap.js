@@ -55,17 +55,10 @@ async function fetchLevel(name) {
   return null;
 }
 
-// Load campaign by name: localStorage → API (resolved) → static file
+// Load campaign by name: API (resolved) → localStorage → static file
+// API first ensures fresh data after editor rebakes; localStorage is offline fallback only.
 async function loadCampaign(name) {
-  // Try localStorage first
-  const stored = localStorage.getItem('campaign:' + name);
-  if (stored) {
-    try {
-      const data = JSON.parse(stored);
-      if (data && Array.isArray(data.levels) && data.levels.length > 0) return data;
-    } catch { /* fall through */ }
-  }
-  // Try API (resolves campaign + fetches all level data)
+  // Try API first (resolves campaign + fetches all level data from Redis)
   try {
     const res = await fetch('/api/campaigns?name=' + encodeURIComponent(name) + '&resolve=true');
     if (res.ok) {
@@ -73,6 +66,14 @@ async function loadCampaign(name) {
       if (data && Array.isArray(data.levels) && data.levels.length > 0) return data;
     }
   } catch { /* fall through */ }
+  // Fallback: localStorage (for offline / localhost without API)
+  const stored = localStorage.getItem('campaign:' + name);
+  if (stored) {
+    try {
+      const data = JSON.parse(stored);
+      if (data && Array.isArray(data.levels) && data.levels.length > 0) return data;
+    } catch { /* fall through */ }
+  }
   // Fallback: static file
   try {
     const res = await fetch('/campaigns/' + encodeURIComponent(name) + '.json');
@@ -82,6 +83,17 @@ async function loadCampaign(name) {
     }
   } catch { /* fall through */ }
   return null;
+}
+
+// Load primary campaign (for player domains with no URL params)
+async function loadPrimaryCampaign() {
+  try {
+    const res = await fetch('/api/config?key=primaryCampaign');
+    if (!res.ok) return null;
+    const { value } = await res.json();
+    if (!value) return null;
+    return await loadCampaign(value);
+  } catch { return null; }
 }
 
 function getQueryParam(key) {
@@ -214,13 +226,19 @@ async function resolve() {
   // Priority 3: ?level=name1,name2 → individual baked levels
   const names = getRequestedNames();
   if (names.length === 0) {
+    // Priority 4: no params → try loading primary campaign from config API
+    const primaryCampaign = await loadPrimaryCampaign();
+    if (primaryCampaign) {
+      bootWithLevels(primaryCampaign.levels, primaryCampaign.name);
+      return;
+    }
     showError('No level specified.\nUse ?level=name, ?campaign=name, or paste a baked URL.');
     return;
   }
 
   const levels = [];
   for (const name of names) {
-    const data = loadBakedLevel(name) || await fetchLevel(name);
+    const data = await fetchLevel(name) || loadBakedLevel(name);
     if (!data) { showError('Level not found: ' + name); return; }
     levels.push(data);
   }
@@ -309,13 +327,29 @@ async function bootWithLevels(levels, campaignName) {
     visualLayout.resize(fw, fh);
   }
 
+  // Restore campaign progress (level index) from localStorage
+  const progressKey = campaignName ? 'peggle_progress:' + campaignName : null;
   let currentIndex = 0;
+  if (progressKey) {
+    try {
+      const saved = JSON.parse(localStorage.getItem(progressKey));
+      if (saved && typeof saved.levelIndex === 'number' && saved.levelIndex < levels.length) {
+        currentIndex = saved.levelIndex;
+      }
+    } catch { /* start from 0 */ }
+  }
+
   let game = null;
   let gambleSystem = null;
   let unsubUiState = null;
   let mirrorState = false; // alternates on defeat
   // Deep-clone originals so mirror can always reference pristine data
   const originalLevels = levels.map(l => JSON.parse(JSON.stringify(l)));
+
+  function saveProgress() {
+    if (!progressKey) return;
+    localStorage.setItem(progressKey, JSON.stringify({ levelIndex: currentIndex }));
+  }
 
   resize();
   window.addEventListener('resize', resize);
@@ -480,10 +514,14 @@ async function bootWithLevels(levels, campaignName) {
           // Reset mirror for next level
           mirrorState = false;
           if (currentIndex < levels.length - 1) {
-            onceAction(() => { currentIndex++; startLevel(currentIndex); });
+            onceAction(() => { currentIndex++; saveProgress(); startLevel(currentIndex); });
           } else {
-            // All levels completed — tap to replay from start
-            onceAction(() => { currentIndex = 0; mirrorState = false; startLevel(0); });
+            // All levels completed — clear progress, tap to replay from start
+            onceAction(() => {
+              currentIndex = 0; mirrorState = false;
+              if (progressKey) localStorage.removeItem(progressKey);
+              startLevel(0);
+            });
           }
         } else {
           // Defeat — toggle mirror and restart same level
@@ -498,5 +536,5 @@ async function bootWithLevels(levels, campaignName) {
     mountGamble();
   }
 
-  startLevel(0);
+  startLevel(currentIndex);
 }

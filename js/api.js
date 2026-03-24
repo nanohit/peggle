@@ -131,5 +131,33 @@ export const api = {
       console.warn('[api] deleteCampaign failed:', e);
       return false;
     }
+  },
+
+  // ─── Config ─────────────────────────────────
+
+  async getConfig(key) {
+    try {
+      const res = await fetch(`${API_BASE}/config?key=${encodeURIComponent(key)}`);
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data.value;
+    } catch (e) {
+      console.warn('[api] getConfig failed:', e);
+      return null;
+    }
+  },
+
+  async setConfig(key, value) {
+    try {
+      const res = await fetch(`${API_BASE}/config`, {
+        method: 'POST',
+        headers: adminHeaders(),
+        body: JSON.stringify({ key, value })
+      });
+      return res.ok;
+    } catch (e) {
+      console.warn('[api] setConfig failed:', e);
+      return false;
+    }
   }
 };

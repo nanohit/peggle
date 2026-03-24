@@ -2113,21 +2113,27 @@ class PeggleApp {
 
   // ─── Campaign Management ─────────────────────────────────
 
-  showCampaignList() {
+  async showCampaignList() {
     const campaigns = this.campaignManager.getAll();
     const list = document.getElementById('campaignItems');
     list.innerHTML = '';
+
+    // Fetch current primary campaign name from Redis
+    const primaryName = await api.getConfig('primaryCampaign');
 
     if (campaigns.length === 0) {
       list.innerHTML = '<div class="campaign-empty-hint">No campaigns yet. Create one to organize baked levels into a playable chain.</div>';
     }
 
     for (const campaign of campaigns) {
+      const safeName = (campaign.name || 'untitled').replace(/[^a-zA-Z0-9_-]/g, '_');
+      const isPrimary = safeName === primaryName;
       const item = document.createElement('div');
       item.className = 'level-item';
 
       item.innerHTML = `
         <div class="level-item-info">
+          <button class="level-action-btn primary-btn" title="${isPrimary ? 'Primary campaign (shown on player domain)' : 'Set as primary campaign'}" style="color:${isPrimary ? '#4ecdc4' : '#555'};font-size:14px;margin-right:4px">&#9733;</button>
           <span class="level-item-name">${campaign.name}</span>
           <span class="level-item-meta">${campaign.levelNames.length} level${campaign.levelNames.length !== 1 ? 's' : ''}</span>
         </div>
@@ -2136,6 +2142,13 @@ class PeggleApp {
           <button class="level-action-btn delete-btn" title="Delete">&#128465;</button>
         </div>
       `;
+
+      item.querySelector('.primary-btn').addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const newPrimary = isPrimary ? null : safeName;
+        await api.setConfig('primaryCampaign', newPrimary);
+        this.showCampaignList(); // refresh to update star colors
+      });
 
       item.querySelector('.level-item-info').addEventListener('click', () => {
         this.openCampaignEditor(campaign.id);
@@ -2249,6 +2262,7 @@ class PeggleApp {
         <span class="campaign-level-name">${name}</span>
         <div class="campaign-level-actions">
           <button class="campaign-action-btn campaign-edit-level-btn" title="Edit in Editor">&#9998;</button>
+          <button class="campaign-action-btn campaign-rebake-btn" title="Rebake Level">&#8635;</button>
           <button class="campaign-action-btn" title="Move Up" ${index === 0 ? 'disabled' : ''}>&#9650;</button>
           <button class="campaign-action-btn" title="Move Down" ${index === campaign.levelNames.length - 1 ? 'disabled' : ''}>&#9660;</button>
           <button class="campaign-action-btn campaign-remove-btn" title="Remove">&#10005;</button>
@@ -2260,7 +2274,32 @@ class PeggleApp {
         this._editCampaignLevel(name);
       });
 
-      const moveBtns = item.querySelectorAll('.campaign-action-btn:not(.campaign-edit-level-btn):not(.campaign-remove-btn)');
+      // Rebake single level
+      item.querySelector('.campaign-rebake-btn').addEventListener('click', async (e) => {
+        const btn = e.currentTarget;
+        btn.disabled = true;
+        btn.style.opacity = '0.4';
+        const didRebake = await this._rebakeLevelIfStale(name);
+        if (!didRebake) {
+          // Force rebake even if timestamps match (user explicitly asked)
+          const editorLevels = this.levelManager.getAllLevels();
+          const editorLevel = editorLevels.find(l => {
+            const safe = (l.name || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+            return safe === name || l.name === name;
+          });
+          if (editorLevel) {
+            const snapshot = JSON.parse(JSON.stringify(editorLevel));
+            localStorage.setItem('baked:' + name, JSON.stringify(snapshot));
+            await api.saveLevel(name, snapshot);
+          }
+        }
+        btn.style.opacity = '';
+        btn.disabled = false;
+        btn.style.color = '#4ecdc4';
+        setTimeout(() => { btn.style.color = ''; }, 800);
+      });
+
+      const moveBtns = item.querySelectorAll('.campaign-action-btn:not(.campaign-edit-level-btn):not(.campaign-rebake-btn):not(.campaign-remove-btn)');
       moveBtns[0].addEventListener('click', () => {
         this.campaignManager.moveLevel(campaignId, index, index - 1);
         this._renderCampaignLevels(campaignId);
@@ -2328,21 +2367,61 @@ class PeggleApp {
     URL.revokeObjectURL(url);
   }
 
-  async playCampaign(campaignId) {
-    // Sync campaign metadata to remote so player can resolve it
-    const campaign = this.campaignManager.getById(campaignId);
-    if (campaign) {
-      const safeName = (campaign.name || 'untitled').replace(/[^a-zA-Z0-9_-]/g, '_');
-      await api.saveCampaign(safeName, campaign);
+  // Rebake a single level by baked name if editor has a newer version.
+  // Returns true if rebaked, false if skipped or no match.
+  async _rebakeLevelIfStale(bakedName) {
+    const editorLevels = this.levelManager.getAllLevels();
+    const editorLevel = editorLevels.find(l => {
+      const safe = (l.name || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+      return safe === bakedName || l.name === bakedName;
+    });
+    if (!editorLevel) return false;
+
+    // Compare modified timestamps — skip if baked copy is already current
+    const bakedRaw = localStorage.getItem('baked:' + bakedName);
+    if (bakedRaw) {
+      try {
+        const bakedData = JSON.parse(bakedRaw);
+        const bakedMod = bakedData.metadata?.modified || '';
+        const editorMod = editorLevel.metadata?.modified || '';
+        if (editorMod && bakedMod && editorMod <= bakedMod) return false;
+      } catch { /* rebake if parse fails */ }
     }
 
-    // Also publish locally as fallback
-    const safeName = this.campaignManager.publishLocal(campaignId);
-    if (!safeName) {
+    const snapshot = JSON.parse(JSON.stringify(editorLevel));
+    localStorage.setItem('baked:' + bakedName, JSON.stringify(snapshot));
+    await api.saveLevel(bakedName, snapshot);
+    return true;
+  }
+
+  async playCampaign(campaignId) {
+    const campaign = this.campaignManager.getById(campaignId);
+    if (!campaign || campaign.levelNames.length === 0) {
+      alert('Campaign has no levels. Add levels first.');
+      return;
+    }
+
+    // Auto-rebake: only rebake levels whose editor copy is newer than baked copy
+    const seen = new Set();
+    let rebaked = 0;
+    for (const bakedName of campaign.levelNames) {
+      if (seen.has(bakedName)) continue;
+      seen.add(bakedName);
+      if (await this._rebakeLevelIfStale(bakedName)) rebaked++;
+    }
+    if (rebaked > 0) console.log(`[campaign] Auto-rebaked ${rebaked} stale level(s)`);
+
+    // Sync campaign metadata to remote
+    const safeName = (campaign.name || 'untitled').replace(/[^a-zA-Z0-9_-]/g, '_');
+    await api.saveCampaign(safeName, campaign);
+
+    // Also publish locally as fallback (resolves from freshly-baked localStorage)
+    const localName = this.campaignManager.publishLocal(campaignId);
+    if (!localName) {
       alert('Campaign has no resolvable levels. Bake the levels first.');
       return;
     }
-    window.open('player.html?campaign=' + encodeURIComponent(safeName), '_blank');
+    window.open('player.html?campaign=' + encodeURIComponent(localName), '_blank');
   }
 }
 
