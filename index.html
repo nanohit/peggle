@@ -7,6 +7,10 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="theme-color" content="#0d1117">
   <title>Peggle Editor</title>
+  <script>
+    // Fallback: if Vercel rewrite didn't catch al3a, redirect to player
+    if (location.hostname === 'al3a.vercel.app') location.replace('player.html');
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Serif:wght@700&display=swap" rel="stylesheet">

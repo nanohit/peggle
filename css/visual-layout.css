@@ -705,7 +705,7 @@
 /* Mobile: panel needs to sit higher to align circle with portrait */
 @media (max-width: 520px) {
   .pause-panel {
-    top: -1.5%;
+    top: -3.5%;
   }
 }
 
