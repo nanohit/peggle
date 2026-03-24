@@ -4,6 +4,10 @@
       "source": "/",
       "has": [{ "type": "host", "value": "al3a.vercel.app" }],
       "destination": "/player.html"
+    },
+    {
+      "source": "/",
+      "destination": "/editor.html"
     }
   ],
   "headers": [
