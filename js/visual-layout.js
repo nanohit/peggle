@@ -5,6 +5,41 @@ import { SLOT_DEFS, DEFAULT_LAYER_ORDER, resolveAssetPaths, normalizeVisuals } f
 
 const imageCache = new Map();
 
+// Compress and resize uploaded images to reduce storage size.
+// Max 512px on longest side, WebP at 0.8 quality (~10-40KB output).
+function compressImage(file, maxSize = 512) {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      let w = img.width, h = img.height;
+      if (w > maxSize || h > maxSize) {
+        const scale = maxSize / Math.max(w, h);
+        w = Math.round(w * scale);
+        h = Math.round(h * scale);
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, w, h);
+      // Try WebP first, fall back to JPEG
+      let dataUrl = canvas.toDataURL('image/webp', 0.8);
+      if (dataUrl.startsWith('data:image/webp')) {
+        resolve(dataUrl);
+      } else {
+        resolve(canvas.toDataURL('image/jpeg', 0.8));
+      }
+    };
+    img.onerror = () => {
+      // Can't decode — fall back to raw file
+      const reader = new FileReader();
+      reader.onload = e => resolve(e.target.result);
+      reader.readAsDataURL(file);
+    };
+    img.src = URL.createObjectURL(file);
+  });
+}
+
 function loadImage(src) {
   if (imageCache.has(src)) return Promise.resolve(imageCache.get(src));
   return new Promise(resolve => {
@@ -310,15 +345,13 @@ export class VisualLayout {
       const input = document.createElement('input');
       input.type = 'file';
       input.accept = 'image/*';
-      input.onchange = ev => {
+      input.onchange = async ev => {
         const file = ev.target.files[0];
         if (!file || !this.config) return;
-        const reader = new FileReader();
-        reader.onload = re => {
-          this.config.background.image = re.target.result;
-          this._emitChange();
-        };
-        reader.readAsDataURL(file);
+        // Background covers full canvas (400×600), allow larger max size
+        const dataUrl = await compressImage(file, 800);
+        this.config.background.image = dataUrl;
+        this._emitChange();
       };
       input.click();
     }, { signal: sig });
@@ -557,21 +590,17 @@ export class VisualLayout {
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = 'image/*';
-    input.onchange = e => {
+    input.onchange = async e => {
       const file = e.target.files[0];
       if (!file) return;
-      const reader = new FileReader();
-      reader.onload = re => {
-        const dataUrl = re.target.result;
-        if (this.config.slots[slotId]) {
-          this.config.slots[slotId].customSrc = dataUrl;
-          this._resolvedAssets[slotId] = dataUrl;
-          const el = this.slotElements[slotId];
-          if (el) el.style.backgroundImage = `url('${dataUrl}')`;
-          this._emitChange();
-        }
-      };
-      reader.readAsDataURL(file);
+      const dataUrl = await compressImage(file);
+      if (this.config.slots[slotId]) {
+        this.config.slots[slotId].customSrc = dataUrl;
+        this._resolvedAssets[slotId] = dataUrl;
+        const el = this.slotElements[slotId];
+        if (el) el.style.backgroundImage = `url('${dataUrl}')`;
+        this._emitChange();
+      }
     };
     input.click();
   }
