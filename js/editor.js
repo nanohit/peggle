@@ -2371,11 +2371,11 @@ export class Editor {
   setMode(mode) {
     if (this.mode === 'draw' && mode !== 'draw') {
       this.clearBezierDraft();
-      // Ensure any in-progress draw interaction is killed
-      if (this.isInteracting && this.interactionType === 'draw') {
-        this.isInteracting = false;
-        this.interactionType = null;
-      }
+      // Kill any in-progress draw interaction and clear stale ghost state
+      this.isInteracting = false;
+      this.interactionType = null;
+      this.ghostBricks = [];
+      this.drawPath = [];
     }
     this.mode = mode;
     if (this.onModeChange) this.onModeChange(mode);

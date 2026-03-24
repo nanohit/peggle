@@ -29,6 +29,12 @@ class PeggleApp {
 
     this.levelManager = new LevelManager();
     this.campaignManager = new CampaignManager();
+    // Refresh campaign UI if remote sync brings new data while overlay is open
+    this.campaignManager.onSync = () => {
+      if (document.getElementById('campaignOverlay')?.classList.contains('visible')) {
+        this.showCampaignList();
+      }
+    };
     this.game = null;
     this.editor = null;
     this.gambleSystem = null;

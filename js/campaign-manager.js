@@ -22,6 +22,47 @@ export class CampaignManager {
       console.error('[campaign] load failed:', e);
     }
     if (!Array.isArray(this.campaigns)) this.campaigns = [];
+    // Kick off async sync from Redis (merges remote campaigns into local)
+    this.syncFromRemote();
+  }
+
+  async syncFromRemote() {
+    try {
+      const remoteList = await api.listCampaigns();
+      if (!remoteList || remoteList.length === 0) return;
+
+      let changed = false;
+      for (const { name: safeName } of remoteList) {
+        const remoteCampaign = await api.getCampaign(safeName);
+        if (!remoteCampaign || !remoteCampaign.levelNames) continue;
+
+        // Find local campaign matching this safe name
+        const localMatch = this.campaigns.find(c => this._safeName(c) === safeName);
+
+        if (localMatch) {
+          // Merge: remote wins if it has a newer modified timestamp
+          const remoteMod = remoteCampaign.modified || '';
+          const localMod = localMatch.modified || '';
+          if (remoteMod > localMod) {
+            Object.assign(localMatch, remoteCampaign);
+            changed = true;
+          }
+        } else {
+          // Campaign exists in Redis but not locally — add it
+          if (!remoteCampaign.id) remoteCampaign.id = Utils.generateId();
+          this.campaigns.push(remoteCampaign);
+          changed = true;
+        }
+      }
+
+      if (changed) {
+        this.save();
+        console.log('[campaign] Synced from remote');
+        if (this.onSync) this.onSync();
+      }
+    } catch (e) {
+      console.warn('[campaign] Remote sync failed:', e);
+    }
   }
 
   save() {
