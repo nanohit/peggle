@@ -2120,6 +2120,12 @@ class PeggleApp {
   // ─── Campaign Management ─────────────────────────────────
 
   async showCampaignList() {
+    // Sync from remote once per session (not every page load)
+    if (!this._campaignsSynced) {
+      this._campaignsSynced = true;
+      await this.campaignManager.syncFromRemote();
+    }
+
     const campaigns = this.campaignManager.getAll();
     const list = document.getElementById('campaignItems');
     list.innerHTML = '';

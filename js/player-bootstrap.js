@@ -55,25 +55,48 @@ async function fetchLevel(name) {
   return null;
 }
 
-// Load campaign by name: API (resolved) → localStorage → static file
-// API first ensures fresh data after editor rebakes; localStorage is offline fallback only.
+// Load campaign by name: localStorage cache (if fresh) → API → static file
+// Cache TTL: 60 seconds. After that, re-fetch from API to pick up editor changes.
+const CAMPAIGN_CACHE_TTL = 60 * 1000; // 60 seconds
+
 async function loadCampaign(name) {
-  // Try API first (resolves campaign + fetches all level data from Redis)
+  const cacheKey = 'campaign:' + name;
+  const cacheTimeKey = 'campaign_ts:' + name;
+
+  // Try localStorage cache first (if fresh enough)
+  const stored = localStorage.getItem(cacheKey);
+  const cachedAt = parseInt(localStorage.getItem(cacheTimeKey) || '0', 10);
+  if (stored && (Date.now() - cachedAt) < CAMPAIGN_CACHE_TTL) {
+    try {
+      const data = JSON.parse(stored);
+      if (data && Array.isArray(data.levels) && data.levels.length > 0) return data;
+    } catch { /* fall through */ }
+  }
+
+  // Fetch from API (resolves campaign + all level data from Redis)
   try {
     const res = await fetch('/api/campaigns?name=' + encodeURIComponent(name) + '&resolve=true');
     if (res.ok) {
       const data = await res.json();
-      if (data && Array.isArray(data.levels) && data.levels.length > 0) return data;
+      if (data && Array.isArray(data.levels) && data.levels.length > 0) {
+        // Cache for next visit
+        try {
+          localStorage.setItem(cacheKey, JSON.stringify(data));
+          localStorage.setItem(cacheTimeKey, String(Date.now()));
+        } catch { /* storage full, no big deal */ }
+        return data;
+      }
     }
   } catch { /* fall through */ }
-  // Fallback: localStorage (for offline / localhost without API)
-  const stored = localStorage.getItem('campaign:' + name);
+
+  // Stale localStorage cache (better than nothing)
   if (stored) {
     try {
       const data = JSON.parse(stored);
       if (data && Array.isArray(data.levels) && data.levels.length > 0) return data;
     } catch { /* fall through */ }
   }
+
   // Fallback: static file
   try {
     const res = await fetch('/campaigns/' + encodeURIComponent(name) + '.json');
@@ -86,14 +109,34 @@ async function loadCampaign(name) {
 }
 
 // Load primary campaign (for player domains with no URL params)
+// Caches the primary campaign name locally to avoid extra API call on repeat visits.
 async function loadPrimaryCampaign() {
-  try {
-    const res = await fetch('/api/config?key=primaryCampaign');
-    if (!res.ok) return null;
-    const { value } = await res.json();
-    if (!value) return null;
-    return await loadCampaign(value);
-  } catch { return null; }
+  let primaryName = null;
+  const cacheKey = 'config:primaryCampaign';
+  const cacheTimeKey = 'config_ts:primaryCampaign';
+  const cachedAt = parseInt(localStorage.getItem(cacheTimeKey) || '0', 10);
+  const cached = localStorage.getItem(cacheKey);
+
+  if (cached && (Date.now() - cachedAt) < CAMPAIGN_CACHE_TTL) {
+    primaryName = cached;
+  } else {
+    try {
+      const res = await fetch('/api/config?key=primaryCampaign');
+      if (res.ok) {
+        const { value } = await res.json();
+        primaryName = value || null;
+        if (primaryName) {
+          localStorage.setItem(cacheKey, primaryName);
+          localStorage.setItem(cacheTimeKey, String(Date.now()));
+        }
+      }
+    } catch { /* fall through */ }
+    // Fall back to cached value if API failed
+    if (!primaryName && cached) primaryName = cached;
+  }
+
+  if (!primaryName) return null;
+  return await loadCampaign(primaryName);
 }
 
 function getQueryParam(key) {

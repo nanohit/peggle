@@ -22,8 +22,6 @@ export class CampaignManager {
       console.error('[campaign] load failed:', e);
     }
     if (!Array.isArray(this.campaigns)) this.campaigns = [];
-    // Kick off async sync from Redis (merges remote campaigns into local)
-    this.syncFromRemote();
   }
 
   async syncFromRemote() {
