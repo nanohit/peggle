@@ -7,14 +7,14 @@ export const PHYSICS_CONFIG = {
   gravity: 0.12,
   friction: 0.998,
   bounce: 0.65,
-  pegRadius: 9,
-  maxVelocity: 15,
-  launchPower: 8,
+  pegRadius: 8.5,
+  maxVelocity: 16,
+  launchPower: 7.5,
   timeScale: 1.0,  // Speed multiplier
 
   // Brick dimensions (when shape is 'brick')
-  brickWidth: 36,
-  brickHeight: 11
+  brickWidth: 34,
+  brickHeight: 10.2
 };
 
 // Get ball radius (always same as peg radius)

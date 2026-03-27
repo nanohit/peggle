@@ -202,6 +202,11 @@ function mirrorLevel(levelData, canvasWidth = WORLD_W) {
     }
   }
 
+  // Mirror background
+  if (m.visuals && m.visuals.background) {
+    m.visuals.background.mirrored = true;
+  }
+
   return m;
 }
 

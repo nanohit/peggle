@@ -266,7 +266,7 @@ export class Renderer {
 
   _ensureBgCache() {
     const bg = this.backgroundConfig;
-    const key = `${this.width}|${this.height}|${bg?.type}|${bg?.colorTop}|${bg?.colorBottom}|${bg?.image ? 1 : 0}`;
+    const key = `${this.width}|${this.height}|${bg?.type}|${bg?.colorTop}|${bg?.colorBottom}|${bg?.image ? 1 : 0}|${bg?.mirrored ? 1 : 0}`;
     if (!this._bgCacheDirty && this._bgCacheKey === key && this._bgCacheCanvas) return;
 
     if (!this._bgCacheCanvas || this._bgCacheCanvas.width !== this.width || this._bgCacheCanvas.height !== this.height) {
@@ -277,7 +277,15 @@ export class Renderer {
     const ctx = this._bgCacheCanvas.getContext('2d');
 
     if (bg?.type === 'image' && this._bgImage) {
-      ctx.drawImage(this._bgImage, 0, 0, this.width, this.height);
+      if (bg.mirrored) {
+        ctx.save();
+        ctx.translate(this.width, 0);
+        ctx.scale(-1, 1);
+        ctx.drawImage(this._bgImage, 0, 0, this.width, this.height);
+        ctx.restore();
+      } else {
+        ctx.drawImage(this._bgImage, 0, 0, this.width, this.height);
+      }
     } else if (bg?.type === 'solid') {
       ctx.fillStyle = bg.colorTop || COLORS.backgroundGradientTop;
       ctx.fillRect(0, 0, this.width, this.height);
@@ -289,27 +297,34 @@ export class Renderer {
       ctx.fillRect(0, 0, this.width, this.height);
     }
 
-    // Soft edge darkening
-    const edgeH = 18;
-    const topFade = ctx.createLinearGradient(0, 0, 0, edgeH);
-    topFade.addColorStop(0, 'rgba(0,0,0,0.45)');
+    // Strong edge vignette — dark fade from frame into game area
+    const edgeV = 50;
+    const edgeH = 24;
+    const edgeAlpha = 0.7;
+
+    const topFade = ctx.createLinearGradient(0, 0, 0, edgeV);
+    topFade.addColorStop(0, `rgba(0,0,0,${edgeAlpha})`);
     topFade.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.fillStyle = topFade;
-    ctx.fillRect(0, 0, this.width, edgeH);
+    ctx.fillRect(0, 0, this.width, edgeV);
 
-    const botFade = ctx.createLinearGradient(0, this.height - edgeH, 0, this.height);
+    const botFade = ctx.createLinearGradient(0, this.height - edgeV, 0, this.height);
     botFade.addColorStop(0, 'rgba(0,0,0,0)');
-    botFade.addColorStop(1, 'rgba(0,0,0,0.45)');
+    botFade.addColorStop(1, `rgba(0,0,0,${edgeAlpha})`);
     ctx.fillStyle = botFade;
-    ctx.fillRect(0, this.height - edgeH, this.width, edgeH);
+    ctx.fillRect(0, this.height - edgeV, this.width, edgeV);
 
-    // Side wall indicators
-    ctx.strokeStyle = COLORS.wall;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(1, 0); ctx.lineTo(1, this.height);
-    ctx.moveTo(this.width - 1, 0); ctx.lineTo(this.width - 1, this.height);
-    ctx.stroke();
+    const leftFade = ctx.createLinearGradient(0, 0, edgeH, 0);
+    leftFade.addColorStop(0, `rgba(0,0,0,${edgeAlpha})`);
+    leftFade.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = leftFade;
+    ctx.fillRect(0, 0, edgeH, this.height);
+
+    const rightFade = ctx.createLinearGradient(this.width - edgeH, 0, this.width, 0);
+    rightFade.addColorStop(0, 'rgba(0,0,0,0)');
+    rightFade.addColorStop(1, `rgba(0,0,0,${edgeAlpha})`);
+    ctx.fillStyle = rightFade;
+    ctx.fillRect(this.width - edgeH, 0, edgeH, this.height);
 
     this._bgCacheKey = key;
     this._bgCacheDirty = false;
@@ -506,18 +521,9 @@ export class Renderer {
       const sl = peg.curveSlices;
       ctx.save();
 
-      // Fake glow: thin expanded ribbon at low alpha
-      if (!isHit) {
-        ctx.globalAlpha = 0.35;
-        this.drawCurvedBrickPath(ctx, sl, halfH + 2, -halfH - 2);
-        ctx.fillStyle = colors.glow;
-        ctx.fill();
-        ctx.globalAlpha = 1;
-      }
-
       // Main fill
       this.drawCurvedBrickPath(ctx, sl, halfH, -halfH);
-      ctx.fillStyle = isHit ? colors.hit : colors.main;
+      ctx.fillStyle = isHit ? colors.hit : (peg.color || colors.main);
       ctx.fill();
 
       // Selection ring
@@ -550,39 +556,15 @@ export class Renderer {
       const w = peg.width || PHYSICS_CONFIG.pegRadius * 4;
       const h = peg.height || PHYSICS_CONFIG.pegRadius * 1.2;
 
-      // Cached glow sprite
-      if (!isHit) {
-        const rg = this._rectGlow(colors.glow, w, h, 12, 2);
-        ctx.drawImage(rg.img, -rg.hw, -rg.hh);
-      }
-
       ctx.beginPath();
       ctx.roundRect(-w/2, -h/2, w, h, 2);
-      ctx.fillStyle = isHit ? colors.hit : colors.main;
-      ctx.fill();
-
-      // Inner highlight
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
-      ctx.beginPath();
-      ctx.roundRect(-w/2 + 2, -h/2 + 1, w - 4, h/3, 1);
+      ctx.fillStyle = isHit ? colors.hit : (peg.color || colors.main);
       ctx.fill();
     } else {
-      // Cached circle glow sprite
-      if (!isHit) {
-        const cg = this._circleGlow(colors.glow, radius, 12);
-        ctx.drawImage(cg.img, -cg.half, -cg.half);
-      }
-
       // Draw circle peg
       ctx.beginPath();
       ctx.arc(0, 0, radius, 0, Math.PI * 2);
-      ctx.fillStyle = isHit ? colors.hit : colors.main;
-      ctx.fill();
-
-      // Inner highlight
-      ctx.beginPath();
-      ctx.arc(-radius * 0.25, -radius * 0.25, radius * 0.35, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
+      ctx.fillStyle = isHit ? colors.hit : (peg.color || colors.main);
       ctx.fill();
     }
 

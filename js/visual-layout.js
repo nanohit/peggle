@@ -194,6 +194,8 @@ export class VisualLayout {
 
   setConfig(rawConfig) {
     this.config = normalizeVisuals(rawConfig);
+    // Clear per-slot resolved assets so each level loads its own images fresh
+    this._resolvedAssets = {};
     if (this.frame) this.frame.style.backgroundColor = this.config.frameColor;
     this._loadAndPositionSlots();
     this._syncPanelValues();

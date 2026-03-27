@@ -97,6 +97,9 @@ export class Game {
       dragging: false
     };
     
+    // Performance overlay (editor only)
+    this.showPerfOverlay = false;
+
     // Trajectory preview
     this.trajectory = null;
     this.showFullTrajectory = false;
@@ -1217,8 +1220,8 @@ export class Game {
       subMessage: this.state === 'won' ? 'Продолжить' : (this.state === 'lost' ? 'Продолжить' : null)
     });
 
-    // Draw FPS overlay directly on canvas (visible on mobile without devtools)
-    this._drawPerfOverlay();
+    // Draw FPS overlay only when enabled (editor play mode)
+    if (this.showPerfOverlay) this._drawPerfOverlay();
   }
 
   _drawPerfOverlay() {

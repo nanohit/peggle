@@ -378,6 +378,32 @@ class PeggleApp {
       });
     });
 
+    // Peg color picker
+    document.getElementById('pegColorPicker').addEventListener('input', (e) => {
+      if (this.editor) {
+        const color = e.target.value;
+        this.editor.selectedPegColor = color;
+        if (this.editor.selectedPegIds.size > 0) {
+          this.editor.setSelectedPegsColor(color);
+        }
+      }
+    });
+
+    document.getElementById('pegColorDefaultBtn').addEventListener('click', () => {
+      const color = document.getElementById('pegColorPicker').value;
+      if (this.editor) this.editor.selectedPegColor = color;
+    });
+
+    document.getElementById('pegColorResetBtn').addEventListener('click', () => {
+      if (this.editor) {
+        this.editor.selectedPegColor = null;
+        if (this.editor.selectedPegIds.size > 0) {
+          this.editor.setSelectedPegsColor(null);
+        }
+        this._syncPegColorPicker();
+      }
+    });
+
     // Tool buttons
     document.getElementById('gridBtn').addEventListener('click', () => {
       if (this.editor) {
@@ -1504,6 +1530,38 @@ class PeggleApp {
     } else {
       this.closeMultiballPanel();
     }
+
+    // Show/hide peg color picker
+    this._syncPegColorPicker();
+  }
+
+  _syncPegColorPicker() {
+    const row = document.getElementById('pegColorRow');
+    const picker = document.getElementById('pegColorPicker');
+    if (!row || !picker || !this.editor) return;
+
+    const typeColors = {
+      orange: '#ff6b35', blue: '#4ecdc4', green: '#95d5b2',
+      purple: '#c77dff', multi: '#ff4d9d', obstacle: '#6b7280',
+      bumper: '#e0e0e0', portalBlue: '#4ecdc4', portalOrange: '#ff8b3d'
+    };
+
+    const count = this.editor.selectedPegIds.size;
+    if (count > 0) {
+      const color = this.editor.getSelectedPegColor();
+      if (color) {
+        picker.value = color;
+      } else {
+        const level = this.levelManager.getCurrentLevel();
+        if (level) {
+          const firstId = [...this.editor.selectedPegIds][0];
+          const peg = level.pegs.find(p => p.id === firstId);
+          picker.value = typeColors[peg?.type] || '#4ecdc4';
+        }
+      }
+    } else {
+      picker.value = this.editor.selectedPegColor || typeColors[this.editor.selectedPegType] || '#4ecdc4';
+    }
   }
 
   showAnimationPanel() {
@@ -1769,7 +1827,8 @@ class PeggleApp {
 
     this.mode = 'play';
     this.game = new Game(this.canvas);
-    
+    this.game.showPerfOverlay = true; // editor play mode shows debug info
+
     // Apply trajectory setting
     const trajectoryToggle = document.getElementById('trajectoryToggle');
     this.game.setShowFullTrajectory(trajectoryToggle.checked);

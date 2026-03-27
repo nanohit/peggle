@@ -29,6 +29,7 @@ export class Editor {
     
     // Editor state
     this.selectedPegType = 'blue';
+    this.selectedPegColor = null; // custom color override, null = use type default
     this.selectedShape = 'circle';
     this.selectedPegIds = new Set();
     this.mode = 'place'; // place, select, draw
@@ -1635,6 +1636,7 @@ export class Editor {
         pegData.height = h;
         if (gb.slices) pegData.curveSlices = gb.slices;
       }
+      if (this.selectedPegColor) pegData.color = this.selectedPegColor;
       if (!this.isPegPositionAllowed(pegData, pegData.x, pegData.y, pegData.angle, pegData.curveSlices)) continue;
       const newPeg = this.levelManager.addPeg(pegData);
     }
@@ -1717,8 +1719,11 @@ export class Editor {
     if (this.selectedPegType === 'multi') {
       pegData.multiballSpawnCount = MULTIBALL_DEFAULT_SPAWN_COUNT;
     }
+    if (this.selectedPegColor) {
+      pegData.color = this.selectedPegColor;
+    }
     if (!this.isPegPositionAllowed(pegData, pegData.x, pegData.y, pegData.angle, pegData.curveSlices)) return null;
-    
+
     const peg = this.levelManager.addPeg(pegData);
     
     if (peg && this.onPegCountChange) {
@@ -1918,6 +1923,28 @@ export class Editor {
     this.levelManager.save();
   }
 
+  setSelectedPegsColor(color) {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level || this.selectedPegIds.size === 0) return;
+    this.saveUndoState();
+    for (const pegId of this.selectedPegIds) {
+      const peg = level.pegs.find(p => p.id === pegId);
+      if (peg) {
+        if (color) peg.color = color;
+        else delete peg.color;
+      }
+    }
+    this.levelManager.save();
+  }
+
+  getSelectedPegColor() {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level || this.selectedPegIds.size === 0) return null;
+    const firstId = [...this.selectedPegIds][0];
+    const peg = level.pegs.find(p => p.id === firstId);
+    return peg?.color || null;
+  }
+
   setSelectedPegsShape(shape) {
     const level = this.levelManager.getCurrentLevel();
     if (!level || this.selectedPegIds.size === 0) return;
@@ -2080,6 +2107,7 @@ export class Editor {
           width: peg.width,
           height: peg.height
         };
+        if (peg.color) pegData.color = peg.color;
         if (peg.type === 'bumper') {
           pegData.bumperBounce = peg.bumperBounce;
           pegData.bumperScale = peg.bumperScale;
@@ -2100,10 +2128,10 @@ export class Editor {
         }
       }
     }
-    
+
     this.selectedPegIds = newPegIds;
     this.notifySelectionChange();
-    
+
     if (this.onPegCountChange) {
       this.onPegCountChange(level.pegs.length);
     }
@@ -2128,6 +2156,7 @@ export class Editor {
           width: peg.width,
           height: peg.height
         };
+        if (peg.color) pegData.color = peg.color;
         if (peg.type === 'bumper') {
           pegData.bumperBounce = peg.bumperBounce;
           pegData.bumperScale = peg.bumperScale;

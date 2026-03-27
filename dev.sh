@@ -14,4 +14,15 @@ echo ""
 # Open browser after a short delay
 (sleep 0.8 && open "$URL") &
 
-python3 -m http.server $PORT
+# Custom handler: serve editor.html when / is requested (no index.html on disk)
+python3 -c "
+import http.server, os
+
+class Handler(http.server.SimpleHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == '/' or self.path == '/index.html':
+            self.path = '/editor.html'
+        super().do_GET()
+
+http.server.HTTPServer(('', $PORT), Handler).serve_forever()
+"
