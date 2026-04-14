@@ -277,6 +277,7 @@ export class PegAnimator {
     this.originalPositions = new Map(); // pegId → {x, y, angle, curveSlices?}
     this.animations = [];               // compiled animation entries
     this.animatedPegIds = new Set();    // pegs affected by active animations
+    this.suspendedPegIds = new Set();   // pegs detached from their authored animation
     this.elapsed = 0;
     this._hitTriggerState = new Map();  // animIndex → { active, elapsed, forward }
   }
@@ -285,6 +286,7 @@ export class PegAnimator {
     this.originalPositions.clear();
     this.animations = [];
     this.animatedPegIds.clear();
+    this.suspendedPegIds.clear();
     this.elapsed = 0;
     this._hitTriggerState = new Map();
 
@@ -609,6 +611,7 @@ export class PegAnimator {
       for (const pegId of anim.pegIds) {
         const peg = pegMap.get(pegId);
         if (!peg) continue;
+        if (this.suspendedPegIds.has(pegId)) continue;
         const orig = this.originalPositions.get(pegId);
         if (!orig) continue;
 
@@ -638,18 +641,26 @@ export class PegAnimator {
         //   1. Raw position (peg smoothly moves off-canvas through the wall)
         //   2. Raw + crossOffset (peg smoothly appears on the other side)
         // Canvas clipping naturally creates the portal effect.
-        // The main peg at traced position is hidden (_wrapHideMain) to avoid
-        // the visual teleportation jump.
+        // Keep the traced pose as the primary/main instance so gameplay systems
+        // can follow the current wrapped peg, and render the alternate raw pose
+        // as an extra copy for the edge transition.
         peg._wrapCopies = null;
         peg._wrapHideMain = false;
         if (hasCrossOffset) {
           const rawX = rawCenterX + localRx;
           const rawY = rawCenterY + localRy;
-          peg._wrapHideMain = true;
-          peg._wrapCopies = [
+          const candidates = [
             { x: rawX, y: rawY },
             { x: rawX + crossOffX, y: rawY + crossOffY }
           ];
+          const extras = [];
+          for (const candidate of candidates) {
+            const dx = candidate.x - peg.x;
+            const dy = candidate.y - peg.y;
+            if (dx * dx + dy * dy <= 0.25) continue;
+            extras.push(candidate);
+          }
+          peg._wrapCopies = extras.length > 0 ? extras : null;
         }
 
         if (orig.curveSlices && peg.curveSlices) {
@@ -739,7 +750,26 @@ export class PegAnimator {
     return this.animations.length > 0;
   }
 
+  suspendPeg(pegId) {
+    if (!pegId) return;
+    this.suspendedPegIds.add(pegId);
+  }
+
+  resumePeg(pegId) {
+    if (!pegId) return;
+    this.suspendedPegIds.delete(pegId);
+  }
+
+  isPegSuspended(pegId) {
+    return !!pegId && this.suspendedPegIds.has(pegId);
+  }
+
   getAnimatedPegIds() {
-    return this.animatedPegIds;
+    const active = new Set();
+    for (const pegId of this.animatedPegIds) {
+      if (this.suspendedPegIds.has(pegId)) continue;
+      active.add(pegId);
+    }
+    return active;
   }
 }

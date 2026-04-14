@@ -17,6 +17,7 @@ import { VisualLayout } from './visual-layout.js';
 import { normalizeVisuals } from './visual-config.js';
 import { CampaignManager } from './campaign-manager.js';
 import { api } from './api.js';
+import { computeLayout, toPixelPositions } from './graph/layout.js';
 
 // Fixed aspect ratio: 3:4.5 (width:height)
 const ASPECT_RATIO = 3 / 4.5;
@@ -32,7 +33,10 @@ class PeggleApp {
     // Refresh campaign UI if remote sync brings new data while overlay is open
     this.campaignManager.onSync = () => {
       if (document.getElementById('campaignOverlay')?.classList.contains('visible')) {
-        this.showCampaignList();
+        this._renderCampaignList();
+      }
+      if (this._editingCampaignId && document.getElementById('campaignEditOverlay')?.classList.contains('visible')) {
+        this._refreshCampaignEditor(this._editingCampaignId);
       }
     };
     this.game = null;
@@ -40,7 +44,17 @@ class PeggleApp {
     this.gambleSystem = null;
     this.visualLayout = new VisualLayout();
     this._editingCampaignId = null;
+    this._campaignsSynced = false;
+    this._campaignSyncPromise = null;
+    this._primaryCampaignName = undefined;
+    this._primaryCampaignPromise = null;
+    this._campaignAvailableLevelsRequest = 0;
+    this._pendingRemoteLevelSaves = new Map();
+    this._remoteLevelSyncFailures = new Map();
+    this._editorSideSheetLayer = null;
+    this._editorSideSheetIds = ['levelListOverlay', 'campaignOverlay', 'campaignEditOverlay'];
 
+    this.campaignManager.beforeSyncCampaign = (campaign) => this._awaitCampaignRemoteLevelSaves(campaign);
     this.mode = 'editor'; // 'editor' or 'play'
     this._syncTimer = null;
 
@@ -54,6 +68,7 @@ class PeggleApp {
     this.visualLayout.mount();
     this._injectAdminPanel();
     this.setupCanvas();
+    this._mountEditorSideSheets();
     this.setupUI();
     this.initMode();
 
@@ -107,6 +122,79 @@ class PeggleApp {
     `;
     viewport.appendChild(panel);
     this.adminPanel = panel;
+  }
+
+  _mountEditorSideSheets() {
+    const viewport = this.visualLayout.viewport;
+    if (!viewport) return;
+
+    let layer = document.getElementById('editorSideSheetLayer');
+    if (!layer) {
+      layer = document.createElement('div');
+      layer.className = 'editor-side-sheet-layer';
+      layer.id = 'editorSideSheetLayer';
+      viewport.appendChild(layer);
+    }
+
+    for (const id of this._editorSideSheetIds) {
+      const el = document.getElementById(id);
+      if (el && el.parentElement !== layer) {
+        layer.appendChild(el);
+      }
+    }
+
+    this._editorSideSheetLayer = layer;
+    this._positionEditorSideSheets();
+  }
+
+  _positionEditorSideSheets() {
+    const viewport = this.visualLayout.viewport;
+    const layer = this._editorSideSheetLayer;
+    if (!viewport || !layer) return;
+
+    const vpRect = viewport.getBoundingClientRect();
+    if (!vpRect.width || !vpRect.height) return;
+
+    const margin = vpRect.width < 520 ? 6 : 12;
+    const anchors = ['visualFrame', 'themePanel', 'adminPanel']
+      .map(id => document.getElementById(id))
+      .filter(el => el && el.offsetParent !== null);
+
+    let contentRight = 0;
+    for (const anchor of anchors) {
+      const rect = anchor.getBoundingClientRect();
+      contentRight = Math.max(contentRight, rect.right - vpRect.left);
+    }
+
+    const maxWidth = Math.max(260, Math.min(360, vpRect.width - margin * 2));
+    let width = maxWidth;
+    let left = Math.max(margin, vpRect.width - width - margin);
+    let docked = false;
+
+    if (contentRight > 0) {
+      const rightGap = vpRect.width - contentRight - margin;
+      const dockWidth = Math.min(maxWidth, rightGap - margin);
+      if (dockWidth >= 280) {
+        width = dockWidth;
+        left = contentRight + margin;
+        docked = true;
+      }
+    }
+
+    const top = margin;
+    const bottom = margin;
+    layer.dataset.docked = docked ? 'true' : 'false';
+
+    for (const id of this._editorSideSheetIds) {
+      const el = document.getElementById(id);
+      if (!el) continue;
+      el.style.left = `${Math.round(left)}px`;
+      el.style.right = 'auto';
+      el.style.top = `${Math.round(top)}px`;
+      el.style.bottom = `${Math.round(bottom)}px`;
+      el.style.width = `${Math.round(width)}px`;
+      el.classList.toggle('editor-side-sheet--docked', docked);
+    }
   }
 
   async _pullRemoteLevels() {
@@ -305,6 +393,7 @@ class PeggleApp {
     if (this.editor) this.editor.resize(worldW, worldH);
 
     this.visualLayout.resize(fw, fh);
+    this._positionEditorSideSheets();
 
     const level = this.levelManager.getCurrentLevel();
     if (level) {
@@ -1956,7 +2045,7 @@ class PeggleApp {
     localStorage.setItem('baked:' + safeName, JSON.stringify(snapshot));
 
     // Persist to remote KV
-    api.saveLevel(safeName, snapshot).then(ok => {
+    this._saveBakedLevelRemote(safeName, snapshot).then(ok => {
       if (ok) console.log('[bake] Synced to remote:', safeName);
       else console.warn('[bake] Remote sync failed for:', safeName);
     });
@@ -2066,7 +2155,7 @@ class PeggleApp {
       
       item.innerHTML = `
         <div class="level-item-info">
-          <span class="level-item-name">${level.name}</span>
+          <span class="level-item-name">${this._esc(level.name || 'Untitled')}</span>
           <span class="level-item-meta">
             ${level.pegs.length} pegs · Difficulty ${level.difficulty || 1}
             ${isTraining ? ' · 📊' : ''}
@@ -2112,6 +2201,7 @@ class PeggleApp {
       list.appendChild(item);
     });
 
+    this._positionEditorSideSheets();
     document.getElementById('levelListOverlay').classList.add('visible');
   }
 
@@ -2178,22 +2268,202 @@ class PeggleApp {
 
   // ─── Campaign Management ─────────────────────────────────
 
-  async showCampaignList() {
-    // Sync from remote once per session (not every page load)
-    if (!this._campaignsSynced) {
-      this._campaignsSynced = true;
-      await this.campaignManager.syncFromRemote();
+  _esc(s) {
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  _findEditorLevelByBakedName(bakedName, editorLevels = this.levelManager.getAllLevels()) {
+    return editorLevels.find(l => {
+      const safe = (l.name || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+      return safe === bakedName || l.name === bakedName;
+    }) || null;
+  }
+
+  _cloneLevelSnapshot(level) {
+    return JSON.parse(JSON.stringify(level));
+  }
+
+  _readBakedLevelSnapshot(bakedName) {
+    const raw = localStorage.getItem('baked:' + bakedName);
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+
+  _writeBakedLevelSnapshot(bakedName, snapshot) {
+    localStorage.setItem('baked:' + bakedName, JSON.stringify(snapshot));
+  }
+
+  _trackPendingRemoteLevelSave(bakedName, savePromise) {
+    const tracked = Promise.resolve(savePromise)
+      .then((ok) => {
+        if (ok) {
+          this._remoteLevelSyncFailures.delete(bakedName);
+        } else {
+          this._remoteLevelSyncFailures.set(bakedName, `Failed to sync "${bakedName}" to remote storage.`);
+        }
+        return ok;
+      })
+      .catch((error) => {
+        const message = error?.message || `Failed to sync "${bakedName}" to remote storage.`;
+        this._remoteLevelSyncFailures.set(bakedName, message);
+        console.warn('[campaign] Level sync threw:', bakedName, error);
+        return false;
+      })
+      .finally(() => {
+        if (this._pendingRemoteLevelSaves.get(bakedName) === tracked) {
+          this._pendingRemoteLevelSaves.delete(bakedName);
+        }
+      });
+
+    this._pendingRemoteLevelSaves.set(bakedName, tracked);
+    return tracked;
+  }
+
+  async _waitForPendingRemoteLevelSave(bakedName) {
+    const pending = this._pendingRemoteLevelSaves.get(bakedName);
+    if (!pending) return true;
+    return await pending;
+  }
+
+  async _awaitCampaignRemoteLevelSaves(campaign) {
+    if (!campaign || !Array.isArray(campaign.levelNames)) return { ok: true };
+
+    const seen = new Set();
+    for (const bakedName of campaign.levelNames) {
+      if (!bakedName || seen.has(bakedName)) continue;
+      seen.add(bakedName);
+
+      const pendingOk = await this._waitForPendingRemoteLevelSave(bakedName);
+      if (!pendingOk) {
+        return {
+          ok: false,
+          levelName: bakedName,
+          message: this._remoteLevelSyncFailures.get(bakedName) || `Failed to sync "${bakedName}" to remote storage.`
+        };
+      }
+
+      const failedMessage = this._remoteLevelSyncFailures.get(bakedName);
+      if (failedMessage) {
+        return {
+          ok: false,
+          levelName: bakedName,
+          message: failedMessage
+        };
+      }
     }
 
+    return { ok: true };
+  }
+
+  async _saveBakedLevelRemote(bakedName, snapshot) {
+    const ok = await this._trackPendingRemoteLevelSave(
+      bakedName,
+      api.saveLevel(bakedName, snapshot)
+    );
+    if (!ok) {
+      console.warn('[campaign] Failed to sync level to remote:', bakedName);
+    }
+    return ok;
+  }
+
+  _saveBakedLevelRemoteInBackground(bakedName, snapshot) {
+    this._saveBakedLevelRemote(bakedName, snapshot);
+  }
+
+  async _cacheRemoteBakedLevel(bakedName) {
+    const remoteLevel = await api.getLevel(bakedName);
+    if (!remoteLevel || !Array.isArray(remoteLevel.pegs)) return null;
+    const snapshot = this._cloneLevelSnapshot(remoteLevel);
+    this._writeBakedLevelSnapshot(bakedName, snapshot);
+    return snapshot;
+  }
+
+  async _prepareCampaignEntryLevel(entry, editorLevels) {
+    if (entry.source === 'editor') {
+      const editorLevel = this._findEditorLevelByBakedName(entry.name, editorLevels);
+      if (!editorLevel) {
+        alert('Editor level not found: ' + (entry.displayName || entry.name));
+        return false;
+      }
+      const snapshot = this._cloneLevelSnapshot(editorLevel);
+      this._writeBakedLevelSnapshot(entry.name, snapshot);
+      this._saveBakedLevelRemoteInBackground(entry.name, snapshot);
+      return true;
+    }
+
+    if (this._readBakedLevelSnapshot(entry.name)) return true;
+
+    const remoteSnapshot = await this._cacheRemoteBakedLevel(entry.name);
+    if (remoteSnapshot) return true;
+
+    alert('Failed to load baked level data: ' + (entry.displayName || entry.name));
+    return false;
+  }
+
+  async _ensureCampaignLevelsReadyForRemote(campaign) {
+    const seen = new Set();
+    for (const bakedName of campaign.levelNames) {
+      if (!bakedName || seen.has(bakedName)) continue;
+      seen.add(bakedName);
+
+      let snapshot = this._readBakedLevelSnapshot(bakedName);
+      if (!snapshot) {
+        const editorLevel = this._findEditorLevelByBakedName(bakedName);
+        if (editorLevel) {
+          snapshot = this._cloneLevelSnapshot(editorLevel);
+          this._writeBakedLevelSnapshot(bakedName, snapshot);
+        } else {
+          snapshot = await this._cacheRemoteBakedLevel(bakedName);
+        }
+      }
+
+      if (!snapshot) {
+        return {
+          ok: false,
+          levelName: bakedName,
+          message: `Missing baked level data for "${bakedName}".`
+        };
+      }
+
+      const ok = await this._saveBakedLevelRemote(bakedName, snapshot);
+      if (!ok) {
+        return {
+          ok: false,
+          levelName: bakedName,
+          message: `Failed to sync "${bakedName}" to remote storage.`
+        };
+      }
+    }
+
+    return { ok: true };
+  }
+
+  _renderCampaignList() {
+    this.campaignManager.compactLocal();
     const campaigns = this.campaignManager.getAll();
     const list = document.getElementById('campaignItems');
     list.innerHTML = '';
-
-    // Fetch current primary campaign name from Redis
-    const primaryName = await api.getConfig('primaryCampaign');
+    const primaryName = this._primaryCampaignName ?? null;
+    const isSyncing = !!this._campaignSyncPromise;
+    const isPrimaryPending = this._primaryCampaignName === undefined && !!this._primaryCampaignPromise;
 
     if (campaigns.length === 0) {
-      list.innerHTML = '<div class="campaign-empty-hint">No campaigns yet. Create one to organize baked levels into a playable chain.</div>';
+      list.innerHTML = `<div class="campaign-empty-hint">${
+        isSyncing
+          ? 'Loading campaigns...'
+          : 'No campaigns yet. Create one to organize baked levels into a playable chain.'
+      }</div>`;
+    } else if (isSyncing || isPrimaryPending) {
+      const status = document.createElement('div');
+      status.className = 'campaign-empty-hint';
+      status.textContent = isSyncing ? 'Refreshing campaigns in background...' : 'Loading primary campaign...';
+      list.appendChild(status);
     }
 
     for (const campaign of campaigns) {
@@ -2205,8 +2475,8 @@ class PeggleApp {
       item.innerHTML = `
         <div class="level-item-info">
           <button class="level-action-btn primary-btn" title="${isPrimary ? 'Primary campaign (shown on player domain)' : 'Set as primary campaign'}" style="color:${isPrimary ? '#4ecdc4' : '#555'};font-size:14px;margin-right:4px">&#9733;</button>
-          <span class="level-item-name">${campaign.name}</span>
-          <span class="level-item-meta">${campaign.levelNames.length} level${campaign.levelNames.length !== 1 ? 's' : ''}</span>
+          <span class="level-item-name">${this._esc(campaign.name)}</span>
+          <span class="level-item-meta">${campaign.levelNames.length} level${campaign.levelNames.length !== 1 ? 's' : ''} • ${this._esc(safeName)}</span>
         </div>
         <div class="level-item-actions">
           <button class="level-action-btn edit-btn" title="Edit">&#9998;</button>
@@ -2217,8 +2487,14 @@ class PeggleApp {
       item.querySelector('.primary-btn').addEventListener('click', async (e) => {
         e.stopPropagation();
         const newPrimary = isPrimary ? null : safeName;
-        await api.setConfig('primaryCampaign', newPrimary);
-        this.showCampaignList(); // refresh to update star colors
+        const prevPrimary = this._primaryCampaignName ?? null;
+        this._primaryCampaignName = newPrimary;
+        this._renderCampaignList();
+        const ok = await api.setConfig('primaryCampaign', newPrimary);
+        if (!ok) {
+          this._primaryCampaignName = prevPrimary;
+        }
+        this._renderCampaignList();
       });
 
       item.querySelector('.level-item-info').addEventListener('click', () => {
@@ -2245,7 +2521,51 @@ class PeggleApp {
       this.openCampaignEditor(c.id);
     };
     document.getElementById('closeCampaignList').onclick = () => this.closeCampaignList();
+  }
 
+  _ensurePrimaryCampaignName() {
+    if (this._primaryCampaignPromise) return this._primaryCampaignPromise;
+    if (this._primaryCampaignName !== undefined) return Promise.resolve(this._primaryCampaignName);
+
+    this._primaryCampaignPromise = api.getConfig('primaryCampaign')
+      .then((primaryName) => {
+        this._primaryCampaignName = typeof primaryName === 'string' && primaryName ? primaryName : null;
+        return this._primaryCampaignName;
+      })
+      .finally(() => {
+        this._primaryCampaignPromise = null;
+        if (document.getElementById('campaignOverlay')?.classList.contains('visible')) {
+          this._renderCampaignList();
+        }
+      });
+
+    return this._primaryCampaignPromise;
+  }
+
+  _ensureCampaignsSynced() {
+    if (this._campaignsSynced) return Promise.resolve(true);
+    if (this._campaignSyncPromise) return this._campaignSyncPromise;
+
+    this._campaignSyncPromise = this.campaignManager.syncFromRemote()
+      .then((ok) => {
+        if (ok) this._campaignsSynced = true;
+        return ok;
+      })
+      .finally(() => {
+        this._campaignSyncPromise = null;
+        if (document.getElementById('campaignOverlay')?.classList.contains('visible')) {
+          this._renderCampaignList();
+        }
+      });
+
+    return this._campaignSyncPromise;
+  }
+
+  showCampaignList() {
+    this._positionEditorSideSheets();
+    this._ensurePrimaryCampaignName();
+    this._ensureCampaignsSynced();
+    this._renderCampaignList();
     document.getElementById('campaignOverlay').classList.add('visible');
   }
 
@@ -2255,8 +2575,13 @@ class PeggleApp {
 
   openCampaignEditor(campaignId) {
     this._editingCampaignId = campaignId;
+    this._selectedGraphNode = null;
+    this._branchAddMode = null;
     const campaign = this.campaignManager.getById(campaignId);
     if (!campaign) return;
+
+    // Ensure graph model exists
+    this.campaignManager.ensureGraph(campaignId);
 
     this.closeCampaignList();
 
@@ -2279,19 +2604,214 @@ class PeggleApp {
       this.playCampaign(campaignId);
     };
 
-    this._renderCampaignLevels(campaignId);
-    this._renderAvailableLevels(campaignId);
+    // Node action buttons
+    document.getElementById('nodeEditBtn').onclick = () => this._graphEditSelected(campaignId);
+    document.getElementById('nodeBranchBtn').onclick = () => this._graphBranchAtSelected(campaignId);
+    document.getElementById('nodeSecretBtn').onclick = () => this._graphToggleSecret(campaignId);
+    document.getElementById('nodeRemoveBtn').onclick = () => this._graphRemoveSelected(campaignId);
 
+    this._refreshCampaignEditor(campaignId);
+
+    this._positionEditorSideSheets();
     document.getElementById('campaignEditOverlay').classList.add('visible');
   }
 
   closeCampaignEditor() {
     this._editingCampaignId = null;
+    this._selectedGraphNode = null;
+    this._branchAddMode = null;
     document.getElementById('campaignEditOverlay').classList.remove('visible');
   }
 
+  _refreshCampaignEditor(campaignId) {
+    this._renderCampaignTree(campaignId);
+    this._updateNodeBar(campaignId);
+    this._renderCampaignLevels(campaignId);
+    this._renderAvailableLevels(campaignId);
+  }
+
+  // ─── Tree canvas preview ─────────────────────────────────
+
+  _renderCampaignTree(campaignId) {
+    const campaign = this.campaignManager.getById(campaignId);
+    const container = document.getElementById('campaignTreeContainer');
+    container.innerHTML = '';
+
+    const hint = document.getElementById('campaignEmptyHint');
+
+    if (!campaign || !campaign.graph || campaign.graph.nodes.length === 0) {
+      if (hint) hint.style.display = '';
+      return;
+    }
+    if (hint) hint.style.display = 'none';
+
+    const graph = campaign.graph;
+    const nodes = graph.nodes;
+    const R = 16, ROW_H = 55, COL_W = 60, PAD = 32;
+
+    const layout = computeLayout(graph);
+    if (!layout) return;
+
+    const { positions, width: cw, height: ch0 } = toPixelPositions(layout, nodes, { rowH: ROW_H, colW: COL_W, pad: PAD });
+    const ch = ch0 + R * 2;
+
+    // --- Canvas ---
+    const dpr = window.devicePixelRatio || 1;
+    const canvas = document.createElement('canvas');
+    canvas.width = cw * dpr;
+    canvas.height = ch * dpr;
+    canvas.style.width = cw + 'px';
+    canvas.style.height = ch + 'px';
+    canvas.style.cursor = 'pointer';
+
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+
+    // Connections
+    for (const n of nodes) {
+      const from = positions.get(n.id);
+      if (!from) continue;
+      for (const cid of (n.children || [])) {
+        const to = positions.get(cid);
+        if (!to) continue;
+        const midY = (from.y + R + to.y - R) / 2;
+        ctx.beginPath();
+        ctx.moveTo(from.x, from.y + R);
+        ctx.bezierCurveTo(from.x, midY, to.x, midY, to.x, to.y - R);
+        ctx.strokeStyle = '#444';
+        ctx.lineWidth = 2;
+        ctx.lineCap = 'round';
+        ctx.stroke();
+      }
+    }
+
+    // Nodes
+    for (const n of nodes) {
+      const pos = positions.get(n.id);
+      if (!pos) continue;
+      const isSel = this._selectedGraphNode === n.id;
+
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, R, 0, Math.PI * 2);
+      ctx.fillStyle = n.type === 'secret' ? '#3a3040' : '#2a2a2f';
+      ctx.fill();
+      ctx.strokeStyle = isSel ? '#4ecdc4' : '#666';
+      ctx.lineWidth = isSel ? 2.5 : 1.5;
+      ctx.stroke();
+
+      // Label
+      ctx.fillStyle = n.type === 'secret' ? '#c77dff' : '#ccc';
+      ctx.font = '8px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const label = n.type === 'secret' ? '?' : (n.levelName || '').slice(0, 5);
+      ctx.fillText(label, pos.x, pos.y);
+    }
+
+    // Click handler
+    canvas.addEventListener('click', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const sx = cw / rect.width;
+      const sy = ch / rect.height;
+      const mx = (e.clientX - rect.left) * sx;
+      const my = (e.clientY - rect.top) * sy;
+
+      let hit = null;
+      for (const n of nodes) {
+        const pos = positions.get(n.id);
+        if (!pos) continue;
+        const dx = mx - pos.x, dy = my - pos.y;
+        if (dx * dx + dy * dy <= (R + 6) * (R + 6)) { hit = n.id; break; }
+      }
+
+      this._selectedGraphNode = hit;
+      this._branchAddMode = null;  // reset branch mode on selection change
+      this._updateNodeBar(campaignId);
+      this._renderCampaignTree(campaignId);
+    });
+
+    container.appendChild(canvas);
+  }
+
+  _updateNodeBar(campaignId) {
+    const bar = document.getElementById('campaignNodeBar');
+    const label = document.getElementById('selectedNodeLabel');
+    if (!bar || !label) return;
+
+    const campaign = this.campaignManager.getById(campaignId);
+    if (!campaign || !campaign.graph || this._selectedGraphNode === null) {
+      bar.style.display = 'none';
+      return;
+    }
+
+    const node = campaign.graph.nodes.find(n => n.id === this._selectedGraphNode);
+    if (!node) { bar.style.display = 'none'; return; }
+
+    bar.style.display = '';
+    label.innerHTML = `<strong>${this._esc(node.levelName || '?')}</strong>${node.type === 'secret' ? ' (secret)' : ''}`;
+
+    const editBtn = document.getElementById('nodeEditBtn');
+    if (editBtn) {
+      editBtn.disabled = !node.levelName;
+      editBtn.title = node.levelName ? 'Edit this level in editor' : 'Node has no level';
+    }
+  }
+
+  // ─── Graph editing actions ───────────────────────────────
+
+  _graphEditSelected(campaignId) {
+    if (this._selectedGraphNode === null) return;
+    const campaign = this.campaignManager.getById(campaignId);
+    if (!campaign || !campaign.graph) return;
+    const node = campaign.graph.nodes.find(n => n.id === this._selectedGraphNode);
+    if (!node || !node.levelName) {
+      alert('This node has no level to edit.');
+      return;
+    }
+    this._editCampaignLevel(node.levelName);
+  }
+
+  _graphBranchAtSelected(campaignId) {
+    if (this._selectedGraphNode === null) return;
+
+    // Prompt for which level to add as new branch
+    const campaign = this.campaignManager.getById(campaignId);
+    if (!campaign) return;
+    const node = campaign.graph.nodes.find(n => n.id === this._selectedGraphNode);
+    if (!node) return;
+
+    // Enter "branch add" mode — next available level click will add as branch child
+    this._branchAddMode = this._selectedGraphNode;
+    this._updateNodeBar(campaignId);
+
+    // Highlight the mode in the node bar
+    const label = document.getElementById('selectedNodeLabel');
+    if (label) label.innerHTML += ' <em style="color:#4ecdc4">— click a level below to add branch</em>';
+  }
+
+  _graphToggleSecret(campaignId) {
+    if (this._selectedGraphNode === null) return;
+    const campaign = this.campaignManager.getById(campaignId);
+    if (!campaign || !campaign.graph) return;
+
+    const node = campaign.graph.nodes.find(n => n.id === this._selectedGraphNode);
+    if (!node) return;
+
+    this.campaignManager.setGraphNodeType(
+      campaignId, node.id,
+      node.type === 'secret' ? 'normal' : 'secret'
+    );
+    this._refreshCampaignEditor(campaignId);
+  }
+
+  _graphRemoveSelected(campaignId) {
+    if (this._selectedGraphNode === null) return;
+    this.campaignManager.removeGraphNode(campaignId, this._selectedGraphNode);
+    this._selectedGraphNode = null;
+    this._refreshCampaignEditor(campaignId);
+  }
+
   _editCampaignLevel(bakedName) {
-    // Try to find existing level with matching name in editor
     const levels = this.levelManager.getAllLevels();
     const match = levels.find(l => {
       const safe = (l.name || '').replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -2301,7 +2821,6 @@ class PeggleApp {
     if (match) {
       this.levelManager.setCurrentLevelById(match.id);
     } else {
-      // Import baked data as new editor level
       const raw = localStorage.getItem('baked:' + bakedName);
       if (!raw) { alert('Baked level data not found: ' + bakedName); return; }
       const imported = this.levelManager.importLevel(raw);
@@ -2315,14 +2834,16 @@ class PeggleApp {
     this.startEditor();
   }
 
+  // ─── Play order list (derived from graph) ────────────────
+
   _renderCampaignLevels(campaignId) {
     const campaign = this.campaignManager.getById(campaignId);
     if (!campaign) return;
 
     const list = document.getElementById('campaignLevelItems');
-    const hint = document.getElementById('campaignEmptyHint');
     list.innerHTML = '';
-    hint.style.display = campaign.levelNames.length === 0 ? '' : 'none';
+
+    if (campaign.levelNames.length === 0) return;
 
     campaign.levelNames.forEach((name, index) => {
       const item = document.createElement('div');
@@ -2330,29 +2851,23 @@ class PeggleApp {
 
       item.innerHTML = `
         <span class="campaign-level-num">${index + 1}</span>
-        <span class="campaign-level-name">${name}</span>
+        <span class="campaign-level-name">${this._esc(name)}</span>
         <div class="campaign-level-actions">
           <button class="campaign-action-btn campaign-edit-level-btn" title="Edit in Editor">&#9998;</button>
           <button class="campaign-action-btn campaign-rebake-btn" title="Rebake Level">&#8635;</button>
-          <button class="campaign-action-btn" title="Move Up" ${index === 0 ? 'disabled' : ''}>&#9650;</button>
-          <button class="campaign-action-btn" title="Move Down" ${index === campaign.levelNames.length - 1 ? 'disabled' : ''}>&#9660;</button>
-          <button class="campaign-action-btn campaign-remove-btn" title="Remove">&#10005;</button>
         </div>
       `;
 
-      // Edit level in editor
       item.querySelector('.campaign-edit-level-btn').addEventListener('click', () => {
         this._editCampaignLevel(name);
       });
 
-      // Rebake single level
       item.querySelector('.campaign-rebake-btn').addEventListener('click', async (e) => {
         const btn = e.currentTarget;
         btn.disabled = true;
         btn.style.opacity = '0.4';
         const didRebake = await this._rebakeLevelIfStale(name);
         if (!didRebake) {
-          // Force rebake even if timestamps match (user explicitly asked)
           const editorLevels = this.levelManager.getAllLevels();
           const editorLevel = editorLevels.find(l => {
             const safe = (l.name || '').replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -2361,7 +2876,7 @@ class PeggleApp {
           if (editorLevel) {
             const snapshot = JSON.parse(JSON.stringify(editorLevel));
             localStorage.setItem('baked:' + name, JSON.stringify(snapshot));
-            await api.saveLevel(name, snapshot);
+            await this._saveBakedLevelRemote(name, snapshot);
           }
         }
         btn.style.opacity = '';
@@ -2370,38 +2885,18 @@ class PeggleApp {
         setTimeout(() => { btn.style.color = ''; }, 800);
       });
 
-      const moveBtns = item.querySelectorAll('.campaign-action-btn:not(.campaign-edit-level-btn):not(.campaign-rebake-btn):not(.campaign-remove-btn)');
-      moveBtns[0].addEventListener('click', () => {
-        this.campaignManager.moveLevel(campaignId, index, index - 1);
-        this._renderCampaignLevels(campaignId);
-      });
-      moveBtns[1].addEventListener('click', () => {
-        this.campaignManager.moveLevel(campaignId, index, index + 1);
-        this._renderCampaignLevels(campaignId);
-      });
-      item.querySelector('.campaign-remove-btn').addEventListener('click', () => {
-        this.campaignManager.removeLevel(campaignId, index);
-        this._renderCampaignLevels(campaignId);
-        this._renderAvailableLevels(campaignId);
-      });
-
       list.appendChild(item);
     });
   }
 
-  async _renderAvailableLevels(campaignId) {
-    const list = document.getElementById('availableLevelItems');
-    list.innerHTML = '<div class="campaign-empty-hint">Loading...</div>';
+  // ─── Available levels list ───────────────────────────────
 
-    // Gather editor levels (primary source) + baked-only levels (remote or local bakes without editor copy)
+  _buildAvailableLevelEntries(remoteNames = []) {
     const editorLevels = this.levelManager.getAllLevels();
     const editorSafeNames = new Set(editorLevels.map(l => (l.name || '').replace(/[^a-zA-Z0-9_-]/g, '_')));
-
     const localBaked = this.campaignManager.getBakedLevelNames();
-    const remoteNames = await api.listLevels();
     const allBaked = [...new Set([...localBaked, ...remoteNames])].sort();
 
-    // Build unified list: editor levels first, then baked-only levels not in editor
     const entries = [];
     for (const level of editorLevels) {
       const safeName = (level.name || '').replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -2413,38 +2908,72 @@ class PeggleApp {
       }
     }
 
-    list.innerHTML = '';
-    if (entries.length === 0) {
-      list.innerHTML = '<div class="campaign-empty-hint">No levels found. Create levels in the editor first.</div>';
-      return;
-    }
+    return { editorLevels, entries };
+  }
 
-    for (const entry of entries) {
-      const item = document.createElement('div');
-      item.className = 'campaign-level-item campaign-available-item';
-      item.innerHTML = `
-        <span class="campaign-level-name">${entry.displayName}</span>
-        <button class="campaign-action-btn campaign-add-btn" title="Add to Campaign">+</button>
-      `;
+  _renderAvailableLevels(campaignId) {
+    const list = document.getElementById('availableLevelItems');
+    const requestId = ++this._campaignAvailableLevelsRequest;
 
-      item.querySelector('.campaign-add-btn').addEventListener('click', async () => {
-        // Auto-bake editor level when adding to campaign
-        if (entry.source === 'editor') {
-          const editorLevel = editorLevels.find(l =>
-            (l.name || '').replace(/[^a-zA-Z0-9_-]/g, '_') === entry.name
-          );
-          if (editorLevel) {
-            const snapshot = JSON.parse(JSON.stringify(editorLevel));
-            localStorage.setItem('baked:' + entry.name, JSON.stringify(snapshot));
-            api.saveLevel(entry.name, snapshot); // fire-and-forget
+    const renderEntries = (remoteNames = null) => {
+      if (requestId !== this._campaignAvailableLevelsRequest || this._editingCampaignId !== campaignId) return;
+
+      const { editorLevels, entries } = this._buildAvailableLevelEntries(remoteNames || []);
+      list.innerHTML = '';
+
+      if (entries.length === 0) {
+        list.innerHTML = `<div class="campaign-empty-hint">${
+          remoteNames === null
+            ? 'Looking for baked levels...'
+            : 'No levels found. Create levels in the editor first.'
+        }</div>`;
+        return;
+      }
+
+      for (const entry of entries) {
+        const item = document.createElement('div');
+        item.className = 'campaign-level-item campaign-available-item';
+        item.innerHTML = `
+          <span class="campaign-level-name">${this._esc(entry.displayName)}</span>
+          <button class="campaign-action-btn campaign-add-btn" title="Add to Campaign">+</button>
+        `;
+
+        const addBtn = item.querySelector('.campaign-add-btn');
+        addBtn.addEventListener('click', async () => {
+          addBtn.disabled = true;
+          addBtn.style.opacity = '0.4';
+          const ready = await this._prepareCampaignEntryLevel(entry, editorLevels);
+          if (!ready) {
+            addBtn.disabled = false;
+            addBtn.style.opacity = '';
+            return;
           }
-        }
-        this.campaignManager.addLevel(campaignId, entry.name);
-        this._renderCampaignLevels(campaignId);
-      });
 
-      list.appendChild(item);
-    }
+          // Branch mode: add as new branch child of the selected node
+          if (this._branchAddMode !== undefined && this._branchAddMode !== null) {
+            this.campaignManager.addGraphBranch(campaignId, this._branchAddMode, entry.name);
+            this._branchAddMode = null;
+            this._refreshCampaignEditor(campaignId);
+            return;
+          }
+
+          // Normal mode: add as child of selected node, or append to end
+          const parentId = this._selectedGraphNode;
+          this.campaignManager.addGraphNode(campaignId, entry.name, parentId);
+          this._refreshCampaignEditor(campaignId);
+        });
+
+        list.appendChild(item);
+      }
+    };
+
+    renderEntries(null);
+
+    api.listLevels().then((remoteNames) => {
+      renderEntries(remoteNames || []);
+    }).catch(() => {
+      renderEntries([]);
+    });
   }
 
   exportCampaign(campaignId) {
@@ -2464,17 +2993,10 @@ class PeggleApp {
     URL.revokeObjectURL(url);
   }
 
-  // Rebake a single level by baked name if editor has a newer version.
-  // Returns true if rebaked, false if skipped or no match.
   async _rebakeLevelIfStale(bakedName) {
-    const editorLevels = this.levelManager.getAllLevels();
-    const editorLevel = editorLevels.find(l => {
-      const safe = (l.name || '').replace(/[^a-zA-Z0-9_-]/g, '_');
-      return safe === bakedName || l.name === bakedName;
-    });
+    const editorLevel = this._findEditorLevelByBakedName(bakedName);
     if (!editorLevel) return false;
 
-    // Compare modified timestamps — skip if baked copy is already current
     const bakedRaw = localStorage.getItem('baked:' + bakedName);
     if (bakedRaw) {
       try {
@@ -2485,9 +3007,9 @@ class PeggleApp {
       } catch { /* rebake if parse fails */ }
     }
 
-    const snapshot = JSON.parse(JSON.stringify(editorLevel));
-    localStorage.setItem('baked:' + bakedName, JSON.stringify(snapshot));
-    await api.saveLevel(bakedName, snapshot);
+    const snapshot = this._cloneLevelSnapshot(editorLevel);
+    this._writeBakedLevelSnapshot(bakedName, snapshot);
+    await this._saveBakedLevelRemote(bakedName, snapshot);
     return true;
   }
 
@@ -2498,7 +3020,6 @@ class PeggleApp {
       return;
     }
 
-    // Auto-rebake: only rebake levels whose editor copy is newer than baked copy
     const seen = new Set();
     let rebaked = 0;
     for (const bakedName of campaign.levelNames) {
@@ -2508,15 +3029,25 @@ class PeggleApp {
     }
     if (rebaked > 0) console.log(`[campaign] Auto-rebaked ${rebaked} stale level(s)`);
 
-    // Sync campaign metadata to remote
-    const safeName = (campaign.name || 'untitled').replace(/[^a-zA-Z0-9_-]/g, '_');
-    await api.saveCampaign(safeName, campaign);
-
-    // Also publish locally as fallback (resolves from freshly-baked localStorage)
+    const remoteLevelsReady = await this._ensureCampaignLevelsReadyForRemote(campaign);
     const localName = this.campaignManager.publishLocal(campaignId);
     if (!localName) {
       alert('Campaign has no resolvable levels. Bake the levels first.');
       return;
+    }
+
+    let remotePublishMessage = '';
+    if (!remoteLevelsReady.ok) {
+      remotePublishMessage = remoteLevelsReady.message || 'Failed to sync campaign levels to remote storage.';
+    } else {
+      const campaignSaved = await this.campaignManager._syncCampaign(campaign);
+      if (!campaignSaved) {
+        remotePublishMessage = `Failed to publish campaign "${campaign.name}" to remote storage.`;
+      }
+    }
+
+    if (remotePublishMessage) {
+      alert(`${remotePublishMessage} Opened local preview only.`);
     }
     window.open('player.html?campaign=' + encodeURIComponent(localName), '_blank');
   }

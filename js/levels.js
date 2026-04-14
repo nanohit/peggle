@@ -366,14 +366,27 @@ export class LevelManager {
       
       // Generate new IDs
       level.id = Utils.generateId();
+      const groupIdMap = new Map();
+      level.pegs = level.pegs.filter(peg => peg && typeof peg === 'object' && !Array.isArray(peg));
       level.pegs.forEach(peg => {
         peg.id = Utils.generateId();
       });
-      if (level.groups) {
+      if (Array.isArray(level.groups)) {
         level.groups.forEach(group => {
-          group.id = Utils.generateId();
+          if (!group || typeof group !== 'object' || Array.isArray(group)) return;
+          const prevId = group?.id;
+          const nextId = Utils.generateId();
+          if (prevId != null && !groupIdMap.has(prevId)) {
+            groupIdMap.set(prevId, nextId);
+          }
+          group.id = nextId;
         });
       }
+      level.pegs.forEach(peg => {
+        if (peg.groupId != null) {
+          peg.groupId = groupIdMap.get(peg.groupId) || null;
+        }
+      });
       
       level.metadata = level.metadata || {};
       level.metadata.created = new Date().toISOString().split('T')[0];
@@ -450,7 +463,18 @@ export class LevelManager {
     if (!level || typeof level !== 'object') return null;
 
     if (!Array.isArray(level.pegs)) level.pegs = [];
+    level.pegs = level.pegs.filter(peg => peg && typeof peg === 'object' && !Array.isArray(peg));
     if (!Array.isArray(level.groups)) level.groups = [];
+    level.groups = level.groups.filter(group => group && typeof group === 'object' && !Array.isArray(group));
+    const validGroupIds = new Set();
+    for (const group of level.groups) {
+      const groupId = group.id;
+      const invalidId = (typeof groupId !== 'string' && typeof groupId !== 'number') || groupId === '';
+      if (invalidId || validGroupIds.has(groupId)) {
+        group.id = Utils.generateId();
+      }
+      validGroupIds.add(group.id);
+    }
     if (!level.bezierCurves || typeof level.bezierCurves !== 'object' || Array.isArray(level.bezierCurves)) {
       level.bezierCurves = {};
     }
@@ -463,6 +487,9 @@ export class LevelManager {
     if (typeof level.aimLength !== 'number') level.aimLength = 300;
     level.aimLength = Math.max(0, Math.min(300, Math.round(level.aimLength)));
     for (const peg of level.pegs) {
+      if (peg && peg.groupId != null && !validGroupIds.has(peg.groupId)) {
+        peg.groupId = null;
+      }
       if (peg && peg.type === 'multi') {
         peg.multiballSpawnCount = normalizeMultiballSpawnCount(peg.multiballSpawnCount);
       }

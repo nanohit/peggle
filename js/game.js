@@ -8,6 +8,7 @@ import { SurvivalRuntime } from './survival-runtime.js';
 import { createDefaultFlipperConfig, normalizeFlipperConfig } from './flipper-defaults.js';
 import { YoyoThreadSystem, normalizeYoyoSettings } from './yoyo-thread.js';
 import { buildBombShockwave } from './perk-bomb.js';
+import { DeepFreezeSystem } from './perk-deep-freeze.js';
 import {
   MULTIBALL_DEFAULT_SPAWN_COUNT,
   normalizeMultiballSpawnCount
@@ -16,6 +17,7 @@ import {
   countSurvivalTargets,
   ensureLevelSurvival
 } from './survival-mode.js';
+import { lightTap, initAudio, pegHitSound, resetHitCounter } from './haptics.js';
 
 // Score values
 const SCORE = {
@@ -33,6 +35,10 @@ const SCORE = {
     0: 100
   }
 };
+
+const ULTRA_AIM_V2_ROTATION_SECONDS = 2.8;
+const ULTRA_AIM_V2_MAX_ROTATIONS = 4;
+const ULTRA_AIM_V2_START_ANGLE = -Math.PI / 2;
 
 function getSimHzOverride() {
   if (typeof window === 'undefined') return null;
@@ -60,11 +66,13 @@ export class Game {
     this.state = 'idle'; // idle, aiming, confirmAim, playing, won, lost
     this.confirmShoot = false; // When true, release locks aim; second tap fires
     this.pegs = [];
+    this.groups = [];
     this.balls = [];
     this.score = 0;
     this.ballsLeft = 10;
     this.hitPegIds = [];
     this.turnHitPegIds = [];
+    this.shotsFired = 0;
     this.totalSurvivalTargets = 0;
     this.initialBallCount = 10;
     this.initialOrangePegs = 0;
@@ -90,8 +98,12 @@ export class Game {
     // Survival mode runtime (camera + scrolling)
     this.survivalRuntime = new SurvivalRuntime(canvas.height, { autoScroll: true });
     this.yoyoThread = new YoyoThreadSystem(canvas.width, canvas.height);
+    this.dynamicYoyoAnchors = new Map();
     this.baseYoyoSettings = normalizeYoyoSettings(null);
     this.yoyoPerkUsesRemaining = 0;
+    this.deepFreezeSystem = new DeepFreezeSystem();
+    this.queuedDeepFreezeShots = 0;
+    this.deepFreezeShotActive = false;
     this.debugDrag = {
       enabled: false,
       dragging: false
@@ -104,7 +116,10 @@ export class Game {
     this.trajectory = null;
     this.showFullTrajectory = false;
     this.aimLength = 300;
-    this.ultraAimCharges = 0;
+    this.ultraAimCharges = 0; // Legacy Ultra Aim 1.0 reference only.
+    this.ultraAimV2Charges = 0;
+    this.ultraAimShotActive = false;
+    this.ultraAimQte = this.createUltraAimQteState();
     this.queuedBombPerkCharges = 0;
     this.armedBombPerk = false;
     
@@ -147,6 +162,8 @@ export class Game {
     let touchDragged = false;
 
     canvas.addEventListener('touchstart', (e) => {
+      initAudio();
+      if (this.handleUltraAimQteInput(e)) return;
       if (this._handleDebugDragStart(e)) return;
       if (this.state === 'won' || this.state === 'lost') return;
       touchDragged = false;
@@ -195,6 +212,8 @@ export class Game {
 
     // --- Mouse input (confirm-shoot: aim follows cursor freely, click = fire) ---
     canvas.addEventListener('mousedown', (e) => {
+      initAudio();
+      if (this.handleUltraAimQteInput(e)) return;
       if (this._handleDebugDragStart(e)) return;
       if (this.state === 'won' || this.state === 'lost') return;
       if (this.confirmShoot) {
@@ -258,14 +277,24 @@ export class Game {
     };
 
     document.addEventListener('keydown', (e) => {
-      if (e.code === 'Space') { e.preventDefault(); handleFlip(); }
+      if (e.code !== 'Space') return;
+      if (this.isUltraAimQteActive()) {
+        e.preventDefault();
+        if (!e.repeat) this.fireUltraAimQte();
+        return;
+      }
+      e.preventDefault();
+      handleFlip();
     }, sig);
     document.addEventListener('keyup', (e) => {
-      if (e.code === 'Space') handleFlipEnd();
+      if (e.code !== 'Space') return;
+      if (this.isUltraAimQteActive()) return;
+      handleFlipEnd();
     }, sig);
 
     canvas.addEventListener('mousedown', (e) => {
       if (this.debugDrag.enabled) return;
+      if (this.isUltraAimQteActive()) return;
       if (this.state === 'playing') handleFlip();
     }, sig);
     canvas.addEventListener('mouseup', (e) => {
@@ -274,6 +303,7 @@ export class Game {
     }, sig);
     canvas.addEventListener('touchstart', (e) => {
       if (this.debugDrag.enabled) return;
+      if (this.isUltraAimQteActive()) return;
       if (this.state === 'playing') { e.preventDefault(); handleFlip(); }
     }, { passive: false, ...sig });
     canvas.addEventListener('touchend', (e) => {
@@ -332,6 +362,254 @@ export class Game {
 
   isAimingState() {
     return this.state === 'aiming' || this.state === 'confirmAim';
+  }
+
+  createUltraAimQteState() {
+    return {
+      active: false,
+      pegId: null,
+      ballId: null,
+      anchorX: 0,
+      anchorY: 0,
+      angle: ULTRA_AIM_V2_START_ANGLE,
+      elapsed: 0,
+      trajectory: null,
+      skipMultiballOnRelease: false
+    };
+  }
+
+  clearDynamicYoyoAnchors() {
+    this.dynamicYoyoAnchors.clear();
+  }
+
+  removeDynamicYoyoAnchor(ballId) {
+    if (!ballId) return;
+    this.dynamicYoyoAnchors.delete(ballId);
+  }
+
+  bindDynamicYoyoAnchor(ballId, pegId, anchorX, anchorY) {
+    if (!ballId || !pegId) return;
+    this.dynamicYoyoAnchors.set(ballId, {
+      pegId,
+      anchorX: Number.isFinite(anchorX) ? anchorX : 0,
+      anchorY: Number.isFinite(anchorY) ? anchorY : 0
+    });
+  }
+
+  syncDynamicYoyoAnchors() {
+    if (this.dynamicYoyoAnchors.size === 0) return;
+
+    for (const [ballId, binding] of this.dynamicYoyoAnchors) {
+      const ball = this.balls.find(item => item && item.id === ballId);
+      if (!ball || !ball.active || ball.yoyoEligible === false) {
+        this.dynamicYoyoAnchors.delete(ballId);
+        continue;
+      }
+
+      const peg = this.pegs.find(item => item && item.id === binding.pegId);
+      if (!peg) {
+        this.dynamicYoyoAnchors.delete(ballId);
+        continue;
+      }
+
+      const anchor = this.resolveUltraAimAnchorPosition(peg, binding.anchorX, binding.anchorY);
+      binding.anchorX = anchor.x;
+      binding.anchorY = anchor.y;
+      this.yoyoThread.setBallAnchor(ballId, anchor.x, anchor.y, { moveOriginalAnchor: true });
+    }
+  }
+
+  getUltraAimWorldHeight() {
+    return this.isSurvivalMode() ? this.survivalRuntime.getWorldHeight() : this.canvas.height;
+  }
+
+  getUltraAimLaunchPower(anchorY) {
+    const worldHeight = Math.max(1, this.getUltraAimWorldHeight());
+    const halfwayY = worldHeight * 0.5;
+    if (!Number.isFinite(anchorY) || anchorY <= halfwayY) {
+      return PHYSICS_CONFIG.launchPower;
+    }
+
+    const t = Utils.clamp((anchorY - halfwayY) / Math.max(1, worldHeight - halfwayY), 0, 1);
+    return PHYSICS_CONFIG.launchPower * (1 + t * 1.5);
+  }
+
+  rayCircleIntersectionDistance(originX, originY, dirX, dirY, cx, cy, radius) {
+    const ox = originX - cx;
+    const oy = originY - cy;
+    const b = ox * dirX + oy * dirY;
+    const c = ox * ox + oy * oy - radius * radius;
+    const disc = b * b - c;
+    if (disc < 0) return null;
+
+    const root = Math.sqrt(disc);
+    const near = -b - root;
+    if (near > 0.001) return near;
+    const far = -b + root;
+    return far > 0.001 ? far : null;
+  }
+
+  rayExpandedBrickIntersectionDistance(originX, originY, dirX, dirY, peg, pose, padding) {
+    const pegX = Number.isFinite(pose?.x) ? pose.x : peg.x;
+    const pegY = Number.isFinite(pose?.y) ? pose.y : peg.y;
+    const angle = peg.angle || 0;
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    const localOriginX = (originX - pegX) * cos + (originY - pegY) * sin;
+    const localOriginY = -(originX - pegX) * sin + (originY - pegY) * cos;
+    const localDirX = dirX * cos + dirY * sin;
+    const localDirY = -dirX * sin + dirY * cos;
+    const halfW = (Number.isFinite(peg.width) ? peg.width : PHYSICS_CONFIG.brickWidth) * 0.5 + padding;
+    const halfH = (Number.isFinite(peg.height) ? peg.height : PHYSICS_CONFIG.brickHeight) * 0.5 + padding;
+
+    let tMin = -Infinity;
+    let tMax = Infinity;
+    const slabs = [
+      { origin: localOriginX, dir: localDirX, min: -halfW, max: halfW },
+      { origin: localOriginY, dir: localDirY, min: -halfH, max: halfH }
+    ];
+
+    for (const slab of slabs) {
+      if (Math.abs(slab.dir) < 1e-6) {
+        if (slab.origin < slab.min || slab.origin > slab.max) return null;
+        continue;
+      }
+      let t1 = (slab.min - slab.origin) / slab.dir;
+      let t2 = (slab.max - slab.origin) / slab.dir;
+      if (t1 > t2) {
+        const tmp = t1;
+        t1 = t2;
+        t2 = tmp;
+      }
+      tMin = Math.max(tMin, t1);
+      tMax = Math.min(tMax, t2);
+      if (tMin > tMax) return null;
+    }
+
+    if (tMax <= 0.001) return null;
+    return tMin > 0.001 ? tMin : tMax;
+  }
+
+  getUltraAimBoundaryDistance(originX, originY, dirX, dirY) {
+    const ballRadius = getBallRadius();
+    const minX = ballRadius;
+    const maxX = Math.max(minX, this.canvas.width - ballRadius);
+    const minY = ballRadius;
+    const maxY = Math.max(minY, this.getUltraAimWorldHeight() - ballRadius);
+    const candidates = [];
+
+    if (dirX > 1e-6) candidates.push((maxX - originX) / dirX);
+    else if (dirX < -1e-6) candidates.push((minX - originX) / dirX);
+
+    if (dirY > 1e-6) candidates.push((maxY - originY) / dirY);
+    else if (dirY < -1e-6) candidates.push((minY - originY) / dirY);
+
+    const positive = candidates.filter(value => Number.isFinite(value) && value > 0.001);
+    if (positive.length === 0) {
+      return Math.max(this.canvas.width, this.getUltraAimWorldHeight());
+    }
+    return Math.min(...positive);
+  }
+
+  buildUltraAimStraightPreview(sourcePeg, anchorX, anchorY, angle) {
+    const origin = this.getUltraAimLaunchOrigin(sourcePeg, anchorX, anchorY, angle);
+    const dirX = Math.cos(angle);
+    const dirY = Math.sin(angle);
+    const ballRadius = getBallRadius();
+    let bestDistance = this.getUltraAimBoundaryDistance(origin.x, origin.y, dirX, dirY);
+    let hit = null;
+
+    for (const peg of this.pegs) {
+      if (!peg || peg.id === sourcePeg?.id || this.isPortalPeg(peg)) continue;
+      const poses = this.physics._getPegCollisionPoses(peg);
+      for (const pose of poses) {
+        const distance = peg.shape === 'brick'
+          ? this.rayExpandedBrickIntersectionDistance(origin.x, origin.y, dirX, dirY, peg, pose, ballRadius)
+          : this.rayCircleIntersectionDistance(
+            origin.x,
+            origin.y,
+            dirX,
+            dirY,
+            Number.isFinite(pose?.x) ? pose.x : peg.x,
+            Number.isFinite(pose?.y) ? pose.y : peg.y,
+            this.physics.getPegCollisionRadius(peg) + ballRadius
+          );
+        if (!Number.isFinite(distance) || distance >= bestDistance - 0.001) continue;
+        bestDistance = distance;
+        hit = {
+          x: origin.x + dirX * distance,
+          y: origin.y + dirY * distance,
+          pegId: peg.id
+        };
+      }
+    }
+
+    const endX = origin.x + dirX * bestDistance;
+    const endY = origin.y + dirY * bestDistance;
+    return {
+      points: [
+        { x: origin.x, y: origin.y },
+        { x: endX, y: endY }
+      ],
+      hits: hit ? [hit] : []
+    };
+  }
+
+  isUltraAimQteActive() {
+    return !!this.ultraAimQte?.active;
+  }
+
+  getUltraAimQteBall() {
+    if (!this.isUltraAimQteActive()) return null;
+    return this.balls.find(ball => ball && ball.id === this.ultraAimQte.ballId) || null;
+  }
+
+  getUltraAimQtePeg() {
+    if (!this.isUltraAimQteActive()) return null;
+    return this.pegs.find(peg => peg && peg.id === this.ultraAimQte.pegId) || null;
+  }
+
+  resolveUltraAimAnchorPosition(peg, baseX, baseY) {
+    if (!peg) {
+      return {
+        x: Number.isFinite(baseX) ? baseX : 0,
+        y: Number.isFinite(baseY) ? baseY : 0
+      };
+    }
+
+    const wrapCopies = Array.isArray(peg._wrapCopies) ? peg._wrapCopies : [];
+    const candidates = [];
+    if (!peg._wrapHideMain || wrapCopies.length === 0) {
+      candidates.push({ x: peg.x, y: peg.y });
+    }
+    for (const copy of wrapCopies) {
+      if (!copy || !Number.isFinite(copy.x) || !Number.isFinite(copy.y)) continue;
+      candidates.push({ x: copy.x, y: copy.y });
+    }
+    if (candidates.length === 0) {
+      candidates.push({ x: peg.x, y: peg.y });
+    }
+
+    let best = candidates[0];
+    let bestDistSq = (best.x - baseX) * (best.x - baseX) + (best.y - baseY) * (best.y - baseY);
+    for (let i = 1; i < candidates.length; i++) {
+      const candidate = candidates[i];
+      const distSq = (candidate.x - baseX) * (candidate.x - baseX) + (candidate.y - baseY) * (candidate.y - baseY);
+      if (distSq < bestDistSq) {
+        best = candidate;
+        bestDistSq = distSq;
+      }
+    }
+
+    return best;
+  }
+
+  handleUltraAimQteInput(e) {
+    if (!this.isUltraAimQteActive()) return false;
+    if (e?.preventDefault) e.preventDefault();
+    if (e?.stopImmediatePropagation) e.stopImmediatePropagation();
+    this.fireUltraAimQte();
+    return true;
   }
 
   getInputWorldPosition(e) {
@@ -414,6 +692,7 @@ export class Game {
     this.balls = this.physics.balls;
 
     this.yoyoThread.clear();
+    this.clearDynamicYoyoAnchors();
     this.yoyoThread.setLaunchAnchor(this.launchX, this.launchY);
     if (ball.yoyoEligible !== false) {
       this.yoyoThread.registerBallLaunch(ball, this.launchX, this.launchY);
@@ -504,7 +783,7 @@ export class Game {
   }
 
   shouldShowFullTrajectory() {
-    return this.showFullTrajectory || this.ultraAimCharges > 0;
+    return this.showFullTrajectory;
   }
 
   isSurvivalMode() {
@@ -523,26 +802,42 @@ export class Game {
   refreshYoyoThreadRuntimeConfig() {
     const base = this.baseYoyoSettings || normalizeYoyoSettings(null);
     const enabledByPerk = this.yoyoPerkUsesRemaining > 0;
+    const enabledByLiveBall = Array.isArray(this.balls)
+      && this.balls.some(ball => ball && ball.yoyoEligible === true);
     this.yoyoThread.configure({
       ...base,
-      enabled: !!base.enabled || enabledByPerk
+      enabled: !!base.enabled || enabledByPerk || enabledByLiveBall
     });
   }
 
-  configureBallYoyoState(ball) {
+  configureBallYoyoState(ball, options = null) {
     if (!ball) return;
+    const suppressPerkBinding = !!(options && options.suppressPerkBinding);
+    ball.yoyoPerkConsumed = false;
     if (this.baseYoyoSettings && this.baseYoyoSettings.enabled) {
       ball.yoyoEligible = true;
       ball.yoyoPerkBound = false;
       return;
     }
-    if (this.yoyoPerkUsesRemaining > 0) {
+    if (!suppressPerkBinding && this.yoyoPerkUsesRemaining > 0) {
       ball.yoyoEligible = true;
       ball.yoyoPerkBound = true;
       return;
     }
     ball.yoyoEligible = false;
     ball.yoyoPerkBound = false;
+  }
+
+  consumeYoyoPerkUseOnBind(ball) {
+    if (!ball || !ball.yoyoPerkBound || ball.yoyoPerkConsumed) return false;
+    if (this.baseYoyoSettings && this.baseYoyoSettings.enabled) return false;
+    if (this.yoyoPerkUsesRemaining <= 0) return false;
+
+    this.yoyoPerkUsesRemaining = Math.max(0, this.yoyoPerkUsesRemaining - 1);
+    ball.yoyoPerkConsumed = true;
+    this.refreshYoyoThreadRuntimeConfig();
+    this.emitUiStateIfChanged(true, 'yoyo-perk-consumed');
+    return true;
   }
 
   disablePerkYoyoAcrossBalls() {
@@ -555,25 +850,28 @@ export class Game {
 
   applyYoyoReleaseEvents(releaseEvents) {
     if (!Array.isArray(releaseEvents) || releaseEvents.length === 0) return;
+    for (const ballId of releaseEvents) {
+      this.removeDynamicYoyoAnchor(ballId);
+    }
     if (this.baseYoyoSettings && this.baseYoyoSettings.enabled) return;
 
-    let consumed = 0;
+    let needsRefresh = false;
     for (const ballId of releaseEvents) {
-      if (this.yoyoPerkUsesRemaining <= 0) break;
       const ball = this.balls.find(item => item && item.id === ballId);
       if (!ball || !ball.yoyoPerkBound) continue;
 
-      this.yoyoPerkUsesRemaining = Math.max(0, this.yoyoPerkUsesRemaining - 1);
-      consumed++;
-      if (this.yoyoPerkUsesRemaining <= 0) {
-        this.disablePerkYoyoAcrossBalls();
-        break;
+      if (!ball.yoyoPerkConsumed && this.yoyoPerkUsesRemaining > 0) {
+        this.yoyoPerkUsesRemaining = Math.max(0, this.yoyoPerkUsesRemaining - 1);
+        ball.yoyoPerkConsumed = true;
       }
+      ball.yoyoEligible = false;
+      ball.yoyoPerkBound = false;
+      ball.yoyoPerkConsumed = false;
+      needsRefresh = true;
     }
 
-    if (consumed > 0) {
+    if (needsRefresh) {
       this.refreshYoyoThreadRuntimeConfig();
-      this.emitUiStateIfChanged(true, 'yoyo-perk-consumed');
     }
   }
 
@@ -587,6 +885,253 @@ export class Game {
     this.queuedBombPerkCharges = Math.max(0, this.queuedBombPerkCharges - 1);
     this.armedBombPerk = true;
     this.emitUiStateIfChanged(true, 'bomb-perk-armed');
+    return true;
+  }
+
+  armDeepFreezeForLaunch() {
+    if (this.queuedDeepFreezeShots <= 0) {
+      this.deepFreezeShotActive = false;
+      return false;
+    }
+
+    this.queuedDeepFreezeShots = Math.max(0, this.queuedDeepFreezeShots - 1);
+    this.deepFreezeShotActive = true;
+    this.deepFreezeSystem.startShot(this.pegs);
+    return true;
+  }
+
+  finishDeepFreezeShot() {
+    const wasActive = this.deepFreezeShotActive || this.deepFreezeSystem.isActive();
+    const moved = wasActive ? this.deepFreezeSystem.finishShot(this.pegs) : false;
+    this.deepFreezeShotActive = false;
+    return moved;
+  }
+
+  armUltraAimForLaunch() {
+    if (this.ultraAimV2Charges <= 0) return false;
+    if (this.ultraAimShotActive || this.isUltraAimQteActive()) return false;
+    this.ultraAimV2Charges = Math.max(0, this.ultraAimV2Charges - 1);
+    this.ultraAimShotActive = true;
+    return true;
+  }
+
+  resetUltraAimRuntime() {
+    const qteBall = this.getUltraAimQteBall();
+    if (qteBall) {
+      qteBall.ultraAimStuck = false;
+      qteBall.ultraAimQteBall = false;
+    }
+    this.ultraAimShotActive = false;
+    this.ultraAimQte = this.createUltraAimQteState();
+  }
+
+  isUltraAimStickyEligiblePeg(peg) {
+    if (!peg || this.isPortalPeg(peg)) return false;
+    if (peg.type === 'bumper') return false;
+    return true;
+  }
+
+  syncUltraAimQteBall() {
+    if (!this.isUltraAimQteActive()) return false;
+    const qteBall = this.getUltraAimQteBall();
+    const qtePeg = this.getUltraAimQtePeg();
+    if (!qteBall || !qtePeg) {
+      this.resetUltraAimRuntime();
+      return false;
+    }
+
+    const anchor = this.resolveUltraAimAnchorPosition(qtePeg, this.ultraAimQte.anchorX, this.ultraAimQte.anchorY);
+    this.ultraAimQte.anchorX = anchor.x;
+    this.ultraAimQte.anchorY = anchor.y;
+    qteBall.x = anchor.x;
+    qteBall.y = anchor.y;
+    qteBall.vx = 0;
+    qteBall.vy = 0;
+    qteBall.active = true;
+    qteBall.stuck = false;
+    qteBall.stuckFrames = 0;
+    qteBall.ultraAimStuck = true;
+    qteBall.ultraAimQteBall = true;
+    return true;
+  }
+
+  getUltraAimLaunchOrigin(peg, baseX, baseY, angle) {
+    const anchorX = Number.isFinite(baseX) ? baseX : (Number.isFinite(peg?.x) ? peg.x : 0);
+    const anchorY = Number.isFinite(baseY) ? baseY : (Number.isFinite(peg?.y) ? peg.y : 0);
+    const dirX = Math.cos(angle);
+    const dirY = Math.sin(angle);
+    const ballRadius = getBallRadius();
+
+    let sourceExtent = this.physics.getPegCollisionRadius(peg);
+    if (peg?.shape === 'brick') {
+      const width = Number.isFinite(peg.width) ? peg.width : PHYSICS_CONFIG.brickWidth;
+      const height = Number.isFinite(peg.height) ? peg.height : PHYSICS_CONFIG.brickHeight;
+      const halfWidth = width / 2;
+      const halfHeight = height / 2;
+      const pegAngle = peg.angle || 0;
+      const ux = Math.cos(pegAngle);
+      const uy = Math.sin(pegAngle);
+      const vx = -uy;
+      const vy = ux;
+      sourceExtent =
+        halfWidth * Math.abs(dirX * ux + dirY * uy) +
+        halfHeight * Math.abs(dirX * vx + dirY * vy);
+    }
+
+    const separation = sourceExtent + ballRadius + 1;
+    return {
+      x: anchorX + dirX * separation,
+      y: anchorY + dirY * separation
+    };
+  }
+
+  updateUltraAimQte(dt) {
+    if (!this.isUltraAimQteActive()) return;
+    if (!this.syncUltraAimQteBall()) return;
+
+    const qte = this.ultraAimQte;
+    const peg = this.getUltraAimQtePeg();
+    qte.elapsed += dt;
+    qte.angle = ULTRA_AIM_V2_START_ANGLE + (qte.elapsed * Math.PI * 2) / ULTRA_AIM_V2_ROTATION_SECONDS;
+    qte.trajectory = this.buildUltraAimStraightPreview(peg, qte.anchorX, qte.anchorY, qte.angle);
+
+    if (qte.elapsed >= ULTRA_AIM_V2_ROTATION_SECONDS * ULTRA_AIM_V2_MAX_ROTATIONS) {
+      this.releaseUltraAimQteWithoutShot();
+    }
+  }
+
+  engageUltraAimQte(event) {
+    if (!this.ultraAimShotActive || this.isUltraAimQteActive()) return false;
+    const peg = event?.peg;
+    const ball = event?.ball;
+    if (!ball || !ball.active || ball.ultraAimStuck) return false;
+    if (!this.isUltraAimStickyEligiblePeg(peg)) return false;
+
+    this.ultraAimShotActive = false;
+    this.yoyoThread.removeBall(ball.id);
+    this.removeDynamicYoyoAnchor(ball.id);
+    ball.yoyoEligible = false;
+    ball.yoyoPerkBound = false;
+
+    const qte = this.createUltraAimQteState();
+    qte.active = true;
+    qte.pegId = peg.id;
+    qte.ballId = ball.id;
+    qte.anchorX = peg.x;
+    qte.anchorY = peg.y;
+    qte.skipMultiballOnRelease = peg.type === 'multi';
+    this.ultraAimQte = qte;
+
+    if (this.physics?.hitPegs && typeof this.physics.hitPegs.add === 'function') {
+      this.physics.hitPegs.add(peg.id);
+    }
+
+    if (peg.type === 'multi') {
+      const spawnCount = normalizeMultiballSpawnCount(peg.multiballSpawnCount);
+      this.spawnMultiballs(
+        {
+          x: peg.x,
+          y: peg.y,
+          vx: event?.impact?.vx ?? ball.vx,
+          vy: event?.impact?.vy ?? ball.vy
+        },
+        spawnCount
+      );
+    }
+
+    this.syncUltraAimQteBall();
+    this.updateUltraAimQte(0);
+    return true;
+  }
+
+  activateUltraAimHeldPeg(ball, options = null) {
+    if (!this.isUltraAimQteActive()) return false;
+    const peg = this.getUltraAimQtePeg();
+    if (!peg) return false;
+
+    if (peg.type === 'obstacle') {
+      this.animator.notifyHit(peg.id);
+      return false;
+    }
+
+    const allowMultiball = options?.allowMultiball !== false && !this.ultraAimQte.skipMultiballOnRelease;
+    const activated = this.activatePeg(peg, ball, { allowMultiball });
+    this.animator.notifyHit(peg.id);
+    return activated;
+  }
+
+  prepareUltraAimFollowUpBall(ball, anchorX, anchorY, anchorPeg = null) {
+    if (!ball) return;
+    this.armBombPerkForLaunch();
+    this.armDeepFreezeForLaunch();
+    this.yoyoThread.removeBall(ball.id);
+    this.removeDynamicYoyoAnchor(ball.id);
+    this.yoyoThread.setLaunchAnchor(anchorX, anchorY);
+    this.configureBallYoyoState(ball);
+    if (ball.yoyoEligible !== false) {
+      this.yoyoThread.registerBallLaunch(ball, anchorX, anchorY);
+      this.consumeYoyoPerkUseOnBind(ball);
+      if (anchorPeg?.id) {
+        this.bindDynamicYoyoAnchor(ball.id, anchorPeg.id, anchorX, anchorY);
+      }
+    }
+  }
+
+  fireUltraAimQte() {
+    if (!this.isUltraAimQteActive()) return false;
+
+    const qte = this.ultraAimQte;
+    const ball = this.getUltraAimQteBall();
+    const peg = this.getUltraAimQtePeg();
+    if (!ball) {
+      this.resetUltraAimRuntime();
+      return false;
+    }
+
+    const anchorX = qte.anchorX;
+    const anchorY = qte.anchorY;
+    const angle = qte.angle;
+    const launchOrigin = this.getUltraAimLaunchOrigin(peg, anchorX, anchorY, angle);
+    const launchPower = this.getUltraAimLaunchPower(anchorY);
+
+    this.activateUltraAimHeldPeg(ball, { allowMultiball: !qte.skipMultiballOnRelease });
+
+    ball.ultraAimStuck = false;
+    ball.ultraAimQteBall = false;
+    ball.x = launchOrigin.x;
+    ball.y = launchOrigin.y;
+    ball.launch(angle, launchPower);
+    this.prepareUltraAimFollowUpBall(ball, anchorX, anchorY, peg);
+    this.ultraAimQte = this.createUltraAimQteState();
+    return true;
+  }
+
+  releaseUltraAimQteWithoutShot() {
+    if (!this.isUltraAimQteActive()) return false;
+
+    const qte = this.ultraAimQte;
+    const ball = this.getUltraAimQteBall();
+    if (!ball) {
+      this.resetUltraAimRuntime();
+      return false;
+    }
+
+    this.activateUltraAimHeldPeg(ball, { allowMultiball: !qte.skipMultiballOnRelease });
+
+    ball.ultraAimStuck = false;
+    ball.ultraAimQteBall = false;
+    ball.yoyoEligible = false;
+    ball.yoyoPerkBound = false;
+    ball.x = qte.anchorX;
+    ball.y = qte.anchorY;
+    ball.vx = 0;
+    ball.vy = Math.max(ball.vy, 0.2);
+    ball.active = true;
+    ball.stuck = false;
+    ball.stuckFrames = 0;
+    this.yoyoThread.removeBall(ball.id);
+    this.removeDynamicYoyoAnchor(ball.id);
+    this.ultraAimQte = this.createUltraAimQteState();
     return true;
   }
 
@@ -609,6 +1154,19 @@ export class Game {
     for (const peg of shockwave.targets) {
       if (this.activatePeg(peg, sourceBall, { allowMultiball: true })) {
         activatedCount++;
+      }
+    }
+    if (this.deepFreezeSystem.isActive()) {
+      this.deepFreezeSystem.applyShockwaveTargets(
+        shockwave.targets,
+        shockwave.centerX,
+        shockwave.centerY,
+        shockwave.radius,
+        sourceBall
+      );
+      for (const peg of shockwave.targets) {
+        if (!peg || this.isPortalPeg(peg)) continue;
+        this.animator.suspendPeg(peg.id);
       }
     }
     return activatedCount;
@@ -669,6 +1227,8 @@ export class Game {
       if (hitSet.has(peg.id)) continue;
       if (this.survivalRuntime.isPegBeyondLoseLine(peg, PHYSICS_CONFIG.pegRadius)) {
         this.state = 'lost';
+        this.finishDeepFreezeShot();
+        this.resetUltraAimRuntime();
         if (this.onGameEnd) this.onGameEnd('lost', this.score);
         return true;
       }
@@ -676,6 +1236,8 @@ export class Game {
 
     if (this.getSurvivalTargetsLeft(true) === 0) {
       this.state = 'won';
+      this.finishDeepFreezeShot();
+      this.resetUltraAimRuntime();
       if (this.onGameEnd) this.onGameEnd('won', this.score);
       return true;
     }
@@ -701,6 +1263,7 @@ export class Game {
     if (next) {
       this.state = 'idle';
       this.yoyoThread.clear();
+      this.clearDynamicYoyoAnchors();
       this.updateLaunchPosition();
       this.yoyoThread.setLaunchAnchor(this.launchX, this.launchY);
       this.resetBall();
@@ -710,6 +1273,7 @@ export class Game {
     // Leave debug mode with a clean regular turn state.
     this.state = 'idle';
     this.yoyoThread.clear();
+    this.clearDynamicYoyoAnchors();
     this.resetBall();
   }
 
@@ -720,10 +1284,20 @@ export class Game {
     this.survivalRuntime.configure(survivalSettings);
     this.survivalRuntime.resetCamera(true);
     this.yoyoPerkUsesRemaining = 0;
+    this.finishDeepFreezeShot();
+    this.resetUltraAimRuntime();
+    this.ultraAimV2Charges = 0;
+    this.queuedDeepFreezeShots = 0;
     this.queuedBombPerkCharges = 0;
     this.armedBombPerk = false;
     this.applyYoyoSettings(yoyoSettings, { skipReset: true });
 
+    this.groups = Array.isArray(levelData.groups)
+      ? levelData.groups.map(group => ({
+        ...group,
+        animation: group.animation ? { ...group.animation } : group.animation
+      }))
+      : [];
     this.pegs = levelData.pegs.map(p => {
       const copy = { ...p };
       if (copy.type === 'multi') {
@@ -734,7 +1308,7 @@ export class Game {
       return copy;
     });
     this.physics.setPegs(this.pegs);
-    this.animator.loadFromLevel(this.pegs, levelData.groups || []);
+    this.animator.loadFromLevel(this.pegs, this.groups);
 
     // Load flippers
     const normalizedFlippers = normalizeFlipperConfig(levelData.flippers, {
@@ -756,6 +1330,7 @@ export class Game {
     this.initialBallCount = Number.isFinite(this.ballsLeft) ? this.ballsLeft : 10;
     this.hitPegIds = [];
     this.turnHitPegIds = [];
+    this.shotsFired = 0;
     this.initialOrangePegs = this.getTotalOrangePegs();
     this.removedOrangePegs = 0;
     this.totalSurvivalTargets = this.isSurvivalMode() ? countSurvivalTargets(this.pegs) : 0;
@@ -763,18 +1338,26 @@ export class Game {
     this.trajectory = null;
     this.aimLength = typeof levelData.aimLength === 'number' ? levelData.aimLength : 300;
     this.ultraAimCharges = 0;
+    this.ultraAimV2Charges = 0;
+    this.ultraAimShotActive = false;
+    this.ultraAimQte = this.createUltraAimQteState();
+    this.queuedDeepFreezeShots = 0;
+    this.deepFreezeShotActive = false;
     this.queuedBombPerkCharges = 0;
     this.armedBombPerk = false;
     this.lastUiStateSignature = '';
 
     this.updateLaunchPosition();
+    this.clearDynamicYoyoAnchors();
     this.yoyoThread.setLaunchAnchor(this.launchX, this.launchY);
     this.resetBall();
   }
 
   resetBall() {
     this.updateLaunchPosition();
+    this.resetUltraAimRuntime();
     this.yoyoThread.clear();
+    this.clearDynamicYoyoAnchors();
     this.yoyoThread.setLaunchAnchor(this.launchX, this.launchY);
     this.balls = [new Ball(this.launchX, this.launchY)];
     this.physics.setBalls(this.balls);
@@ -792,26 +1375,34 @@ export class Game {
     if (this.state !== 'aiming' && this.state !== 'confirmAim') return;
     if (Number.isFinite(this.ballsLeft) && this.ballsLeft <= 0) return;
 
-    if (!this.showFullTrajectory && this.ultraAimCharges > 0) {
-      this.ultraAimCharges--;
-    }
+    const ultraAimLaunch = this.armUltraAimForLaunch();
     if (!this.baseFlipperConfig && !this.temporaryFlipperActive && this.temporaryFlipperTurns > 0) {
       this.temporaryFlipperTurns--;
       this.temporaryFlipperActive = true;
       this.refreshFlipperState();
     }
-    this.armBombPerkForLaunch();
+    if (!ultraAimLaunch) {
+      this.armBombPerkForLaunch();
+      this.armDeepFreezeForLaunch();
+    }
 
     this.state = 'playing';
+    initAudio();
+    resetHitCounter();
+    lightTap();
     for (const ball of this.balls) {
       ball.launch(this.aimAngle);
-      this.configureBallYoyoState(ball);
+      ball.ultraAimStuck = false;
+      ball.ultraAimQteBall = false;
+      this.configureBallYoyoState(ball, { suppressPerkBinding: ultraAimLaunch });
       if (ball.yoyoEligible !== false) {
         this.yoyoThread.registerBallLaunch(ball, this.launchX, this.launchY);
+        this.consumeYoyoPerkUseOnBind(ball);
       }
     }
     this.turnHitPegIds = [];
     this.ballPositionHistory = [];
+    this.shotsFired += 1;
 
     if (Number.isFinite(this.ballsLeft)) {
       this.ballsLeft--;
@@ -892,6 +1483,8 @@ export class Game {
       this.physics.hitPegs.add(peg.id);
     }
 
+    pegHitSound();
+
     if (this.onPegHit) this.onPegHit(peg, points);
     if (this.onScoreChange) this.onScoreChange(this.score);
 
@@ -904,8 +1497,27 @@ export class Game {
     return true;
   }
 
+  triggerPegViaDeepFreeze(peg, sourceBall = null) {
+    if (!peg || this.isPortalPeg(peg)) return;
+    this.animator.suspendPeg(peg.id);
+
+    if (peg.type === 'bumper') {
+      peg._bumperHitScale = 1.3;
+    }
+
+    if (peg.type === 'obstacle') {
+      this.animator.notifyHit(peg.id);
+      return;
+    }
+
+    this.activatePeg(peg, sourceBall, { allowMultiball: true });
+    this.animator.notifyHit(peg.id);
+  }
+
   endTurn() {
     this.yoyoThread.clear();
+    this.finishDeepFreezeShot();
+    this.resetUltraAimRuntime();
 
     if (!this.baseFlipperConfig && this.temporaryFlipperActive) {
       this.temporaryFlipperActive = false;
@@ -936,6 +1548,7 @@ export class Game {
     if (this.isSurvivalMode()) {
       if (this.getSurvivalTargetsLeft(true) === 0) {
         this.state = 'won';
+        this.resetUltraAimRuntime();
         if (this.onGameEnd) this.onGameEnd('won', this.score);
         return;
       }
@@ -949,6 +1562,7 @@ export class Game {
     // Check win condition
     if (this.getOrangePegsLeft() === 0) {
       this.state = 'won';
+      this.resetUltraAimRuntime();
       if (this.onGameEnd) this.onGameEnd('won', this.score);
       return;
     }
@@ -956,6 +1570,7 @@ export class Game {
     // Check lose condition (bucket catches already credited in onPhysicsUpdate)
     if (this.ballsLeft <= 0) {
       this.state = 'lost';
+      this.resetUltraAimRuntime();
       if (this.onGameEnd) this.onGameEnd('lost', this.score);
       return;
     }
@@ -993,7 +1608,11 @@ export class Game {
     const dt = Math.min((deltaTime || 16.67) / 1000, 0.1);
     const worldHeight = this.isSurvivalMode() ? this.survivalRuntime.getWorldHeight() : this.canvas.height;
     this.animator.tick(this.pegs, dt, { width: this.canvas.width, height: worldHeight });
+    if (this.deepFreezeSystem.isActive()) {
+      this.deepFreezeSystem.syncPegPositions(this.pegs, this.animator.getAnimatedPegIds());
+    }
     this.physics.markPegGridDirty();
+    this.updateUltraAimQte(dt);
 
     if (this.isSurvivalMode()) {
       this.survivalRuntime.update(dt);
@@ -1013,6 +1632,7 @@ export class Game {
         debugBall.vx = 0;
         debugBall.vy = 0;
       }
+      this.syncDynamicYoyoAnchors();
       const yoyoReleaseEvents = this.yoyoThread.step(this.balls, this.pegs, dt, { retractStartY });
       this.applyYoyoReleaseEvents(yoyoReleaseEvents);
       return;
@@ -1021,6 +1641,7 @@ export class Game {
     const runsPhysics = this.state === 'playing';
     if (!runsPhysics) {
       this.yoyoThread.clear();
+      this.clearDynamicYoyoAnchors();
       if (this.balls.length === 1 && !this.balls[0].active) {
         this.balls[0].x = this.launchX;
         this.balls[0].y = this.launchY;
@@ -1043,11 +1664,41 @@ export class Game {
 
     const result = this.physics.update(dt);
     this.balls = this.physics.balls;
+    if (this.deepFreezeSystem.isActive()) {
+      for (const contact of result.contactEvents) {
+        if (this.deepFreezeSystem.applyBallImpact(contact.peg, contact.ball, contact.impact)) {
+          this.animator.suspendPeg(contact.peg?.id);
+        }
+      }
+    }
     const bombContact = this.consumeBombPerkOnFirstContact(result.contactEvents);
+    let capturedUltraAimBallId = null;
+    let capturedUltraAimPegId = null;
+    if (this.ultraAimShotActive && !this.isUltraAimQteActive()) {
+      const captureEvent = result.hitEvents.find(event => {
+        if (!event || event.portalHit || event.bumperAnimOnly) return false;
+        return this.isUltraAimStickyEligiblePeg(event.peg);
+      });
+      if (captureEvent && this.engageUltraAimQte(captureEvent)) {
+        capturedUltraAimBallId = captureEvent.ball?.id || null;
+        capturedUltraAimPegId = captureEvent.peg?.id || null;
+      }
+    }
 
     // Handle newly hit pegs
     for (const event of result.hitEvents) {
       const peg = event.peg;
+      if (!peg) continue;
+      const isCapturedUltraAimHit = capturedUltraAimBallId
+        && capturedUltraAimPegId
+        && event.ball?.id === capturedUltraAimBallId
+        && peg.id === capturedUltraAimPegId;
+      if (isCapturedUltraAimHit) {
+        continue;
+      }
+      if (this.isUltraAimQteActive() && peg.id === this.ultraAimQte.pegId) {
+        continue;
+      }
       this.yoyoThread.notePegContact(event.ball, peg);
 
       // Portal teleport: notify animator and yoyo thread, no peg activation
@@ -1076,6 +1727,19 @@ export class Game {
     if (bombContact) {
       this.detonateBombShockwave(bombContact.ball, bombContact.peg);
     }
+    if (this.deepFreezeSystem.isActive()) {
+      const chainEvents = this.deepFreezeSystem.step(this.pegs, dt, {
+        width: this.canvas.width,
+        height: worldHeight
+      });
+      for (const event of chainEvents) {
+        if (event.suspendSource) {
+          this.animator.suspendPeg(event.sourcePeg?.id);
+        }
+        this.triggerPegViaDeepFreeze(event.targetPeg, event.sourceBall);
+      }
+    }
+    this.syncDynamicYoyoAnchors();
     const yoyoReleaseEvents = this.yoyoThread.step(this.balls, this.pegs, dt, { retractStartY });
     this.applyYoyoReleaseEvents(yoyoReleaseEvents);
 
@@ -1109,6 +1773,7 @@ export class Game {
   }
 
   checkStuckBalls() {
+    if (this.isUltraAimQteActive()) return;
     if (this.balls.length === 0 || this.turnHitPegIds.length === 0) return;
 
     const now = performance.now();
@@ -1184,6 +1849,8 @@ export class Game {
 
   render() {
     const allHitIds = [...this.hitPegIds, ...this.turnHitPegIds];
+    const ultraAimQteActive = this.isUltraAimQteActive();
+    const qteTrajectory = ultraAimQteActive ? this.ultraAimQte.trajectory : null;
     const survivalMode = this.isSurvivalMode();
     const survivalTargetsLeft = this.getSurvivalTargetsLeft(true);
     const totalTargets = survivalMode ? this.totalSurvivalTargets : this.getTotalOrangePegs();
@@ -1205,8 +1872,13 @@ export class Game {
       launchY: this.launchY,
       aimAngle: this.aimAngle,
       showAim: this.isAimingState(),
-      trajectory: this.isAimingState() ? this.trajectory : null,
-      showFullTrajectory: this.shouldShowFullTrajectory(),
+      showQteAim: ultraAimQteActive,
+      qteAimX: ultraAimQteActive ? this.ultraAimQte.anchorX : 0,
+      qteAimY: ultraAimQteActive ? this.ultraAimQte.anchorY : 0,
+      qteAimAngle: ultraAimQteActive ? this.ultraAimQte.angle : ULTRA_AIM_V2_START_ANGLE,
+      trajectoryStyle: ultraAimQteActive ? 'qte' : 'default',
+      trajectory: qteTrajectory || (this.isAimingState() ? this.trajectory : null),
+      showFullTrajectory: ultraAimQteActive ? false : this.shouldShowFullTrajectory(),
       aimLength: this.aimLength,
       yoyoThreads: this.yoyoThread.getRenderThreads(),
       score: this.score,
@@ -1216,7 +1888,7 @@ export class Game {
       centerLabel,
       survivalLoseLineY: survivalMode ? this.survivalRuntime.getLoseLineY() : null,
       verticalProgress: trackerState,
-      message: this.state === 'won' ? 'Ритуал совершён' : (this.state === 'lost' ? 'Игра окончена' : null),
+      message: this.state === 'won' ? 'Уровень пройден' : (this.state === 'lost' ? 'Игра окончена' : null),
       subMessage: this.state === 'won' ? 'Продолжить' : (this.state === 'lost' ? 'Продолжить' : null)
     });
 
@@ -1406,6 +2078,10 @@ export class Game {
     return this.ballsLeft > cost;
   }
 
+  hasShotInCurrentLevel() {
+    return this.shotsFired > 0;
+  }
+
   spendBallsForGamble(ballCost = 1) {
     if (!this.canGamble(ballCost)) return false;
     const cost = Math.max(1, Math.floor(ballCost));
@@ -1447,6 +2123,12 @@ export class Game {
     return this.getBombPerkChargeCount();
   }
 
+  grantDeepFreezeShots(shots = 1) {
+    const gain = Math.max(1, Math.floor(shots));
+    this.queuedDeepFreezeShots = Math.min(99, this.queuedDeepFreezeShots + gain);
+    return this.queuedDeepFreezeShots;
+  }
+
   grantYoyoThreadUses(uses = 1) {
     if (this.baseYoyoSettings && this.baseYoyoSettings.enabled) return 0;
     const gain = Math.max(1, Math.floor(uses));
@@ -1458,10 +2140,24 @@ export class Game {
 
   grantUltraAim(charges = 1) {
     const gain = Math.max(1, Math.floor(charges));
+    this.ultraAimV2Charges = Math.min(99, this.ultraAimV2Charges + gain);
+    return this.ultraAimV2Charges;
+  }
+
+  // Legacy Ultra Aim 1.0 kept intentionally as dead code/reference.
+  shouldShowFullTrajectoryLegacy() {
+    return this.showFullTrajectory || this.ultraAimCharges > 0;
+  }
+
+  consumeUltraAimLegacyChargeOnLaunch() {
+    if (this.showFullTrajectory || this.ultraAimCharges <= 0) return this.ultraAimCharges;
+    this.ultraAimCharges = Math.max(0, this.ultraAimCharges - 1);
+    return this.ultraAimCharges;
+  }
+
+  grantUltraAimLegacy(charges = 1) {
+    const gain = Math.max(1, Math.floor(charges));
     this.ultraAimCharges = Math.min(99, this.ultraAimCharges + gain);
-    if (this.isAimingState()) {
-      this.updateTrajectory();
-    }
     return this.ultraAimCharges;
   }
 

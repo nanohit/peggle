@@ -1151,10 +1151,16 @@ html, body {
   transition: transform 0.25s ease-out;
   border-left: 1px solid var(--border);
   box-shadow: -4px 0 20px rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
 }
 
 .level-list-overlay.visible {
   transform: translateX(0);
+  opacity: 1;
+  pointer-events: auto;
+  visibility: visible;
 }
 
 .level-list-header {
@@ -1217,8 +1223,12 @@ html, body {
 }
 
 .level-item-meta {
+  display: block;
   font-size: 11px;
   color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .level-item-actions {
@@ -1650,10 +1660,16 @@ html, body {
   transition: transform 0.25s ease-out;
   border-left: 1px solid var(--border);
   box-shadow: -4px 0 20px rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
 }
 
 .campaign-overlay.visible {
   transform: translateX(0);
+  opacity: 1;
+  pointer-events: auto;
+  visibility: visible;
 }
 
 .campaign-header {
@@ -1792,4 +1808,30 @@ html, body {
 
 .campaign-edit-level-btn {
   color: var(--accent) !important;
+}
+
+.editor-side-sheet-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 240;
+  pointer-events: none;
+}
+
+.editor-side-sheet-layer > .level-list-overlay,
+.editor-side-sheet-layer > .campaign-overlay {
+  position: absolute;
+  top: 12px;
+  bottom: 12px;
+  max-width: none;
+  height: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 20px 44px rgba(0, 0, 0, 0.42);
+}
+
+.editor-side-sheet-layer > .level-list-overlay .level-list-content,
+.editor-side-sheet-layer > .campaign-overlay .campaign-content,
+.editor-side-sheet-layer > .campaign-overlay .campaign-edit-body {
+  overscroll-behavior: contain;
 }

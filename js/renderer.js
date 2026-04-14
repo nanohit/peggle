@@ -718,6 +718,55 @@ export class Renderer {
     }
   }
 
+  drawAimReticle(x, y, angle) {
+    const ctx = this.ctx;
+    const outerRadius = getBallRadius() + 8;
+    const innerRadius = getBallRadius() + 2;
+    const indicatorLen = outerRadius + 14;
+    const ringStart = angle - Math.PI * 0.22;
+    const ringEnd = angle + Math.PI * 0.22;
+
+    ctx.save();
+
+    ctx.beginPath();
+    ctx.arc(x, y, outerRadius, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(x, y, innerRadius, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.14)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(x, y, outerRadius, ringStart, ringEnd);
+    ctx.strokeStyle = COLORS.launcherAim;
+    ctx.lineWidth = 3;
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + Math.cos(angle) * indicatorLen, y + Math.sin(angle) * indicatorLen);
+    ctx.strokeStyle = COLORS.launcherAim;
+    ctx.lineWidth = 3;
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(
+      x + Math.cos(angle) * indicatorLen,
+      y + Math.sin(angle) * indicatorLen,
+      3,
+      0,
+      Math.PI * 2
+    );
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+    ctx.fill();
+
+    ctx.restore();
+  }
+
   drawTrajectory(trajectory, fullPath = false, aimLength = 300) {
     if (!trajectory || !trajectory.points || trajectory.points.length < 2) return;
 
@@ -776,6 +825,23 @@ export class Renderer {
         ctx.fill();
       }
     }
+  }
+
+  drawQteTrajectory(trajectory) {
+    if (!trajectory || !trajectory.points || trajectory.points.length < 2) return;
+
+    const ctx = this.ctx;
+    const start = trajectory.points[0];
+    const end = trajectory.points[trajectory.points.length - 1];
+
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.34)';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(start.x, start.y);
+    ctx.lineTo(end.x, end.y);
+    ctx.stroke();
+    ctx.restore();
   }
 
   drawYoyoThreads(threads) {
@@ -1506,7 +1572,11 @@ export class Renderer {
 
     // Draw trajectory before ball
     if (state.trajectory) {
-      this.drawTrajectory(state.trajectory, state.showFullTrajectory, state.aimLength);
+      if (state.trajectoryStyle === 'qte') {
+        this.drawQteTrajectory(state.trajectory);
+      } else {
+        this.drawTrajectory(state.trajectory, state.showFullTrajectory, state.aimLength);
+      }
     }
 
     if (state.yoyoThreads) {
@@ -1517,6 +1587,10 @@ export class Renderer {
       this.drawBalls(state.balls);
     } else if (state.ball) {
       this.drawBall(state.ball);
+    }
+
+    if (state.showQteAim) {
+      this.drawAimReticle(state.qteAimX, state.qteAimY, state.qteAimAngle);
     }
 
     if (state.bucket) {

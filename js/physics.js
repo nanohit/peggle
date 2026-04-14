@@ -309,6 +309,27 @@ export class PhysicsEngine {
     return PHYSICS_CONFIG.pegRadius;
   }
 
+  _getPegCollisionPoses(peg) {
+    if (!peg) return [];
+
+    const poses = [];
+    const wrapCopies = Array.isArray(peg._wrapCopies) ? peg._wrapCopies : [];
+    if (!peg._wrapHideMain || wrapCopies.length === 0) {
+      poses.push({ x: peg.x, y: peg.y, isWrapCopy: false });
+    }
+
+    for (const copy of wrapCopies) {
+      if (!copy || !Number.isFinite(copy.x) || !Number.isFinite(copy.y)) continue;
+      poses.push({ x: copy.x, y: copy.y, isWrapCopy: true });
+    }
+
+    if (poses.length === 0) {
+      poses.push({ x: peg.x, y: peg.y, isWrapCopy: false });
+    }
+
+    return poses;
+  }
+
   getPortalHalfLength(portal) {
     if (!portal) return PHYSICS_CONFIG.pegRadius;
     return PHYSICS_CONFIG.pegRadius * (portal.portalScale || 1);
@@ -321,8 +342,10 @@ export class PhysicsEngine {
     return Math.max(24, pegSize, brickW, brickH);
   }
 
-  _getPegBounds(peg) {
+  _getPegBounds(peg, pose = null) {
     if (!peg) return null;
+    const pegX = Number.isFinite(pose?.x) ? pose.x : peg.x;
+    const pegY = Number.isFinite(pose?.y) ? pose.y : peg.y;
     if (peg.shape === 'brick') {
       const w = Number.isFinite(peg.width) ? peg.width : PHYSICS_CONFIG.brickWidth;
       const h = Number.isFinite(peg.height) ? peg.height : PHYSICS_CONFIG.brickHeight;
@@ -335,22 +358,71 @@ export class PhysicsEngine {
       const extY = Math.abs(s) * hw + Math.abs(c) * hh;
       const radius = Math.hypot(extX, extY);
       return {
-        minX: peg.x - extX,
-        maxX: peg.x + extX,
-        minY: peg.y - extY,
-        maxY: peg.y + extY,
+        minX: pegX - extX,
+        maxX: pegX + extX,
+        minY: pegY - extY,
+        maxY: pegY + extY,
         radius
       };
     }
 
     const r = this.getPegCollisionRadius(peg);
     return {
-      minX: peg.x - r,
-      maxX: peg.x + r,
-      minY: peg.y - r,
-      maxY: peg.y + r,
+      minX: pegX - r,
+      maxX: pegX + r,
+      minY: pegY - r,
+      maxY: pegY + r,
       radius: r
     };
+  }
+
+  _detectPegCollision(ball, peg) {
+    if (!ball || !peg || this.isPortalPeg(peg)) return null;
+
+    const poses = this._getPegCollisionPoses(peg);
+    let best = null;
+
+    for (const pose of poses) {
+      let collision;
+      if (peg.shape === 'brick') {
+        collision = circleRectCollision(ball, { ...peg, x: pose.x, y: pose.y });
+      } else {
+        collision = Utils.circleCollision(ball, {
+          x: pose.x,
+          y: pose.y,
+          radius: this.getPegCollisionRadius(peg)
+        });
+      }
+
+      if (!collision) continue;
+      if (!best || collision.depth > best.collision.depth) {
+        best = { collision, pose };
+      }
+    }
+
+    return best;
+  }
+
+  _snapPegToCollisionPose(peg, pose) {
+    if (!peg || !pose?.isWrapCopy) return;
+
+    const dx = pose.x - peg.x;
+    const dy = pose.y - peg.y;
+    peg.x = pose.x;
+    peg.y = pose.y;
+    peg._wrapCopies = null;
+    peg._wrapHideMain = false;
+    peg._animWrapShiftX = 0;
+    peg._animWrapShiftY = 0;
+
+    if (peg.curveSlices) {
+      for (const slice of peg.curveSlices) {
+        slice.x += dx;
+        slice.y += dy;
+      }
+    }
+
+    this._pegGridDirty = true;
   }
 
   _buildPegGrid() {
@@ -372,25 +444,28 @@ export class PhysicsEngine {
     for (let i = 0; i < pegs.length; i++) {
       const peg = pegs[i];
       if (this.isPortalPeg(peg)) continue;
-      const bounds = this._getPegBounds(peg);
-      if (!bounds) continue;
-      if (Number.isFinite(bounds.radius)) {
-        maxRadius = Math.max(maxRadius, bounds.radius);
-      }
-      const minCellX = Math.floor(bounds.minX / cellSize);
-      const maxCellX = Math.floor(bounds.maxX / cellSize);
-      const minCellY = Math.floor(bounds.minY / cellSize);
-      const maxCellY = Math.floor(bounds.maxY / cellSize);
+      const poses = this._getPegCollisionPoses(peg);
+      for (const pose of poses) {
+        const bounds = this._getPegBounds(peg, pose);
+        if (!bounds) continue;
+        if (Number.isFinite(bounds.radius)) {
+          maxRadius = Math.max(maxRadius, bounds.radius);
+        }
+        const minCellX = Math.floor(bounds.minX / cellSize);
+        const maxCellX = Math.floor(bounds.maxX / cellSize);
+        const minCellY = Math.floor(bounds.minY / cellSize);
+        const maxCellY = Math.floor(bounds.maxY / cellSize);
 
-      for (let cx = minCellX; cx <= maxCellX; cx++) {
-        for (let cy = minCellY; cy <= maxCellY; cy++) {
-          const key = `${cx},${cy}`;
-          let bucket = grid.get(key);
-          if (!bucket) {
-            bucket = [];
-            grid.set(key, bucket);
+        for (let cx = minCellX; cx <= maxCellX; cx++) {
+          for (let cy = minCellY; cy <= maxCellY; cy++) {
+            const key = `${cx},${cy}`;
+            let bucket = grid.get(key);
+            if (!bucket) {
+              bucket = [];
+              grid.set(key, bucket);
+            }
+            bucket.push(i);
           }
-          bucket.push(i);
         }
       }
     }
@@ -683,7 +758,7 @@ export class PhysicsEngine {
 
     // Update ball physics with sub-stepping to prevent tunneling
     for (const ball of this.balls) {
-      if (!ball.active) continue;
+      if (!ball.active || ball.ultraAimStuck) continue;
 
       // Phase 1 — velocity (gravity, friction, clamp). No position change yet.
       ball.updateVelocity();
@@ -744,76 +819,62 @@ export class PhysicsEngine {
           for (let ci = 0; ci < candidates.length; ci++) {
             const peg = this.pegs[candidates[ci]];
             if (!peg) continue;
-            let collision;
-
-            if (peg.shape === 'brick') {
-              collision = circleRectCollision(ball, peg);
-            } else {
-              collision = Utils.circleCollision(ball, {
-                x: peg.x,
-                y: peg.y,
-                radius: this.getPegCollisionRadius(peg)
-              });
-            }
+            const collisionResult = this._detectPegCollision(ball, peg);
+            const collision = collisionResult?.collision || null;
 
             if (collision) {
+              this._snapPegToCollisionPose(peg, collisionResult.pose);
+              const impact = this.buildPegImpact(ball, collision);
               this.resolveCollision(ball, collision, peg);
               const contactKey = `${ball.id}:${peg.id}`;
               if (!contactKeys.has(contactKey)) {
                 contactKeys.add(contactKey);
-                contactEvents.push({ peg, ball });
+                contactEvents.push({ peg, ball, impact });
               }
 
               const isBumper = peg.type === 'bumper';
 
               if (isBumper) {
-                hitEvents.push({ peg, ball, isBumper: true, bumperAnimOnly: true });
+                hitEvents.push({ peg, ball, impact, isBumper: true, bumperAnimOnly: true });
               } else if (peg.type === 'obstacle') {
-                hitEvents.push({ peg, ball, obstacleHit: true });
+                hitEvents.push({ peg, ball, impact, obstacleHit: true });
               }
 
               const isPermanentBumper = isBumper && !peg.bumperDisappear && !peg.bumperOrange;
               if (peg.type !== 'obstacle' && !isPermanentBumper && !this.hitPegs.has(peg.id)) {
                 this.hitPegs.add(peg.id);
-                hitEvents.push({ peg, ball });
+                hitEvents.push({ peg, ball, impact });
               }
             }
           }
         } else if (pegSource && pegSource.length > 0) {
           for (const peg of pegSource) {
             if (this.isPortalPeg(peg)) continue;
-            let collision;
-
-            if (peg.shape === 'brick') {
-              collision = circleRectCollision(ball, peg);
-            } else {
-              collision = Utils.circleCollision(ball, {
-                x: peg.x,
-                y: peg.y,
-                radius: this.getPegCollisionRadius(peg)
-              });
-            }
+            const collisionResult = this._detectPegCollision(ball, peg);
+            const collision = collisionResult?.collision || null;
 
             if (collision) {
+              this._snapPegToCollisionPose(peg, collisionResult.pose);
+              const impact = this.buildPegImpact(ball, collision);
               this.resolveCollision(ball, collision, peg);
               const contactKey = `${ball.id}:${peg.id}`;
               if (!contactKeys.has(contactKey)) {
                 contactKeys.add(contactKey);
-                contactEvents.push({ peg, ball });
+                contactEvents.push({ peg, ball, impact });
               }
 
               const isBumper = peg.type === 'bumper';
 
               if (isBumper) {
-                hitEvents.push({ peg, ball, isBumper: true, bumperAnimOnly: true });
+                hitEvents.push({ peg, ball, impact, isBumper: true, bumperAnimOnly: true });
               } else if (peg.type === 'obstacle') {
-                hitEvents.push({ peg, ball, obstacleHit: true });
+                hitEvents.push({ peg, ball, impact, obstacleHit: true });
               }
 
               const isPermanentBumper = isBumper && !peg.bumperDisappear && !peg.bumperOrange;
               if (peg.type !== 'obstacle' && !isPermanentBumper && !this.hitPegs.has(peg.id)) {
                 this.hitPegs.add(peg.id);
-                hitEvents.push({ peg, ball });
+                hitEvents.push({ peg, ball, impact });
               }
             }
           }
@@ -832,6 +893,10 @@ export class PhysicsEngine {
     const remaining = [];
     for (const ball of this.balls) {
       if (!ball.active) continue;
+      if (ball.ultraAimStuck) {
+        remaining.push(ball);
+        continue;
+      }
       if (this.checkBucketCatch(ball)) {
         bucketCatchCount++;
         continue;
@@ -852,6 +917,17 @@ export class PhysicsEngine {
       contactEvents,
       ballsRemaining: this.balls.length,
       bucketCatchCount
+    };
+  }
+
+  buildPegImpact(ball, collision) {
+    if (!ball || !collision) return null;
+    return {
+      vx: ball.vx,
+      vy: ball.vy,
+      speed: Utils.magnitude(ball.vx, ball.vy),
+      normalX: -collision.normal.x,
+      normalY: -collision.normal.y
     };
   }
 
@@ -913,10 +989,10 @@ export class PhysicsEngine {
 
     for (let i = 0; i < this.balls.length; i++) {
       const a = this.balls[i];
-      if (!a.active) continue;
+      if (!a.active || a.ultraAimStuck) continue;
       for (let j = i + 1; j < this.balls.length; j++) {
         const b = this.balls[j];
-        if (!b.active) continue;
+        if (!b.active || b.ultraAimStuck) continue;
 
         const dx = b.x - a.x;
         const dy = b.y - a.y;
@@ -1252,17 +1328,7 @@ export class PhysicsEngine {
           for (let ci = 0; ci < candidates.length; ci++) {
             const peg = this.pegs[candidates[ci]];
             if (!peg || this.isPortalPeg(peg)) continue;
-            let collision;
-
-            if (peg.shape === 'brick') {
-              collision = circleRectCollision(simBall, peg);
-            } else {
-              collision = Utils.circleCollision(simBall, {
-                x: peg.x,
-                y: peg.y,
-                radius: this.getPegCollisionRadius(peg)
-              });
-            }
+            const collision = this._detectPegCollision(simBall, peg)?.collision || null;
 
             if (collision) {
               simBall.x += collision.normal.x * (collision.depth + 0.5);
@@ -1286,17 +1352,7 @@ export class PhysicsEngine {
         } else {
           for (const peg of this.pegs) {
             if (this.isPortalPeg(peg)) continue;
-            let collision;
-
-            if (peg.shape === 'brick') {
-              collision = circleRectCollision(simBall, peg);
-            } else {
-              collision = Utils.circleCollision(simBall, {
-                x: peg.x,
-                y: peg.y,
-                radius: this.getPegCollisionRadius(peg)
-              });
-            }
+            const collision = this._detectPegCollision(simBall, peg)?.collision || null;
 
             if (collision) {
               simBall.x += collision.normal.x * (collision.depth + 0.5);

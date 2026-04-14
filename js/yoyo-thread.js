@@ -218,6 +218,11 @@ export class YoyoThreadSystem {
     this.states.clear();
   }
 
+  removeBall(ballId) {
+    if (!ballId) return;
+    this.states.delete(ballId);
+  }
+
   setLaunchAnchor(x, y) {
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
     this.launchAnchor.x = x;
@@ -228,6 +233,40 @@ export class YoyoThreadSystem {
     if (!ball) return;
     const state = this._createState(ball, anchorX, anchorY);
     this.states.set(ball.id, state);
+  }
+
+  setBallAnchor(ballId, x, y, options = null) {
+    if (!ballId || !Number.isFinite(x) || !Number.isFinite(y)) return;
+
+    const state = this.states.get(ballId);
+    if (!state) return;
+
+    const prevX = Number.isFinite(state.anchorX) ? state.anchorX : x;
+    const prevY = Number.isFinite(state.anchorY) ? state.anchorY : y;
+    const dx = x - prevX;
+    const dy = y - prevY;
+    if (Math.abs(dx) < 1e-6 && Math.abs(dy) < 1e-6) return;
+
+    state.anchorX = x;
+    state.anchorY = y;
+
+    if (options?.moveOriginalAnchor !== false) {
+      const originalX = Number.isFinite(state.originalAnchorX) ? state.originalAnchorX : prevX;
+      const originalY = Number.isFinite(state.originalAnchorY) ? state.originalAnchorY : prevY;
+      state.originalAnchorX = originalX + dx;
+      state.originalAnchorY = originalY + dy;
+    }
+
+    if (Array.isArray(state.portalSegments) && state.portalSegments.length > 0) {
+      for (const seg of state.portalSegments) {
+        if (!seg) continue;
+        if (Math.abs((seg.anchorX ?? prevX) - prevX) > 0.001 || Math.abs((seg.anchorY ?? prevY) - prevY) > 0.001) {
+          continue;
+        }
+        seg.anchorX = (seg.anchorX ?? prevX) + dx;
+        seg.anchorY = (seg.anchorY ?? prevY) + dy;
+      }
+    }
   }
 
   step(balls, pegs, deltaSeconds = 1 / 60, options = null) {

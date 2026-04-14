@@ -679,9 +679,28 @@
   transition: opacity 0.25s ease;
 }
 
+.pause-overlay.pause-overlay--instant {
+  transition: none !important;
+}
+
 .pause-overlay.visible {
   opacity: 1;
   pointer-events: auto;
+}
+
+/* While level-map is open from pause: keep overlay mounted for instant return,
+   but make it visually transparent and non-interactive. */
+.pause-overlay.pause-overlay--map-mode {
+  opacity: 1;
+  background: transparent !important;
+  pointer-events: none !important;
+  transition: none !important;
+}
+
+.pause-overlay.pause-overlay--map-mode .pause-panel {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
 }
 
 /* Character portrait elements: always on top (gameplay + pause) */
@@ -690,6 +709,21 @@
 .visual-slot[data-slot-id="healthCircle"],
 .visual-slot[data-slot-id="healthCharCircle"] {
   z-index: 501 !important;
+}
+
+/* Level-map mode: hide the live character stack in HUD */
+.visual-frame--level-map-open .visual-slot[data-slot-id="character"],
+.visual-frame--level-map-open .visual-slot[data-slot-id="characterCircle"],
+.visual-frame--level-map-open .visual-slot[data-slot-id="healthCircle"],
+.visual-frame--level-map-open .visual-slot[data-slot-id="healthCharCircle"] {
+  display: none !important;
+}
+
+/* Keep top-left controls clickable above level-map overlay */
+.visual-frame--level-map-open .visual-slot[data-slot-id="leftCircle"],
+.visual-frame--level-map-open .visual-slot[data-slot-id="topLeft"] {
+  z-index: 701 !important;
+  pointer-events: auto !important;
 }
 
 /* Panel: absolutely positioned so bg circle aligns with character portrait */
@@ -786,6 +820,35 @@
 .pause-img-btn:active .pause-img-btn__pressed {
   opacity: 1;
 }
+
+/* Sound toggle button — positioned absolutely so it doesn't affect flex layout */
+.pause-sound-btn {
+  position: absolute;
+  bottom: 5%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  z-index: 2;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.pause-sound-btn img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  user-select: none;
+}
+
+.pause-sound-btn .pause-sound-btn__off { display: none; }
+.pause-sound-btn .pause-sound-btn__on  { display: block; }
+.pause-sound-btn.muted .pause-sound-btn__off { display: block; }
+.pause-sound-btn.muted .pause-sound-btn__on  { display: none; }
 
 /* Hint row (text + checkbox) */
 .pause-hint {

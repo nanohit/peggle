@@ -12,6 +12,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Noto+Serif:wght@700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/styles.css">
   <link rel="stylesheet" href="css/visual-layout.css">
+  <link rel="stylesheet" href="css/level-map.css">
 </head>
 <body>
   <div class="app">
@@ -281,9 +282,20 @@
     </div>
     <div class="campaign-edit-body">
       <div class="campaign-section">
-        <div class="campaign-section-title">Levels in Campaign</div>
+        <div class="campaign-section-title">Level Tree</div>
+        <div id="campaignTreeContainer" class="campaign-tree-container"></div>
+        <div id="campaignNodeBar" class="campaign-node-bar" style="display:none">
+          <span class="node-label" id="selectedNodeLabel">Select a node</span>
+          <button class="campaign-action-btn" id="nodeEditBtn" title="Edit node level">&#9998;</button>
+          <button class="campaign-action-btn" id="nodeBranchBtn" title="Add parallel branch">&#9095;</button>
+          <button class="campaign-action-btn" id="nodeSecretBtn" title="Toggle secret">?</button>
+          <button class="campaign-action-btn campaign-remove-btn" id="nodeRemoveBtn" title="Remove">&#10005;</button>
+        </div>
+        <div class="campaign-empty-hint" id="campaignEmptyHint">No levels added yet. Add levels from the list below.</div>
+      </div>
+      <div class="campaign-section">
+        <div class="campaign-section-title">Levels in Campaign (play order)</div>
         <div id="campaignLevelItems" class="campaign-level-list"></div>
-        <div class="campaign-empty-hint" id="campaignEmptyHint">No levels added yet. Bake levels first, then add them below.</div>
       </div>
       <div class="campaign-section">
         <div class="campaign-section-title">Available Baked Levels</div>

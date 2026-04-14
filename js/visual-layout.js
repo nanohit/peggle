@@ -72,7 +72,8 @@ const COMPACT_TOP_SLOTS = new Set([
 ]);
 
 export class VisualLayout {
-  constructor() {
+  constructor(options = {}) {
+    const opts = (options && typeof options === 'object') ? options : {};
     this.viewport = null;
     this.frame = null;
     this.panel = null;
@@ -90,6 +91,8 @@ export class VisualLayout {
     this._slotRuntimeFx = {};
     this.gambleUiMode = false;
     this.gambleOverlayState = { open: false, target: null };
+    this._includePanel = opts.includePanel !== false;
+    this._enableEditorInteractions = opts.enableEditorInteractions !== false;
 
     /** @type {function(object):void|null} */
     this.onConfigChange = null;
@@ -154,14 +157,18 @@ export class VisualLayout {
       this.slotElements[def.id] = el;
     }
 
-    // Build theme panel
-    this._buildPanel();
+    // Build theme panel (editor only)
+    if (this._includePanel) {
+      this._buildPanel();
+    }
 
-    // Slot interaction listeners (active only in edit mode)
-    this.frame.addEventListener('pointerdown', e => this._onPointerDown(e), { signal: sig });
-    document.addEventListener('pointermove', e => this._onPointerMove(e), { signal: sig });
-    document.addEventListener('pointerup', e => this._onPointerUp(e), { signal: sig });
-    this.frame.addEventListener('wheel', e => this._onWheel(e), { passive: false, signal: sig });
+    // Slot interaction listeners (editor drag/scale)
+    if (this._enableEditorInteractions) {
+      this.frame.addEventListener('pointerdown', e => this._onPointerDown(e), { signal: sig });
+      document.addEventListener('pointermove', e => this._onPointerMove(e), { signal: sig });
+      document.addEventListener('pointerup', e => this._onPointerUp(e), { signal: sig });
+      this.frame.addEventListener('wheel', e => this._onWheel(e), { passive: false, signal: sig });
+    }
 
     this.mounted = true;
   }
@@ -279,6 +286,14 @@ export class VisualLayout {
 
   getBackground() {
     return this.config?.background || null;
+  }
+
+  setSlotRuntimeFx(slotId, fx) {
+    this._setSlotRuntimeFx(slotId, fx);
+  }
+
+  clearSlotRuntimeFx(slotId) {
+    this._setSlotRuntimeFx(slotId, null);
   }
 
   // ─── Panel ────────────────────────────────────────────

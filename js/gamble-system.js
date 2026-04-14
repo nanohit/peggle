@@ -1,4 +1,6 @@
 import { MAX_LUCK, SLOT_COLS, SLOT_ROWS, SlotMathEngine } from './slots-math.js';
+import { lightTap } from './haptics.js';
+import { DEEP_FREEZE_SHOTS_PER_USE } from './perk-deep-freeze.js';
 
 const STORAGE_KEY = 'peggle_gamble_settings_v1';
 const SLOTS_BOARD_ASSET = 'visuals/slots_background.webp';
@@ -42,6 +44,13 @@ const PERK_DEFINITIONS = [
     name: 'Bomb Shockwave',
     icon: '💣',
     color: '#ff9b54',
+    defaultProbability: 20
+  },
+  {
+    id: 'perk_freeze',
+    name: 'Deep Freeze',
+    icon: '❄️',
+    color: '#8ad7ff',
     defaultProbability: 20
   }
 ];
@@ -115,7 +124,7 @@ function formatRewardSummary(rewardMap, perkDefinitions) {
 }
 
 export class GambleSystem {
-  constructor({ game, levelManager, statusBar, pegCountEl, selectionCountEl, host, visualLayout, onLayoutChange }) {
+  constructor({ game, levelManager, statusBar, pegCountEl, selectionCountEl, host, visualLayout, onLayoutChange, allowSettings = true }) {
     this.game = game;
     this.levelManager = levelManager;
     this.statusBar = statusBar;
@@ -124,6 +133,7 @@ export class GambleSystem {
     this.host = host || statusBar;
     this.visualLayout = visualLayout || null;
     this.onLayoutChange = typeof onLayoutChange === 'function' ? onLayoutChange : null;
+    this.allowSettings = allowSettings !== false;
 
     this.perkDefinitions = PERK_DEFINITIONS.map(perk => ({ ...perk }));
     this.settings = this.loadSettings();
@@ -144,7 +154,7 @@ export class GambleSystem {
 
     this.lastSpinGrid = this.createInitialSpinGrid();
     this.lastWinningCells = new Set();
-    this.lastMessage = 'Press Spin to roll the slots.';
+    this.lastMessage = 'Shoot one ball to unlock Spin.';
     this.lastMessageType = 'info';
     this._reelAnimation = null;
 
@@ -424,13 +434,14 @@ export class GambleSystem {
     infoActions.className = 'gamble-info-actions';
     infoRow.appendChild(infoActions);
 
-    const settingsButton = document.createElement('button');
-    settingsButton.type = 'button';
-    settingsButton.className = 'gamble-settings-btn';
-    settingsButton.textContent = '⚙';
-    settingsButton.title = 'Slots settings';
-    infoActions.appendChild(settingsButton);
-
+    let settingsButton = null;
+    let settingsPanel = null;
+    let ballCostControl = null;
+    let manualLuckControl = null;
+    let autoLuckToggle = null;
+    let autoLuckScaleControl = null;
+    let jackpotRewardControl = null;
+    const probabilityControls = {};
     const inventoryButtons = {};
     const splitIndex = Math.floor(this.perkDefinitions.length / 2);
     for (let index = 0; index < this.perkDefinitions.length; index++) {
@@ -445,10 +456,6 @@ export class GambleSystem {
       inventoryButtons[perk.id] = button;
     }
 
-    const settingsPanel = document.createElement('div');
-    settingsPanel.className = 'gamble-settings-panel hidden';
-    root.appendChild(settingsPanel);
-
     const spinButton = document.createElement('button');
     spinButton.type = 'button';
     spinButton.className = 'gamble-btn';
@@ -457,6 +464,7 @@ export class GambleSystem {
     dock.appendChild(spinButton);
 
     const addNumberControl = ({ label, min, max, step, value, onChange }) => {
+      if (!settingsPanel) return null;
       const wrapper = document.createElement('div');
       wrapper.className = 'gamble-control';
 
@@ -497,101 +505,115 @@ export class GambleSystem {
       return { range, number, wrapper };
     };
 
-    const ballCostControl = addNumberControl({
-      label: 'Ball Cost',
-      min: 1,
-      max: 5,
-      step: 1,
-      value: this.settings.ballCost,
-      onChange: (nextValue) => {
-        this.settings.ballCost = Math.round(nextValue);
-        this.persistSettings();
-        this.refreshUi();
-      }
-    });
+    if (this.allowSettings) {
+      settingsButton = document.createElement('button');
+      settingsButton.type = 'button';
+      settingsButton.className = 'gamble-settings-btn';
+      settingsButton.textContent = '⚙';
+      settingsButton.title = 'Slots settings';
+      infoActions.appendChild(settingsButton);
 
-    const manualLuckControl = addNumberControl({
-      label: 'Manual Luck',
-      min: 0,
-      max: MAX_LUCK,
-      step: 1,
-      value: this.settings.manualLuck,
-      onChange: (nextValue) => {
-        this.settings.manualLuck = Math.round(nextValue);
-        this.persistSettings();
-        this.refreshUi();
-      }
-    });
+      settingsPanel = document.createElement('div');
+      settingsPanel.className = 'gamble-settings-panel hidden';
+      root.appendChild(settingsPanel);
 
-    const autoLuckRow = document.createElement('label');
-    autoLuckRow.className = 'gamble-toggle-row';
-    const autoLuckText = document.createElement('span');
-    autoLuckText.textContent = 'Auto Luck (less balls = more luck)';
-    const autoLuckToggle = document.createElement('input');
-    autoLuckToggle.type = 'checkbox';
-    autoLuckToggle.checked = !!this.settings.autoLuckEnabled;
-    autoLuckToggle.addEventListener('change', () => {
-      this.settings.autoLuckEnabled = autoLuckToggle.checked;
-      this.persistSettings();
-      this.refreshUi();
-    });
-    autoLuckRow.appendChild(autoLuckText);
-    autoLuckRow.appendChild(autoLuckToggle);
-    settingsPanel.appendChild(autoLuckRow);
-
-    const autoLuckScaleControl = addNumberControl({
-      label: 'Auto Luck Max Bonus',
-      min: 0,
-      max: MAX_LUCK,
-      step: 1,
-      value: this.settings.autoLuckMaxBonus,
-      onChange: (nextValue) => {
-        this.settings.autoLuckMaxBonus = Math.round(nextValue);
-        this.persistSettings();
-        this.refreshUi();
-      }
-    });
-
-    const jackpotRewardControl = addNumberControl({
-      label: 'Jackpot Base Perk Count',
-      min: 1,
-      max: 20,
-      step: 1,
-      value: this.settings.jackpotPerkCount,
-      onChange: (nextValue) => {
-        this.settings.jackpotPerkCount = Math.round(nextValue);
-        this.persistSettings();
-        this.refreshUi();
-      }
-    });
-
-    const probabilityControls = {};
-    for (const perk of this.perkDefinitions) {
-      probabilityControls[perk.id] = addNumberControl({
-        label: `${perk.icon} ${perk.name} Probability`,
-        min: 0,
-        max: 100,
-        step: 0.1,
-        value: Number(this.settings.perkProbabilities[perk.id].toFixed(1)),
+      ballCostControl = addNumberControl({
+        label: 'Ball Cost',
+        min: 1,
+        max: 5,
+        step: 1,
+        value: this.settings.ballCost,
         onChange: (nextValue) => {
-          this.settings.perkProbabilities[perk.id] = Math.max(0, nextValue);
-          this.settings.perkProbabilities = normalizeProbabilityMap(
-            this.settings.perkProbabilities,
-            this.perkDefinitions
-          );
-          this.applyProbabilitySettings();
-          this.syncProbabilityInputs(probabilityControls);
+          this.settings.ballCost = Math.round(nextValue);
           this.persistSettings();
+          this.refreshUi();
         }
       });
-    }
 
-    settingsButton.addEventListener('click', () => {
-      if (root.classList.contains('collapsed')) {
-        this.setPanelExpanded(true);
+      manualLuckControl = addNumberControl({
+        label: 'Manual Luck',
+        min: 0,
+        max: MAX_LUCK,
+        step: 1,
+        value: this.settings.manualLuck,
+        onChange: (nextValue) => {
+          this.settings.manualLuck = Math.round(nextValue);
+          this.persistSettings();
+          this.refreshUi();
+        }
+      });
+
+      const autoLuckRow = document.createElement('label');
+      autoLuckRow.className = 'gamble-toggle-row';
+      const autoLuckText = document.createElement('span');
+      autoLuckText.textContent = 'Auto Luck (less balls = more luck)';
+      autoLuckToggle = document.createElement('input');
+      autoLuckToggle.type = 'checkbox';
+      autoLuckToggle.checked = !!this.settings.autoLuckEnabled;
+      autoLuckToggle.addEventListener('change', () => {
+        this.settings.autoLuckEnabled = autoLuckToggle.checked;
+        this.persistSettings();
+        this.refreshUi();
+      });
+      autoLuckRow.appendChild(autoLuckText);
+      autoLuckRow.appendChild(autoLuckToggle);
+      settingsPanel.appendChild(autoLuckRow);
+
+      autoLuckScaleControl = addNumberControl({
+        label: 'Auto Luck Max Bonus',
+        min: 0,
+        max: MAX_LUCK,
+        step: 1,
+        value: this.settings.autoLuckMaxBonus,
+        onChange: (nextValue) => {
+          this.settings.autoLuckMaxBonus = Math.round(nextValue);
+          this.persistSettings();
+          this.refreshUi();
+        }
+      });
+
+      jackpotRewardControl = addNumberControl({
+        label: 'Jackpot Base Perk Count',
+        min: 1,
+        max: 20,
+        step: 1,
+        value: this.settings.jackpotPerkCount,
+        onChange: (nextValue) => {
+          this.settings.jackpotPerkCount = Math.round(nextValue);
+          this.persistSettings();
+          this.refreshUi();
+        }
+      });
+
+      for (const perk of this.perkDefinitions) {
+        probabilityControls[perk.id] = addNumberControl({
+          label: `${perk.icon} ${perk.name} Probability`,
+          min: 0,
+          max: 100,
+          step: 0.1,
+          value: Number(this.settings.perkProbabilities[perk.id].toFixed(1)),
+          onChange: (nextValue) => {
+            this.settings.perkProbabilities[perk.id] = Math.max(0, nextValue);
+            this.settings.perkProbabilities = normalizeProbabilityMap(
+              this.settings.perkProbabilities,
+              this.perkDefinitions
+            );
+            this.applyProbabilitySettings();
+            this.syncProbabilityInputs(probabilityControls);
+            this.persistSettings();
+          }
+        });
       }
-      settingsPanel.classList.toggle('hidden');
-    });
+
+      settingsButton.addEventListener('click', () => {
+        if (root.classList.contains('collapsed')) {
+          this.setPanelExpanded(true);
+        }
+        settingsPanel.classList.toggle('hidden');
+      });
+    } else {
+      infoActions.style.display = 'none';
+    }
 
     return {
       root,
@@ -622,7 +644,7 @@ export class GambleSystem {
     this.ui.root.classList.toggle('expanded', next);
     this.ui.root.classList.toggle('collapsed', !next);
     this.ui.toggleButton.setAttribute('aria-expanded', next ? 'true' : 'false');
-    if (!next) {
+    if (!next && this.ui.settingsPanel) {
       this.ui.settingsPanel.classList.add('hidden');
     }
     this.syncOverlayLayout();
@@ -747,6 +769,7 @@ export class GambleSystem {
 
   canSpin() {
     if (this._reelAnimation) return false;
+    if (!this.game?.hasShotInCurrentLevel?.()) return false;
     return this.canInteract() && !!this.game?.canGamble?.(this.settings.ballCost);
   }
 
@@ -767,6 +790,7 @@ export class GambleSystem {
       return;
     }
 
+    lightTap();
     const spent = this.game.spendBallsForGamble(this.settings.ballCost);
     if (!spent) {
       this.setMessage('Failed to spend balls for gamble spin.', 'error');
@@ -1100,6 +1124,10 @@ export class GambleSystem {
         const charges = this.game.grantBombShockwaveCharges(1);
         return { success: true, message: `Bomb armed. Charges: ${charges}.` };
       }
+      case 'perk_freeze': {
+        const shots = this.game.grantDeepFreezeShots(DEEP_FREEZE_SHOTS_PER_USE);
+        return { success: true, message: `Deep Freeze queued. Frozen shots: ${shots}.` };
+      }
       default:
         return { success: false, message: 'Unknown perk.' };
     }
@@ -1111,11 +1139,15 @@ export class GambleSystem {
     this.syncOverlayLayout();
 
     const interactionAllowed = this.canInteract();
+    const spinUnlocked = !!this.game?.hasShotInCurrentLevel?.();
     const canSpin = this.canSpin();
+    this.ui.spinButton.style.display = spinUnlocked ? '' : 'none';
     this.ui.spinButton.disabled = !canSpin;
     this.ui.spinButton.textContent = 'Spin';
     this.ui.spinButton.title = `Spin slots (-${this.settings.ballCost} ball)`;
-    this.ui.autoLuckToggle.checked = !!this.settings.autoLuckEnabled;
+    if (this.ui.autoLuckToggle) {
+      this.ui.autoLuckToggle.checked = !!this.settings.autoLuckEnabled;
+    }
 
     const luck = this.getEffectiveLuck();
     this.ui.luckLabel.textContent = `Luck ${luck.total} (M${luck.manual} + A${luck.auto}) · Cost ${this.settings.ballCost}`;
