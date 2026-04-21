@@ -9,7 +9,7 @@
   <title>Peggle Editor</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif:wght@700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif:wght@600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/styles.css">
   <link rel="stylesheet" href="css/visual-layout.css">
   <link rel="stylesheet" href="css/level-map.css">
@@ -50,6 +50,20 @@
               <input type="number" id="survivalSpeedInput" min="2" max="400" step="1">
             </div>
           </div>
+          <div class="survival-control survival-curve-control">
+            <label for="survivalSpeedCurvePreset">Speed Curve</label>
+            <select id="survivalSpeedCurvePreset" class="survival-curve-select">
+              <option value="linear">Linear</option>
+              <option value="escalate">Escalate</option>
+              <option value="softStart">Soft Start</option>
+              <option value="custom">Custom</option>
+            </select>
+            <canvas id="survivalSpeedCurveCanvas" class="survival-curve-canvas" width="154" height="86"></canvas>
+            <div class="survival-curve-actions">
+              <button type="button" id="survivalSpeedCurveEqualizeBtn" class="survival-bg-btn">Equalize</button>
+              <button type="button" id="survivalSpeedCurveResetBtn" class="survival-bg-btn">Preset</button>
+            </div>
+          </div>
           <div class="survival-control">
             <label for="survivalLoseLineSlider">Lose Line</label>
             <div class="survival-control-row">
@@ -57,7 +71,23 @@
               <input type="number" id="survivalLoseLineInput" min="8" step="1">
             </div>
           </div>
-          <div class="survival-hint">Hold Shift for 5-step snapping</div>
+          <div class="survival-control">
+            <label for="survivalAntiCooldownSlider">Anti-Cooldown</label>
+            <div class="survival-control-row">
+              <input type="range" id="survivalAntiCooldownSlider" min="0" max="10000" step="100">
+              <input type="number" id="survivalAntiCooldownInput" min="0" max="10" step="0.1">
+            </div>
+          </div>
+          <div class="survival-control survival-bg-control">
+            <label>Vertical Background</label>
+            <div class="survival-bg-row">
+              <input type="file" id="survivalBackgroundInput" accept="image/*" hidden>
+              <button type="button" id="survivalBackgroundUploadBtn" class="survival-bg-btn">Upload</button>
+              <button type="button" id="survivalBackgroundRemoveBtn" class="survival-bg-btn">Remove</button>
+            </div>
+            <div id="survivalBackgroundStatus" class="survival-bg-status">No image</div>
+          </div>
+          <div class="survival-hint">Hold Shift for 5-step snapping. Anti-cooldown 0s keeps classic one-ball timing.</div>
         </div>
       </div>
       <!-- Aim length slider -->
@@ -67,6 +97,17 @@
           <div class="survival-control-row">
             <input type="range" id="aimLengthSlider" min="0" max="300" step="1" value="300">
             <input type="number" id="aimLengthInput" min="0" max="300" step="1" value="300">
+          </div>
+        </div>
+        <div class="survival-control">
+          <label for="hitPegClearDelaySlider">Hit Peg Clear</label>
+          <label class="hit-clear-toggle">
+            <input type="checkbox" id="hitPegTimedClearToggle">
+            Timed clear before ball drops
+          </label>
+          <div class="survival-control-row">
+            <input type="range" id="hitPegClearDelaySlider" min="0" max="8000" step="100" value="1200">
+            <input type="number" id="hitPegClearDelayInput" min="0" max="8" step="0.1" value="1.2">
           </div>
         </div>
       </div>
@@ -180,11 +221,28 @@
       </div>
       <!-- Multiball properties panel (right side) -->
       <div id="multiballPanel" class="bumper-panel">
-        <div class="bumper-panel-title">Multiball <button id="closeMultiballPanel" class="anim-close-btn">✕</button></div>
+        <div class="bumper-panel-title"><span id="multiballPanelTitle">Multiball</span> <button id="closeMultiballPanel" class="anim-close-btn">✕</button></div>
         <div class="bumper-panel-body">
-          <div class="anim-slider">
+          <div id="multiballSettings">
+            <div class="anim-slider">
             <label>Extra Balls <input type="number" id="multiballCountInput" class="anim-num" value="1" step="1" min="1" max="10"></label>
             <input type="range" id="multiballCountSlider" min="1" max="10" value="1" step="1">
+            </div>
+          </div>
+          <div id="gamblePegSettings" class="hidden">
+            <div class="anim-slider">
+              <label>Gamble Balls <input type="number" id="gamblePegBallCountInput" class="anim-num" value="2" step="1" min="0" max="20"></label>
+              <input type="range" id="gamblePegBallCountSlider" min="0" max="20" value="2" step="1">
+            </div>
+            <label class="anim-toggle"><input type="checkbox" id="gamblePegKnockbackToggle"> Board knockback</label>
+            <div class="anim-slider">
+              <label>Distance <input type="number" id="gamblePegKnockbackDistanceInput" class="anim-num" value="160" step="1" min="0" max="900"></label>
+              <input type="range" id="gamblePegKnockbackDistanceSlider" min="0" max="900" value="160" step="1">
+            </div>
+            <div class="anim-slider">
+              <label>Smooth <input type="number" id="gamblePegKnockbackSmoothInput" class="anim-num" value="180" step="10" min="60" max="800"></label>
+              <input type="range" id="gamblePegKnockbackSmoothSlider" min="60" max="800" value="180" step="10">
+            </div>
           </div>
         </div>
       </div>
@@ -205,6 +263,7 @@
           <button class="peg-btn" data-type="green" title="Green (Special)"></button>
           <button class="peg-btn" data-type="purple" title="Purple (Bonus)"></button>
           <button class="peg-btn" data-type="multi" title="Multiball"></button>
+          <button class="peg-btn" data-type="gamble" title="Spin Ball Peg (+2 Survival Spin Balls)"></button>
           <button class="peg-btn" data-type="obstacle" title="Obstacle (Stays)"></button>
           <button class="peg-btn" data-type="bumper" title="Bumper (Bouncy)"></button>
           <button class="peg-btn" data-type="portalBlue" title="Portal Blue"></button>
@@ -302,6 +361,16 @@
         <div id="availableLevelItems" class="campaign-level-list"></div>
       </div>
     </div>
+  </div>
+
+  <!-- Dialogue Editor Overlay -->
+  <div id="dialogueOverlay" class="campaign-overlay dialogue-overlay">
+    <div class="campaign-header">
+      <button id="closeDialogueOverlay" class="header-btn">&larr;</button>
+      <h2 class="level-list-title">Dialogues</h2>
+      <button id="addDialogueEntryBtn" class="header-btn" title="New Dialogue">+</button>
+    </div>
+    <div id="dialogueEditorBody" class="dialogue-edit-body"></div>
   </div>
 
   <!-- Physics Settings Overlay -->

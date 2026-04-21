@@ -2,12 +2,29 @@
 
 import { Game } from './game.js';
 import { Editor } from './editor.js';
-import { LevelManager } from './levels.js';
+import { LevelManager, cloneLevelSnapshot, normalizeLevelData } from './levels.js';
 import { PHYSICS_CONFIG } from './physics.js';
 import { FLIPPER_DEFAULTS, createDefaultFlipperConfig, normalizeFlipperConfig } from './flipper-defaults.js';
-import { ensureLevelSurvival, normalizeSurvivalSettings } from './survival-mode.js';
+import {
+  ensureLevelSurvival,
+  getSurvivalSpeedCurvePreset,
+  normalizeSurvivalGamblePegProperties,
+  normalizeSurvivalSettings,
+  normalizeSurvivalSpeedCurve,
+  SURVIVAL_GAMBLE_BALL_COUNT_MAX,
+  SURVIVAL_GAMBLE_BALL_COUNT_MIN,
+  SURVIVAL_GAMBLE_KNOCKBACK_DISTANCE_MAX,
+  SURVIVAL_GAMBLE_KNOCKBACK_DISTANCE_MIN,
+  SURVIVAL_GAMBLE_KNOCKBACK_SMOOTH_MAX_MS,
+  SURVIVAL_GAMBLE_KNOCKBACK_SMOOTH_MIN_MS,
+  SURVIVAL_SPEED_CURVE_PRESETS
+} from './survival-mode.js';
 import { GambleSystem } from './gamble-system.js';
 import { normalizeYoyoSettings } from './yoyo-thread.js';
+import {
+  normalizeHitPegClearDelayMs,
+  normalizeLevelHitPegClearSettings
+} from './hit-peg-clear-settings.js';
 import {
   MULTIBALL_MAX_SPAWN_COUNT,
   MULTIBALL_MIN_SPAWN_COUNT,
@@ -18,6 +35,15 @@ import { normalizeVisuals } from './visual-config.js';
 import { CampaignManager } from './campaign-manager.js';
 import { api } from './api.js';
 import { computeLayout, toPixelPositions } from './graph/layout.js';
+import { Utils } from './utils.js';
+import { DialogueController } from './dialogue-controller.js';
+import {
+  clampDialogueTimeoutMs,
+  createDialogueEntry,
+  normalizeDialogueConfig
+} from './dialogue-config.js';
+import { getStoredLanguage, normalizeLanguage } from './localization.js';
+import { PERK_DEFINITIONS } from './gamble-system.js';
 
 // Fixed aspect ratio: 3:4.5 (width:height)
 const ASPECT_RATIO = 3 / 4.5;
@@ -52,7 +78,11 @@ class PeggleApp {
     this._pendingRemoteLevelSaves = new Map();
     this._remoteLevelSyncFailures = new Map();
     this._editorSideSheetLayer = null;
-    this._editorSideSheetIds = ['levelListOverlay', 'campaignOverlay', 'campaignEditOverlay'];
+    this._editorSideSheetIds = ['levelListOverlay', 'campaignOverlay', 'campaignEditOverlay', 'dialogueOverlay'];
+    this._dialogueSelectedEntryId = null;
+    this._dialoguePreviewState = null;
+    this.dialogueLanguage = getStoredLanguage();
+    this.dialogueController = new DialogueController({ visualLayout: this.visualLayout, persistSeen: false });
 
     this.campaignManager.beforeSyncCampaign = (campaign) => this._awaitCampaignRemoteLevelSaves(campaign);
     this.mode = 'editor'; // 'editor' or 'play'
@@ -66,6 +96,8 @@ class PeggleApp {
     };
 
     this.visualLayout.mount();
+    this.dialogueController.mount();
+    this.dialogueController.setLanguage(this.dialogueLanguage);
     this._injectAdminPanel();
     this.setupCanvas();
     this._mountEditorSideSheets();
@@ -98,6 +130,7 @@ class PeggleApp {
           </select>
           <label class="admin-toggle"><input type="checkbox" id="yoyoThreadToggle"> Yo-yo Thread</label>
           <label class="admin-toggle"><input type="checkbox" id="yoyoDebugDragToggle"> Yo-yo Debug Drag</label>
+          <button id="dialogueBtn" class="admin-btn">Dialogues</button>
           <button id="addToTrainingBtn" class="admin-btn">Add to Training</button>
           <button id="themeDefaultBtn" class="admin-btn">Default Theme</button>
         </div>
@@ -236,7 +269,8 @@ class PeggleApp {
       const level = this.levelManager.getCurrentLevel();
       if (!level) return;
       const safeName = (level.name || 'untitled').replace(/[^a-zA-Z0-9_-]/g, '_');
-      const snapshot = JSON.parse(JSON.stringify(level));
+      const snapshot = cloneLevelSnapshot(level);
+      if (!snapshot) return;
       api.saveLevel(safeName, snapshot).then(ok => {
         if (ok) console.log('[auto-sync] Saved to remote:', safeName);
       });
@@ -394,17 +428,27 @@ class PeggleApp {
 
     this.visualLayout.resize(fw, fh);
     this._positionEditorSideSheets();
+    this.dialogueController.refreshLayout();
 
     const level = this.levelManager.getCurrentLevel();
     if (level) {
       const prev = level.survival ? { ...level.survival } : null;
       const normalized = ensureLevelSurvival(level, worldH);
+      const prevBackground = prev?.background || {};
+      const nextBackground = normalized.background || {};
       if (
         !prev ||
         prev.enabled !== normalized.enabled ||
         prev.worldHeight !== normalized.worldHeight ||
         prev.scrollSpeed !== normalized.scrollSpeed ||
-        prev.loseLineY !== normalized.loseLineY
+        prev.loseLineY !== normalized.loseLineY ||
+        prev.antiCooldownMs !== normalized.antiCooldownMs ||
+        JSON.stringify(prev.speedCurve || null) !== JSON.stringify(normalized.speedCurve || null) ||
+        JSON.stringify(prev.gamblePeg || null) !== JSON.stringify(normalized.gamblePeg || null) ||
+        prevBackground.type !== nextBackground.type ||
+        prevBackground.image !== nextBackground.image ||
+        prevBackground.fit !== nextBackground.fit ||
+        JSON.stringify(prevBackground.liquid || null) !== JSON.stringify(nextBackground.liquid || null)
       ) {
         this.levelManager.save();
       }
@@ -676,6 +720,10 @@ class PeggleApp {
       this.showPhysicsSettings();
     });
 
+    document.getElementById('dialogueBtn').addEventListener('click', () => {
+      this.showDialogueEditor();
+    });
+
     // Visual layout: config change callback — deep clone so the level owns its
     // own copy and future VisualLayout mutations don't silently change it.
     this.visualLayout.onConfigChange = (config) => {
@@ -684,7 +732,27 @@ class PeggleApp {
         level.visuals = JSON.parse(JSON.stringify(config));
         this.levelManager.save();
         const renderer = this.game?.renderer || this.editor?.renderer;
-        if (renderer) renderer.setBackground(config.background);
+        if (renderer) {
+          renderer.setBackground(config.background);
+          renderer.setBallTrail(config.ballTrail);
+          renderer.setShockwave(config.shockwave);
+        }
+        this.dialogueController.refreshLayout();
+      }
+    };
+    this.visualLayout.onPreviewProgressionChange = (enabled) => {
+      if (this.editor) {
+        this.editor.previewLevelProgress = enabled ? 1 : null;
+      }
+    };
+    this.visualLayout.onBallTrailPreviewChange = (enabled) => {
+      if (this.editor) {
+        this.editor.ballTrailPreview = !!enabled;
+      }
+    };
+    this.visualLayout.onShockwavePreviewChange = (enabled) => {
+      if (this.editor) {
+        this.editor.shockwavePreview = !!enabled;
       }
     };
 
@@ -734,6 +802,14 @@ class PeggleApp {
     // Close level list
     document.getElementById('closeLevelList').addEventListener('click', () => {
       this.closeLevelList();
+    });
+
+    document.getElementById('closeDialogueOverlay').addEventListener('click', () => {
+      this.closeDialogueEditor();
+    });
+
+    document.getElementById('addDialogueEntryBtn').addEventListener('click', () => {
+      this._addDialogueEntry();
     });
 
     // Close physics panel
@@ -826,6 +902,7 @@ class PeggleApp {
   }
 
   showPhysicsSettings() {
+    this.closeDialogueEditor();
     // Update slider values to current settings
     document.getElementById('gravitySlider').value = PHYSICS_CONFIG.gravity * 100;
     document.getElementById('gravityValue').textContent = PHYSICS_CONFIG.gravity.toFixed(2);
@@ -1269,11 +1346,36 @@ class PeggleApp {
   setupMultiballPanel() {
     const countSlider = document.getElementById('multiballCountSlider');
     const countInput = document.getElementById('multiballCountInput');
+    const gambleBallSlider = document.getElementById('gamblePegBallCountSlider');
+    const gambleBallInput = document.getElementById('gamblePegBallCountInput');
+    const gambleKnockbackToggle = document.getElementById('gamblePegKnockbackToggle');
+    const gambleKnockbackSlider = document.getElementById('gamblePegKnockbackDistanceSlider');
+    const gambleKnockbackInput = document.getElementById('gamblePegKnockbackDistanceInput');
+    const gambleKnockbackSmoothSlider = document.getElementById('gamblePegKnockbackSmoothSlider');
+    const gambleKnockbackSmoothInput = document.getElementById('gamblePegKnockbackSmoothInput');
     if (!countSlider || !countInput) return;
     countSlider.min = String(MULTIBALL_MIN_SPAWN_COUNT);
     countSlider.max = String(MULTIBALL_MAX_SPAWN_COUNT);
     countInput.min = String(MULTIBALL_MIN_SPAWN_COUNT);
     countInput.max = String(MULTIBALL_MAX_SPAWN_COUNT);
+    if (gambleBallSlider && gambleBallInput) {
+      gambleBallSlider.min = String(SURVIVAL_GAMBLE_BALL_COUNT_MIN);
+      gambleBallSlider.max = String(SURVIVAL_GAMBLE_BALL_COUNT_MAX);
+      gambleBallInput.min = String(SURVIVAL_GAMBLE_BALL_COUNT_MIN);
+      gambleBallInput.max = String(SURVIVAL_GAMBLE_BALL_COUNT_MAX);
+    }
+    if (gambleKnockbackSlider && gambleKnockbackInput) {
+      gambleKnockbackSlider.min = String(SURVIVAL_GAMBLE_KNOCKBACK_DISTANCE_MIN);
+      gambleKnockbackSlider.max = String(SURVIVAL_GAMBLE_KNOCKBACK_DISTANCE_MAX);
+      gambleKnockbackInput.min = String(SURVIVAL_GAMBLE_KNOCKBACK_DISTANCE_MIN);
+      gambleKnockbackInput.max = String(SURVIVAL_GAMBLE_KNOCKBACK_DISTANCE_MAX);
+    }
+    if (gambleKnockbackSmoothSlider && gambleKnockbackSmoothInput) {
+      gambleKnockbackSmoothSlider.min = String(SURVIVAL_GAMBLE_KNOCKBACK_SMOOTH_MIN_MS);
+      gambleKnockbackSmoothSlider.max = String(SURVIVAL_GAMBLE_KNOCKBACK_SMOOTH_MAX_MS);
+      gambleKnockbackSmoothInput.min = String(SURVIVAL_GAMBLE_KNOCKBACK_SMOOTH_MIN_MS);
+      gambleKnockbackSmoothInput.max = String(SURVIVAL_GAMBLE_KNOCKBACK_SMOOTH_MAX_MS);
+    }
 
     document.getElementById('closeMultiballPanel').addEventListener('click', () => {
       this.closeMultiballPanel();
@@ -1296,15 +1398,109 @@ class PeggleApp {
       const value = parseInt(countInput.value, 10);
       applySpawnCount(value);
     });
+
+    if (gambleBallSlider && gambleBallInput) {
+      const applyGambleBallCount = (rawValue) => {
+        if (!this.editor) return;
+        const normalized = normalizeSurvivalGamblePegProperties({ gambleBallCount: rawValue });
+        gambleBallSlider.value = normalized.gambleBallCount;
+        gambleBallInput.value = normalized.gambleBallCount;
+        this.editor.setSelectedGambleBallCount(normalized.gambleBallCount);
+      };
+      gambleBallSlider.addEventListener('input', () => applyGambleBallCount(gambleBallSlider.value));
+      gambleBallInput.addEventListener('input', () => applyGambleBallCount(gambleBallInput.value));
+    }
+
+    if (gambleKnockbackToggle && gambleKnockbackSlider && gambleKnockbackInput) {
+      const syncKnockbackDistanceControls = (enabled) => {
+        gambleKnockbackSlider.disabled = !enabled;
+        gambleKnockbackInput.disabled = !enabled;
+        if (gambleKnockbackSmoothSlider) gambleKnockbackSmoothSlider.disabled = !enabled;
+        if (gambleKnockbackSmoothInput) gambleKnockbackSmoothInput.disabled = !enabled;
+      };
+      const applyGambleKnockbackDistance = (rawValue) => {
+        if (!this.editor) return;
+        const normalized = normalizeSurvivalGamblePegProperties({ gambleKnockbackDistance: rawValue });
+        gambleKnockbackSlider.value = normalized.gambleKnockbackDistance;
+        gambleKnockbackInput.value = normalized.gambleKnockbackDistance;
+        this.editor.setSelectedGambleKnockbackDistance(normalized.gambleKnockbackDistance);
+      };
+      const applyGambleKnockbackSmooth = (rawValue) => {
+        if (!this.editor || !gambleKnockbackSmoothSlider || !gambleKnockbackSmoothInput) return;
+        const normalized = normalizeSurvivalGamblePegProperties({ gambleKnockbackSmoothMs: rawValue });
+        gambleKnockbackSmoothSlider.value = normalized.gambleKnockbackSmoothMs;
+        gambleKnockbackSmoothInput.value = normalized.gambleKnockbackSmoothMs;
+        this.editor.setSelectedGambleKnockbackSmoothMs(normalized.gambleKnockbackSmoothMs);
+      };
+      gambleKnockbackToggle.addEventListener('change', () => {
+        const enabled = gambleKnockbackToggle.checked;
+        syncKnockbackDistanceControls(enabled);
+        this.editor?.setSelectedGambleKnockbackEnabled(enabled);
+      });
+      gambleKnockbackSlider.addEventListener('input', () => {
+        applyGambleKnockbackDistance(gambleKnockbackSlider.value);
+      });
+      gambleKnockbackInput.addEventListener('input', () => {
+        applyGambleKnockbackDistance(gambleKnockbackInput.value);
+      });
+      gambleKnockbackSmoothSlider?.addEventListener('input', () => {
+        applyGambleKnockbackSmooth(gambleKnockbackSmoothSlider.value);
+      });
+      gambleKnockbackSmoothInput?.addEventListener('input', () => {
+        applyGambleKnockbackSmooth(gambleKnockbackSmoothInput.value);
+      });
+      syncKnockbackDistanceControls(gambleKnockbackToggle.checked);
+    }
   }
 
   showMultiballPanel() {
-    const props = this.editor ? this.editor.getSelectedMultiballProperties() : null;
-    if (!props) return;
+    const multiballProps = this.editor ? this.editor.getSelectedMultiballProperties() : null;
+    const gambleProps = this.editor ? this.editor.getSelectedGamblePegProperties() : null;
+    const panelTitle = document.getElementById('multiballPanelTitle');
+    const multiballSettings = document.getElementById('multiballSettings');
+    const gambleSettings = document.getElementById('gamblePegSettings');
 
-    const value = normalizeMultiballSpawnCount(props.spawnCount);
-    document.getElementById('multiballCountSlider').value = value;
-    document.getElementById('multiballCountInput').value = value;
+    if (!multiballProps && !gambleProps) return;
+
+    if (multiballProps) {
+      const value = normalizeMultiballSpawnCount(multiballProps.spawnCount);
+      if (panelTitle) panelTitle.textContent = 'Multiball';
+      if (multiballSettings) multiballSettings.classList.remove('hidden');
+      if (gambleSettings) gambleSettings.classList.add('hidden');
+      document.getElementById('multiballCountSlider').value = value;
+      document.getElementById('multiballCountInput').value = value;
+    } else {
+      const props = normalizeSurvivalGamblePegProperties(gambleProps);
+      if (panelTitle) panelTitle.textContent = 'Lime Peg';
+      if (multiballSettings) multiballSettings.classList.add('hidden');
+      if (gambleSettings) gambleSettings.classList.remove('hidden');
+      const ballSlider = document.getElementById('gamblePegBallCountSlider');
+      const ballInput = document.getElementById('gamblePegBallCountInput');
+      const knockbackToggle = document.getElementById('gamblePegKnockbackToggle');
+      const knockbackSlider = document.getElementById('gamblePegKnockbackDistanceSlider');
+      const knockbackInput = document.getElementById('gamblePegKnockbackDistanceInput');
+      const knockbackSmoothSlider = document.getElementById('gamblePegKnockbackSmoothSlider');
+      const knockbackSmoothInput = document.getElementById('gamblePegKnockbackSmoothInput');
+      if (ballSlider) ballSlider.value = props.gambleBallCount;
+      if (ballInput) ballInput.value = props.gambleBallCount;
+      if (knockbackToggle) knockbackToggle.checked = !!props.gambleKnockbackEnabled;
+      if (knockbackSlider) {
+        knockbackSlider.value = props.gambleKnockbackDistance;
+        knockbackSlider.disabled = !props.gambleKnockbackEnabled;
+      }
+      if (knockbackInput) {
+        knockbackInput.value = props.gambleKnockbackDistance;
+        knockbackInput.disabled = !props.gambleKnockbackEnabled;
+      }
+      if (knockbackSmoothSlider) {
+        knockbackSmoothSlider.value = props.gambleKnockbackSmoothMs;
+        knockbackSmoothSlider.disabled = !props.gambleKnockbackEnabled;
+      }
+      if (knockbackSmoothInput) {
+        knockbackSmoothInput.value = props.gambleKnockbackSmoothMs;
+        knockbackSmoothInput.disabled = !props.gambleKnockbackEnabled;
+      }
+    }
     document.getElementById('multiballPanel').classList.add('visible');
   }
 
@@ -1378,12 +1574,22 @@ class PeggleApp {
     const speedInput = document.getElementById('survivalSpeedInput');
     const loseLineSlider = document.getElementById('survivalLoseLineSlider');
     const loseLineInput = document.getElementById('survivalLoseLineInput');
+    const antiCooldownSlider = document.getElementById('survivalAntiCooldownSlider');
+    const antiCooldownInput = document.getElementById('survivalAntiCooldownInput');
+    const curvePresetSelect = document.getElementById('survivalSpeedCurvePreset');
+    const curveCanvas = document.getElementById('survivalSpeedCurveCanvas');
+    const curveEqualizeBtn = document.getElementById('survivalSpeedCurveEqualizeBtn');
+    const curveResetBtn = document.getElementById('survivalSpeedCurveResetBtn');
+    const backgroundInput = document.getElementById('survivalBackgroundInput');
+    const backgroundUploadBtn = document.getElementById('survivalBackgroundUploadBtn');
+    const backgroundRemoveBtn = document.getElementById('survivalBackgroundRemoveBtn');
 
     if (
       !panel || !toggle ||
       !worldHeightSlider || !worldHeightInput ||
       !speedSlider || !speedInput ||
-      !loseLineSlider || !loseLineInput
+      !loseLineSlider || !loseLineInput ||
+      !antiCooldownSlider || !antiCooldownInput
     ) return;
 
     let shiftHeld = false;
@@ -1459,6 +1665,265 @@ class PeggleApp {
     });
     loseLineSlider.addEventListener('change', () => applyLoseLine(loseLineSlider.value));
     loseLineInput.addEventListener('change', () => applyLoseLine(loseLineInput.value));
+
+    const formatCooldownSeconds = (ms) => (Math.round(ms) / 1000).toFixed(1);
+    const applyAntiCooldown = (rawValue, fromSeconds = false) => {
+      const rawMs = fromSeconds
+        ? (parseFloat(rawValue) || 0) * 1000
+        : parseFloat(rawValue) || 0;
+      const value = Math.max(0, Math.min(10000, Math.round(rawMs / 100) * 100));
+      antiCooldownSlider.value = value;
+      antiCooldownInput.value = formatCooldownSeconds(value);
+      this.updateLevelSurvivalSettings({ antiCooldownMs: value });
+    };
+
+    antiCooldownSlider.addEventListener('input', () => {
+      const value = Math.max(0, Math.min(10000, parseInt(antiCooldownSlider.value, 10) || 0));
+      antiCooldownInput.value = formatCooldownSeconds(value);
+    });
+    antiCooldownSlider.addEventListener('change', () => applyAntiCooldown(antiCooldownSlider.value));
+    antiCooldownInput.addEventListener('change', () => applyAntiCooldown(antiCooldownInput.value, true));
+
+    if (curvePresetSelect && curveCanvas) {
+      const applyPreset = (presetId) => {
+        if (presetId === 'custom') {
+          const level = this.levelManager.getCurrentLevel();
+          if (!level) return;
+          const survival = ensureLevelSurvival(level, this.canvas.height);
+          this.updateLevelSurvivalSettings({
+            speedCurve: { ...survival.speedCurve, preset: 'custom' }
+          });
+          return;
+        }
+        this.updateLevelSurvivalSettings({
+          speedCurve: getSurvivalSpeedCurvePreset(presetId)
+        });
+      };
+      curvePresetSelect.addEventListener('change', () => applyPreset(curvePresetSelect.value));
+      if (curveEqualizeBtn) {
+        curveEqualizeBtn.addEventListener('click', () => {
+          this.updateLevelSurvivalSettings({
+            speedCurve: {
+              preset: 'custom',
+              x1: 0.25,
+              y0: 1,
+              y1: 1,
+              x2: 0.75,
+              y2: 1,
+              y3: 1
+            }
+          });
+        });
+      }
+      if (curveResetBtn) {
+        curveResetBtn.addEventListener('click', () => {
+          const preset = SURVIVAL_SPEED_CURVE_PRESETS[curvePresetSelect.value]
+            ? curvePresetSelect.value
+            : 'linear';
+          applyPreset(preset);
+        });
+      }
+      curveCanvas.addEventListener('pointerdown', (event) => {
+        event.preventDefault();
+        const level = this.levelManager.getCurrentLevel();
+        if (!level) return;
+        const survival = ensureLevelSurvival(level, this.canvas.height);
+        this._survivalCurveDragHandle = this._getSurvivalCurveHandleAt(event, survival.speedCurve, curveCanvas);
+        curveCanvas.setPointerCapture?.(event.pointerId);
+        this._applySurvivalCurveDrag(event, curveCanvas);
+      });
+      curveCanvas.addEventListener('pointermove', (event) => {
+        if (!this._survivalCurveDragHandle) return;
+        event.preventDefault();
+        this._applySurvivalCurveDrag(event, curveCanvas);
+      });
+      const endCurveDrag = (event) => {
+        const wasDragging = !!this._survivalCurveDragHandle;
+        if (wasDragging && curveCanvas.hasPointerCapture?.(event.pointerId)) {
+          curveCanvas.releasePointerCapture(event.pointerId);
+        }
+        this._survivalCurveDragHandle = null;
+        if (wasDragging) {
+          this.levelManager.save();
+          this.updateLevelSettings();
+        }
+      };
+      curveCanvas.addEventListener('pointerup', endCurveDrag);
+      curveCanvas.addEventListener('pointercancel', endCurveDrag);
+    }
+
+    if (backgroundInput && backgroundUploadBtn && backgroundRemoveBtn) {
+      backgroundUploadBtn.addEventListener('click', () => backgroundInput.click());
+      backgroundRemoveBtn.addEventListener('click', () => {
+        backgroundInput.value = '';
+        this.updateLevelSurvivalSettings({
+          background: { type: 'none', image: null, fit: 'cover', liquid: null }
+        });
+      });
+      backgroundInput.addEventListener('change', () => {
+        const file = backgroundInput.files && backgroundInput.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          const image = typeof reader.result === 'string' ? reader.result : null;
+          if (!image) return;
+          this.updateLevelSurvivalSettings({
+            background: { type: 'image', image, fit: 'cover', liquid: null }
+          });
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+  }
+
+  _getSurvivalCurveMetrics(canvas) {
+    const width = canvas?.width || 154;
+    const height = canvas?.height || 86;
+    const pad = { left: 12, top: 8, right: 10, bottom: 14 };
+    return {
+      width,
+      height,
+      pad,
+      plotW: Math.max(1, width - pad.left - pad.right),
+      plotH: Math.max(1, height - pad.top - pad.bottom)
+    };
+  }
+
+  _survivalCurvePointToCanvas(canvas, x, speed) {
+    const metrics = this._getSurvivalCurveMetrics(canvas);
+    const px = metrics.pad.left + Utils.clamp(x, 0, 1) * metrics.plotW;
+    const yNorm = (Utils.clamp(speed, 0.05, 3) - 0.05) / (3 - 0.05);
+    const py = metrics.pad.top + (1 - yNorm) * metrics.plotH;
+    return { x: px, y: py };
+  }
+
+  _survivalCurveEventToValue(event, canvas) {
+    const rect = canvas.getBoundingClientRect();
+    const metrics = this._getSurvivalCurveMetrics(canvas);
+    const sx = (event.clientX - rect.left) * (metrics.width / Math.max(1, rect.width));
+    const sy = (event.clientY - rect.top) * (metrics.height / Math.max(1, rect.height));
+    const x = Utils.clamp((sx - metrics.pad.left) / metrics.plotW, 0, 1);
+    const yNorm = 1 - Utils.clamp((sy - metrics.pad.top) / metrics.plotH, 0, 1);
+    const speed = 0.05 + yNorm * (3 - 0.05);
+    return { x, speed };
+  }
+
+  _getSurvivalCurveHandleAt(event, rawCurve, canvas) {
+    const curve = normalizeSurvivalSpeedCurve(rawCurve);
+    const value = this._survivalCurveEventToValue(event, canvas);
+    const handles = [
+      { id: 'p0', x: 0, speed: curve.y0 },
+      { id: 'p1', x: curve.x1, speed: curve.y1 },
+      { id: 'p2', x: curve.x2, speed: curve.y2 },
+      { id: 'p3', x: 1, speed: curve.y3 }
+    ];
+    let best = handles[0];
+    let bestDist = Infinity;
+    for (const handle of handles) {
+      const dx = handle.x - value.x;
+      const dy = (handle.speed - value.speed) / 3;
+      const dist = Math.hypot(dx, dy);
+      if (dist < bestDist) {
+        best = handle;
+        bestDist = dist;
+      }
+    }
+    return best.id;
+  }
+
+  _applySurvivalCurveDrag(event, canvas) {
+    const handle = this._survivalCurveDragHandle;
+    if (!handle) return;
+    const level = this.levelManager.getCurrentLevel();
+    if (!level) return;
+
+    const survival = ensureLevelSurvival(level, this.canvas.height);
+    const value = this._survivalCurveEventToValue(event, canvas);
+    const next = { ...survival.speedCurve, preset: 'custom' };
+
+    if (handle === 'p0') {
+      next.y0 = value.speed;
+    } else if (handle === 'p1') {
+      next.x1 = Math.min(value.x, next.x2);
+      next.y1 = value.speed;
+    } else if (handle === 'p2') {
+      next.x2 = Math.max(value.x, next.x1);
+      next.y2 = value.speed;
+    } else if (handle === 'p3') {
+      next.y3 = value.speed;
+    }
+
+    const normalized = normalizeSurvivalSpeedCurve(next);
+    this.updateLevelSurvivalSettings(
+      { speedCurve: normalized },
+      { save: false, refreshUi: false }
+    );
+    const presetSelect = document.getElementById('survivalSpeedCurvePreset');
+    if (presetSelect) presetSelect.value = 'custom';
+    this._drawSurvivalSpeedCurveEditor(normalized);
+  }
+
+  _drawSurvivalSpeedCurveEditor(rawCurve) {
+    const canvas = document.getElementById('survivalSpeedCurveCanvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const curve = normalizeSurvivalSpeedCurve(rawCurve);
+    const metrics = this._getSurvivalCurveMetrics(canvas);
+    const p0 = this._survivalCurvePointToCanvas(canvas, 0, curve.y0);
+    const p1 = this._survivalCurvePointToCanvas(canvas, curve.x1, curve.y1);
+    const p2 = this._survivalCurvePointToCanvas(canvas, curve.x2, curve.y2);
+    const p3 = this._survivalCurvePointToCanvas(canvas, 1, curve.y3);
+    const baseline = this._survivalCurvePointToCanvas(canvas, 0, 1).y;
+
+    ctx.clearRect(0, 0, metrics.width, metrics.height);
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.14)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(metrics.pad.left, baseline);
+    ctx.lineTo(metrics.width - metrics.pad.right, baseline);
+    ctx.stroke();
+
+    ctx.strokeStyle = 'rgba(140, 255, 0, 0.28)';
+    ctx.beginPath();
+    ctx.moveTo(p0.x, p0.y);
+    ctx.lineTo(p1.x, p1.y);
+    ctx.moveTo(p3.x, p3.y);
+    ctx.lineTo(p2.x, p2.y);
+    ctx.stroke();
+
+    ctx.strokeStyle = '#8cff00';
+    ctx.lineWidth = 2.25;
+    ctx.beginPath();
+    ctx.moveTo(p0.x, p0.y);
+    ctx.bezierCurveTo(p1.x, p1.y, p2.x, p2.y, p3.x, p3.y);
+    ctx.stroke();
+
+    const drawHandle = (point, fill, radius = 4) => {
+      ctx.fillStyle = fill;
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.55)';
+      ctx.lineWidth = 1.25;
+      ctx.beginPath();
+      ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    };
+    drawHandle(p0, '#ffffff', 4.5);
+    drawHandle(p3, '#ffffff', 4.5);
+    drawHandle(p1, '#48cfff', 4);
+    drawHandle(p2, '#48cfff', 4);
+
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.52)';
+    ctx.font = '9px -apple-system, BlinkMacSystemFont, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('slow', metrics.pad.left, metrics.height - 4);
+    ctx.textAlign = 'right';
+    ctx.fillText('fast', metrics.width - metrics.pad.right, metrics.pad.top + 8);
+    ctx.restore();
   }
 
   _setSurvivalSettingsVisible(visible) {
@@ -1473,9 +1938,21 @@ class PeggleApp {
     panel.classList.toggle('visible', !!visible);
   }
 
+  _updateSurvivalBackgroundStatus(survival) {
+    const status = document.getElementById('survivalBackgroundStatus');
+    const removeBtn = document.getElementById('survivalBackgroundRemoveBtn');
+    if (!status) return;
+    const hasImage = !!(survival?.background?.type === 'image' && survival.background.image);
+    status.textContent = hasImage ? 'Image loaded for full vertical field' : 'No image';
+    if (removeBtn) removeBtn.disabled = !hasImage;
+  }
+
   setupAimLengthPanel() {
     const slider = document.getElementById('aimLengthSlider');
     const numInput = document.getElementById('aimLengthInput');
+    const clearToggle = document.getElementById('hitPegTimedClearToggle');
+    const clearSlider = document.getElementById('hitPegClearDelaySlider');
+    const clearInput = document.getElementById('hitPegClearDelayInput');
     if (!slider || !numInput) return;
 
     const apply = (rawValue) => {
@@ -1494,6 +1971,43 @@ class PeggleApp {
     });
     slider.addEventListener('change', () => apply(slider.value));
     numInput.addEventListener('change', () => apply(numInput.value));
+
+    if (clearToggle && clearSlider && clearInput) {
+      const formatSeconds = (ms) => (Math.round(ms) / 1000).toFixed(1);
+      const syncClearControls = (enabled) => {
+        clearSlider.disabled = !enabled;
+        clearInput.disabled = !enabled;
+      };
+      clearToggle.addEventListener('change', () => {
+        const enabled = clearToggle.checked;
+        syncClearControls(enabled);
+        const level = this.levelManager.getCurrentLevel();
+        if (level) {
+          this.levelManager.updateCurrentLevel({ hitPegTimedClearEnabled: enabled });
+        }
+        if (this.game) this.game.setHitPegTimedClearEnabled(enabled);
+      });
+      const applyClearDelay = (rawValue, fromSeconds = false) => {
+        const rawMs = fromSeconds
+          ? (parseFloat(rawValue) || 0) * 1000
+          : parseFloat(rawValue) || 0;
+        const value = normalizeHitPegClearDelayMs(rawMs);
+        clearSlider.value = value;
+        clearInput.value = formatSeconds(value);
+        const level = this.levelManager.getCurrentLevel();
+        if (level) {
+          this.levelManager.updateCurrentLevel({ hitPegClearDelayMs: value });
+        }
+        if (this.game) this.game.setHitPegClearDelay(value);
+      };
+
+      clearSlider.addEventListener('input', () => {
+        clearInput.value = formatSeconds(parseFloat(clearSlider.value) || 0);
+      });
+      clearSlider.addEventListener('change', () => applyClearDelay(clearSlider.value));
+      clearInput.addEventListener('change', () => applyClearDelay(clearInput.value, true));
+      syncClearControls(clearToggle.checked);
+    }
   }
 
   setAimLengthPanelVisible(visible) {
@@ -1501,18 +2015,29 @@ class PeggleApp {
     if (panel) panel.style.display = visible ? '' : 'none';
   }
 
-  updateLevelSurvivalSettings(partialSettings) {
+  updateLevelSurvivalSettings(partialSettings, options = {}) {
     const level = this.levelManager.getCurrentLevel();
     if (!level) return;
 
     const current = ensureLevelSurvival(level, this.canvas.height);
+    const nextRaw = { ...current, ...partialSettings };
+    if (partialSettings?.background) {
+      nextRaw.background = { ...(current.background || {}), ...partialSettings.background };
+    }
+    if (partialSettings?.gamblePeg) {
+      nextRaw.gamblePeg = { ...(current.gamblePeg || {}), ...partialSettings.gamblePeg };
+    }
     level.survival = normalizeSurvivalSettings(
-      { ...current, ...partialSettings },
+      nextRaw,
       this.canvas.height
     );
-    this.levelManager.save();
+    if (options.save !== false) {
+      this.levelManager.save();
+    }
     this.applySurvivalSettingsToEditor();
-    this.updateLevelSettings();
+    if (options.refreshUi !== false) {
+      this.updateLevelSettings();
+    }
   }
 
   updateLevelYoyoSettings(partialSettings) {
@@ -1614,7 +2139,7 @@ class PeggleApp {
       this.closePortalPanel();
     }
 
-    if (count > 0 && this.editor.isSelectionAllMultiballs()) {
+    if (count > 0 && (this.editor.isSelectionAllMultiballs() || this.editor.isSelectionAllGamblePegs())) {
       this.showMultiballPanel();
     } else {
       this.closeMultiballPanel();
@@ -1632,7 +2157,7 @@ class PeggleApp {
     const typeColors = {
       orange: '#ff6b35', blue: '#4ecdc4', green: '#95d5b2',
       purple: '#c77dff', multi: '#ff4d9d', obstacle: '#6b7280',
-      bumper: '#e0e0e0', portalBlue: '#4ecdc4', portalOrange: '#ff8b3d'
+      gamble: '#8cff00', bumper: '#e0e0e0', portalBlue: '#4ecdc4', portalOrange: '#ff8b3d'
     };
 
     const count = this.editor.selectedPegIds.size;
@@ -1880,12 +2405,16 @@ class PeggleApp {
     this.visualLayout.setPanelVisible(true);
     if (this.adminPanel) this.adminPanel.classList.remove('hidden');
     this.resizeCanvas(); // re-fit frame with panel visible
+    this._setDialogueControllerContextForCurrentLevel({ live: false, refreshPreview: true });
   }
 
   startGame() {
+    this.closeDialogueEditor();
     this.teardownGambleSystem();
 
     if (this.editor) {
+      this.visualLayout.setBallTrailPreview?.(false);
+      this.visualLayout.setShockwavePreview?.(false);
       // Close panels if open
       this.closeAnimationPanel();
       this.closeBumperPanel();
@@ -1944,7 +2473,7 @@ class PeggleApp {
 
     // Ball counter + health bar: subscribe to game state
     this._unsubBallCounter = this.game.subscribeUiState((snapshot) => {
-      if (Number.isFinite(snapshot.ballsLeft)) {
+      if (snapshot.ballsLeft != null) {
         this.visualLayout.updateBallCounter(snapshot.ballsLeft, snapshot.initialBallCount);
       }
       if (Number.isFinite(snapshot.orangePegsLeft)) {
@@ -1963,6 +2492,7 @@ class PeggleApp {
     this.visualLayout.setPanelVisible(false);
     if (this.adminPanel) this.adminPanel.classList.add('hidden');
     this.resizeCanvas(); // re-fit frame without panel
+    this._setDialogueControllerContextForCurrentLevel({ live: true, refreshPreview: false });
     this.mountGambleSystem();
   }
 
@@ -1984,12 +2514,14 @@ class PeggleApp {
       onLayoutChange: () => this.resizeCanvas()
     });
     this.gambleSystem.mount();
+    this.dialogueController.setGambleSystem(this.gambleSystem);
   }
 
   teardownGambleSystem() {
     if (!this.gambleSystem) return;
     this.gambleSystem.dispose();
     this.gambleSystem = null;
+    this.dialogueController.setGambleSystem(null);
   }
 
   handleGameRestart = () => {
@@ -2019,6 +2551,8 @@ class PeggleApp {
     const renderer = this.game?.renderer || this.editor?.renderer;
     if (renderer) {
       renderer.setBackground(visuals.background);
+      renderer.setBallTrail(visuals.ballTrail);
+      renderer.setShockwave(visuals.shockwave);
     }
   }
 
@@ -2037,12 +2571,15 @@ class PeggleApp {
       return;
     }
 
-    // Deep-clone so we don't mutate the editor's copy
-    const snapshot = JSON.parse(JSON.stringify(level));
+    const snapshot = this._cloneLevelSnapshot(level);
+    if (!snapshot) {
+      alert('Failed to bake level snapshot.');
+      return;
+    }
 
     // Store in localStorage as local cache
     const safeName = (snapshot.name || 'untitled').replace(/[^a-zA-Z0-9_-]/g, '_');
-    localStorage.setItem('baked:' + safeName, JSON.stringify(snapshot));
+    this._writeBakedLevelSnapshot(safeName, snapshot);
 
     // Persist to remote KV
     this._saveBakedLevelRemote(safeName, snapshot).then(ok => {
@@ -2094,6 +2631,19 @@ class PeggleApp {
     const aimInput = document.getElementById('aimLengthInput');
     if (aimSlider) aimSlider.value = aimVal;
     if (aimInput) aimInput.value = aimVal;
+    const hitClearSettings = normalizeLevelHitPegClearSettings(level);
+    const hitClearSlider = document.getElementById('hitPegClearDelaySlider');
+    const hitClearInput = document.getElementById('hitPegClearDelayInput');
+    const hitClearToggle = document.getElementById('hitPegTimedClearToggle');
+    if (hitClearToggle) hitClearToggle.checked = !!hitClearSettings.enabled;
+    if (hitClearSlider) {
+      hitClearSlider.value = Math.round(hitClearSettings.delayMs);
+      hitClearSlider.disabled = !hitClearSettings.enabled;
+    }
+    if (hitClearInput) {
+      hitClearInput.value = (Math.round(hitClearSettings.delayMs) / 1000).toFixed(1);
+      hitClearInput.disabled = !hitClearSettings.enabled;
+    }
     const yoyoSettings = normalizeYoyoSettings(level.yoyo);
     const yoyoToggle = document.getElementById('yoyoThreadToggle');
     if (yoyoToggle) {
@@ -2121,10 +2671,34 @@ class PeggleApp {
     loseLineSlider.value = Math.round(survival.loseLineY);
     loseLineInput.max = Math.max(8, Math.round(this.canvas.height - 8));
     loseLineInput.value = Math.round(survival.loseLineY);
+    const antiCooldownSlider = document.getElementById('survivalAntiCooldownSlider');
+    const antiCooldownInput = document.getElementById('survivalAntiCooldownInput');
+    if (antiCooldownSlider) {
+      antiCooldownSlider.value = Math.round(survival.antiCooldownMs || 0);
+    }
+    if (antiCooldownInput) {
+      antiCooldownInput.value = (Math.round(survival.antiCooldownMs || 0) / 1000).toFixed(1);
+    }
+    const curvePresetSelect = document.getElementById('survivalSpeedCurvePreset');
+    if (curvePresetSelect) {
+      curvePresetSelect.value = SURVIVAL_SPEED_CURVE_PRESETS[survival.speedCurve?.preset]
+        ? survival.speedCurve.preset
+        : 'custom';
+    }
+    this._drawSurvivalSpeedCurveEditor(survival.speedCurve);
+    this._updateSurvivalBackgroundStatus(survival);
     this._setSurvivalSettingsVisible(!!survival.enabled);
     
     const isInTraining = this.levelManager.isInTraining(level.id);
     document.getElementById('addToTrainingBtn').textContent = isInTraining ? 'Remove from Training' : 'Add to Training';
+
+    this.dialogueController.setConfig(level.dialogue);
+    if (this.mode === 'editor') {
+      if (document.getElementById('dialogueOverlay')?.classList.contains('visible')) {
+        this._renderDialogueEditor();
+      }
+      this._refreshDialoguePreviewFromState();
+    }
   }
 
   newLevel() {
@@ -2136,10 +2710,14 @@ class PeggleApp {
     
     if (this.mode === 'editor' && this.editor) {
       this.editor.selectedPegIds.clear();
+      this._dialogueSelectedEntryId = null;
+      this._dialoguePreviewState = null;
+      this._setDialogueControllerContextForCurrentLevel({ live: false, refreshPreview: true });
     }
   }
 
   showLevelList() {
+    this.closeDialogueEditor();
     const levels = this.levelManager.getAllLevels();
     const list = document.getElementById('levelItems');
     list.innerHTML = '';
@@ -2207,6 +2785,524 @@ class PeggleApp {
 
   closeLevelList() {
     document.getElementById('levelListOverlay').classList.remove('visible');
+  }
+
+  _setDialogueControllerContextForCurrentLevel(options = {}) {
+    const level = this.levelManager.getCurrentLevel();
+    const live = !!options.live;
+    this.dialogueController.setContext({
+      level,
+      scopeKey: level ? `editor:${level.id}` : 'editor',
+      game: live ? this.game : null,
+      gambleSystem: live ? this.gambleSystem : null,
+      persistSeen: false,
+      live
+    });
+    this.dialogueController.setLanguage(this.dialogueLanguage);
+    if (options.refreshPreview) {
+      this._refreshDialoguePreviewFromState();
+    }
+  }
+
+  _getCurrentDialogueConfig() {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level) return normalizeDialogueConfig(null);
+    const normalized = normalizeDialogueConfig(level.dialogue);
+    level.dialogue = normalized;
+    return normalized;
+  }
+
+  _setCurrentLevelDialogue(config, options = {}) {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level) return null;
+
+    const normalized = normalizeDialogueConfig(config);
+    level.dialogue = normalized;
+    if (level.metadata) {
+      level.metadata.modified = new Date().toISOString();
+    }
+    this.levelManager.save();
+    this.dialogueController.setConfig(normalized);
+
+    if (this.mode === 'editor') {
+      this._refreshDialoguePreviewFromState();
+      if (options.rerender !== false && document.getElementById('dialogueOverlay')?.classList.contains('visible')) {
+        this._renderDialogueEditor();
+      }
+    }
+    return normalized;
+  }
+
+  _getSelectedDialogueEntry() {
+    const config = this._getCurrentDialogueConfig();
+    const selected = config.entries.find(entry => entry.id === this._dialogueSelectedEntryId) || null;
+    if (selected) return selected;
+    if (config.entries.length > 0) {
+      this._dialogueSelectedEntryId = config.entries[0].id;
+      return config.entries[0];
+    }
+    this._dialogueSelectedEntryId = null;
+    return null;
+  }
+
+  _setSelectedDialogueEntry(entryId) {
+    this._dialogueSelectedEntryId = entryId || null;
+    if (document.getElementById('dialogueOverlay')?.classList.contains('visible')) {
+      this._renderDialogueEditor();
+    }
+  }
+
+  _updateDialogueEntry(entryId, mutator, options = {}) {
+    const config = normalizeDialogueConfig(this._getCurrentDialogueConfig());
+    const index = config.entries.findIndex(entry => entry.id === entryId);
+    if (index === -1) return null;
+
+    const entry = config.entries[index];
+    if (mutator(entry, config, index) === false) return null;
+    return this._setCurrentLevelDialogue(config, options);
+  }
+
+  _formatDialogueTriggerSummary(entry) {
+    if (entry.trigger.type === 'spinReward') {
+      if (!entry.trigger.perkIds.length) return 'Spin reward';
+      if (entry.trigger.perkIds.length === 1) {
+        const perk = PERK_DEFINITIONS.find(item => item.id === entry.trigger.perkIds[0]);
+        return perk ? `Spin: ${perk.name}` : 'Spin reward';
+      }
+      return `Spin: ${entry.trigger.perkIds.length} perks`;
+    }
+    if (entry.trigger.type === 'pegProgress') {
+      return `Peg progress ${entry.trigger.progressPercent}%`;
+    }
+    if (entry.trigger.type === 'performanceCap30') {
+      return 'Stable ~30 FPS cap';
+    }
+    return 'Level start';
+  }
+
+  _formatDialogueLocaleSummary(entry) {
+    const parts = [];
+    if (entry.content?.ru?.segments?.some(segment => segment.text)) parts.push('RU');
+    if (entry.content?.en?.segments?.some(segment => segment.text)) parts.push('EN');
+    return parts.length ? parts.join(' / ') : 'No text yet';
+  }
+
+  _renderDialogueLocaleCard(entry, language, label) {
+    const segments = Array.isArray(entry.content?.[language]?.segments) ? entry.content[language].segments : [];
+    const rows = segments.length > 0
+      ? segments.map((segment) => {
+        const color = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(segment.color || '')
+          ? segment.color
+          : '#ffffff';
+        return `
+          <div class="dialogue-segment-row">
+            <textarea
+              class="dialogue-field-textarea"
+              data-dialogue-segment-text="${this._esc(segment.id)}"
+              data-dialogue-language="${language}"
+              placeholder="Text segment"
+            >${this._esc(segment.text || '')}</textarea>
+            <input
+              class="dialogue-color-input"
+              type="color"
+              value="${this._esc(color)}"
+              data-dialogue-segment-color="${this._esc(segment.id)}"
+              data-dialogue-language="${language}"
+            >
+            <button
+              class="dialogue-icon-btn dialogue-icon-btn--danger"
+              type="button"
+              title="Remove segment"
+              data-dialogue-remove-segment="${this._esc(segment.id)}"
+              data-dialogue-language="${language}"
+            >×</button>
+          </div>
+        `;
+      }).join('')
+      : `<div class="dialogue-segment-empty">${language === 'en' ? 'English can stay empty and fall back to Russian.' : 'Add at least one segment to show dialogue.'}</div>`;
+
+    return `
+      <div class="dialogue-locale-card">
+        <div class="dialogue-locale-header">
+          <div class="dialogue-locale-title">${label}</div>
+          <div class="dialogue-locale-actions">
+            <button class="dialogue-chip-btn" type="button" data-dialogue-add-segment="${language}">+ Segment</button>
+            <button class="dialogue-preview-btn${this._dialoguePreviewState?.entryId === entry.id && this._dialoguePreviewState?.language === language ? ' is-active' : ''}" type="button" data-dialogue-preview="${language}">Preview ${language.toUpperCase()}</button>
+          </div>
+        </div>
+        <div class="dialogue-locale-hint">${language === 'ru' ? 'Noto Serif Semibold with dark shadow in gameplay.' : 'Optional English override with Kelmscott Roman NF.'}</div>
+        <div class="dialogue-segment-list">${rows}</div>
+      </div>
+    `;
+  }
+
+  _renderDialogueEditor() {
+    const body = document.getElementById('dialogueEditorBody');
+    if (!body) return;
+
+    const level = this.levelManager.getCurrentLevel();
+    if (!level) {
+      body.innerHTML = '<div class="dialogue-editor-empty">No level selected.</div>';
+      return;
+    }
+
+    const config = this._getCurrentDialogueConfig();
+    const selectedEntry = this._getSelectedDialogueEntry();
+    const previewState = this._dialoguePreviewState;
+
+    const entryListHtml = config.entries.length > 0
+      ? config.entries.map((entry, index) => {
+        const isSelected = entry.id === selectedEntry?.id;
+        const isPreviewing = previewState?.entryId === entry.id;
+        return `
+          <div class="dialogue-entry-item${isSelected ? ' is-selected' : ''}" data-dialogue-entry-id="${this._esc(entry.id)}">
+            <button class="dialogue-entry-main" type="button" data-dialogue-select="${this._esc(entry.id)}">
+              <div class="dialogue-entry-title-row">
+                <span class="dialogue-entry-title">${this._esc(entry.title || 'Untitled dialogue')}</span>
+                <span class="dialogue-entry-badge">${this._esc(this._formatDialogueTriggerSummary(entry))}</span>
+              </div>
+              <div class="dialogue-entry-meta">
+                ${this._esc(this._formatDialogueLocaleSummary(entry))} · ${Math.round((entry.timeoutMs || 0) / 1000)}s${entry.once ? ' · once' : ' · repeat'}${entry.enabled ? '' : ' · disabled'}${isPreviewing ? ` · preview ${this._esc(previewState.language.toUpperCase())}` : ''}
+              </div>
+            </button>
+            <div class="dialogue-entry-actions">
+              <button class="dialogue-icon-btn" type="button" title="Move up" data-dialogue-move="${this._esc(entry.id)}" data-dialogue-direction="-1"${index === 0 ? ' disabled' : ''}>↑</button>
+              <button class="dialogue-icon-btn" type="button" title="Move down" data-dialogue-move="${this._esc(entry.id)}" data-dialogue-direction="1"${index === config.entries.length - 1 ? ' disabled' : ''}>↓</button>
+              <button class="dialogue-icon-btn dialogue-icon-btn--danger" type="button" title="Delete" data-dialogue-delete="${this._esc(entry.id)}">×</button>
+            </div>
+          </div>
+        `;
+      }).join('')
+      : '<div class="dialogue-editor-empty">No dialogue entries yet. Add a first-level intro or a perk explanation.</div>';
+
+    const formHtml = selectedEntry ? `
+      <div class="dialogue-entry-form">
+        <div class="dialogue-card-block">
+          <div class="dialogue-block-title">Entry</div>
+          <label class="dialogue-field">
+            <span class="dialogue-field-label">Title</span>
+            <input id="dialogueTitleInput" class="dialogue-field-input" type="text" value="${this._esc(selectedEntry.title || '')}" placeholder="Dialogue title">
+          </label>
+          <div class="dialogue-inline-grid">
+            <label class="dialogue-field">
+              <span class="dialogue-field-label">Timeout, seconds</span>
+              <input id="dialogueTimeoutInput" class="dialogue-field-input" type="number" min="0" max="120" step="1" value="${Math.round((selectedEntry.timeoutMs || 0) / 1000)}">
+            </label>
+            <label class="dialogue-field">
+              <span class="dialogue-field-label">Vertical offset</span>
+              <input id="dialogueOffsetInput" class="dialogue-field-input" type="number" min="-120" max="180" step="2" value="${Math.round(selectedEntry.placement?.offsetY || 0)}">
+            </label>
+          </div>
+          <div class="dialogue-toggle-grid">
+            <label class="dialogue-toggle"><input id="dialogueEnabledToggle" type="checkbox"${selectedEntry.enabled ? ' checked' : ''}> Enabled</label>
+            <label class="dialogue-toggle"><input id="dialogueOnceToggle" type="checkbox"${selectedEntry.once ? ' checked' : ''}> Show once</label>
+            <label class="dialogue-toggle"><input id="dialogueDismissShotToggle" type="checkbox"${selectedEntry.dismissOn?.shot ? ' checked' : ''}> Hide on shot</label>
+            <label class="dialogue-toggle"><input id="dialogueDismissSpinToggle" type="checkbox"${selectedEntry.dismissOn?.spin ? ' checked' : ''}> Hide on spin</label>
+          </div>
+          <div class="dialogue-block-note">Dismiss only reacts to a real shot or a real spin start, not random taps.</div>
+        </div>
+
+        <div class="dialogue-card-block">
+          <div class="dialogue-block-title">Trigger</div>
+          <label class="dialogue-field">
+            <span class="dialogue-field-label">When this dialogue should appear</span>
+            <select id="dialogueTriggerType" class="dialogue-field-select">
+              <option value="levelStart"${selectedEntry.trigger.type === 'levelStart' ? ' selected' : ''}>First level enter / level start</option>
+              <option value="spinReward"${selectedEntry.trigger.type === 'spinReward' ? ' selected' : ''}>Spin reward</option>
+              <option value="pegProgress"${selectedEntry.trigger.type === 'pegProgress' ? ' selected' : ''}>Peg clear progress</option>
+              <option value="performanceCap30"${selectedEntry.trigger.type === 'performanceCap30' ? ' selected' : ''}>Stable ~30 FPS cap / possible power saver</option>
+            </select>
+          </label>
+          ${selectedEntry.trigger.type === 'pegProgress' ? `
+            <div class="dialogue-trigger-extra">
+              <label class="dialogue-field">
+                <span class="dialogue-field-label">Show after this percent of target pegs is cleared</span>
+                <input id="dialogueProgressInput" class="dialogue-field-input" type="number" min="0" max="100" step="1" value="${Math.round(selectedEntry.trigger.progressPercent || 0)}">
+              </label>
+            </div>
+          ` : ''}
+          ${selectedEntry.trigger.type === 'spinReward' ? `
+            <div class="dialogue-trigger-extra">
+              <div class="dialogue-field-label" style="margin-bottom:6px;">Perks that can trigger this line</div>
+              <div class="dialogue-perk-grid">
+                ${PERK_DEFINITIONS.map((perk) => `
+                  <label class="dialogue-perk-chip">
+                    <input type="checkbox" value="${this._esc(perk.id)}" data-dialogue-perk="${this._esc(perk.id)}"${selectedEntry.trigger.perkIds.includes(perk.id) ? ' checked' : ''}>
+                    <span>${this._esc(perk.name)}</span>
+                  </label>
+                `).join('')}
+              </div>
+              <div class="dialogue-block-note">Leave all unchecked to show this dialogue for any won perk.</div>
+            </div>
+          ` : ''}
+          ${selectedEntry.trigger.type === 'performanceCap30' ? `
+            <div class="dialogue-trigger-extra">
+              <div class="dialogue-block-note">Shows after the game observes a steady ~30 FPS cap for a couple of seconds while the level itself looks otherwise light to render. Useful for hints like “disable Low Power Mode for smoother visuals”.</div>
+            </div>
+          ` : ''}
+        </div>
+
+        ${this._renderDialogueLocaleCard(selectedEntry, 'ru', 'Russian')}
+        ${this._renderDialogueLocaleCard(selectedEntry, 'en', 'English')}
+      </div>
+    ` : '';
+
+    body.innerHTML = `
+      <div class="dialogue-editor-toolbar">
+        <button class="dialogue-chip-btn" type="button" data-dialogue-add-entry>+ Add Entry</button>
+        <button class="dialogue-preview-btn${previewState?.language === 'ru' && previewState?.entryId === selectedEntry?.id ? ' is-active' : ''}" type="button" data-dialogue-preview="ru"${selectedEntry ? '' : ' disabled'}>Preview RU</button>
+        <button class="dialogue-preview-btn${previewState?.language === 'en' && previewState?.entryId === selectedEntry?.id ? ' is-active' : ''}" type="button" data-dialogue-preview="en"${selectedEntry ? '' : ' disabled'}>Preview EN</button>
+        <div class="dialogue-toolbar-spacer"></div>
+        <button class="dialogue-chip-btn${previewState ? ' is-active' : ''}" type="button" data-dialogue-hide-preview${previewState ? '' : ' disabled'}>Hide Preview</button>
+      </div>
+      <div class="dialogue-editor-note">Dialogues are saved inside this level, can fire in sequence, and already support future triggers like peg-progress thresholds and multi-line scripting.</div>
+      <div class="dialogue-entry-list">${entryListHtml}</div>
+      ${formHtml}
+    `;
+
+    body.querySelectorAll('[data-dialogue-add-entry]').forEach((button) => {
+      button.addEventListener('click', () => this._addDialogueEntry());
+    });
+
+    body.querySelectorAll('[data-dialogue-select]').forEach((button) => {
+      button.addEventListener('click', () => this._setSelectedDialogueEntry(button.dataset.dialogueSelect));
+    });
+
+    body.querySelectorAll('[data-dialogue-move]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const entryId = button.dataset.dialogueMove;
+        const direction = Number(button.dataset.dialogueDirection || 0);
+        const configToMove = normalizeDialogueConfig(this._getCurrentDialogueConfig());
+        const fromIndex = configToMove.entries.findIndex(entry => entry.id === entryId);
+        const toIndex = fromIndex + direction;
+        if (fromIndex < 0 || toIndex < 0 || toIndex >= configToMove.entries.length) return;
+        const [entry] = configToMove.entries.splice(fromIndex, 1);
+        configToMove.entries.splice(toIndex, 0, entry);
+        this._dialogueSelectedEntryId = entryId;
+        this._setCurrentLevelDialogue(configToMove);
+      });
+    });
+
+    body.querySelectorAll('[data-dialogue-delete]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const entryId = button.dataset.dialogueDelete;
+        const configToDelete = normalizeDialogueConfig(this._getCurrentDialogueConfig());
+        const index = configToDelete.entries.findIndex(entry => entry.id === entryId);
+        if (index === -1) return;
+        configToDelete.entries.splice(index, 1);
+        const nextSelected = configToDelete.entries[index] || configToDelete.entries[index - 1] || null;
+        this._dialogueSelectedEntryId = nextSelected?.id || null;
+        if (this._dialoguePreviewState?.entryId === entryId) {
+          this._dialoguePreviewState = null;
+          this.dialogueController.hidePreview();
+        }
+        this._setCurrentLevelDialogue(configToDelete);
+      });
+    });
+
+    body.querySelectorAll('[data-dialogue-preview]').forEach((button) => {
+      button.addEventListener('click', () => this._previewDialogueEntry(button.dataset.dialoguePreview));
+    });
+
+    body.querySelectorAll('[data-dialogue-hide-preview]').forEach((button) => {
+      button.addEventListener('click', () => this._hideDialoguePreview());
+    });
+
+    if (!selectedEntry) return;
+
+    const titleInput = body.querySelector('#dialogueTitleInput');
+    titleInput?.addEventListener('input', (event) => {
+      const value = event.target.value;
+      this._updateDialogueEntry(selectedEntry.id, (entry) => {
+        entry.title = value.trim() || 'Dialogue';
+      }, { rerender: false });
+      const titleItem = Array.from(body.querySelectorAll('.dialogue-entry-item')).find((item) => item.dataset.dialogueEntryId === selectedEntry.id);
+      const titleEl = titleItem?.querySelector('.dialogue-entry-title');
+      if (titleEl) titleEl.textContent = value.trim() || 'Dialogue';
+    });
+
+    body.querySelector('#dialogueTimeoutInput')?.addEventListener('input', (event) => {
+      this._updateDialogueEntry(selectedEntry.id, (entry) => {
+        entry.timeoutMs = clampDialogueTimeoutMs(Number(event.target.value) * 1000);
+      }, { rerender: false });
+    });
+
+    body.querySelector('#dialogueOffsetInput')?.addEventListener('input', (event) => {
+      this._updateDialogueEntry(selectedEntry.id, (entry) => {
+        entry.placement.offsetY = Number.isFinite(Number(event.target.value)) ? Number(event.target.value) : 0;
+      }, { rerender: false });
+    });
+
+    body.querySelector('#dialogueEnabledToggle')?.addEventListener('change', (event) => {
+      this._updateDialogueEntry(selectedEntry.id, (entry) => {
+        entry.enabled = !!event.target.checked;
+      });
+    });
+
+    body.querySelector('#dialogueOnceToggle')?.addEventListener('change', (event) => {
+      this._updateDialogueEntry(selectedEntry.id, (entry) => {
+        entry.once = !!event.target.checked;
+      });
+    });
+
+    body.querySelector('#dialogueDismissShotToggle')?.addEventListener('change', (event) => {
+      this._updateDialogueEntry(selectedEntry.id, (entry) => {
+        entry.dismissOn.shot = !!event.target.checked;
+      });
+    });
+
+    body.querySelector('#dialogueDismissSpinToggle')?.addEventListener('change', (event) => {
+      this._updateDialogueEntry(selectedEntry.id, (entry) => {
+        entry.dismissOn.spin = !!event.target.checked;
+      });
+    });
+
+    body.querySelector('#dialogueTriggerType')?.addEventListener('change', (event) => {
+      this._updateDialogueEntry(selectedEntry.id, (entry) => {
+        entry.trigger.type = event.target.value;
+      });
+    });
+
+    body.querySelector('#dialogueProgressInput')?.addEventListener('input', (event) => {
+      this._updateDialogueEntry(selectedEntry.id, (entry) => {
+        entry.trigger.progressPercent = Math.max(0, Math.min(100, Math.round(Number(event.target.value) || 0)));
+      }, { rerender: false });
+    });
+
+    body.querySelectorAll('[data-dialogue-perk]').forEach((checkbox) => {
+      checkbox.addEventListener('change', () => {
+        const selectedPerks = Array.from(body.querySelectorAll('[data-dialogue-perk]:checked')).map((input) => input.value);
+        this._updateDialogueEntry(selectedEntry.id, (entry) => {
+          entry.trigger.perkIds = selectedPerks;
+        }, { rerender: false });
+      });
+    });
+
+    body.querySelectorAll('[data-dialogue-add-segment]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const language = button.dataset.dialogueAddSegment;
+        this._updateDialogueEntry(selectedEntry.id, (entry) => {
+          entry.content[language].segments.push({
+            id: Utils.generateId(),
+            text: '',
+            color: '#ffffff'
+          });
+        });
+      });
+    });
+
+    body.querySelectorAll('[data-dialogue-remove-segment]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const language = button.dataset.dialogueLanguage;
+        const segmentId = button.dataset.dialogueRemoveSegment;
+        this._updateDialogueEntry(selectedEntry.id, (entry) => {
+          entry.content[language].segments = entry.content[language].segments.filter(segment => segment.id !== segmentId);
+        });
+      });
+    });
+
+    body.querySelectorAll('[data-dialogue-segment-text]').forEach((textarea) => {
+      textarea.addEventListener('input', (event) => {
+        const language = textarea.dataset.dialogueLanguage;
+        const segmentId = textarea.dataset.dialogueSegmentText;
+        this._updateDialogueEntry(selectedEntry.id, (entry) => {
+          const segment = entry.content[language].segments.find(item => item.id === segmentId);
+          if (segment) segment.text = event.target.value;
+        }, { rerender: false });
+      });
+    });
+
+    body.querySelectorAll('[data-dialogue-segment-color]').forEach((input) => {
+      input.addEventListener('input', (event) => {
+        const language = input.dataset.dialogueLanguage;
+        const segmentId = input.dataset.dialogueSegmentColor;
+        this._updateDialogueEntry(selectedEntry.id, (entry) => {
+          const segment = entry.content[language].segments.find(item => item.id === segmentId);
+          if (segment) segment.color = event.target.value || '#ffffff';
+        }, { rerender: false });
+      });
+    });
+  }
+
+  _addDialogueEntry() {
+    const config = normalizeDialogueConfig(this._getCurrentDialogueConfig());
+    const entry = createDialogueEntry({
+      title: `Dialogue ${config.entries.length + 1}`,
+      content: {
+        ru: {
+          segments: [
+            { id: Utils.generateId(), text: '', color: '#ffffff' }
+          ]
+        },
+        en: { segments: [] }
+      }
+    });
+    config.entries.push(entry);
+    this._dialogueSelectedEntryId = entry.id;
+    this._setCurrentLevelDialogue(config);
+    this.showDialogueEditor();
+  }
+
+  _previewDialogueEntry(language) {
+    const entry = this._getSelectedDialogueEntry();
+    if (!entry) return;
+    this.dialogueLanguage = normalizeLanguage(language);
+    this._dialoguePreviewState = {
+      entryId: entry.id,
+      language: this.dialogueLanguage
+    };
+    this.dialogueController.setLanguage(this.dialogueLanguage);
+    this.dialogueController.setConfig(this._getCurrentDialogueConfig());
+    this.dialogueController.previewEntry(entry.id, { language: this.dialogueLanguage });
+    if (document.getElementById('dialogueOverlay')?.classList.contains('visible')) {
+      this._renderDialogueEditor();
+    }
+  }
+
+  _hideDialoguePreview() {
+    this._dialoguePreviewState = null;
+    this.dialogueController.hidePreview();
+    if (document.getElementById('dialogueOverlay')?.classList.contains('visible')) {
+      this._renderDialogueEditor();
+    }
+  }
+
+  _refreshDialoguePreviewFromState() {
+    if (this.mode !== 'editor') return;
+    this.dialogueController.setConfig(this._getCurrentDialogueConfig());
+    if (!this._dialoguePreviewState?.entryId) {
+      this.dialogueController.hidePreview();
+      return;
+    }
+    const targetEntry = this._getCurrentDialogueConfig().entries.find((item) => item.id === this._dialoguePreviewState.entryId);
+    if (!targetEntry) {
+      this._dialoguePreviewState = null;
+      this.dialogueController.hidePreview();
+      return;
+    }
+    const language = normalizeLanguage(this._dialoguePreviewState.language);
+    this.dialogueController.setLanguage(language);
+    this.dialogueController.previewEntry(targetEntry.id, { language });
+  }
+
+  showDialogueEditor() {
+    this.closeLevelList();
+    this.closeCampaignList();
+    this.closeCampaignEditor();
+    this.closePhysicsSettings();
+
+    const config = this._getCurrentDialogueConfig();
+    if (!this._dialogueSelectedEntryId && config.entries.length > 0) {
+      this._dialogueSelectedEntryId = config.entries[0].id;
+    }
+    this._positionEditorSideSheets();
+    this._renderDialogueEditor();
+    document.getElementById('dialogueOverlay').classList.add('visible');
+  }
+
+  closeDialogueEditor() {
+    document.getElementById('dialogueOverlay').classList.remove('visible');
+    this._hideDialoguePreview();
   }
 
   exportLevel() {
@@ -2282,21 +3378,30 @@ class PeggleApp {
   }
 
   _cloneLevelSnapshot(level) {
-    return JSON.parse(JSON.stringify(level));
+    return cloneLevelSnapshot(level);
   }
 
   _readBakedLevelSnapshot(bakedName) {
     const raw = localStorage.getItem('baked:' + bakedName);
     if (!raw) return null;
     try {
-      return JSON.parse(raw);
+      const snapshot = normalizeLevelData(JSON.parse(raw));
+      if (!snapshot) return null;
+      const normalizedRaw = JSON.stringify(snapshot);
+      if (normalizedRaw !== raw) {
+        localStorage.setItem('baked:' + bakedName, normalizedRaw);
+      }
+      return snapshot;
     } catch {
       return null;
     }
   }
 
   _writeBakedLevelSnapshot(bakedName, snapshot) {
-    localStorage.setItem('baked:' + bakedName, JSON.stringify(snapshot));
+    const normalized = this._cloneLevelSnapshot(snapshot);
+    if (!normalized) return null;
+    localStorage.setItem('baked:' + bakedName, JSON.stringify(normalized));
+    return normalized;
   }
 
   _trackPendingRemoteLevelSave(bakedName, savePromise) {
@@ -2379,8 +3484,7 @@ class PeggleApp {
   async _cacheRemoteBakedLevel(bakedName) {
     const remoteLevel = await api.getLevel(bakedName);
     if (!remoteLevel || !Array.isArray(remoteLevel.pegs)) return null;
-    const snapshot = this._cloneLevelSnapshot(remoteLevel);
-    this._writeBakedLevelSnapshot(bakedName, snapshot);
+    const snapshot = this._writeBakedLevelSnapshot(bakedName, remoteLevel);
     return snapshot;
   }
 
@@ -2391,8 +3495,8 @@ class PeggleApp {
         alert('Editor level not found: ' + (entry.displayName || entry.name));
         return false;
       }
-      const snapshot = this._cloneLevelSnapshot(editorLevel);
-      this._writeBakedLevelSnapshot(entry.name, snapshot);
+      const snapshot = this._writeBakedLevelSnapshot(entry.name, editorLevel);
+      if (!snapshot) return false;
       this._saveBakedLevelRemoteInBackground(entry.name, snapshot);
       return true;
     }
@@ -2416,8 +3520,7 @@ class PeggleApp {
       if (!snapshot) {
         const editorLevel = this._findEditorLevelByBakedName(bakedName);
         if (editorLevel) {
-          snapshot = this._cloneLevelSnapshot(editorLevel);
-          this._writeBakedLevelSnapshot(bakedName, snapshot);
+          snapshot = this._writeBakedLevelSnapshot(bakedName, editorLevel);
         } else {
           snapshot = await this._cacheRemoteBakedLevel(bakedName);
         }
@@ -2562,6 +3665,7 @@ class PeggleApp {
   }
 
   showCampaignList() {
+    this.closeDialogueEditor();
     this._positionEditorSideSheets();
     this._ensurePrimaryCampaignName();
     this._ensureCampaignsSynced();
@@ -2821,9 +3925,9 @@ class PeggleApp {
     if (match) {
       this.levelManager.setCurrentLevelById(match.id);
     } else {
-      const raw = localStorage.getItem('baked:' + bakedName);
-      if (!raw) { alert('Baked level data not found: ' + bakedName); return; }
-      const imported = this.levelManager.importLevel(raw);
+      const snapshot = this._readBakedLevelSnapshot(bakedName);
+      if (!snapshot) { alert('Baked level data not found: ' + bakedName); return; }
+      const imported = this.levelManager.importLevel(JSON.stringify(snapshot));
       if (!imported) { alert('Failed to import level'); return; }
       this.levelManager.setCurrentLevelById(imported.id);
     }
@@ -2874,9 +3978,10 @@ class PeggleApp {
             return safe === name || l.name === name;
           });
           if (editorLevel) {
-            const snapshot = JSON.parse(JSON.stringify(editorLevel));
-            localStorage.setItem('baked:' + name, JSON.stringify(snapshot));
-            await this._saveBakedLevelRemote(name, snapshot);
+            const snapshot = this._writeBakedLevelSnapshot(name, editorLevel);
+            if (snapshot) {
+              await this._saveBakedLevelRemote(name, snapshot);
+            }
           }
         }
         btn.style.opacity = '';
@@ -2997,18 +4102,15 @@ class PeggleApp {
     const editorLevel = this._findEditorLevelByBakedName(bakedName);
     if (!editorLevel) return false;
 
-    const bakedRaw = localStorage.getItem('baked:' + bakedName);
-    if (bakedRaw) {
-      try {
-        const bakedData = JSON.parse(bakedRaw);
-        const bakedMod = bakedData.metadata?.modified || '';
-        const editorMod = editorLevel.metadata?.modified || '';
-        if (editorMod && bakedMod && editorMod <= bakedMod) return false;
-      } catch { /* rebake if parse fails */ }
+    const bakedSnapshot = this._readBakedLevelSnapshot(bakedName);
+    if (bakedSnapshot) {
+      const bakedMod = bakedSnapshot.metadata?.modified || '';
+      const editorMod = editorLevel.metadata?.modified || '';
+      if (editorMod && bakedMod && editorMod <= bakedMod) return false;
     }
 
-    const snapshot = this._cloneLevelSnapshot(editorLevel);
-    this._writeBakedLevelSnapshot(bakedName, snapshot);
+    const snapshot = this._writeBakedLevelSnapshot(bakedName, editorLevel);
+    if (!snapshot) return false;
     await this._saveBakedLevelRemote(bakedName, snapshot);
     return true;
   }

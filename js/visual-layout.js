@@ -93,9 +93,18 @@ export class VisualLayout {
     this.gambleOverlayState = { open: false, target: null };
     this._includePanel = opts.includePanel !== false;
     this._enableEditorInteractions = opts.enableEditorInteractions !== false;
+    this._previewFinalProgression = false;
+    this._previewBallTrail = false;
+    this._previewShockwave = false;
 
     /** @type {function(object):void|null} */
     this.onConfigChange = null;
+    /** @type {function(boolean):void|null} */
+    this.onPreviewProgressionChange = null;
+    /** @type {function(boolean):void|null} */
+    this.onBallTrailPreviewChange = null;
+    /** @type {function(boolean):void|null} */
+    this.onShockwavePreviewChange = null;
   }
 
   mount() {
@@ -208,6 +217,38 @@ export class VisualLayout {
     this._syncPanelValues();
   }
 
+  setPreviewFinalProgression(enabled) {
+    const next = !!enabled;
+    if (this._previewFinalProgression === next) return;
+    this._previewFinalProgression = next;
+    this._syncProgressionPreviewButton();
+    if (this.onPreviewProgressionChange) {
+      this.onPreviewProgressionChange(this._previewFinalProgression);
+    }
+  }
+
+  setBallTrailPreview(enabled) {
+    const available = !!this.config?.ballTrail?.enabled;
+    const next = !!enabled && available;
+    if (this._previewBallTrail === next) return;
+    this._previewBallTrail = next;
+    this._syncBallTrailPreviewButton();
+    if (this.onBallTrailPreviewChange) {
+      this.onBallTrailPreviewChange(this._previewBallTrail);
+    }
+  }
+
+  setShockwavePreview(enabled) {
+    const available = !!this.config?.shockwave?.enabled;
+    const next = !!enabled && available;
+    if (this._previewShockwave === next) return;
+    this._previewShockwave = next;
+    this._syncShockwaveButtons();
+    if (this.onShockwavePreviewChange) {
+      this.onShockwavePreviewChange(this._previewShockwave);
+    }
+  }
+
   resize(frameW, frameH) {
     this._frameW = frameW;
     this._frameH = frameH;
@@ -313,11 +354,22 @@ export class VisualLayout {
               <option value="image">Image</option>
               <option value="gradient">Gradient</option>
               <option value="solid">Solid</option>
+              <option value="liquid">Liquid</option>
             </select>
           </div>
           <div class="theme-row" id="themeBgImageRow">
             <span class="theme-row-label">Image</span>
-            <button id="themeBgImageBtn" class="theme-edit-btn" style="font-size:10px;padding:2px 6px">Upload</button>
+            <div class="theme-row-actions">
+              <button id="themeBgImageBtn" class="theme-row-btn">Upload</button>
+            </div>
+          </div>
+          <div class="theme-row" id="themeBgProgressRow">
+            <span class="theme-row-label">Progress</span>
+            <div class="theme-row-actions">
+              <span id="themeBgProgressState" class="theme-row-state">Optional</span>
+              <button id="themeBgProgressBtn" class="theme-row-btn">Upload</button>
+              <button id="themeBgProgressClearBtn" class="theme-row-btn theme-row-btn--secondary">Clear</button>
+            </div>
           </div>
           <div class="theme-row" id="themeBgTopRow">
             <span class="theme-row-label">Top</span>
@@ -326,6 +378,344 @@ export class VisualLayout {
           <div class="theme-row" id="themeBgBottomRow">
             <span class="theme-row-label">Bottom</span>
             <input type="color" id="themeBgBottom" value="#1a1a2e" class="theme-color">
+          </div>
+          <div class="theme-row" id="themeBgLiquidBaseRow">
+            <span class="theme-row-label">Base</span>
+            <input type="color" id="themeBgLiquidBase" value="#05020f" class="theme-color">
+          </div>
+          <div class="theme-row" id="themeBgLiquidMidRow">
+            <span class="theme-row-label">Mid</span>
+            <input type="color" id="themeBgLiquidMid" value="#24104f" class="theme-color">
+          </div>
+          <div class="theme-row" id="themeBgLiquidAccentRow">
+            <span class="theme-row-label">Accent</span>
+            <input type="color" id="themeBgLiquidAccent" value="#8d63ff" class="theme-color">
+          </div>
+          <div class="theme-row" id="themeBgLiquidScaleRow">
+            <span class="theme-row-label">Scale</span>
+            <div class="theme-row-actions">
+              <input type="range" id="themeBgLiquidScale" class="theme-row-range" min="50" max="200" value="100">
+              <span id="themeBgLiquidScaleValue" class="theme-range-value">100%</span>
+            </div>
+          </div>
+          <div class="theme-row" id="themeBgLiquidRoughnessRow">
+            <span class="theme-row-label">Rough</span>
+            <div class="theme-row-actions">
+              <input type="range" id="themeBgLiquidRoughness" class="theme-row-range" min="0" max="100" value="58">
+              <span id="themeBgLiquidRoughnessValue" class="theme-range-value">58%</span>
+            </div>
+          </div>
+          <div class="theme-row" id="themeBgLiquidDistortionRow">
+            <span class="theme-row-label">Distort</span>
+            <div class="theme-row-actions">
+              <input type="range" id="themeBgLiquidDistortion" class="theme-row-range" min="0" max="200" value="100">
+              <span id="themeBgLiquidDistortionValue" class="theme-range-value">100%</span>
+            </div>
+          </div>
+          <div class="theme-row" id="themeBgLiquidLacunarityRow">
+            <span class="theme-row-label">Lacunarity</span>
+            <div class="theme-row-actions">
+              <input type="range" id="themeBgLiquidLacunarity" class="theme-row-range" min="160" max="310" value="225">
+              <span id="themeBgLiquidLacunarityValue" class="theme-range-value">2.25</span>
+            </div>
+          </div>
+          <div class="theme-row" id="themeBgLiquidTrailRow">
+            <span class="theme-row-label">Trail</span>
+            <div class="theme-row-actions">
+              <input type="range" id="themeBgLiquidTrail" class="theme-row-range" min="0" max="200" value="100">
+              <span id="themeBgLiquidTrailValue" class="theme-range-value">100%</span>
+            </div>
+          </div>
+          <div class="theme-row" id="themeBgLiquidMotionRow">
+            <span class="theme-row-label">Motion</span>
+            <div class="theme-row-actions">
+              <input type="range" id="themeBgLiquidMotion" class="theme-row-range" min="0" max="100" value="44">
+              <span id="themeBgLiquidMotionValue" class="theme-range-value">44%</span>
+            </div>
+          </div>
+          <div class="theme-row" id="themeBgLiquidReactionRow">
+            <span class="theme-row-label">React</span>
+            <div class="theme-row-actions">
+              <input type="range" id="themeBgLiquidReaction" class="theme-row-range" min="0" max="200" value="82">
+              <span id="themeBgLiquidReactionValue" class="theme-range-value">82%</span>
+            </div>
+          </div>
+          <div class="theme-label" id="themeBgLiquidProgressionLabel">Liquid Progression</div>
+          <div class="theme-row" id="themeBgLiquidProgResetRow">
+            <span class="theme-row-label">Copy Base to 2nd</span>
+            <button id="themeBgLiquidProgResetBtn" class="theme-row-btn theme-row-btn--secondary">Match Base</button>
+          </div>
+          <div class="theme-row" id="themeBgLiquidProgBaseRow">
+            <label class="theme-row-label"><input type="checkbox" id="themeBgLiquidProgBaseEnabled"> Base 2</label>
+            <input type="color" id="themeBgLiquidProgBase" value="#05020f" class="theme-color">
+          </div>
+          <div class="theme-row" id="themeBgLiquidProgMidRow">
+            <label class="theme-row-label"><input type="checkbox" id="themeBgLiquidProgMidEnabled"> Mid 2</label>
+            <input type="color" id="themeBgLiquidProgMid" value="#24104f" class="theme-color">
+          </div>
+          <div class="theme-row" id="themeBgLiquidProgAccentRow">
+            <label class="theme-row-label"><input type="checkbox" id="themeBgLiquidProgAccentEnabled"> Accent 2</label>
+            <input type="color" id="themeBgLiquidProgAccent" value="#8d63ff" class="theme-color">
+          </div>
+          <div class="theme-row" id="themeBgLiquidProgScaleRow">
+            <label class="theme-row-label"><input type="checkbox" id="themeBgLiquidProgScaleEnabled"> Scale 2</label>
+            <div class="theme-row-actions">
+              <input type="range" id="themeBgLiquidProgScale" class="theme-row-range" min="50" max="200" value="100">
+              <span id="themeBgLiquidProgScaleValue" class="theme-range-value">100%</span>
+            </div>
+          </div>
+          <div class="theme-row" id="themeBgLiquidProgRoughnessRow">
+            <label class="theme-row-label"><input type="checkbox" id="themeBgLiquidProgRoughnessEnabled"> Rough 2</label>
+            <div class="theme-row-actions">
+              <input type="range" id="themeBgLiquidProgRoughness" class="theme-row-range" min="0" max="100" value="58">
+              <span id="themeBgLiquidProgRoughnessValue" class="theme-range-value">58%</span>
+            </div>
+          </div>
+          <div class="theme-row" id="themeBgLiquidProgDistortionRow">
+            <label class="theme-row-label"><input type="checkbox" id="themeBgLiquidProgDistortionEnabled"> Distort 2</label>
+            <div class="theme-row-actions">
+              <input type="range" id="themeBgLiquidProgDistortion" class="theme-row-range" min="0" max="200" value="100">
+              <span id="themeBgLiquidProgDistortionValue" class="theme-range-value">100%</span>
+            </div>
+          </div>
+          <div class="theme-row" id="themeBgLiquidProgLacunarityRow">
+            <label class="theme-row-label"><input type="checkbox" id="themeBgLiquidProgLacunarityEnabled"> Lacunarity 2</label>
+            <div class="theme-row-actions">
+              <input type="range" id="themeBgLiquidProgLacunarity" class="theme-row-range" min="160" max="310" value="225">
+              <span id="themeBgLiquidProgLacunarityValue" class="theme-range-value">2.25</span>
+            </div>
+          </div>
+          <div class="theme-row" id="themeBgLiquidProgTrailRow">
+            <label class="theme-row-label"><input type="checkbox" id="themeBgLiquidProgTrailEnabled"> Trail 2</label>
+            <div class="theme-row-actions">
+              <input type="range" id="themeBgLiquidProgTrail" class="theme-row-range" min="0" max="200" value="100">
+              <span id="themeBgLiquidProgTrailValue" class="theme-range-value">100%</span>
+            </div>
+          </div>
+          <div class="theme-row" id="themeBgLiquidProgMotionRow">
+            <label class="theme-row-label"><input type="checkbox" id="themeBgLiquidProgMotionEnabled"> Motion 2</label>
+            <div class="theme-row-actions">
+              <input type="range" id="themeBgLiquidProgMotion" class="theme-row-range" min="0" max="100" value="44">
+              <span id="themeBgLiquidProgMotionValue" class="theme-range-value">44%</span>
+            </div>
+          </div>
+          <div class="theme-row" id="themeBgLiquidProgReactionRow">
+            <label class="theme-row-label"><input type="checkbox" id="themeBgLiquidProgReactionEnabled"> React 2</label>
+            <div class="theme-row-actions">
+              <input type="range" id="themeBgLiquidProgReaction" class="theme-row-range" min="0" max="200" value="82">
+              <span id="themeBgLiquidProgReactionValue" class="theme-range-value">82%</span>
+            </div>
+          </div>
+        </div>
+        <div class="theme-section">
+          <div class="theme-label">Ball Trail</div>
+          <div class="theme-row">
+            <label class="theme-row-label"><input type="checkbox" id="themeBallTrailEnabled"> Enabled</label>
+            <button id="themeBallTrailPreviewBtn" class="theme-row-btn theme-row-btn--secondary">Preview Tail</button>
+          </div>
+          <div class="theme-row">
+            <span class="theme-row-label">Color</span>
+            <input type="color" id="themeBallTrailColor" value="#f8f9fa" class="theme-color">
+          </div>
+          <div class="theme-row">
+            <span class="theme-row-label">Length</span>
+            <div class="theme-row-actions">
+              <input type="range" id="themeBallTrailLength" class="theme-row-range" min="20" max="260" value="31">
+              <span id="themeBallTrailLengthValue" class="theme-range-value">31%</span>
+            </div>
+          </div>
+          <div class="theme-row">
+            <span class="theme-row-label">Width</span>
+            <div class="theme-row-actions">
+              <input type="range" id="themeBallTrailWidth" class="theme-row-range" min="35" max="260" value="70">
+              <span id="themeBallTrailWidthValue" class="theme-range-value">70%</span>
+            </div>
+          </div>
+          <div class="theme-row">
+            <span class="theme-row-label">Glow</span>
+            <div class="theme-row-actions">
+              <input type="range" id="themeBallTrailGlow" class="theme-row-range" min="0" max="240" value="0">
+              <span id="themeBallTrailGlowValue" class="theme-range-value">0%</span>
+            </div>
+          </div>
+          <div class="theme-row">
+            <span class="theme-row-label">Opacity</span>
+            <div class="theme-row-actions">
+              <input type="range" id="themeBallTrailOpacity" class="theme-row-range" min="0" max="150" value="32">
+              <span id="themeBallTrailOpacityValue" class="theme-range-value">32%</span>
+            </div>
+          </div>
+          <div class="theme-row">
+            <span class="theme-row-label">Flow</span>
+            <div class="theme-row-actions">
+              <input type="range" id="themeBallTrailTurbulence" class="theme-row-range" min="0" max="180" value="0">
+              <span id="themeBallTrailTurbulenceValue" class="theme-range-value">0%</span>
+            </div>
+          </div>
+          <div class="theme-row">
+            <span class="theme-row-label">Smooth</span>
+            <div class="theme-row-actions">
+              <input type="range" id="themeBallTrailSmoothing" class="theme-row-range" min="0" max="100" value="100">
+              <span id="themeBallTrailSmoothingValue" class="theme-range-value">100%</span>
+            </div>
+          </div>
+          <div class="theme-label">Trail Progression</div>
+          <div class="theme-row">
+            <label class="theme-row-label"><input type="checkbox" id="themeBallTrailProgEnabled"> Use 2nd set</label>
+            <button id="themeBallTrailProgMatchBtn" class="theme-row-btn theme-row-btn--secondary">Match Base</button>
+          </div>
+          <div class="theme-row" id="themeBallTrailProgColorRow">
+            <span class="theme-row-label">Color 2</span>
+            <input type="color" id="themeBallTrailProgColor" value="#f8f9fa" class="theme-color">
+          </div>
+          <div class="theme-row" id="themeBallTrailProgLengthRow">
+            <span class="theme-row-label">Length 2</span>
+            <div class="theme-row-actions">
+              <input type="range" id="themeBallTrailProgLength" class="theme-row-range" min="20" max="260" value="31">
+              <span id="themeBallTrailProgLengthValue" class="theme-range-value">31%</span>
+            </div>
+          </div>
+          <div class="theme-row" id="themeBallTrailProgWidthRow">
+            <span class="theme-row-label">Width 2</span>
+            <div class="theme-row-actions">
+              <input type="range" id="themeBallTrailProgWidth" class="theme-row-range" min="35" max="260" value="70">
+              <span id="themeBallTrailProgWidthValue" class="theme-range-value">70%</span>
+            </div>
+          </div>
+          <div class="theme-row" id="themeBallTrailProgGlowRow">
+            <span class="theme-row-label">Glow 2</span>
+            <div class="theme-row-actions">
+              <input type="range" id="themeBallTrailProgGlow" class="theme-row-range" min="0" max="240" value="0">
+              <span id="themeBallTrailProgGlowValue" class="theme-range-value">0%</span>
+            </div>
+          </div>
+          <div class="theme-row" id="themeBallTrailProgOpacityRow">
+            <span class="theme-row-label">Opacity 2</span>
+            <div class="theme-row-actions">
+              <input type="range" id="themeBallTrailProgOpacity" class="theme-row-range" min="0" max="150" value="32">
+              <span id="themeBallTrailProgOpacityValue" class="theme-range-value">32%</span>
+            </div>
+          </div>
+          <div class="theme-row" id="themeBallTrailProgTurbulenceRow">
+            <span class="theme-row-label">Flow 2</span>
+            <div class="theme-row-actions">
+              <input type="range" id="themeBallTrailProgTurbulence" class="theme-row-range" min="0" max="180" value="0">
+              <span id="themeBallTrailProgTurbulenceValue" class="theme-range-value">0%</span>
+            </div>
+          </div>
+          <div class="theme-row" id="themeBallTrailProgSmoothingRow">
+            <span class="theme-row-label">Smooth 2</span>
+            <div class="theme-row-actions">
+              <input type="range" id="themeBallTrailProgSmoothing" class="theme-row-range" min="0" max="100" value="100">
+              <span id="themeBallTrailProgSmoothingValue" class="theme-range-value">100%</span>
+            </div>
+          </div>
+        </div>
+        <div class="theme-section">
+          <div class="theme-label">Shockwave</div>
+          <div class="theme-row">
+            <label class="theme-row-label"><input type="checkbox" id="themeShockwaveEnabled"> Enabled</label>
+            <button id="themeShockwavePreviewBtn" class="theme-row-btn theme-row-btn--secondary">Preview Wave</button>
+          </div>
+          <div class="theme-row">
+            <label class="theme-row-label"><input type="checkbox" id="themeShockwaveBomb"> Bomb hits</label>
+            <label class="theme-row-label"><input type="checkbox" id="themeShockwaveBombTargets"> Each bomb peg</label>
+            <label class="theme-row-label"><input type="checkbox" id="themeShockwaveVictory"> Final peg</label>
+          </div>
+          <div class="theme-row">
+            <label class="theme-row-label"><input type="checkbox" id="themeShockwaveVictorySeparate"> Separate final peg</label>
+          </div>
+          <div class="theme-row">
+            <span class="theme-row-label">Color</span>
+            <input type="color" id="themeShockwaveColor" value="#ffffff" class="theme-color">
+          </div>
+          <div class="theme-row">
+            <span class="theme-row-label">Radius</span>
+            <div class="theme-row-actions">
+              <input type="range" id="themeShockwaveRadius" class="theme-row-range" min="35" max="260" value="100">
+              <span id="themeShockwaveRadiusValue" class="theme-range-value">100%</span>
+            </div>
+          </div>
+          <div class="theme-row">
+            <span class="theme-row-label">Strength</span>
+            <div class="theme-row-actions">
+              <input type="range" id="themeShockwaveStrength" class="theme-row-range" min="0" max="280" value="100">
+              <span id="themeShockwaveStrengthValue" class="theme-range-value">100%</span>
+            </div>
+          </div>
+          <div class="theme-row">
+            <span class="theme-row-label">Width</span>
+            <div class="theme-row-actions">
+              <input type="range" id="themeShockwaveWidth" class="theme-row-range" min="25" max="240" value="100">
+              <span id="themeShockwaveWidthValue" class="theme-range-value">100%</span>
+            </div>
+          </div>
+          <div class="theme-row">
+            <span class="theme-row-label">Duration</span>
+            <div class="theme-row-actions">
+              <input type="range" id="themeShockwaveDuration" class="theme-row-range" min="22" max="180" value="82">
+              <span id="themeShockwaveDurationValue" class="theme-range-value">0.82s</span>
+            </div>
+          </div>
+          <div class="theme-row">
+            <span class="theme-row-label">Ripple</span>
+            <div class="theme-row-actions">
+              <input type="range" id="themeShockwaveRipple" class="theme-row-range" min="0" max="240" value="100">
+              <span id="themeShockwaveRippleValue" class="theme-range-value">100%</span>
+            </div>
+          </div>
+          <div class="theme-row">
+            <span class="theme-row-label">Opacity</span>
+            <div class="theme-row-actions">
+              <input type="range" id="themeShockwaveOpacity" class="theme-row-range" min="0" max="120" value="86">
+              <span id="themeShockwaveOpacityValue" class="theme-range-value">86%</span>
+            </div>
+          </div>
+          <div class="theme-row" id="themeShockwaveVictoryColorRow">
+            <span class="theme-row-label">Final Color</span>
+            <input type="color" id="themeShockwaveVictoryColor" value="#ffffff" class="theme-color">
+          </div>
+          <div class="theme-row" id="themeShockwaveVictoryRadiusRow">
+            <span class="theme-row-label">Final Radius</span>
+            <div class="theme-row-actions">
+              <input type="range" id="themeShockwaveVictoryRadius" class="theme-row-range" min="35" max="260" value="100">
+              <span id="themeShockwaveVictoryRadiusValue" class="theme-range-value">100%</span>
+            </div>
+          </div>
+          <div class="theme-row" id="themeShockwaveVictoryStrengthRow">
+            <span class="theme-row-label">Final Strength</span>
+            <div class="theme-row-actions">
+              <input type="range" id="themeShockwaveVictoryStrength" class="theme-row-range" min="0" max="280" value="100">
+              <span id="themeShockwaveVictoryStrengthValue" class="theme-range-value">100%</span>
+            </div>
+          </div>
+          <div class="theme-row" id="themeShockwaveVictoryWidthRow">
+            <span class="theme-row-label">Final Width</span>
+            <div class="theme-row-actions">
+              <input type="range" id="themeShockwaveVictoryWidth" class="theme-row-range" min="25" max="240" value="100">
+              <span id="themeShockwaveVictoryWidthValue" class="theme-range-value">100%</span>
+            </div>
+          </div>
+          <div class="theme-row" id="themeShockwaveVictoryDurationRow">
+            <span class="theme-row-label">Final Duration</span>
+            <div class="theme-row-actions">
+              <input type="range" id="themeShockwaveVictoryDuration" class="theme-row-range" min="22" max="180" value="82">
+              <span id="themeShockwaveVictoryDurationValue" class="theme-range-value">0.82s</span>
+            </div>
+          </div>
+          <div class="theme-row" id="themeShockwaveVictoryRippleRow">
+            <span class="theme-row-label">Final Ripple</span>
+            <div class="theme-row-actions">
+              <input type="range" id="themeShockwaveVictoryRipple" class="theme-row-range" min="0" max="240" value="100">
+              <span id="themeShockwaveVictoryRippleValue" class="theme-range-value">100%</span>
+            </div>
+          </div>
+          <div class="theme-row" id="themeShockwaveVictoryOpacityRow">
+            <span class="theme-row-label">Final Opacity</span>
+            <div class="theme-row-actions">
+              <input type="range" id="themeShockwaveVictoryOpacity" class="theme-row-range" min="0" max="120" value="86">
+              <span id="themeShockwaveVictoryOpacityValue" class="theme-range-value">86%</span>
+            </div>
           </div>
         </div>
         <div class="theme-section">
@@ -337,6 +727,7 @@ export class VisualLayout {
         </div>
         <div class="theme-section">
           <div class="theme-label">Assets</div>
+          <button id="themePreviewProgressBtn" class="theme-edit-btn">Preview Final State</button>
           <button id="themeEditBtn" class="theme-edit-btn">Edit Layout</button>
           <div id="themeSlotList" class="theme-slot-list"></div>
           <button id="themeApplyLevelBtn" class="theme-edit-btn" style="margin-top:6px">Apply for Level</button>
@@ -374,6 +765,28 @@ export class VisualLayout {
       input.click();
     }, { signal: sig });
 
+    this.panel.querySelector('#themeBgProgressBtn').addEventListener('click', () => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/*';
+      input.onchange = async ev => {
+        const file = ev.target.files[0];
+        if (!file || !this.config) return;
+        const dataUrl = await compressImage(file, 800);
+        this.config.background.progressionImage = dataUrl;
+        this._syncProgressBgButtons();
+        this._emitChange();
+      };
+      input.click();
+    }, { signal: sig });
+
+    this.panel.querySelector('#themeBgProgressClearBtn').addEventListener('click', () => {
+      if (!this.config || !this.config.background.progressionImage) return;
+      this.config.background.progressionImage = null;
+      this._syncProgressBgButtons();
+      this._emitChange();
+    }, { signal: sig });
+
     this.panel.querySelector('#themeBgTop').addEventListener('input', e => {
       if (!this.config) return;
       this.config.background.colorTop = e.target.value;
@@ -386,6 +799,394 @@ export class VisualLayout {
       this._emitChange();
     }, { signal: sig });
 
+    this.panel.querySelector('#themeBgLiquidBase').addEventListener('input', e => {
+      if (!this.config) return;
+      this.config.background.liquid.colorBase = e.target.value;
+      this._emitChange();
+    }, { signal: sig });
+
+    this.panel.querySelector('#themeBgLiquidMid').addEventListener('input', e => {
+      if (!this.config) return;
+      this.config.background.liquid.colorMid = e.target.value;
+      this._emitChange();
+    }, { signal: sig });
+
+    this.panel.querySelector('#themeBgLiquidAccent').addEventListener('input', e => {
+      if (!this.config) return;
+      this.config.background.liquid.colorAccent = e.target.value;
+      this._emitChange();
+    }, { signal: sig });
+
+    this.panel.querySelector('#themeBgLiquidScale').addEventListener('input', e => {
+      if (!this.config) return;
+      const value = Math.max(50, Math.min(200, parseInt(e.target.value, 10) || 100));
+      this.config.background.liquid.scale = value / 100;
+      this._syncLiquidBgButtons();
+      this._emitChange();
+    }, { signal: sig });
+
+    this.panel.querySelector('#themeBgLiquidRoughness').addEventListener('input', e => {
+      if (!this.config) return;
+      const value = Math.max(0, Math.min(100, parseInt(e.target.value, 10) || 0));
+      this.config.background.liquid.roughness = value / 100;
+      this._syncLiquidBgButtons();
+      this._emitChange();
+    }, { signal: sig });
+
+    this.panel.querySelector('#themeBgLiquidDistortion').addEventListener('input', e => {
+      if (!this.config) return;
+      const value = Math.max(0, Math.min(200, parseInt(e.target.value, 10) || 0));
+      this.config.background.liquid.distortion = value / 100;
+      this._syncLiquidBgButtons();
+      this._emitChange();
+    }, { signal: sig });
+
+    this.panel.querySelector('#themeBgLiquidLacunarity').addEventListener('input', e => {
+      if (!this.config) return;
+      const value = Math.max(160, Math.min(310, parseInt(e.target.value, 10) || 0));
+      this.config.background.liquid.lacunarity = value / 100;
+      this._syncLiquidBgButtons();
+      this._emitChange();
+    }, { signal: sig });
+
+    this.panel.querySelector('#themeBgLiquidTrail').addEventListener('input', e => {
+      if (!this.config) return;
+      const value = Math.max(0, Math.min(200, parseInt(e.target.value, 10) || 0));
+      this.config.background.liquid.trail = value / 100;
+      this._syncLiquidBgButtons();
+      this._emitChange();
+    }, { signal: sig });
+
+    this.panel.querySelector('#themeBgLiquidMotion').addEventListener('input', e => {
+      if (!this.config) return;
+      const value = Math.max(0, Math.min(100, parseInt(e.target.value, 10) || 0));
+      this.config.background.liquid.motion = value / 100;
+      this._syncLiquidBgButtons();
+      this._emitChange();
+    }, { signal: sig });
+
+    this.panel.querySelector('#themeBgLiquidReaction').addEventListener('input', e => {
+      if (!this.config) return;
+      const value = Math.max(0, Math.min(200, parseInt(e.target.value, 10) || 0));
+      this.config.background.liquid.reaction = value / 100;
+      this._syncLiquidBgButtons();
+      this._emitChange();
+    }, { signal: sig });
+
+    const ensureLiquidProgression = () => {
+      if (!this.config?.background?.liquid) return null;
+      if (!this.config.background.liquid.progression || typeof this.config.background.liquid.progression !== 'object') {
+        this.config.background.liquid.progression = {
+          colorBase: null,
+          colorMid: null,
+          colorAccent: null,
+          scale: null,
+          roughness: null,
+          distortion: null,
+          lacunarity: null,
+          trail: null,
+          motion: null,
+          reaction: null,
+        };
+      }
+      return this.config.background.liquid.progression;
+    };
+
+    const copyLiquidBaseToProgression = () => {
+      if (!this.config?.background?.liquid) return null;
+      const liquid = this.config.background.liquid;
+      const progression = ensureLiquidProgression();
+      if (!progression) return null;
+      progression.colorBase = liquid.colorBase ?? '#05020f';
+      progression.colorMid = liquid.colorMid ?? '#24104f';
+      progression.colorAccent = liquid.colorAccent ?? '#8d63ff';
+      progression.scale = liquid.scale ?? 1;
+      progression.roughness = liquid.roughness ?? 0.58;
+      progression.distortion = liquid.distortion ?? 1;
+      progression.lacunarity = liquid.lacunarity ?? 2.25;
+      progression.trail = liquid.trail ?? 1;
+      progression.motion = liquid.motion ?? 0.44;
+      progression.reaction = liquid.reaction ?? 0.82;
+      return progression;
+    };
+
+    const wireLiquidProgressColor = (enabledId, inputId, key, baseKey) => {
+      this.panel.querySelector(enabledId).addEventListener('change', e => {
+        if (!this.config) return;
+        const progression = ensureLiquidProgression();
+        if (!progression) return;
+        progression[key] = e.target.checked ? (progression[key] || this.config.background.liquid[baseKey]) : null;
+        this._syncLiquidBgButtons();
+        this._emitChange();
+      }, { signal: sig });
+
+      this.panel.querySelector(inputId).addEventListener('input', e => {
+        if (!this.config) return;
+        const progression = ensureLiquidProgression();
+        if (!progression || progression[key] === null) return;
+        progression[key] = e.target.value;
+        this._syncLiquidBgButtons();
+        this._emitChange();
+      }, { signal: sig });
+    };
+
+    const wireLiquidProgressRange = (enabledId, inputId, key, baseKey, min, max, fallback, transform = value => value / 100) => {
+      this.panel.querySelector(enabledId).addEventListener('change', e => {
+        if (!this.config) return;
+        const progression = ensureLiquidProgression();
+        if (!progression) return;
+        progression[key] = e.target.checked ? (progression[key] ?? this.config.background.liquid[baseKey] ?? fallback) : null;
+        this._syncLiquidBgButtons();
+        this._emitChange();
+      }, { signal: sig });
+
+      this.panel.querySelector(inputId).addEventListener('input', e => {
+        if (!this.config) return;
+        const progression = ensureLiquidProgression();
+        if (!progression || progression[key] === null) return;
+        const raw = parseInt(e.target.value, 10);
+        const value = Math.max(min, Math.min(max, Number.isFinite(raw) ? raw : fallback));
+        progression[key] = transform(value);
+        this._syncLiquidBgButtons();
+        this._emitChange();
+      }, { signal: sig });
+    };
+
+    wireLiquidProgressColor('#themeBgLiquidProgBaseEnabled', '#themeBgLiquidProgBase', 'colorBase', 'colorBase');
+    wireLiquidProgressColor('#themeBgLiquidProgMidEnabled', '#themeBgLiquidProgMid', 'colorMid', 'colorMid');
+    wireLiquidProgressColor('#themeBgLiquidProgAccentEnabled', '#themeBgLiquidProgAccent', 'colorAccent', 'colorAccent');
+    wireLiquidProgressRange('#themeBgLiquidProgScaleEnabled', '#themeBgLiquidProgScale', 'scale', 'scale', 50, 200, 100);
+    wireLiquidProgressRange('#themeBgLiquidProgRoughnessEnabled', '#themeBgLiquidProgRoughness', 'roughness', 'roughness', 0, 100, 58);
+    wireLiquidProgressRange('#themeBgLiquidProgDistortionEnabled', '#themeBgLiquidProgDistortion', 'distortion', 'distortion', 0, 200, 100);
+    wireLiquidProgressRange('#themeBgLiquidProgLacunarityEnabled', '#themeBgLiquidProgLacunarity', 'lacunarity', 'lacunarity', 160, 310, 225);
+    wireLiquidProgressRange('#themeBgLiquidProgTrailEnabled', '#themeBgLiquidProgTrail', 'trail', 'trail', 0, 200, 100);
+    wireLiquidProgressRange('#themeBgLiquidProgMotionEnabled', '#themeBgLiquidProgMotion', 'motion', 'motion', 0, 100, 44);
+    wireLiquidProgressRange('#themeBgLiquidProgReactionEnabled', '#themeBgLiquidProgReaction', 'reaction', 'reaction', 0, 200, 82);
+
+    this.panel.querySelector('#themeBgLiquidProgResetBtn').addEventListener('click', () => {
+      if (!copyLiquidBaseToProgression()) return;
+      this._syncLiquidBgButtons();
+      this._emitChange();
+    }, { signal: sig });
+
+    const ensureBallTrail = () => {
+      if (!this.config) return null;
+      if (!this.config.ballTrail || typeof this.config.ballTrail !== 'object') {
+        this.config.ballTrail = normalizeVisuals({ ballTrail: {} }, true).ballTrail;
+      }
+      if (!this.config.ballTrail.progression || typeof this.config.ballTrail.progression !== 'object') {
+        this.config.ballTrail.progression = {
+          enabled: false,
+          color: this.config.ballTrail.color || '#f8f9fa',
+          length: this.config.ballTrail.length ?? 0.31,
+          width: this.config.ballTrail.width ?? 0.7,
+          glow: this.config.ballTrail.glow ?? 0,
+          opacity: this.config.ballTrail.opacity ?? 0.32,
+          turbulence: this.config.ballTrail.turbulence ?? 0,
+          smoothing: this.config.ballTrail.smoothing ?? 1
+        };
+      }
+      return this.config.ballTrail;
+    };
+
+    const setTrailRange = (key, rawValue) => {
+      const trail = ensureBallTrail();
+      if (!trail) return;
+      const value = Math.max(0, parseInt(rawValue, 10) || 0) / 100;
+      trail[key] = value;
+      this._syncBallTrailButtons();
+      this._emitChange();
+    };
+
+    const setTrailProgressRange = (key, rawValue) => {
+      const trail = ensureBallTrail();
+      if (!trail?.progression) return;
+      const value = Math.max(0, parseInt(rawValue, 10) || 0) / 100;
+      trail.progression[key] = value;
+      this._syncBallTrailButtons();
+      this._emitChange();
+    };
+
+    this.panel.querySelector('#themeBallTrailEnabled').addEventListener('change', e => {
+      const trail = ensureBallTrail();
+      if (!trail) return;
+      trail.enabled = !!e.target.checked;
+      if (!trail.enabled) this.setBallTrailPreview(false);
+      this._syncBallTrailButtons();
+      this._emitChange();
+    }, { signal: sig });
+
+    this.panel.querySelector('#themeBallTrailPreviewBtn').addEventListener('click', () => {
+      this.setBallTrailPreview(!this._previewBallTrail);
+    }, { signal: sig });
+
+    this.panel.querySelector('#themeBallTrailColor').addEventListener('input', e => {
+      const trail = ensureBallTrail();
+      if (!trail) return;
+      trail.color = e.target.value;
+      this._syncBallTrailButtons();
+      this._emitChange();
+    }, { signal: sig });
+
+    this.panel.querySelector('#themeBallTrailLength').addEventListener('input', e => setTrailRange('length', e.target.value), { signal: sig });
+    this.panel.querySelector('#themeBallTrailWidth').addEventListener('input', e => setTrailRange('width', e.target.value), { signal: sig });
+    this.panel.querySelector('#themeBallTrailGlow').addEventListener('input', e => setTrailRange('glow', e.target.value), { signal: sig });
+    this.panel.querySelector('#themeBallTrailOpacity').addEventListener('input', e => setTrailRange('opacity', e.target.value), { signal: sig });
+    this.panel.querySelector('#themeBallTrailTurbulence').addEventListener('input', e => setTrailRange('turbulence', e.target.value), { signal: sig });
+    this.panel.querySelector('#themeBallTrailSmoothing').addEventListener('input', e => setTrailRange('smoothing', e.target.value), { signal: sig });
+
+    this.panel.querySelector('#themeBallTrailProgEnabled').addEventListener('change', e => {
+      const trail = ensureBallTrail();
+      if (!trail?.progression) return;
+      trail.progression.enabled = !!e.target.checked;
+      this._syncBallTrailButtons();
+      this._emitChange();
+    }, { signal: sig });
+
+    this.panel.querySelector('#themeBallTrailProgMatchBtn').addEventListener('click', () => {
+      const trail = ensureBallTrail();
+      if (!trail?.progression) return;
+      trail.progression.color = trail.color;
+      trail.progression.length = trail.length;
+      trail.progression.width = trail.width;
+      trail.progression.glow = trail.glow;
+      trail.progression.opacity = trail.opacity;
+      trail.progression.turbulence = trail.turbulence;
+      trail.progression.smoothing = trail.smoothing;
+      this._syncBallTrailButtons();
+      this._emitChange();
+    }, { signal: sig });
+
+    this.panel.querySelector('#themeBallTrailProgColor').addEventListener('input', e => {
+      const trail = ensureBallTrail();
+      if (!trail?.progression) return;
+      trail.progression.color = e.target.value;
+      this._syncBallTrailButtons();
+      this._emitChange();
+    }, { signal: sig });
+
+    this.panel.querySelector('#themeBallTrailProgLength').addEventListener('input', e => setTrailProgressRange('length', e.target.value), { signal: sig });
+    this.panel.querySelector('#themeBallTrailProgWidth').addEventListener('input', e => setTrailProgressRange('width', e.target.value), { signal: sig });
+    this.panel.querySelector('#themeBallTrailProgGlow').addEventListener('input', e => setTrailProgressRange('glow', e.target.value), { signal: sig });
+    this.panel.querySelector('#themeBallTrailProgOpacity').addEventListener('input', e => setTrailProgressRange('opacity', e.target.value), { signal: sig });
+    this.panel.querySelector('#themeBallTrailProgTurbulence').addEventListener('input', e => setTrailProgressRange('turbulence', e.target.value), { signal: sig });
+    this.panel.querySelector('#themeBallTrailProgSmoothing').addEventListener('input', e => setTrailProgressRange('smoothing', e.target.value), { signal: sig });
+
+    const ensureShockwave = () => {
+      if (!this.config) return null;
+      if (!this.config.shockwave || typeof this.config.shockwave !== 'object') {
+        this.config.shockwave = normalizeVisuals({ shockwave: {} }, true).shockwave;
+      }
+      return this.config.shockwave;
+    };
+    const ensureShockwaveVictorySettings = (shockwave) => {
+      if (!shockwave) return null;
+      if (!shockwave.victorySettings || typeof shockwave.victorySettings !== 'object') {
+        shockwave.victorySettings = {
+          color: shockwave.color || '#ffffff',
+          radius: shockwave.radius ?? 1,
+          strength: shockwave.strength ?? 1,
+          width: shockwave.width ?? 1,
+          duration: shockwave.duration ?? 0.82,
+          ripple: shockwave.ripple ?? 1,
+          opacity: shockwave.opacity ?? 0.86
+        };
+      }
+      return shockwave.victorySettings;
+    };
+
+    const setShockwaveRange = (key, rawValue) => {
+      const shockwave = ensureShockwave();
+      if (!shockwave) return;
+      shockwave[key] = Math.max(0, parseInt(rawValue, 10) || 0) / 100;
+      this._syncShockwaveButtons();
+      this._emitChange();
+    };
+    const setShockwaveVictoryRange = (key, rawValue) => {
+      const shockwave = ensureShockwave();
+      const victorySettings = ensureShockwaveVictorySettings(shockwave);
+      if (!victorySettings) return;
+      victorySettings[key] = Math.max(0, parseInt(rawValue, 10) || 0) / 100;
+      this._syncShockwaveButtons();
+      this._emitChange();
+    };
+
+    this.panel.querySelector('#themeShockwaveEnabled').addEventListener('change', e => {
+      const shockwave = ensureShockwave();
+      if (!shockwave) return;
+      shockwave.enabled = !!e.target.checked;
+      if (!shockwave.enabled) this.setShockwavePreview(false);
+      this._syncShockwaveButtons();
+      this._emitChange();
+    }, { signal: sig });
+
+    this.panel.querySelector('#themeShockwavePreviewBtn').addEventListener('click', () => {
+      this.setShockwavePreview(!this._previewShockwave);
+    }, { signal: sig });
+
+    this.panel.querySelector('#themeShockwaveBomb').addEventListener('change', e => {
+      const shockwave = ensureShockwave();
+      if (!shockwave) return;
+      shockwave.bomb = !!e.target.checked;
+      this._syncShockwaveButtons();
+      this._emitChange();
+    }, { signal: sig });
+
+    this.panel.querySelector('#themeShockwaveBombTargets').addEventListener('change', e => {
+      const shockwave = ensureShockwave();
+      if (!shockwave) return;
+      shockwave.bombTargets = !!e.target.checked;
+      this._syncShockwaveButtons();
+      this._emitChange();
+    }, { signal: sig });
+
+    this.panel.querySelector('#themeShockwaveVictory').addEventListener('change', e => {
+      const shockwave = ensureShockwave();
+      if (!shockwave) return;
+      shockwave.victory = !!e.target.checked;
+      this._syncShockwaveButtons();
+      this._emitChange();
+    }, { signal: sig });
+
+    this.panel.querySelector('#themeShockwaveVictorySeparate').addEventListener('change', e => {
+      const shockwave = ensureShockwave();
+      if (!shockwave) return;
+      ensureShockwaveVictorySettings(shockwave);
+      shockwave.victorySeparate = !!e.target.checked;
+      this._syncShockwaveButtons();
+      this._emitChange();
+    }, { signal: sig });
+
+    this.panel.querySelector('#themeShockwaveColor').addEventListener('input', e => {
+      const shockwave = ensureShockwave();
+      if (!shockwave) return;
+      shockwave.color = e.target.value;
+      this._syncShockwaveButtons();
+      this._emitChange();
+    }, { signal: sig });
+
+    this.panel.querySelector('#themeShockwaveVictoryColor').addEventListener('input', e => {
+      const shockwave = ensureShockwave();
+      const victorySettings = ensureShockwaveVictorySettings(shockwave);
+      if (!victorySettings) return;
+      victorySettings.color = e.target.value;
+      this._syncShockwaveButtons();
+      this._emitChange();
+    }, { signal: sig });
+
+    this.panel.querySelector('#themeShockwaveRadius').addEventListener('input', e => setShockwaveRange('radius', e.target.value), { signal: sig });
+    this.panel.querySelector('#themeShockwaveStrength').addEventListener('input', e => setShockwaveRange('strength', e.target.value), { signal: sig });
+    this.panel.querySelector('#themeShockwaveWidth').addEventListener('input', e => setShockwaveRange('width', e.target.value), { signal: sig });
+    this.panel.querySelector('#themeShockwaveDuration').addEventListener('input', e => setShockwaveRange('duration', e.target.value), { signal: sig });
+    this.panel.querySelector('#themeShockwaveRipple').addEventListener('input', e => setShockwaveRange('ripple', e.target.value), { signal: sig });
+    this.panel.querySelector('#themeShockwaveOpacity').addEventListener('input', e => setShockwaveRange('opacity', e.target.value), { signal: sig });
+    this.panel.querySelector('#themeShockwaveVictoryRadius').addEventListener('input', e => setShockwaveVictoryRange('radius', e.target.value), { signal: sig });
+    this.panel.querySelector('#themeShockwaveVictoryStrength').addEventListener('input', e => setShockwaveVictoryRange('strength', e.target.value), { signal: sig });
+    this.panel.querySelector('#themeShockwaveVictoryWidth').addEventListener('input', e => setShockwaveVictoryRange('width', e.target.value), { signal: sig });
+    this.panel.querySelector('#themeShockwaveVictoryDuration').addEventListener('input', e => setShockwaveVictoryRange('duration', e.target.value), { signal: sig });
+    this.panel.querySelector('#themeShockwaveVictoryRipple').addEventListener('input', e => setShockwaveVictoryRange('ripple', e.target.value), { signal: sig });
+    this.panel.querySelector('#themeShockwaveVictoryOpacity').addEventListener('input', e => setShockwaveVictoryRange('opacity', e.target.value), { signal: sig });
+
     this.panel.querySelector('#themeFrameColor').addEventListener('input', e => {
       if (!this.config) return;
       this.config.frameColor = e.target.value;
@@ -395,6 +1196,10 @@ export class VisualLayout {
 
     this.panel.querySelector('#themeEditBtn').addEventListener('click', () => {
       this.setEditMode(!this.editMode);
+    }, { signal: sig });
+
+    this.panel.querySelector('#themePreviewProgressBtn').addEventListener('click', () => {
+      this.setPreviewFinalProgression(!this._previewFinalProgression);
     }, { signal: sig });
 
     // Apply for Level — explicitly save current visuals to this level
@@ -640,15 +1445,135 @@ export class VisualLayout {
     if (!this.panel || !this.config) return;
     const bg = this.config.background;
     const sel = (id) => this.panel.querySelector(id);
+    const progression = bg.liquid?.progression || {};
     const bgType = sel('#themeBgType');
     if (bgType) bgType.value = bg.type;
     const bgTop = sel('#themeBgTop');
     if (bgTop) bgTop.value = bg.colorTop;
     const bgBot = sel('#themeBgBottom');
     if (bgBot) bgBot.value = bg.colorBottom;
+    const liquidBase = sel('#themeBgLiquidBase');
+    if (liquidBase) liquidBase.value = bg.liquid?.colorBase || '#05020f';
+    const liquidMid = sel('#themeBgLiquidMid');
+    if (liquidMid) liquidMid.value = bg.liquid?.colorMid || '#24104f';
+    const liquidAccent = sel('#themeBgLiquidAccent');
+    if (liquidAccent) liquidAccent.value = bg.liquid?.colorAccent || '#8d63ff';
+    const liquidScale = sel('#themeBgLiquidScale');
+    if (liquidScale) liquidScale.value = String(Math.round((bg.liquid?.scale ?? 1) * 100));
+    const liquidRoughness = sel('#themeBgLiquidRoughness');
+    if (liquidRoughness) liquidRoughness.value = String(Math.round((bg.liquid?.roughness ?? 0.58) * 100));
+    const liquidDistortion = sel('#themeBgLiquidDistortion');
+    if (liquidDistortion) liquidDistortion.value = String(Math.round((bg.liquid?.distortion ?? 1) * 100));
+    const liquidLacunarity = sel('#themeBgLiquidLacunarity');
+    if (liquidLacunarity) liquidLacunarity.value = String(Math.round((bg.liquid?.lacunarity ?? 2.25) * 100));
+    const liquidTrail = sel('#themeBgLiquidTrail');
+    if (liquidTrail) liquidTrail.value = String(Math.round((bg.liquid?.trail ?? 1) * 100));
+    const liquidMotion = sel('#themeBgLiquidMotion');
+    if (liquidMotion) liquidMotion.value = String(Math.round((bg.liquid?.motion ?? 0.44) * 100));
+    const liquidReaction = sel('#themeBgLiquidReaction');
+    if (liquidReaction) liquidReaction.value = String(Math.round((bg.liquid?.reaction ?? 0.82) * 100));
+    const liquidProgBaseEnabled = sel('#themeBgLiquidProgBaseEnabled');
+    if (liquidProgBaseEnabled) liquidProgBaseEnabled.checked = typeof progression.colorBase === 'string';
+    const liquidProgBase = sel('#themeBgLiquidProgBase');
+    if (liquidProgBase) liquidProgBase.value = progression.colorBase || (bg.liquid?.colorBase || '#05020f');
+    const liquidProgMidEnabled = sel('#themeBgLiquidProgMidEnabled');
+    if (liquidProgMidEnabled) liquidProgMidEnabled.checked = typeof progression.colorMid === 'string';
+    const liquidProgMid = sel('#themeBgLiquidProgMid');
+    if (liquidProgMid) liquidProgMid.value = progression.colorMid || (bg.liquid?.colorMid || '#24104f');
+    const liquidProgAccentEnabled = sel('#themeBgLiquidProgAccentEnabled');
+    if (liquidProgAccentEnabled) liquidProgAccentEnabled.checked = typeof progression.colorAccent === 'string';
+    const liquidProgAccent = sel('#themeBgLiquidProgAccent');
+    if (liquidProgAccent) liquidProgAccent.value = progression.colorAccent || (bg.liquid?.colorAccent || '#8d63ff');
+    const liquidProgScaleEnabled = sel('#themeBgLiquidProgScaleEnabled');
+    if (liquidProgScaleEnabled) liquidProgScaleEnabled.checked = Number.isFinite(progression.scale);
+    const liquidProgScale = sel('#themeBgLiquidProgScale');
+    if (liquidProgScale) liquidProgScale.value = String(Math.round((Number.isFinite(progression.scale) ? progression.scale : (bg.liquid?.scale ?? 1)) * 100));
+    const liquidProgRoughnessEnabled = sel('#themeBgLiquidProgRoughnessEnabled');
+    if (liquidProgRoughnessEnabled) liquidProgRoughnessEnabled.checked = Number.isFinite(progression.roughness);
+    const liquidProgRoughness = sel('#themeBgLiquidProgRoughness');
+    if (liquidProgRoughness) liquidProgRoughness.value = String(Math.round((Number.isFinite(progression.roughness) ? progression.roughness : (bg.liquid?.roughness ?? 0.58)) * 100));
+    const liquidProgDistortionEnabled = sel('#themeBgLiquidProgDistortionEnabled');
+    if (liquidProgDistortionEnabled) liquidProgDistortionEnabled.checked = Number.isFinite(progression.distortion);
+    const liquidProgDistortion = sel('#themeBgLiquidProgDistortion');
+    if (liquidProgDistortion) liquidProgDistortion.value = String(Math.round((Number.isFinite(progression.distortion) ? progression.distortion : (bg.liquid?.distortion ?? 1)) * 100));
+    const liquidProgLacunarityEnabled = sel('#themeBgLiquidProgLacunarityEnabled');
+    if (liquidProgLacunarityEnabled) liquidProgLacunarityEnabled.checked = Number.isFinite(progression.lacunarity);
+    const liquidProgLacunarity = sel('#themeBgLiquidProgLacunarity');
+    if (liquidProgLacunarity) liquidProgLacunarity.value = String(Math.round((Number.isFinite(progression.lacunarity) ? progression.lacunarity : (bg.liquid?.lacunarity ?? 2.25)) * 100));
+    const liquidProgTrailEnabled = sel('#themeBgLiquidProgTrailEnabled');
+    if (liquidProgTrailEnabled) liquidProgTrailEnabled.checked = Number.isFinite(progression.trail);
+    const liquidProgTrail = sel('#themeBgLiquidProgTrail');
+    if (liquidProgTrail) liquidProgTrail.value = String(Math.round((Number.isFinite(progression.trail) ? progression.trail : (bg.liquid?.trail ?? 1)) * 100));
+    const liquidProgMotionEnabled = sel('#themeBgLiquidProgMotionEnabled');
+    if (liquidProgMotionEnabled) liquidProgMotionEnabled.checked = Number.isFinite(progression.motion);
+    const liquidProgMotion = sel('#themeBgLiquidProgMotion');
+    if (liquidProgMotion) liquidProgMotion.value = String(Math.round((Number.isFinite(progression.motion) ? progression.motion : (bg.liquid?.motion ?? 0.44)) * 100));
+    const liquidProgReactionEnabled = sel('#themeBgLiquidProgReactionEnabled');
+    if (liquidProgReactionEnabled) liquidProgReactionEnabled.checked = Number.isFinite(progression.reaction);
+    const liquidProgReaction = sel('#themeBgLiquidProgReaction');
+    if (liquidProgReaction) liquidProgReaction.value = String(Math.round((Number.isFinite(progression.reaction) ? progression.reaction : (bg.liquid?.reaction ?? 0.82)) * 100));
     const fc = sel('#themeFrameColor');
     if (fc) fc.value = this.config.frameColor;
+    const trail = this.config.ballTrail || {};
+    const trailProgression = trail.progression || {};
+    const trailEnabled = sel('#themeBallTrailEnabled');
+    if (trailEnabled) trailEnabled.checked = !!trail.enabled;
+    const trailColor = sel('#themeBallTrailColor');
+    if (trailColor) trailColor.value = trail.color || '#f8f9fa';
+    const setTrailRange = (id, value, fallback) => {
+      const input = sel(id);
+      if (input) input.value = String(Math.round((Number.isFinite(value) ? value : fallback) * 100));
+    };
+    setTrailRange('#themeBallTrailLength', trail.length, 0.31);
+    setTrailRange('#themeBallTrailWidth', trail.width, 0.7);
+    setTrailRange('#themeBallTrailGlow', trail.glow, 0);
+    setTrailRange('#themeBallTrailOpacity', trail.opacity, 0.32);
+    setTrailRange('#themeBallTrailTurbulence', trail.turbulence, 0);
+    setTrailRange('#themeBallTrailSmoothing', trail.smoothing, 1);
+    const trailProgEnabled = sel('#themeBallTrailProgEnabled');
+    if (trailProgEnabled) trailProgEnabled.checked = !!trailProgression.enabled;
+    const trailProgColor = sel('#themeBallTrailProgColor');
+    if (trailProgColor) trailProgColor.value = trailProgression.color || trail.color || '#f8f9fa';
+    setTrailRange('#themeBallTrailProgLength', trailProgression.length, trail.length ?? 0.31);
+    setTrailRange('#themeBallTrailProgWidth', trailProgression.width, trail.width ?? 0.7);
+    setTrailRange('#themeBallTrailProgGlow', trailProgression.glow, trail.glow ?? 0);
+    setTrailRange('#themeBallTrailProgOpacity', trailProgression.opacity, trail.opacity ?? 0.32);
+    setTrailRange('#themeBallTrailProgTurbulence', trailProgression.turbulence, trail.turbulence ?? 0);
+    setTrailRange('#themeBallTrailProgSmoothing', trailProgression.smoothing, trail.smoothing ?? 1);
+    const shockwave = this.config.shockwave || {};
+    const shockwaveEnabled = sel('#themeShockwaveEnabled');
+    if (shockwaveEnabled) shockwaveEnabled.checked = shockwave.enabled !== false;
+    const shockwaveBomb = sel('#themeShockwaveBomb');
+    if (shockwaveBomb) shockwaveBomb.checked = shockwave.bomb !== false;
+    const shockwaveBombTargets = sel('#themeShockwaveBombTargets');
+    if (shockwaveBombTargets) shockwaveBombTargets.checked = shockwave.bombTargets === true;
+    const shockwaveVictory = sel('#themeShockwaveVictory');
+    if (shockwaveVictory) shockwaveVictory.checked = shockwave.victory !== false;
+    const shockwaveVictorySeparate = sel('#themeShockwaveVictorySeparate');
+    if (shockwaveVictorySeparate) shockwaveVictorySeparate.checked = shockwave.victorySeparate === true;
+    const shockwaveColor = sel('#themeShockwaveColor');
+    if (shockwaveColor) shockwaveColor.value = shockwave.color || '#ffffff';
+    const victorySettings = shockwave.victorySettings || {};
+    const shockwaveVictoryColor = sel('#themeShockwaveVictoryColor');
+    if (shockwaveVictoryColor) shockwaveVictoryColor.value = victorySettings.color || shockwave.color || '#ffffff';
+    setTrailRange('#themeShockwaveRadius', shockwave.radius, 1);
+    setTrailRange('#themeShockwaveStrength', shockwave.strength, 1);
+    setTrailRange('#themeShockwaveWidth', shockwave.width, 1);
+    setTrailRange('#themeShockwaveDuration', shockwave.duration, 0.82);
+    setTrailRange('#themeShockwaveRipple', shockwave.ripple, 1);
+    setTrailRange('#themeShockwaveOpacity', shockwave.opacity, 0.86);
+    setTrailRange('#themeShockwaveVictoryRadius', victorySettings.radius, shockwave.radius ?? 1);
+    setTrailRange('#themeShockwaveVictoryStrength', victorySettings.strength, shockwave.strength ?? 1);
+    setTrailRange('#themeShockwaveVictoryWidth', victorySettings.width, shockwave.width ?? 1);
+    setTrailRange('#themeShockwaveVictoryDuration', victorySettings.duration, shockwave.duration ?? 0.82);
+    setTrailRange('#themeShockwaveVictoryRipple', victorySettings.ripple, shockwave.ripple ?? 1);
+    setTrailRange('#themeShockwaveVictoryOpacity', victorySettings.opacity, shockwave.opacity ?? 0.86);
     this._syncBgRowVisibility();
+    this._syncProgressBgButtons();
+    this._syncLiquidBgButtons();
+    this._syncBallTrailButtons();
+    this._syncShockwaveButtons();
+    this._syncProgressionPreviewButton();
     this._buildSlotList();
   }
 
@@ -657,11 +1582,325 @@ export class VisualLayout {
     const type = this.config.background.type;
     const sel = (id) => this.panel.querySelector(id);
     const imgRow = sel('#themeBgImageRow');
+    const progressRow = sel('#themeBgProgressRow');
     const topRow = sel('#themeBgTopRow');
     const botRow = sel('#themeBgBottomRow');
+    const liquidBaseRow = sel('#themeBgLiquidBaseRow');
+    const liquidMidRow = sel('#themeBgLiquidMidRow');
+    const liquidAccentRow = sel('#themeBgLiquidAccentRow');
+    const liquidScaleRow = sel('#themeBgLiquidScaleRow');
+    const liquidRoughnessRow = sel('#themeBgLiquidRoughnessRow');
+    const liquidDistortionRow = sel('#themeBgLiquidDistortionRow');
+    const liquidLacunarityRow = sel('#themeBgLiquidLacunarityRow');
+    const liquidTrailRow = sel('#themeBgLiquidTrailRow');
+    const liquidMotionRow = sel('#themeBgLiquidMotionRow');
+    const liquidReactionRow = sel('#themeBgLiquidReactionRow');
+    const liquidProgressionLabel = sel('#themeBgLiquidProgressionLabel');
+    const liquidProgResetRow = sel('#themeBgLiquidProgResetRow');
+    const liquidProgBaseRow = sel('#themeBgLiquidProgBaseRow');
+    const liquidProgMidRow = sel('#themeBgLiquidProgMidRow');
+    const liquidProgAccentRow = sel('#themeBgLiquidProgAccentRow');
+    const liquidProgScaleRow = sel('#themeBgLiquidProgScaleRow');
+    const liquidProgRoughnessRow = sel('#themeBgLiquidProgRoughnessRow');
+    const liquidProgDistortionRow = sel('#themeBgLiquidProgDistortionRow');
+    const liquidProgLacunarityRow = sel('#themeBgLiquidProgLacunarityRow');
+    const liquidProgTrailRow = sel('#themeBgLiquidProgTrailRow');
+    const liquidProgMotionRow = sel('#themeBgLiquidProgMotionRow');
+    const liquidProgReactionRow = sel('#themeBgLiquidProgReactionRow');
     if (imgRow) imgRow.style.display = type === 'image' ? '' : 'none';
+    if (progressRow) progressRow.style.display = type === 'image' ? '' : 'none';
     if (topRow) topRow.style.display = type === 'image' ? 'none' : '';
     if (botRow) botRow.style.display = type === 'gradient' ? '' : 'none';
+    if (liquidBaseRow) liquidBaseRow.style.display = type === 'liquid' ? '' : 'none';
+    if (liquidMidRow) liquidMidRow.style.display = type === 'liquid' ? '' : 'none';
+    if (liquidAccentRow) liquidAccentRow.style.display = type === 'liquid' ? '' : 'none';
+    if (liquidScaleRow) liquidScaleRow.style.display = type === 'liquid' ? '' : 'none';
+    if (liquidRoughnessRow) liquidRoughnessRow.style.display = type === 'liquid' ? '' : 'none';
+    if (liquidDistortionRow) liquidDistortionRow.style.display = type === 'liquid' ? '' : 'none';
+    if (liquidLacunarityRow) liquidLacunarityRow.style.display = type === 'liquid' ? '' : 'none';
+    if (liquidTrailRow) liquidTrailRow.style.display = type === 'liquid' ? '' : 'none';
+    if (liquidMotionRow) liquidMotionRow.style.display = type === 'liquid' ? '' : 'none';
+    if (liquidReactionRow) liquidReactionRow.style.display = type === 'liquid' ? '' : 'none';
+    if (liquidProgressionLabel) liquidProgressionLabel.style.display = type === 'liquid' ? '' : 'none';
+    if (liquidProgResetRow) liquidProgResetRow.style.display = type === 'liquid' ? '' : 'none';
+    if (liquidProgBaseRow) liquidProgBaseRow.style.display = type === 'liquid' ? '' : 'none';
+    if (liquidProgMidRow) liquidProgMidRow.style.display = type === 'liquid' ? '' : 'none';
+    if (liquidProgAccentRow) liquidProgAccentRow.style.display = type === 'liquid' ? '' : 'none';
+    if (liquidProgScaleRow) liquidProgScaleRow.style.display = type === 'liquid' ? '' : 'none';
+    if (liquidProgRoughnessRow) liquidProgRoughnessRow.style.display = type === 'liquid' ? '' : 'none';
+    if (liquidProgDistortionRow) liquidProgDistortionRow.style.display = type === 'liquid' ? '' : 'none';
+    if (liquidProgLacunarityRow) liquidProgLacunarityRow.style.display = type === 'liquid' ? '' : 'none';
+    if (liquidProgTrailRow) liquidProgTrailRow.style.display = type === 'liquid' ? '' : 'none';
+    if (liquidProgMotionRow) liquidProgMotionRow.style.display = type === 'liquid' ? '' : 'none';
+    if (liquidProgReactionRow) liquidProgReactionRow.style.display = type === 'liquid' ? '' : 'none';
+    if (topRow && type === 'liquid') topRow.style.display = 'none';
+  }
+
+  _syncProgressBgButtons() {
+    if (!this.panel || !this.config) return;
+    const hasProgressImage = !!this.config.background?.progressionImage;
+    const uploadBtn = this.panel.querySelector('#themeBgProgressBtn');
+    const clearBtn = this.panel.querySelector('#themeBgProgressClearBtn');
+    const state = this.panel.querySelector('#themeBgProgressState');
+    if (uploadBtn) uploadBtn.textContent = hasProgressImage ? 'Change' : 'Upload';
+    if (clearBtn) clearBtn.disabled = !hasProgressImage;
+    if (state) state.textContent = hasProgressImage ? 'Set' : 'Optional';
+    this._syncProgressionPreviewButton();
+  }
+
+  _hasPreviewableProgression() {
+    const bg = this.config?.background;
+    const trail = this.config?.ballTrail;
+    if (trail?.enabled && trail.progression?.enabled) return true;
+    if (!bg) return false;
+    if (bg.type === 'image') return !!bg.progressionImage;
+    if (bg.type !== 'liquid') return false;
+    const progression = bg.liquid?.progression;
+    if (!progression || typeof progression !== 'object') return false;
+    return Object.values(progression).some(value => value !== null && value !== undefined && value !== '');
+  }
+
+  _syncProgressionPreviewButton() {
+    if (!this.panel) return;
+    const button = this.panel.querySelector('#themePreviewProgressBtn');
+    if (!button) return;
+    const available = this._hasPreviewableProgression();
+    if (!available && this._previewFinalProgression) {
+      this._previewFinalProgression = false;
+      if (this.onPreviewProgressionChange) {
+        this.onPreviewProgressionChange(false);
+      }
+    }
+    button.disabled = !available;
+    button.textContent = this._previewFinalProgression ? 'Hide Final State' : 'Preview Final State';
+    button.classList.toggle('is-active', available && this._previewFinalProgression);
+  }
+
+  _syncBallTrailPreviewButton() {
+    if (!this.panel) return;
+    const button = this.panel.querySelector('#themeBallTrailPreviewBtn');
+    if (!button) return;
+    const available = !!this.config?.ballTrail?.enabled;
+    if (!available && this._previewBallTrail) {
+      this._previewBallTrail = false;
+      if (this.onBallTrailPreviewChange) {
+        this.onBallTrailPreviewChange(false);
+      }
+    }
+    button.disabled = !available;
+    button.textContent = this._previewBallTrail ? 'Hide Tail Preview' : 'Preview Tail';
+    button.classList.toggle('is-active', available && this._previewBallTrail);
+  }
+
+  _syncBallTrailButtons() {
+    if (!this.panel || !this.config?.ballTrail) return;
+    const trail = this.config.ballTrail;
+    const progression = trail.progression || {};
+    const setValue = (id, value, fallback, format = value => `${Math.round(value * 100)}%`) => {
+      const el = this.panel.querySelector(id);
+      if (el) el.textContent = format(Number.isFinite(value) ? value : fallback);
+    };
+    setValue('#themeBallTrailLengthValue', trail.length, 0.31);
+    setValue('#themeBallTrailWidthValue', trail.width, 0.7);
+    setValue('#themeBallTrailGlowValue', trail.glow, 0);
+    setValue('#themeBallTrailOpacityValue', trail.opacity, 0.32);
+    setValue('#themeBallTrailTurbulenceValue', trail.turbulence, 0);
+    setValue('#themeBallTrailSmoothingValue', trail.smoothing, 1);
+    setValue('#themeBallTrailProgLengthValue', progression.length, trail.length ?? 0.31);
+    setValue('#themeBallTrailProgWidthValue', progression.width, trail.width ?? 0.7);
+    setValue('#themeBallTrailProgGlowValue', progression.glow, trail.glow ?? 0);
+    setValue('#themeBallTrailProgOpacityValue', progression.opacity, trail.opacity ?? 0.32);
+    setValue('#themeBallTrailProgTurbulenceValue', progression.turbulence, trail.turbulence ?? 0);
+    setValue('#themeBallTrailProgSmoothingValue', progression.smoothing, trail.smoothing ?? 1);
+
+    const enabled = !!trail.enabled;
+    for (const id of [
+      '#themeBallTrailColor',
+      '#themeBallTrailLength',
+      '#themeBallTrailWidth',
+      '#themeBallTrailGlow',
+      '#themeBallTrailOpacity',
+      '#themeBallTrailTurbulence',
+      '#themeBallTrailSmoothing',
+      '#themeBallTrailProgEnabled',
+      '#themeBallTrailProgMatchBtn'
+    ]) {
+      const el = this.panel.querySelector(id);
+      if (el) el.disabled = !enabled;
+    }
+
+    const progressionEnabled = enabled && !!progression.enabled;
+    for (const id of [
+      '#themeBallTrailProgColor',
+      '#themeBallTrailProgLength',
+      '#themeBallTrailProgWidth',
+      '#themeBallTrailProgGlow',
+      '#themeBallTrailProgOpacity',
+      '#themeBallTrailProgTurbulence',
+      '#themeBallTrailProgSmoothing'
+    ]) {
+      const el = this.panel.querySelector(id);
+      if (el) el.disabled = !progressionEnabled;
+    }
+
+    for (const id of [
+      '#themeBallTrailProgColorRow',
+      '#themeBallTrailProgLengthRow',
+      '#themeBallTrailProgWidthRow',
+      '#themeBallTrailProgGlowRow',
+      '#themeBallTrailProgOpacityRow',
+      '#themeBallTrailProgTurbulenceRow',
+      '#themeBallTrailProgSmoothingRow'
+    ]) {
+      const row = this.panel.querySelector(id);
+      if (row) row.style.opacity = progressionEnabled ? '1' : '0.62';
+    }
+
+    this._syncBallTrailPreviewButton();
+    this._syncProgressionPreviewButton();
+  }
+
+  _syncShockwavePreviewButton() {
+    if (!this.panel) return;
+    const button = this.panel.querySelector('#themeShockwavePreviewBtn');
+    if (!button) return;
+    const available = this.config?.shockwave?.enabled !== false;
+    if (!available && this._previewShockwave) {
+      this._previewShockwave = false;
+      if (this.onShockwavePreviewChange) {
+        this.onShockwavePreviewChange(false);
+      }
+    }
+    button.disabled = !available;
+    button.textContent = this._previewShockwave ? 'Hide Wave Preview' : 'Preview Wave';
+    button.classList.toggle('is-active', available && this._previewShockwave);
+  }
+
+  _syncShockwaveButtons() {
+    if (!this.panel || !this.config?.shockwave) return;
+    const shockwave = this.config.shockwave;
+    const formatPercent = value => `${Math.round(value * 100)}%`;
+    const setValue = (id, value, fallback, format = formatPercent) => {
+      const el = this.panel.querySelector(id);
+      if (el) el.textContent = format(Number.isFinite(value) ? value : fallback);
+    };
+    setValue('#themeShockwaveRadiusValue', shockwave.radius, 1);
+    setValue('#themeShockwaveStrengthValue', shockwave.strength, 1);
+    setValue('#themeShockwaveWidthValue', shockwave.width, 1);
+    setValue('#themeShockwaveDurationValue', shockwave.duration, 0.82, value => `${value.toFixed(2)}s`);
+    setValue('#themeShockwaveRippleValue', shockwave.ripple, 1);
+    setValue('#themeShockwaveOpacityValue', shockwave.opacity, 0.86);
+    const victorySettings = shockwave.victorySettings || {};
+    setValue('#themeShockwaveVictoryRadiusValue', victorySettings.radius, shockwave.radius ?? 1);
+    setValue('#themeShockwaveVictoryStrengthValue', victorySettings.strength, shockwave.strength ?? 1);
+    setValue('#themeShockwaveVictoryWidthValue', victorySettings.width, shockwave.width ?? 1);
+    setValue('#themeShockwaveVictoryDurationValue', victorySettings.duration, shockwave.duration ?? 0.82, value => `${value.toFixed(2)}s`);
+    setValue('#themeShockwaveVictoryRippleValue', victorySettings.ripple, shockwave.ripple ?? 1);
+    setValue('#themeShockwaveVictoryOpacityValue', victorySettings.opacity, shockwave.opacity ?? 0.86);
+
+    const enabled = shockwave.enabled !== false;
+    for (const id of [
+      '#themeShockwaveBomb',
+      '#themeShockwaveBombTargets',
+      '#themeShockwaveVictory',
+      '#themeShockwaveVictorySeparate',
+      '#themeShockwaveColor',
+      '#themeShockwaveRadius',
+      '#themeShockwaveStrength',
+      '#themeShockwaveWidth',
+      '#themeShockwaveDuration',
+      '#themeShockwaveRipple',
+      '#themeShockwaveOpacity'
+    ]) {
+      const el = this.panel.querySelector(id);
+      if (el) el.disabled = !enabled;
+    }
+    const bombTargets = this.panel.querySelector('#themeShockwaveBombTargets');
+    if (bombTargets) bombTargets.disabled = !enabled || shockwave.bomb === false;
+    const victorySeparateToggle = this.panel.querySelector('#themeShockwaveVictorySeparate');
+    if (victorySeparateToggle) victorySeparateToggle.disabled = !enabled || shockwave.victory === false;
+
+    const victorySeparate = enabled && shockwave.victory !== false && shockwave.victorySeparate === true;
+    for (const id of [
+      '#themeShockwaveVictoryColorRow',
+      '#themeShockwaveVictoryRadiusRow',
+      '#themeShockwaveVictoryStrengthRow',
+      '#themeShockwaveVictoryWidthRow',
+      '#themeShockwaveVictoryDurationRow',
+      '#themeShockwaveVictoryRippleRow',
+      '#themeShockwaveVictoryOpacityRow'
+    ]) {
+      const row = this.panel.querySelector(id);
+      if (row) row.style.display = victorySeparate ? '' : 'none';
+    }
+    for (const id of [
+      '#themeShockwaveVictoryColor',
+      '#themeShockwaveVictoryRadius',
+      '#themeShockwaveVictoryStrength',
+      '#themeShockwaveVictoryWidth',
+      '#themeShockwaveVictoryDuration',
+      '#themeShockwaveVictoryRipple',
+      '#themeShockwaveVictoryOpacity'
+    ]) {
+      const el = this.panel.querySelector(id);
+      if (el) el.disabled = !victorySeparate;
+    }
+
+    this._syncShockwavePreviewButton();
+  }
+
+  _syncLiquidBgButtons() {
+    if (!this.panel || !this.config?.background?.liquid) return;
+    const progression = this.config.background.liquid.progression || {};
+    const scaleValue = this.panel.querySelector('#themeBgLiquidScaleValue');
+    const roughnessValue = this.panel.querySelector('#themeBgLiquidRoughnessValue');
+    const distortionValue = this.panel.querySelector('#themeBgLiquidDistortionValue');
+    const lacunarityValue = this.panel.querySelector('#themeBgLiquidLacunarityValue');
+    const trailValue = this.panel.querySelector('#themeBgLiquidTrailValue');
+    const motionValue = this.panel.querySelector('#themeBgLiquidMotionValue');
+    const reactionValue = this.panel.querySelector('#themeBgLiquidReactionValue');
+    const progScaleValue = this.panel.querySelector('#themeBgLiquidProgScaleValue');
+    const progRoughnessValue = this.panel.querySelector('#themeBgLiquidProgRoughnessValue');
+    const progDistortionValue = this.panel.querySelector('#themeBgLiquidProgDistortionValue');
+    const progLacunarityValue = this.panel.querySelector('#themeBgLiquidProgLacunarityValue');
+    const progTrailValue = this.panel.querySelector('#themeBgLiquidProgTrailValue');
+    const progMotionValue = this.panel.querySelector('#themeBgLiquidProgMotionValue');
+    const progReactionValue = this.panel.querySelector('#themeBgLiquidProgReactionValue');
+    if (scaleValue) scaleValue.textContent = `${Math.round((this.config.background.liquid.scale ?? 1) * 100)}%`;
+    if (roughnessValue) roughnessValue.textContent = `${Math.round((this.config.background.liquid.roughness ?? 0.58) * 100)}%`;
+    if (distortionValue) distortionValue.textContent = `${Math.round((this.config.background.liquid.distortion ?? 1) * 100)}%`;
+    if (lacunarityValue) lacunarityValue.textContent = (this.config.background.liquid.lacunarity ?? 2.25).toFixed(2);
+    if (trailValue) trailValue.textContent = `${Math.round((this.config.background.liquid.trail ?? 1) * 100)}%`;
+    if (motionValue) motionValue.textContent = `${Math.round(this.config.background.liquid.motion * 100)}%`;
+    if (reactionValue) reactionValue.textContent = `${Math.round(this.config.background.liquid.reaction * 100)}%`;
+    if (progScaleValue) progScaleValue.textContent = `${Math.round((Number.isFinite(progression.scale) ? progression.scale : (this.config.background.liquid.scale ?? 1)) * 100)}%`;
+    if (progRoughnessValue) progRoughnessValue.textContent = `${Math.round((Number.isFinite(progression.roughness) ? progression.roughness : (this.config.background.liquid.roughness ?? 0.58)) * 100)}%`;
+    if (progDistortionValue) progDistortionValue.textContent = `${Math.round((Number.isFinite(progression.distortion) ? progression.distortion : (this.config.background.liquid.distortion ?? 1)) * 100)}%`;
+    if (progLacunarityValue) progLacunarityValue.textContent = (Number.isFinite(progression.lacunarity) ? progression.lacunarity : (this.config.background.liquid.lacunarity ?? 2.25)).toFixed(2);
+    if (progTrailValue) progTrailValue.textContent = `${Math.round((Number.isFinite(progression.trail) ? progression.trail : (this.config.background.liquid.trail ?? 1)) * 100)}%`;
+    if (progMotionValue) progMotionValue.textContent = `${Math.round((Number.isFinite(progression.motion) ? progression.motion : this.config.background.liquid.motion) * 100)}%`;
+    if (progReactionValue) progReactionValue.textContent = `${Math.round((Number.isFinite(progression.reaction) ? progression.reaction : this.config.background.liquid.reaction) * 100)}%`;
+
+    const syncControl = (enabledId, inputId, rowId, active) => {
+      const enabled = this.panel.querySelector(enabledId);
+      const input = this.panel.querySelector(inputId);
+      const row = this.panel.querySelector(rowId);
+      if (enabled) enabled.checked = active;
+      if (input) input.disabled = !active;
+      if (row) row.style.opacity = active ? '1' : '0.62';
+    };
+
+    syncControl('#themeBgLiquidProgBaseEnabled', '#themeBgLiquidProgBase', '#themeBgLiquidProgBaseRow', typeof progression.colorBase === 'string');
+    syncControl('#themeBgLiquidProgMidEnabled', '#themeBgLiquidProgMid', '#themeBgLiquidProgMidRow', typeof progression.colorMid === 'string');
+    syncControl('#themeBgLiquidProgAccentEnabled', '#themeBgLiquidProgAccent', '#themeBgLiquidProgAccentRow', typeof progression.colorAccent === 'string');
+    syncControl('#themeBgLiquidProgScaleEnabled', '#themeBgLiquidProgScale', '#themeBgLiquidProgScaleRow', Number.isFinite(progression.scale));
+    syncControl('#themeBgLiquidProgRoughnessEnabled', '#themeBgLiquidProgRoughness', '#themeBgLiquidProgRoughnessRow', Number.isFinite(progression.roughness));
+    syncControl('#themeBgLiquidProgDistortionEnabled', '#themeBgLiquidProgDistortion', '#themeBgLiquidProgDistortionRow', Number.isFinite(progression.distortion));
+    syncControl('#themeBgLiquidProgLacunarityEnabled', '#themeBgLiquidProgLacunarity', '#themeBgLiquidProgLacunarityRow', Number.isFinite(progression.lacunarity));
+    syncControl('#themeBgLiquidProgTrailEnabled', '#themeBgLiquidProgTrail', '#themeBgLiquidProgTrailRow', Number.isFinite(progression.trail));
+    syncControl('#themeBgLiquidProgMotionEnabled', '#themeBgLiquidProgMotion', '#themeBgLiquidProgMotionRow', Number.isFinite(progression.motion));
+    syncControl('#themeBgLiquidProgReactionEnabled', '#themeBgLiquidProgReaction', '#themeBgLiquidProgReactionRow', Number.isFinite(progression.reaction));
+    this._syncProgressionPreviewButton();
   }
 
   // ─── Slot rendering ────────────────────────────────────
@@ -750,8 +1989,12 @@ export class VisualLayout {
     const slotCfg = this.config?.slots.ballCounter;
     if (!slotCfg || slotCfg.visible === false) return;
 
-    const prev = this._ballCountPrev ?? totalBalls;
-    this._ballCountPrev = ballsLeft;
+    const finiteBallsLeft = Number.isFinite(ballsLeft);
+    const displayBalls = finiteBallsLeft ? Math.max(0, Math.round(ballsLeft)) : 0;
+    const finiteTotal = Number.isFinite(totalBalls);
+    const displayTotal = finiteTotal ? Math.max(0, Math.round(totalBalls)) : displayBalls;
+    const prev = this._ballCountPrev ?? displayTotal;
+    this._ballCountPrev = displayBalls;
 
     // Build inner DOM on first call
     if (!el.querySelector('.bc-ring')) {
@@ -770,14 +2013,14 @@ export class VisualLayout {
 
     const ring = el.querySelector('.bc-ring');
     const numEl = el.querySelector('.bc-number');
-    numEl.textContent = ballsLeft;
+    numEl.textContent = finiteBallsLeft ? displayBalls : '∞';
 
     // Scale font to element size
     const w = el.offsetWidth;
     if (w > 0) el.style.setProperty('--bc-font-size', Math.round(w * 0.38) + 'px');
 
     // Ring shows max(totalBalls, ballsLeft) positions so bonus balls get dots too
-    const ringSize = Math.max(totalBalls, ballsLeft);
+    const ringSize = Math.max(displayTotal, displayBalls);
 
     // Adjust or rebuild dot elements
     const existingDots = ring.querySelectorAll('.bc-dot');
@@ -803,7 +2046,7 @@ export class VisualLayout {
     const dotSize = n <= 10 ? 11 : Math.max(6, Math.round(110 / n));
     ring.style.setProperty('--bc-dot-size', dotSize + '%');
 
-    const filled = Math.max(0, Math.min(n, ballsLeft));
+    const filled = Math.max(0, Math.min(n, displayBalls));
     const step = (Math.PI * 2) / n;
 
     // Rotation offset: center filled dots at bottom (6 o'clock)
@@ -824,7 +2067,7 @@ export class VisualLayout {
       const isFilled = i < filled;
 
       // Dot just consumed: pop animation
-      if (prev > ballsLeft && i === filled && i < prev) {
+      if (prev > displayBalls && i === filled && i < prev) {
         dot.classList.remove('bc-dot--filled', 'bc-dot--empty', 'bc-dot--appearing');
         dot.classList.add('bc-dot--popping');
         dot.addEventListener('animationend', () => {
@@ -832,7 +2075,7 @@ export class VisualLayout {
           dot.classList.add('bc-dot--empty');
         }, { once: true });
       // Dot just gained (bonus ball): appear animation
-      } else if (ballsLeft > prev && i >= prev && isFilled) {
+      } else if (displayBalls > prev && i >= prev && isFilled) {
         dot.classList.remove('bc-dot--popping', 'bc-dot--empty');
         dot.classList.add('bc-dot--filled', 'bc-dot--appearing');
         dot.addEventListener('animationend', () => {

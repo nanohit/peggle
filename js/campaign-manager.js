@@ -5,6 +5,7 @@
 
 import { Utils } from './utils.js';
 import { api } from './api.js';
+import { normalizeLevelData } from './levels.js';
 import { topoOrder, wouldCycle, nextNodeId, graphFromLinear, syncLevelNames, buildNodeMap, resolveNodeLevelName } from './graph/core.js';
 import { validateGraph } from './graph/validate.js';
 
@@ -438,7 +439,17 @@ export class CampaignManager {
   resolveBakedLevel(name) {
     const raw = localStorage.getItem('baked:' + name);
     if (!raw) return null;
-    try { return JSON.parse(raw); } catch { return null; }
+    try {
+      const level = normalizeLevelData(JSON.parse(raw));
+      if (!level) return null;
+      const normalizedRaw = JSON.stringify(level);
+      if (normalizedRaw !== raw) {
+        localStorage.setItem('baked:' + name, normalizedRaw);
+      }
+      return level;
+    } catch {
+      return null;
+    }
   }
 
   // Resolve campaign to full level data array

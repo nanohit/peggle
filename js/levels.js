@@ -2,13 +2,95 @@
 
 import { Utils } from './utils.js';
 import { normalizeFlipperConfig } from './flipper-defaults.js';
-import { ensureLevelSurvival, normalizeSurvivalSettings } from './survival-mode.js';
+import {
+  ensureLevelSurvival,
+  normalizeSurvivalGamblePegProperties,
+  normalizeSurvivalSettings
+} from './survival-mode.js';
 import { normalizeYoyoSettings } from './yoyo-thread.js';
 import { normalizeMultiballSpawnCount } from './multiball-settings.js';
 import { normalizeVisuals } from './visual-config.js';
+import { normalizeDialogueConfig } from './dialogue-config.js';
+import { normalizeLevelHitPegClearSettings } from './hit-peg-clear-settings.js';
 
 const STORAGE_KEY = 'peggle_levels';
 const TRAINING_KEY = 'peggle_training_data';
+
+export function normalizeLevelData(level) {
+  if (!level || typeof level !== 'object') return null;
+
+  if (!Array.isArray(level.pegs)) level.pegs = [];
+  level.pegs = level.pegs.filter(peg => peg && typeof peg === 'object' && !Array.isArray(peg));
+  if (!Array.isArray(level.groups)) level.groups = [];
+  level.groups = level.groups.filter(group => group && typeof group === 'object' && !Array.isArray(group));
+  const validGroupIds = new Set();
+  for (const group of level.groups) {
+    const groupId = group.id;
+    const invalidId = (typeof groupId !== 'string' && typeof groupId !== 'number') || groupId === '';
+    if (invalidId || validGroupIds.has(groupId)) {
+      group.id = Utils.generateId();
+    }
+    validGroupIds.add(group.id);
+  }
+  if (!level.bezierCurves || typeof level.bezierCurves !== 'object' || Array.isArray(level.bezierCurves)) {
+    level.bezierCurves = {};
+  }
+  if (!Object.prototype.hasOwnProperty.call(level, 'flippers')) {
+    level.flippers = null;
+  } else {
+    level.flippers = normalizeFlipperConfig(level.flippers, { canvasHeight: 600 }) || null;
+  }
+  level.yoyo = normalizeYoyoSettings(level.yoyo);
+  if (typeof level.aimLength !== 'number') level.aimLength = 300;
+  level.aimLength = Math.max(0, Math.min(300, Math.round(level.aimLength)));
+  normalizeLevelHitPegClearSettings(level);
+  const survival = ensureLevelSurvival(level, 600);
+  for (const peg of level.pegs) {
+    if (peg && peg.groupId != null && !validGroupIds.has(peg.groupId)) {
+      peg.groupId = null;
+    }
+    if (peg && peg.type === 'multi') {
+      peg.multiballSpawnCount = normalizeMultiballSpawnCount(peg.multiballSpawnCount);
+    }
+    if (peg && peg.type === 'gamble') {
+      Object.assign(peg, normalizeSurvivalGamblePegProperties(peg, survival.gamblePeg));
+      delete peg.gambleBalls;
+      delete peg.gambleBallsAward;
+      delete peg.gambleKnockbackStrength;
+      delete peg.gambleKnockbackSmooth;
+      delete peg.knockbackEnabled;
+      delete peg.knockbackDistance;
+      delete peg.knockbackStrength;
+      delete peg.knockbackSmooth;
+      delete peg.knockbackSmoothMs;
+    }
+  }
+
+  level.metadata = level.metadata || {};
+  if (!level.metadata.created) {
+    level.metadata.created = new Date().toISOString().split('T')[0];
+  }
+  if (!level.metadata.modified) {
+    level.metadata.modified = new Date().toISOString();
+  }
+  if (level.metadata.playCount == null) {
+    level.metadata.playCount = 0;
+  }
+  if (!Object.prototype.hasOwnProperty.call(level.metadata, 'avgCompletionRate')) {
+    level.metadata.avgCompletionRate = null;
+  }
+  if (!Object.prototype.hasOwnProperty.call(level.metadata, 'authorNotes')) {
+    level.metadata.authorNotes = '';
+  }
+
+  level.visuals = normalizeVisuals(level.visuals);
+  level.dialogue = normalizeDialogueConfig(level.dialogue);
+  return level;
+}
+
+export function cloneLevelSnapshot(level) {
+  return normalizeLevelData(Utils.deepClone(level));
+}
 
 export class LevelManager {
   constructor() {
@@ -20,6 +102,7 @@ export class LevelManager {
 
   // Create a new empty level
   createLevel(name = 'Untitled Level') {
+    const hitPegClear = normalizeLevelHitPegClearSettings({});
     const level = {
       version: 1,
       id: Utils.generateId(),
@@ -31,8 +114,11 @@ export class LevelManager {
       bezierCurves: {},
       flippers: null,
       yoyo: normalizeYoyoSettings(null),
+      hitPegTimedClearEnabled: hitPegClear.enabled,
+      hitPegClearDelayMs: hitPegClear.delayMs,
       survival: ensureLevelSurvival({}, 600),
       visuals: normalizeVisuals(null),
+      dialogue: normalizeDialogueConfig(null),
       metadata: {
         created: new Date().toISOString().split('T')[0],
         modified: new Date().toISOString(),
@@ -84,6 +170,7 @@ export class LevelManager {
       ensureLevelSurvival(level, 600);
     }
     level.yoyo = normalizeYoyoSettings(level.yoyo);
+    normalizeLevelHitPegClearSettings(level);
     level.metadata.modified = new Date().toISOString();
     this.save();
     
@@ -123,6 +210,9 @@ export class LevelManager {
       newPeg.height = peg.height || 12;
       if (peg.curveSlices) newPeg.curveSlices = peg.curveSlices;
     }
+    if (typeof peg.color === 'string' && peg.color) {
+      newPeg.color = peg.color;
+    }
 
     // Preserve animation data
     if (peg.animation) newPeg.animation = peg.animation;
@@ -146,6 +236,9 @@ export class LevelManager {
 
     if (peg.type === 'multi') {
       newPeg.multiballSpawnCount = normalizeMultiballSpawnCount(peg.multiballSpawnCount);
+    }
+    if (peg.type === 'gamble') {
+      Object.assign(newPeg, normalizeSurvivalGamblePegProperties(peg));
     }
 
     level.pegs.push(newPeg);
@@ -460,61 +553,7 @@ export class LevelManager {
   }
 
   normalizeLevel(level) {
-    if (!level || typeof level !== 'object') return null;
-
-    if (!Array.isArray(level.pegs)) level.pegs = [];
-    level.pegs = level.pegs.filter(peg => peg && typeof peg === 'object' && !Array.isArray(peg));
-    if (!Array.isArray(level.groups)) level.groups = [];
-    level.groups = level.groups.filter(group => group && typeof group === 'object' && !Array.isArray(group));
-    const validGroupIds = new Set();
-    for (const group of level.groups) {
-      const groupId = group.id;
-      const invalidId = (typeof groupId !== 'string' && typeof groupId !== 'number') || groupId === '';
-      if (invalidId || validGroupIds.has(groupId)) {
-        group.id = Utils.generateId();
-      }
-      validGroupIds.add(group.id);
-    }
-    if (!level.bezierCurves || typeof level.bezierCurves !== 'object' || Array.isArray(level.bezierCurves)) {
-      level.bezierCurves = {};
-    }
-    if (!Object.prototype.hasOwnProperty.call(level, 'flippers')) {
-      level.flippers = null;
-    } else {
-      level.flippers = normalizeFlipperConfig(level.flippers, { canvasHeight: 600 }) || null;
-    }
-    level.yoyo = normalizeYoyoSettings(level.yoyo);
-    if (typeof level.aimLength !== 'number') level.aimLength = 300;
-    level.aimLength = Math.max(0, Math.min(300, Math.round(level.aimLength)));
-    for (const peg of level.pegs) {
-      if (peg && peg.groupId != null && !validGroupIds.has(peg.groupId)) {
-        peg.groupId = null;
-      }
-      if (peg && peg.type === 'multi') {
-        peg.multiballSpawnCount = normalizeMultiballSpawnCount(peg.multiballSpawnCount);
-      }
-    }
-
-    level.metadata = level.metadata || {};
-    if (!level.metadata.created) {
-      level.metadata.created = new Date().toISOString().split('T')[0];
-    }
-    if (!level.metadata.modified) {
-      level.metadata.modified = new Date().toISOString();
-    }
-    if (level.metadata.playCount == null) {
-      level.metadata.playCount = 0;
-    }
-    if (!Object.prototype.hasOwnProperty.call(level.metadata, 'avgCompletionRate')) {
-      level.metadata.avgCompletionRate = null;
-    }
-    if (!Object.prototype.hasOwnProperty.call(level.metadata, 'authorNotes')) {
-      level.metadata.authorNotes = '';
-    }
-
-    ensureLevelSurvival(level, 600);
-    level.visuals = normalizeVisuals(level.visuals);
-    return level;
+    return normalizeLevelData(level);
   }
 
   // Get all levels

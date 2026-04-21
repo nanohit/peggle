@@ -6,7 +6,7 @@ import { Utils } from './utils.js';
 import { PHYSICS_CONFIG } from './physics.js';
 import { normalizeFlipperConfig } from './flipper-defaults.js';
 import { SurvivalRuntime } from './survival-runtime.js';
-import { ensureLevelSurvival } from './survival-mode.js';
+import { ensureLevelSurvival, normalizeSurvivalGamblePegProperties } from './survival-mode.js';
 import {
   MULTIBALL_DEFAULT_SPAWN_COUNT,
   normalizeMultiballSpawnCount
@@ -54,6 +54,7 @@ export class Editor {
     
     // Alt-drag copy
     this.isCopying = false;
+    this.pendingCopyDrag = false;
     
     // Draw mode state
     this.drawPath = [];
@@ -81,6 +82,9 @@ export class Editor {
     this.animationPreview = false;
     this.animationPreviewAnimator = null;
     this.onAnimationOffsetChange = null; // callback for slider sync
+    this.previewLevelProgress = null;
+    this.ballTrailPreview = false;
+    this.shockwavePreview = false;
 
     // Undo/Redo
     this.undoStack = [];
@@ -246,14 +250,15 @@ export class Editor {
         
         // Alt+drag = copy
         if (this.isCopying) {
-          this.saveUndoState();
-          this.duplicateSelectedPegsInPlace();
+          this.pendingCopyDrag = true;
         } else {
           this.saveUndoState();
         }
         
         this.interactionType = 'drag';
-        this.captureDragStartPositions();
+        if (!this.pendingCopyDrag) {
+          this.captureDragStartPositions();
+        }
       } else {
         this.deselectFlippers();
         // Clicking on empty space
@@ -287,6 +292,10 @@ export class Editor {
 
     const handleMove = (e) => {
       if (!this.isInteracting) return;
+      if (!e.touches && !e.changedTouches && typeof e.buttons === 'number' && e.buttons === 0) {
+        handleEnd(e);
+        return;
+      }
       e.preventDefault();
       
       const screenPos = this.getEventScreenPosition(e);
@@ -374,6 +383,13 @@ export class Editor {
           
         case 'drag':
           if (this.hasMoved && this.selectedPegIds.size > 0) {
+            if (this.pendingCopyDrag) {
+              this.saveUndoState();
+              this.duplicateSelectedPegsInPlace();
+              this.pendingCopyDrag = false;
+              this.dragPegId = this.selectedPegIds.keys().next().value || null;
+              this.captureDragStartPositions();
+            }
             this.moveSelectedPegs(totalDx, totalDy);
           }
           break;
@@ -520,6 +536,7 @@ export class Editor {
       this.dragPegId = null;
       this.rotationCenter = null;
       this.isCopying = false;
+      this.pendingCopyDrag = false;
       this.dragStartPositions = null;
       this.dragAnchorId = null;
       this._panStartCameraY = null;
@@ -536,9 +553,9 @@ export class Editor {
 
     // Mouse events
     canvas.addEventListener('mousedown', handleStart, sig);
-    canvas.addEventListener('mousemove', handleMove, sig);
-    canvas.addEventListener('mouseup', handleEnd, sig);
-    canvas.addEventListener('mouseleave', handleEnd, sig);
+    window.addEventListener('mousemove', handleMove, sig);
+    window.addEventListener('mouseup', handleEnd, sig);
+    window.addEventListener('blur', handleEnd, sig);
     canvas.addEventListener('dblclick', (e) => {
       if (this.animationMode) return;
       e.preventDefault();
@@ -1719,6 +1736,9 @@ export class Editor {
     if (this.selectedPegType === 'multi') {
       pegData.multiballSpawnCount = MULTIBALL_DEFAULT_SPAWN_COUNT;
     }
+    if (this.selectedPegType === 'gamble') {
+      Object.assign(pegData, normalizeSurvivalGamblePegProperties(pegData));
+    }
     if (this.selectedPegColor) {
       pegData.color = this.selectedPegColor;
     }
@@ -1884,6 +1904,10 @@ export class Editor {
           delete peg.portalOneWay;
           delete peg.portalOneWayFlip;
           delete peg.multiballSpawnCount;
+          delete peg.gambleBallCount;
+          delete peg.gambleKnockbackEnabled;
+          delete peg.gambleKnockbackDistance;
+          delete peg.gambleKnockbackSmoothMs;
         } else if (type === 'portalBlue' || type === 'portalOrange') {
           peg.shape = 'circle';
           if (peg.portalScale == null) peg.portalScale = 1.0;
@@ -1895,8 +1919,27 @@ export class Editor {
           delete peg.bumperOrange;
           delete peg._bumperHitScale;
           delete peg.multiballSpawnCount;
+          delete peg.gambleBallCount;
+          delete peg.gambleKnockbackEnabled;
+          delete peg.gambleKnockbackDistance;
+          delete peg.gambleKnockbackSmoothMs;
         } else if (type === 'multi') {
           peg.multiballSpawnCount = normalizeMultiballSpawnCount(peg.multiballSpawnCount);
+          delete peg.gambleBallCount;
+          delete peg.gambleKnockbackEnabled;
+          delete peg.gambleKnockbackDistance;
+          delete peg.gambleKnockbackSmoothMs;
+          delete peg.bumperBounce;
+          delete peg.bumperScale;
+          delete peg.bumperDisappear;
+          delete peg.bumperOrange;
+          delete peg._bumperHitScale;
+          delete peg.portalScale;
+          delete peg.portalOneWay;
+          delete peg.portalOneWayFlip;
+        } else if (type === 'gamble') {
+          Object.assign(peg, normalizeSurvivalGamblePegProperties(peg));
+          delete peg.multiballSpawnCount;
           delete peg.bumperBounce;
           delete peg.bumperScale;
           delete peg.bumperDisappear;
@@ -1916,6 +1959,10 @@ export class Editor {
           delete peg.portalOneWay;
           delete peg.portalOneWayFlip;
           delete peg.multiballSpawnCount;
+          delete peg.gambleBallCount;
+          delete peg.gambleKnockbackEnabled;
+          delete peg.gambleKnockbackDistance;
+          delete peg.gambleKnockbackSmoothMs;
         }
       }
     }
@@ -2122,6 +2169,9 @@ export class Editor {
         if (peg.type === 'multi') {
           pegData.multiballSpawnCount = normalizeMultiballSpawnCount(peg.multiballSpawnCount);
         }
+        if (peg.type === 'gamble') {
+          Object.assign(pegData, normalizeSurvivalGamblePegProperties(peg));
+        }
         const newPeg = this.levelManager.addPeg(pegData);
         if (newPeg) {
           newPegIds.add(newPeg.id);
@@ -2170,6 +2220,9 @@ export class Editor {
         }
         if (peg.type === 'multi') {
           pegData.multiballSpawnCount = normalizeMultiballSpawnCount(peg.multiballSpawnCount);
+        }
+        if (peg.type === 'gamble') {
+          Object.assign(pegData, normalizeSurvivalGamblePegProperties(peg));
         }
         const newPeg = this.levelManager.addPeg(pegData);
         if (newPeg) {
@@ -2275,6 +2328,12 @@ export class Editor {
     const wrapCopyPegIds = (this.animationPreview && this.animationPreviewAnimator)
       ? this.animationPreviewAnimator.getAnimatedPegIds()
       : null;
+    const hasPreviewLevelProgress = Number.isFinite(this.previewLevelProgress);
+    const previewLevelProgress = hasPreviewLevelProgress
+      ? Math.max(0, Math.min(1, this.previewLevelProgress))
+      : 0;
+    const trackerState = survivalOn ? this.survivalRuntime.getTrackerState() : null;
+    const cameraY = this.getCameraY();
 
     // Tick animation preview if active
     if (this.animationPreview && this.animationPreviewAnimator && level) {
@@ -2292,7 +2351,16 @@ export class Editor {
       selectedPegIds: this.selectedPegIds,
       ball: null,
       bucket: null,
-      cameraY: this.getCameraY(),
+      cameraY,
+      levelProgress: hasPreviewLevelProgress
+        ? previewLevelProgress
+        : (survivalOn ? (trackerState?.progressRatio ?? 0) : 0),
+      liquidWorldOffset: survivalOn ? (cameraY / Math.max(1, this.canvas.height)) : 0,
+      backgroundFxId: level ? `editor:${level.id}` : 'editor',
+      backgroundEvents: [],
+      playState: 'editor',
+      worldHeight: survivalOn ? this.survivalRuntime.getWorldHeight() : this.canvas.height,
+      survivalBackground: survivalOn ? this.survivalRuntime.getBackground() : null,
       showLauncher: false,
       showGrid: this.showGrid,
       selectionBox: this.selectionBox,
@@ -2326,7 +2394,9 @@ export class Editor {
       flippers: level ? level.flippers : null,
       flipperSelected: this.flipperSelected,
       survivalLoseLineY: survivalOn ? this.survivalRuntime.getLoseLineY() : null,
-      verticalProgress: survivalOn ? this.survivalRuntime.getTrackerState() : null
+      verticalProgress: survivalOn ? this.survivalRuntime.getTrackerState() : null,
+      ballTrailPreview: this.ballTrailPreview,
+      shockwavePreview: this.shockwavePreview
     });
   }
 
@@ -2451,6 +2521,16 @@ export class Editor {
     for (const pegId of this.selectedPegIds) {
       const peg = level.pegs.find(p => p.id === pegId);
       if (!peg || peg.type !== 'multi') return false;
+    }
+    return true;
+  }
+
+  isSelectionAllGamblePegs() {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level || this.selectedPegIds.size === 0) return false;
+    for (const pegId of this.selectedPegIds) {
+      const peg = level.pegs.find(p => p.id === pegId);
+      if (!peg || peg.type !== 'gamble') return false;
     }
     return true;
   }
@@ -2586,6 +2666,73 @@ export class Editor {
         return {
           spawnCount: normalizeMultiballSpawnCount(peg.multiballSpawnCount)
         };
+      }
+    }
+    return null;
+  }
+
+  setSelectedGambleBallCount(count) {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level) return;
+    const normalized = normalizeSurvivalGamblePegProperties({ gambleBallCount: count });
+    for (const pegId of this.selectedPegIds) {
+      const peg = level.pegs.find(p => p.id === pegId);
+      if (peg && peg.type === 'gamble') {
+        peg.gambleBallCount = normalized.gambleBallCount;
+      }
+    }
+    this.levelManager.save();
+  }
+
+  setSelectedGambleKnockbackEnabled(enabled) {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level) return;
+    for (const pegId of this.selectedPegIds) {
+      const peg = level.pegs.find(p => p.id === pegId);
+      if (peg && peg.type === 'gamble') {
+        const normalized = normalizeSurvivalGamblePegProperties(peg);
+        peg.gambleBallCount = normalized.gambleBallCount;
+        peg.gambleKnockbackDistance = normalized.gambleKnockbackDistance;
+        peg.gambleKnockbackSmoothMs = normalized.gambleKnockbackSmoothMs;
+        peg.gambleKnockbackEnabled = !!enabled;
+      }
+    }
+    this.levelManager.save();
+  }
+
+  setSelectedGambleKnockbackDistance(distance) {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level) return;
+    const normalized = normalizeSurvivalGamblePegProperties({ gambleKnockbackDistance: distance });
+    for (const pegId of this.selectedPegIds) {
+      const peg = level.pegs.find(p => p.id === pegId);
+      if (peg && peg.type === 'gamble') {
+        peg.gambleKnockbackDistance = normalized.gambleKnockbackDistance;
+      }
+    }
+    this.levelManager.save();
+  }
+
+  setSelectedGambleKnockbackSmoothMs(smoothMs) {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level) return;
+    const normalized = normalizeSurvivalGamblePegProperties({ gambleKnockbackSmoothMs: smoothMs });
+    for (const pegId of this.selectedPegIds) {
+      const peg = level.pegs.find(p => p.id === pegId);
+      if (peg && peg.type === 'gamble') {
+        peg.gambleKnockbackSmoothMs = normalized.gambleKnockbackSmoothMs;
+      }
+    }
+    this.levelManager.save();
+  }
+
+  getSelectedGamblePegProperties() {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level || this.selectedPegIds.size === 0) return null;
+    for (const pegId of this.selectedPegIds) {
+      const peg = level.pegs.find(p => p.id === pegId);
+      if (peg && peg.type === 'gamble') {
+        return normalizeSurvivalGamblePegProperties(peg);
       }
     }
     return null;

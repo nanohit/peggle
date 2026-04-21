@@ -10,7 +10,7 @@ const ARROW_UP_ASSET = 'visuals/arrow_up.webp';
 const ARROW_DOWN_ASSET = 'visuals/arrow_down.webp';
 const DEFAULT_ITEM_ASSET = 'visuals/assets_webtp/item_cirlce.webp';
 
-const PERK_DEFINITIONS = [
+export const PERK_DEFINITIONS = [
   {
     id: 'perk_multi',
     name: 'Tri Multi',
@@ -154,9 +154,10 @@ export class GambleSystem {
 
     this.lastSpinGrid = this.createInitialSpinGrid();
     this.lastWinningCells = new Set();
-    this.lastMessage = 'Shoot one ball to unlock Spin.';
+    this.lastMessage = 'Shoot to unlock Spin.';
     this.lastMessageType = 'info';
     this._reelAnimation = null;
+    this.eventListeners = new Set();
 
     this.ui = null;
     this.unsubscribeGameState = null;
@@ -189,6 +190,7 @@ export class GambleSystem {
 
   dispose() {
     this._cancelReelAnimation();
+    this.game?.setGambleOverlayOpen?.(false);
     if (this.unsubscribeGameState) {
       this.unsubscribeGameState();
       this.unsubscribeGameState = null;
@@ -209,6 +211,25 @@ export class GambleSystem {
     if (this.pegCountEl) this.pegCountEl.style.display = '';
     if (this.selectionCountEl) this.selectionCountEl.style.display = '';
     this.onLayoutChange?.();
+  }
+
+  subscribeEvents(listener) {
+    if (typeof listener !== 'function') return () => {};
+    this.eventListeners.add(listener);
+    return () => {
+      this.eventListeners.delete(listener);
+    };
+  }
+
+  emitEvent(type, payload = {}) {
+    if (this.eventListeners.size === 0) return;
+    for (const listener of this.eventListeners) {
+      try {
+        listener(type, payload);
+      } catch {
+        // Listener errors must never break gamble flow.
+      }
+    }
   }
 
   loadSettings() {
@@ -518,7 +539,7 @@ export class GambleSystem {
       root.appendChild(settingsPanel);
 
       ballCostControl = addNumberControl({
-        label: 'Ball Cost',
+        label: this.game?.isSurvivalMode?.() ? 'Spin Ball Cost' : 'Ball Cost',
         min: 1,
         max: 5,
         step: 1,
@@ -546,7 +567,9 @@ export class GambleSystem {
       const autoLuckRow = document.createElement('label');
       autoLuckRow.className = 'gamble-toggle-row';
       const autoLuckText = document.createElement('span');
-      autoLuckText.textContent = 'Auto Luck (less balls = more luck)';
+      autoLuckText.textContent = this.game?.isSurvivalMode?.()
+        ? 'Auto Luck (vertical progress = more luck)'
+        : 'Auto Luck (less balls = more luck)';
       autoLuckToggle = document.createElement('input');
       autoLuckToggle.type = 'checkbox';
       autoLuckToggle.checked = !!this.settings.autoLuckEnabled;
@@ -644,6 +667,7 @@ export class GambleSystem {
     this.ui.root.classList.toggle('expanded', next);
     this.ui.root.classList.toggle('collapsed', !next);
     this.ui.toggleButton.setAttribute('aria-expanded', next ? 'true' : 'false');
+    this.game?.setGambleOverlayOpen?.(next);
     if (!next && this.ui.settingsPanel) {
       this.ui.settingsPanel.classList.add('hidden');
     }
@@ -738,6 +762,11 @@ export class GambleSystem {
 
   getAutoLuck() {
     if (!this.settings.autoLuckEnabled) return 0;
+    const progressRatio = this.game?.getGambleAutoLuckRatio?.();
+    if (Number.isFinite(progressRatio)) {
+      return Math.round(Math.max(0, Math.min(1, progressRatio)) * this.settings.autoLuckMaxBonus);
+    }
+
     const startingBalls = this.game?.initialBallCount;
     const ballsLeft = this.game?.ballsLeft;
     if (!Number.isFinite(startingBalls) || startingBalls <= 0) return 0;
@@ -785,7 +814,8 @@ export class GambleSystem {
   spin() {
     if (this._reelAnimation) return;
     if (!this.canSpin()) {
-      this.setMessage('Cannot gamble while ball is in flight or balls are too low.', 'warn');
+      const currency = this.game?.isSurvivalMode?.() ? 'spin balls' : 'balls';
+      this.setMessage(`Cannot gamble while locked or ${currency} are too low.`, 'warn');
       this.refreshUi();
       return;
     }
@@ -801,6 +831,11 @@ export class GambleSystem {
     const luck = this.getEffectiveLuck();
     this.applyProbabilitySettings();
     const { grid, wins } = this.engine.spin(luck.total);
+    this.emitEvent('spin-start', {
+      ballCost: this.settings.ballCost,
+      luck,
+      wins
+    });
     this._animateReels(grid, wins, luck);
   }
 
@@ -1007,6 +1042,14 @@ export class GambleSystem {
     }
 
     this.refreshUi();
+    this.emitEvent('spin-resolved', {
+      finalGrid,
+      wins,
+      luck,
+      rewards,
+      jackpot,
+      rewardIds: Object.keys(rewards).filter(key => rewards[key] > 0)
+    });
   }
 
   resolveRewards(wins) {
@@ -1141,16 +1184,19 @@ export class GambleSystem {
     const interactionAllowed = this.canInteract();
     const spinUnlocked = !!this.game?.hasShotInCurrentLevel?.();
     const canSpin = this.canSpin();
+    const isSurvival = !!this.game?.isSurvivalMode?.();
+    const currencySingular = isSurvival ? 'spin ball' : 'ball';
+    const currencyPlural = isSurvival ? 'spin balls' : 'balls';
     this.ui.spinButton.style.display = spinUnlocked ? '' : 'none';
     this.ui.spinButton.disabled = !canSpin;
     this.ui.spinButton.textContent = 'Spin';
-    this.ui.spinButton.title = `Spin slots (-${this.settings.ballCost} ball)`;
+    this.ui.spinButton.title = `Spin slots (-${this.settings.ballCost} ${this.settings.ballCost === 1 ? currencySingular : currencyPlural})`;
     if (this.ui.autoLuckToggle) {
       this.ui.autoLuckToggle.checked = !!this.settings.autoLuckEnabled;
     }
 
     const luck = this.getEffectiveLuck();
-    this.ui.luckLabel.textContent = `Luck ${luck.total} (M${luck.manual} + A${luck.auto}) · Cost ${this.settings.ballCost}`;
+    this.ui.luckLabel.textContent = `Luck ${luck.total} (M${luck.manual} + A${luck.auto}) · Cost ${this.settings.ballCost} ${this.settings.ballCost === 1 ? currencySingular : currencyPlural}`;
 
     // Skip grid cell updates while reel animation is running
     if (!this._reelAnimation) {

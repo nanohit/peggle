@@ -1,6 +1,16 @@
 // Peggle Renderer - Canvas rendering for game and editor
 
 import { PHYSICS_CONFIG, getBallRadius } from './physics.js';
+import { LiquidBackground } from './liquid-background.js';
+import {
+  BallTrailRenderer,
+  normalizeBallTrailConfig,
+  normalizeTrailPerformanceProfile
+} from './ball-trail.js';
+import {
+  ShockwaveEffectRenderer,
+  normalizeShockwaveConfig
+} from './shockwave-effect.js';
 
 // Color palette
 const COLORS = {
@@ -29,6 +39,11 @@ const COLORS = {
   multi: '#ff4d9d',
   multiHit: '#ff7ab8',
   multiGlow: 'rgba(255, 77, 157, 0.5)',
+
+  // Survival spin currency
+  gamble: '#8cff00',
+  gambleHit: '#dfff8a',
+  gambleGlow: 'rgba(140, 255, 0, 0.55)',
   
   // Obstacle
   obstacle: '#6b7280',
@@ -86,16 +101,20 @@ const PEG_COLORS = {
   green: { main: COLORS.green, hit: COLORS.greenHit, glow: COLORS.greenGlow },
   purple: { main: COLORS.purple, hit: COLORS.purpleHit, glow: COLORS.purpleGlow },
   multi: { main: COLORS.multi, hit: COLORS.multiHit, glow: COLORS.multiGlow },
+  gamble: { main: COLORS.gamble, hit: COLORS.gambleHit, glow: COLORS.gambleGlow },
   obstacle: { main: COLORS.obstacle, hit: COLORS.obstacle, glow: COLORS.obstacleGlow },
   bumper: { main: COLORS.bumper, hit: COLORS.bumperHit, glow: COLORS.bumperGlow },
   portalBlue: { main: COLORS.portalBlue, hit: COLORS.portalBlue, glow: COLORS.portalBlueGlow },
   portalOrange: { main: COLORS.portalOrange, hit: COLORS.portalOrange, glow: COLORS.portalOrangeGlow }
 };
 
+const GLOW_CACHE_LIMIT = 128;
+
 export class Renderer {
   constructor(canvas) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
+    this.baseCtx = this.ctx;
     this.width = canvas.width;
     this.height = canvas.height;
 
@@ -112,9 +131,32 @@ export class Renderer {
 
     // Configurable background (set via setBackground)
     this.backgroundConfig = null;
-    this._bgCacheCanvas = null;
-    this._bgCacheDirty = true;
-    this._bgCacheKey = '';
+    this._bgBaseCanvas = null;
+    this._bgBaseDirty = true;
+    this._bgBaseKey = '';
+    this._bgOverlayCanvas = null;
+    this._bgOverlayDirty = true;
+    this._bgOverlayKey = '';
+    this._bgVignetteCanvas = null;
+    this._bgVignetteDirty = true;
+    this._bgVignetteKey = '';
+    this._bgImage = null;
+    this._bgImageSrc = '';
+    this._bgProgressImage = null;
+    this._bgProgressImageSrc = '';
+    this._bgBlendTarget = 0;
+    this._bgBlendDisplayed = 0;
+    this._liquidBackground = new LiquidBackground();
+    this._ballTrail = new BallTrailRenderer();
+    this.ballTrailConfig = normalizeBallTrailConfig(null);
+    this._shockwaveEffect = new ShockwaveEffectRenderer();
+    this.shockwaveConfig = normalizeShockwaveConfig(null);
+    this._shockwaveLayerCanvas = null;
+    this._foregroundCanvas = null;
+    this._foregroundCtx = null;
+    this.performanceProfile = 'balanced';
+    this._survivalBgImage = null;
+    this._survivalBgImageSrc = '';
 
     // Glow sprite cache: pre-rendered blur effects stamped via drawImage()
     // instead of per-frame ctx.shadowBlur (which is software-rasterized on
@@ -134,18 +176,43 @@ export class Renderer {
     this.canvas.width = width;
     this.canvas.height = height;
     this.launchX = width / 2;
-    this._bgCacheDirty = true;
+    this._bgBaseDirty = true;
+    this._bgOverlayDirty = true;
+    this._bgVignetteDirty = true;
+    this._syncRenderLayers();
   }
 
   // --- Glow sprite cache ---
   // Returns { img, half } for circle glows.
   // The img is an offscreen canvas with the blur pre-rendered once.
-  _circleGlow(color, radius, blur) {
-    const key = `c|${color}|${radius}|${blur}`;
-    let e = this._glowCache.get(key);
+  _touchGlowCache(key) {
+    const entry = this._glowCache.get(key);
+    if (!entry) return null;
+    this._glowCache.delete(key);
+    this._glowCache.set(key, entry);
+    return entry;
+  }
+
+  _storeGlowCache(key, entry) {
+    if (this._glowCache.has(key)) {
+      this._glowCache.delete(key);
+    }
+    this._glowCache.set(key, entry);
+    while (this._glowCache.size > GLOW_CACHE_LIMIT) {
+      const oldestKey = this._glowCache.keys().next().value;
+      if (oldestKey === undefined) break;
+      this._glowCache.delete(oldestKey);
+    }
+    return entry;
+  }
+
+  _circleGlow(color, radius, blur, keyStep = 0) {
+    const drawRadius = keyStep > 0 ? Math.round(radius / keyStep) * keyStep : radius;
+    const key = `c|${color}|${drawRadius}|${blur}|${keyStep}`;
+    let e = this._touchGlowCache(key);
     if (e) return e;
     const margin = Math.ceil(blur * 1.5) + 2;
-    const size = Math.ceil((radius + margin) * 2);
+    const size = Math.ceil((drawRadius + margin) * 2);
     const oc = document.createElement('canvas');
     oc.width = size; oc.height = size;
     const g = oc.getContext('2d');
@@ -154,11 +221,10 @@ export class Renderer {
     g.shadowBlur = blur;
     g.fillStyle = color;
     g.beginPath();
-    g.arc(c, c, radius, 0, Math.PI * 2);
+    g.arc(c, c, drawRadius, 0, Math.PI * 2);
     g.fill();
     e = { img: oc, half: c };
-    this._glowCache.set(key, e);
-    return e;
+    return this._storeGlowCache(key, e);
   }
 
   // Returns { img, hw, hh } for rect glows.
@@ -166,7 +232,7 @@ export class Renderer {
     const rw = Math.round(w);
     const rh = Math.round(h);
     const key = `r|${color}|${rw}|${rh}|${blur}|${cr || 0}`;
-    let e = this._glowCache.get(key);
+    let e = this._touchGlowCache(key);
     if (e) return e;
     const margin = Math.ceil(blur * 1.5) + 2;
     const cw = rw + margin * 2;
@@ -181,8 +247,7 @@ export class Renderer {
     g.roundRect((cw - rw) / 2, (ch - rh) / 2, rw, rh, cr || 0);
     g.fill();
     e = { img: oc, hw: cw / 2, hh: ch / 2 };
-    this._glowCache.set(key, e);
-    return e;
+    return this._storeGlowCache(key, e);
   }
 
   // Line glow for portals: thick blurred stroke cached as sprite.
@@ -190,7 +255,7 @@ export class Renderer {
     const hl = Math.round(halfLen);
     const lw = Math.round(lineWidth * 10) / 10;
     const key = `l|${color}|${hl}|${lw}|${blur}`;
-    let e = this._glowCache.get(key);
+    let e = this._touchGlowCache(key);
     if (e) return e;
     const margin = Math.ceil(blur * 1.5) + 2;
     const cw = Math.ceil(hl * 2 + margin * 2);
@@ -208,15 +273,14 @@ export class Renderer {
     g.lineTo(cw - margin, ch / 2);
     g.stroke();
     e = { img: oc, hw: cw / 2, hh: ch / 2 };
-    this._glowCache.set(key, e);
-    return e;
+    return this._storeGlowCache(key, e);
   }
 
   // Cached bumper body: ring + radial gradient + specular glare.
   _bumperBodySprite(r, ringColor, bodyColorOuter, bodyColorMid) {
     const rr = Math.round(r * 10) / 10;
     const key = `b|${rr}|${ringColor}|${bodyColorOuter}|${bodyColorMid}`;
-    let e = this._glowCache.get(key);
+    let e = this._touchGlowCache(key);
     if (e) return e;
     const pad = 2;
     const size = Math.ceil((rr + pad) * 2);
@@ -245,46 +309,213 @@ export class Renderer {
     g.fillStyle = 'rgba(255, 255, 255, 0.45)';
     g.fill();
     e = { img: oc, half: c };
-    this._glowCache.set(key, e);
-    return e;
+    return this._storeGlowCache(key, e);
   }
 
   setBackground(config) {
     this.backgroundConfig = config || null;
-    this._bgCacheDirty = true;
-    // Preload background image if type is 'image'
-    if (config?.type === 'image' && config.image) {
-      if (!this._bgImage || this._bgImageSrc !== config.image) {
-        this._bgImageSrc = config.image;
-        this._bgImage = null;
-        const img = new Image();
-        img.onload = () => { this._bgImage = img; this._bgCacheDirty = true; };
-        img.src = config.image;
-      }
+    this._glowCache.clear();
+    this._bgBaseDirty = true;
+    this._bgOverlayDirty = true;
+    this._bgVignetteDirty = true;
+    this._bgBlendTarget = 0;
+    this._bgBlendDisplayed = 0;
+    this._loadBackgroundAsset(config?.type === 'image' ? config.image : null, '_bgImage', '_bgImageSrc', '_bgBaseDirty');
+    this._loadBackgroundAsset(this._hasProgressionBackground(config) ? config.progressionImage : null, '_bgProgressImage', '_bgProgressImageSrc', '_bgOverlayDirty');
+    if (config?.type !== 'liquid') {
+      this._liquidBackground.reset();
     }
   }
 
-  _ensureBgCache() {
-    const bg = this.backgroundConfig;
-    const key = `${this.width}|${this.height}|${bg?.type}|${bg?.colorTop}|${bg?.colorBottom}|${bg?.image ? 1 : 0}|${bg?.mirrored ? 1 : 0}`;
-    if (!this._bgCacheDirty && this._bgCacheKey === key && this._bgCacheCanvas) return;
-
-    if (!this._bgCacheCanvas || this._bgCacheCanvas.width !== this.width || this._bgCacheCanvas.height !== this.height) {
-      this._bgCacheCanvas = document.createElement('canvas');
-      this._bgCacheCanvas.width = this.width;
-      this._bgCacheCanvas.height = this.height;
+  setBallTrail(config) {
+    this.ballTrailConfig = normalizeBallTrailConfig(config);
+    if (!this.ballTrailConfig.enabled) {
+      this._ballTrail.reset();
     }
-    const ctx = this._bgCacheCanvas.getContext('2d');
+  }
 
-    if (bg?.type === 'image' && this._bgImage) {
+  setShockwave(config) {
+    this.shockwaveConfig = normalizeShockwaveConfig(config);
+    this._shockwaveEffect.setConfig(this.shockwaveConfig);
+  }
+
+  setPerformanceProfile(profile) {
+    this.performanceProfile = normalizeTrailPerformanceProfile(profile);
+  }
+
+  _loadBackgroundAsset(src, imageProp, srcProp, dirtyProp) {
+    if (!src) {
+      this[srcProp] = '';
+      this[imageProp] = null;
+      this[dirtyProp] = true;
+      return;
+    }
+    if (this[srcProp] === src) return;
+
+    this[srcProp] = src;
+    this[imageProp] = null;
+    this[dirtyProp] = true;
+
+    const img = new Image();
+    img.onload = () => {
+      if (this[srcProp] !== src) return;
+      this[imageProp] = img;
+      this[dirtyProp] = true;
+    };
+    img.onerror = () => {
+      if (this[srcProp] !== src) return;
+      this[imageProp] = null;
+      this[dirtyProp] = true;
+    };
+    img.src = src;
+  }
+
+  _hasProgressionBackground(bg = this.backgroundConfig) {
+    return !!(bg && bg.type === 'image' && typeof bg.progressionImage === 'string' && bg.progressionImage);
+  }
+
+  _hasLiquidProgression(bg = this.backgroundConfig) {
+    if (!bg || bg.type !== 'liquid') return false;
+    const progression = bg.liquid?.progression;
+    if (!progression || typeof progression !== 'object') return false;
+    return Object.values(progression).some(value => value !== null && value !== undefined && value !== '');
+  }
+
+  _hasBallTrailProgression() {
+    return !!(this.ballTrailConfig?.enabled && this.ballTrailConfig.progression?.enabled);
+  }
+
+  _ensureBackgroundCanvas(prop) {
+    if (!this[prop] || this[prop].width !== this.width || this[prop].height !== this.height) {
+      this[prop] = document.createElement('canvas');
+      this[prop].width = this.width;
+      this[prop].height = this.height;
+    }
+    return this[prop];
+  }
+
+  _ensureRenderLayers() {
+    if (typeof document === 'undefined') return false;
+    const host = this.canvas.parentElement;
+    if (!host) return false;
+
+    if (typeof getComputedStyle === 'function' && getComputedStyle(host).position === 'static') {
+      host.style.position = 'relative';
+    }
+    this.canvas.style.position = this.canvas.style.position || 'relative';
+    this.canvas.style.zIndex = '1';
+
+    const shockwaveCanvas = this._shockwaveEffect.getCanvas();
+    if (shockwaveCanvas) {
+      const isNewShockwaveLayer = this._shockwaveLayerCanvas !== shockwaveCanvas;
+      this._shockwaveLayerCanvas = shockwaveCanvas;
+      if (isNewShockwaveLayer && !shockwaveCanvas.style.visibility) {
+        shockwaveCanvas.style.visibility = 'hidden';
+      }
+      if (shockwaveCanvas.parentElement !== host) {
+        host.appendChild(shockwaveCanvas);
+      }
+    }
+
+    if (!this._foregroundCanvas) {
+      this._foregroundCanvas = document.createElement('canvas');
+      this._foregroundCanvas.className = 'game-foreground-layer';
+      this._foregroundCanvas.setAttribute('aria-hidden', 'true');
+      this._foregroundCtx = this._foregroundCanvas.getContext('2d');
+    }
+    if (this._foregroundCanvas.parentElement !== host) {
+      host.appendChild(this._foregroundCanvas);
+    }
+
+    this._syncRenderLayers();
+    return !!this._foregroundCtx;
+  }
+
+  _displayCanvasSize() {
+    const rect = typeof this.canvas.getBoundingClientRect === 'function'
+      ? this.canvas.getBoundingClientRect()
+      : null;
+    const width = this.canvas.style.width
+      || `${Math.max(1, Math.round(rect?.width || this.canvas.width || this.width))}px`;
+    const height = this.canvas.style.height
+      || `${Math.max(1, Math.round(rect?.height || this.canvas.height || this.height))}px`;
+    return { width, height };
+  }
+
+  _syncLayerCanvas(canvas, zIndex, visible = true) {
+    if (!canvas) return;
+    if (canvas.width !== this.width) canvas.width = this.width;
+    if (canvas.height !== this.height) canvas.height = this.height;
+
+    const display = this._displayCanvasSize();
+    const baseTransform = this.canvas.style.transform || '';
+    const style = canvas.style;
+    style.position = 'absolute';
+    style.left = '50%';
+    style.top = '50%';
+    style.width = display.width;
+    style.height = display.height;
+    style.transform = `translate(-50%, -50%)${baseTransform ? ` ${baseTransform}` : ''}`;
+    style.transformOrigin = this.canvas.style.transformOrigin || 'center center';
+    style.transition = this.canvas.style.transition || '';
+    style.pointerEvents = 'none';
+    style.touchAction = 'none';
+    style.borderRadius = this.canvas.style.borderRadius || '4px';
+    style.boxShadow = 'none';
+    style.zIndex = String(zIndex);
+    style.display = 'block';
+    style.visibility = visible ? 'visible' : 'hidden';
+  }
+
+  _syncRenderLayers() {
+    if (this._shockwaveLayerCanvas) {
+      this._syncLayerCanvas(this._shockwaveLayerCanvas, 2, this._shockwaveLayerCanvas.style.visibility !== 'hidden');
+    }
+    if (this._foregroundCanvas) {
+      this._syncLayerCanvas(this._foregroundCanvas, 3, true);
+    }
+  }
+
+  _setShockwaveLayerVisible(visible) {
+    if (visible) {
+      this._ensureRenderLayers();
+      this._syncLayerCanvas(this._shockwaveLayerCanvas, 2, true);
+    } else if (this._shockwaveLayerCanvas) {
+      this._syncLayerCanvas(this._shockwaveLayerCanvas, 2, false);
+    }
+  }
+
+  _prepareForegroundLayer() {
+    if (!this._ensureRenderLayers() || !this._foregroundCtx) return null;
+    this._foregroundCtx.setTransform(1, 0, 0, 1, 0, 0);
+    this._foregroundCtx.clearRect(0, 0, this.width, this.height);
+    return this._foregroundCtx;
+  }
+
+  drawCompositeTo(targetCtx) {
+    if (!targetCtx) return false;
+    targetCtx.clearRect(0, 0, this.width, this.height);
+    targetCtx.drawImage(this.canvas, 0, 0);
+    // Keep this capture CPU-only; the WebGL shockwave layer is intentionally
+    // skipped so level transitions never force a GPU -> 2D readback.
+    if (this._foregroundCanvas) {
+      targetCtx.drawImage(this._foregroundCanvas, 0, 0);
+    }
+    return true;
+  }
+
+  _drawBackgroundLayer(ctx, bg, image) {
+    ctx.clearRect(0, 0, this.width, this.height);
+
+    if (bg?.type === 'image' && image) {
       if (bg.mirrored) {
         ctx.save();
         ctx.translate(this.width, 0);
         ctx.scale(-1, 1);
-        ctx.drawImage(this._bgImage, 0, 0, this.width, this.height);
+        ctx.drawImage(image, 0, 0, this.width, this.height);
         ctx.restore();
       } else {
-        ctx.drawImage(this._bgImage, 0, 0, this.width, this.height);
+        ctx.drawImage(image, 0, 0, this.width, this.height);
       }
     } else if (bg?.type === 'solid') {
       ctx.fillStyle = bg.colorTop || COLORS.backgroundGradientTop;
@@ -296,6 +527,51 @@ export class Renderer {
       ctx.fillStyle = gradient;
       ctx.fillRect(0, 0, this.width, this.height);
     }
+  }
+
+  _ensureBgBaseCache() {
+    const bg = this.backgroundConfig;
+    const key = `${this.width}|${this.height}|${bg?.type}|${bg?.colorTop}|${bg?.colorBottom}|${bg?.image || ''}|${bg?.mirrored ? 1 : 0}`;
+    if (!this._bgBaseDirty && this._bgBaseKey === key && this._bgBaseCanvas) return;
+
+    const canvas = this._ensureBackgroundCanvas('_bgBaseCanvas');
+    const ctx = canvas.getContext('2d');
+    this._drawBackgroundLayer(ctx, bg, this._bgImage);
+    this._bgBaseKey = key;
+    this._bgBaseDirty = false;
+  }
+
+  _ensureBgOverlayCache() {
+    const bg = this.backgroundConfig;
+    const hasProgression = this._hasProgressionBackground(bg);
+    const key = `${this.width}|${this.height}|${hasProgression ? (bg.progressionImage || '') : ''}|${bg?.mirrored ? 1 : 0}`;
+    if (!this._bgOverlayDirty && this._bgOverlayKey === key && this._bgOverlayCanvas) return;
+
+    const canvas = this._ensureBackgroundCanvas('_bgOverlayCanvas');
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, this.width, this.height);
+    if (hasProgression && this._bgProgressImage) {
+      if (bg.mirrored) {
+        ctx.save();
+        ctx.translate(this.width, 0);
+        ctx.scale(-1, 1);
+        ctx.drawImage(this._bgProgressImage, 0, 0, this.width, this.height);
+        ctx.restore();
+      } else {
+        ctx.drawImage(this._bgProgressImage, 0, 0, this.width, this.height);
+      }
+    }
+    this._bgOverlayKey = key;
+    this._bgOverlayDirty = false;
+  }
+
+  _ensureBgVignetteCache() {
+    const key = `${this.width}|${this.height}`;
+    if (!this._bgVignetteDirty && this._bgVignetteKey === key && this._bgVignetteCanvas) return;
+
+    const canvas = this._ensureBackgroundCanvas('_bgVignetteCanvas');
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, this.width, this.height);
 
     // Strong edge vignette — dark fade from frame into game area
     const edgeV = 50;
@@ -326,13 +602,111 @@ export class Renderer {
     ctx.fillStyle = rightFade;
     ctx.fillRect(this.width - edgeH, 0, edgeH, this.height);
 
-    this._bgCacheKey = key;
-    this._bgCacheDirty = false;
+    this._bgVignetteKey = key;
+    this._bgVignetteDirty = false;
   }
 
-  clear() {
-    this._ensureBgCache();
-    this.ctx.drawImage(this._bgCacheCanvas, 0, 0);
+  _clamp01(value) {
+    return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
+  }
+
+  _smoothstep01(value) {
+    const t = this._clamp01(value);
+    return t * t * (3 - 2 * t);
+  }
+
+  _updateBackgroundBlend(progressRatio) {
+    const hasProgression = this._hasProgressionBackground()
+      || this._hasLiquidProgression()
+      || this._hasBallTrailProgression();
+    this._bgBlendTarget = hasProgression ? this._smoothstep01(progressRatio) : 0;
+    const delta = this._bgBlendTarget - this._bgBlendDisplayed;
+    if (Math.abs(delta) < 0.001) {
+      this._bgBlendDisplayed = this._bgBlendTarget;
+      return this._bgBlendDisplayed;
+    }
+    this._bgBlendDisplayed += delta * 0.12;
+    return this._bgBlendDisplayed;
+  }
+
+  clear(progressRatio = 0, reactiveState = null) {
+    this._ensureBgVignetteCache();
+    const progressionBlend = this._updateBackgroundBlend(progressRatio);
+
+    if (this.backgroundConfig?.type === 'liquid') {
+      this._liquidBackground.render(this.ctx, this.backgroundConfig, reactiveState, progressionBlend);
+      if (this._bgVignetteCanvas) {
+        this.ctx.drawImage(this._bgVignetteCanvas, 0, 0);
+      }
+      return;
+    }
+
+    this._ensureBgBaseCache();
+    this._ensureBgOverlayCache();
+
+    this.ctx.drawImage(this._bgBaseCanvas, 0, 0);
+
+    const overlayAlpha = progressionBlend;
+    if (overlayAlpha > 0.001 && this._bgOverlayCanvas) {
+      this.ctx.save();
+      this.ctx.globalAlpha = overlayAlpha;
+      this.ctx.drawImage(this._bgOverlayCanvas, 0, 0);
+      this.ctx.restore();
+    }
+
+    if (this._bgVignetteCanvas) {
+      this.ctx.drawImage(this._bgVignetteCanvas, 0, 0);
+    }
+  }
+
+  _getSurvivalBackgroundImage(src) {
+    if (!src || typeof src !== 'string') return null;
+    if (this._survivalBgImageSrc === src && this._survivalBgImage) {
+      return this._survivalBgImage;
+    }
+
+    const img = new Image();
+    this._survivalBgImageSrc = src;
+    this._survivalBgImage = img;
+    img.onerror = () => {
+      if (this._survivalBgImageSrc !== src) return;
+      this._survivalBgImage = null;
+      this._survivalBgImageSrc = '';
+    };
+    img.src = src;
+    return img;
+  }
+
+  drawSurvivalBackground(background, cameraY = 0, worldHeight = this.height) {
+    if (!background || background.type !== 'image' || !background.image) return false;
+    const image = this._getSurvivalBackgroundImage(background.image);
+    if (!image || !image.complete || image.naturalWidth <= 0 || image.naturalHeight <= 0) return false;
+
+    const ctx = this.ctx;
+    const destW = this.width;
+    const destH = Math.max(this.height, Math.round(Number(worldHeight) || this.height));
+    const fit = background.fit === 'contain' || background.fit === 'stretch'
+      ? background.fit
+      : 'cover';
+
+    ctx.save();
+    ctx.translate(0, -cameraY);
+    if (fit === 'stretch') {
+      ctx.drawImage(image, 0, 0, destW, destH);
+      ctx.restore();
+      return true;
+    }
+
+    const scale = fit === 'contain'
+      ? Math.min(destW / image.naturalWidth, destH / image.naturalHeight)
+      : Math.max(destW / image.naturalWidth, destH / image.naturalHeight);
+    const drawW = image.naturalWidth * scale;
+    const drawH = image.naturalHeight * scale;
+    const drawX = (destW - drawW) / 2;
+    const drawY = (destH - drawH) / 2;
+    ctx.drawImage(image, drawX, drawY, drawW, drawH);
+    ctx.restore();
+    return true;
   }
 
   drawGrid(cameraY = 0) {
@@ -434,7 +808,7 @@ export class Renderer {
       if (peg._bumperHitScale && peg._bumperHitScale > 1.01) {
         const pulseAlpha = Math.min(1, (peg._bumperHitScale - 1) * 5);
         ctx.globalAlpha = pulseAlpha;
-        const flashGlow = this._circleGlow('#ffffff', r, 30);
+        const flashGlow = this._circleGlow('#ffffff', r, 30, 0.5);
         ctx.drawImage(flashGlow.img, -flashGlow.half, -flashGlow.half);
         ctx.beginPath();
         ctx.arc(0, 0, r, 0, Math.PI * 2);
@@ -564,8 +938,60 @@ export class Renderer {
       // Draw circle peg
       ctx.beginPath();
       ctx.arc(0, 0, radius, 0, Math.PI * 2);
-      ctx.fillStyle = isHit ? colors.hit : (peg.color || colors.main);
+      if (peg.type === 'gamble' && !isHit) {
+        const edgeColor = peg.color || colors.main;
+        const gradient = ctx.createRadialGradient(
+          -radius * 0.25,
+          -radius * 0.28,
+          radius * 0.08,
+          0,
+          0,
+          radius
+        );
+        gradient.addColorStop(0, '#ffffff');
+        gradient.addColorStop(0.36, '#fbfff4');
+        gradient.addColorStop(0.72, edgeColor);
+        gradient.addColorStop(1, edgeColor);
+        ctx.fillStyle = gradient;
+      } else {
+        ctx.fillStyle = isHit ? colors.hit : (peg.color || colors.main);
+      }
       ctx.fill();
+
+      if (peg.type === 'gamble' && peg.gambleKnockbackEnabled && !isHit) {
+        const arrowColor = '#FF00B2';
+        const arrowGlow = 'rgba(255, 0, 178, 0.52)';
+        const arrowWidth = Math.max(2.6, radius * 0.32);
+        const shaftTop = -radius * 0.56;
+        const tipY = radius * 0.55;
+        const shoulderY = radius * 0.12;
+        const shoulderX = radius * 0.42;
+
+        ctx.save();
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+
+        ctx.beginPath();
+        ctx.moveTo(0, shaftTop);
+        ctx.lineTo(0, tipY);
+        ctx.lineTo(-shoulderX, shoulderY);
+        ctx.moveTo(0, tipY);
+        ctx.lineTo(shoulderX, shoulderY);
+        ctx.strokeStyle = arrowGlow;
+        ctx.lineWidth = arrowWidth * 2.2;
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(0, shaftTop);
+        ctx.lineTo(0, tipY);
+        ctx.lineTo(-shoulderX, shoulderY);
+        ctx.moveTo(0, tipY);
+        ctx.lineTo(shoulderX, shoulderY);
+        ctx.strokeStyle = arrowColor;
+        ctx.lineWidth = arrowWidth;
+        ctx.stroke();
+        ctx.restore();
+      }
     }
 
     // Selection indicator
@@ -673,26 +1099,30 @@ export class Renderer {
     if (!ball) return;
 
     const ctx = this.ctx;
+    const spawnT = ball.active ? 1 : Math.max(0, Math.min(1, Number.isFinite(ball.launcherSpawnAnim) ? ball.launcherSpawnAnim : 1));
+    const spawnScale = ball.active ? 1 : (0.22 + (1 - Math.pow(1 - spawnT, 3)) * 0.78);
+    const radius = ball.radius * spawnScale;
 
     // Ball glow (cached sprite)
-    const bg = this._circleGlow(COLORS.ballGlow, ball.radius, 15);
+    const bg = this._circleGlow(COLORS.ballGlow, radius, 15);
     ctx.drawImage(bg.img, ball.x - bg.half, ball.y - bg.half);
 
     // Ball body
     ctx.beginPath();
-    ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+    ctx.arc(ball.x, ball.y, radius, 0, Math.PI * 2);
     ctx.fillStyle = COLORS.ball;
     ctx.fill();
 
     // Highlight
     ctx.beginPath();
-    ctx.arc(ball.x - ball.radius * 0.25, ball.y - ball.radius * 0.25, ball.radius * 0.35, 0, Math.PI * 2);
+    ctx.arc(ball.x - radius * 0.25, ball.y - radius * 0.25, radius * 0.35, 0, Math.PI * 2);
     ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
     ctx.fill();
   }
 
-  drawLauncher(x, y, angle, showAim = true) {
+  drawLauncher(x, y, angle, showAim = true, ballScale = 1) {
     const ctx = this.ctx;
+    const previewRadius = getBallRadius() * Math.max(0.2, Math.min(1, Number.isFinite(ballScale) ? ballScale : 1));
     
     // Launcher base
     ctx.fillStyle = COLORS.launcher;
@@ -703,7 +1133,7 @@ export class Renderer {
     // Ball preview in launcher
     ctx.fillStyle = COLORS.ball;
     ctx.beginPath();
-    ctx.arc(x, y, getBallRadius(), 0, Math.PI * 2);
+    ctx.arc(x, y, previewRadius, 0, Math.PI * 2);
     ctx.fill();
 
     // Direction indicator
@@ -885,17 +1315,82 @@ export class Renderer {
     }
   }
 
-  drawBucket(bucket) {
+  drawBucket(bucket, flash = 0) {
     const ctx = this.ctx;
     const { x, y, width, height } = bucket;
+    const intensity = Math.max(0, Math.min(1, flash || 0));
+    const hasBucketAsset = Boolean(this._bucketImg);
+    let drawX = x - width / 2;
+    let drawY = y - height / 2;
+    let drawW = width;
+    let drawH = height;
 
-    if (this._bucketImg) {
+    if (hasBucketAsset) {
+      const imgAspect = this._bucketImg.width / this._bucketImg.height;
+      drawW = width;
+      drawH = drawW / imgAspect;
+      drawX = x - drawW / 2;
+      drawY = y + height / 2 - drawH;
+    }
+
+    const mouthY = hasBucketAsset ? (drawY + drawH * 0.72) : (y - height / 2 + 5);
+    const mouthHalfW = hasBucketAsset ? (drawW * 0.43) : (width * 0.3);
+    const flareHeight = hasBucketAsset
+      ? (drawH * (0.44 + intensity * 0.62))
+      : (height * (0.92 + intensity * 1.08));
+    const flareTopY = mouthY - flareHeight;
+    const flareTopHalfW = hasBucketAsset
+      ? (drawW * (0.5 + intensity * 0.05))
+      : (mouthHalfW * (1.18 + intensity * 0.12));
+    const bowlGlowRadiusX = hasBucketAsset ? (drawW * 0.44) : (width * 0.34);
+    const bowlGlowRadiusY = hasBucketAsset ? (drawH * 0.24) : (height * 0.18);
+    const rimRadiusX = hasBucketAsset ? (drawW * 0.42) : (width * 0.28);
+    const rimRadiusY = hasBucketAsset ? (drawH * 0.12) : (height * 0.1);
+
+    if (intensity > 0.001) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'screen';
+
+      const beamGradient = ctx.createLinearGradient(x, flareTopY, x, mouthY + drawH * 0.08);
+      beamGradient.addColorStop(0, 'rgba(255,255,255,0)');
+      beamGradient.addColorStop(0.42, `rgba(255,255,255,${0.05 + intensity * 0.08})`);
+      beamGradient.addColorStop(0.82, `rgba(255,255,255,${0.12 + intensity * 0.13})`);
+      beamGradient.addColorStop(1, `rgba(255,255,255,${0.18 + intensity * 0.16})`);
+      ctx.fillStyle = beamGradient;
+      ctx.beginPath();
+      ctx.moveTo(x - mouthHalfW, mouthY + 0.5);
+      ctx.quadraticCurveTo(
+        x - mouthHalfW * 0.98,
+        mouthY - flareHeight * 0.28,
+        x - flareTopHalfW,
+        flareTopY
+      );
+      ctx.lineTo(x + flareTopHalfW, flareTopY);
+      ctx.quadraticCurveTo(
+        x + mouthHalfW * 0.98,
+        mouthY - flareHeight * 0.28,
+        x + mouthHalfW,
+        mouthY + 0.5
+      );
+      ctx.closePath();
+      ctx.fill();
+
+      const bowlGlowY = mouthY + (hasBucketAsset ? drawH * 0.14 : 1);
+      const bowlGlow = ctx.createRadialGradient(x, bowlGlowY, 1, x, bowlGlowY, bowlGlowRadiusX);
+      bowlGlow.addColorStop(0, `rgba(255,255,255,${0.18 + intensity * 0.16})`);
+      bowlGlow.addColorStop(0.58, `rgba(255,255,255,${0.06 + intensity * 0.06})`);
+      bowlGlow.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = bowlGlow;
+      ctx.beginPath();
+      ctx.ellipse(x, bowlGlowY, bowlGlowRadiusX, bowlGlowRadiusY, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    if (hasBucketAsset) {
       // Draw the bucket.webp asset, scaled to fit the bucket bounds
       // Image is wider than tall — use width as primary, derive height from aspect ratio
-      const imgAspect = this._bucketImg.width / this._bucketImg.height;
-      const drawW = width;
-      const drawH = drawW / imgAspect;
-      ctx.drawImage(this._bucketImg, x - drawW / 2, y + height / 2 - drawH, drawW, drawH);
+      ctx.drawImage(this._bucketImg, drawX, drawY, drawW, drawH);
     } else {
       // Fallback: original trapezoid shape
       ctx.fillStyle = COLORS.bucket;
@@ -914,6 +1409,17 @@ export class Renderer {
       ctx.lineTo(x + width / 2 - 4, y - height / 2 + 4);
       ctx.closePath();
       ctx.fill();
+    }
+
+    if (intensity > 0.001 && !hasBucketAsset) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'screen';
+      ctx.strokeStyle = `rgba(255,255,255,${0.18 + intensity * 0.32})`;
+      ctx.lineWidth = hasBucketAsset ? (0.85 + intensity * 1.1) : (1.25 + intensity * 1.75);
+      ctx.beginPath();
+      ctx.ellipse(x, mouthY + 0.8, rimRadiusX, rimRadiusY, 0, Math.PI, 0, true);
+      ctx.stroke();
+      ctx.restore();
     }
   }
 
@@ -1542,9 +2048,21 @@ export class Renderer {
 
   // Render full game frame
   renderGame(state) {
-    this.clear();
+    const baseCtx = this.baseCtx || this.canvas.getContext('2d');
+    this.ctx = baseCtx;
+
+    const shockwaveActive = this._shockwaveEffect.syncEvents(state.backgroundEvents, {
+      preview: !!state.shockwavePreview,
+      width: this.width,
+      height: this.height
+    });
+    this.clear(state.levelProgress, state);
     
     const cameraY = Number.isFinite(state.cameraY) ? state.cameraY : 0;
+    const drewSurvivalBackground = this.drawSurvivalBackground(state.survivalBackground, cameraY, state.worldHeight);
+    if (drewSurvivalBackground && this._bgVignetteCanvas) {
+      this.ctx.drawImage(this._bgVignetteCanvas, 0, 0);
+    }
 
     if (state.showGrid) {
       this.showGrid = true;
@@ -1582,6 +2100,47 @@ export class Renderer {
     if (state.yoyoThreads) {
       this.drawYoyoThreads(state.yoyoThreads);
     }
+
+    if (useCamera) {
+      this.ctx.restore();
+    }
+
+    if (shockwaveActive) {
+      const waveCanvas = this._shockwaveEffect.renderToCanvas(this.canvas, {
+        cameraY,
+        width: this.width,
+        height: this.height,
+        profile: this.performanceProfile,
+        preview: !!state.shockwavePreview,
+        skipPrune: true
+      });
+      this._setShockwaveLayerVisible(!!waveCanvas);
+    } else {
+      this._setShockwaveLayerVisible(false);
+    }
+
+    const sceneCtx = this.ctx;
+    const foregroundCtx = this._prepareForegroundLayer();
+    this.ctx = foregroundCtx || sceneCtx;
+    if (!foregroundCtx) {
+      this._setShockwaveLayerVisible(false);
+    }
+
+    if (useCamera) {
+      this.ctx.save();
+      this.ctx.translate(0, -cameraY);
+    }
+
+    const ballTrailPreviewBall = this._ballTrail.render(
+      this.ctx,
+      this.ballTrailConfig,
+      state,
+      this._bgBlendDisplayed,
+      this.width,
+      this.height,
+      getBallRadius(),
+      this.performanceProfile
+    );
     
     if (state.balls) {
       this.drawBalls(state.balls);
@@ -1589,12 +2148,16 @@ export class Renderer {
       this.drawBall(state.ball);
     }
 
+    if (ballTrailPreviewBall) {
+      this.drawBall(ballTrailPreviewBall);
+    }
+
     if (state.showQteAim) {
       this.drawAimReticle(state.qteAimX, state.qteAimY, state.qteAimAngle);
     }
 
     if (state.bucket) {
-      this.drawBucket(state.bucket);
+      this.drawBucket(state.bucket, state.bucketFlash);
     }
 
     if (state.flippers) {
@@ -1602,7 +2165,7 @@ export class Renderer {
     }
 
     if (state.showLauncher) {
-      this.drawLauncher(state.launchX, state.launchY, state.aimAngle, state.showAim);
+      this.drawLauncher(state.launchX, state.launchY, state.aimAngle, state.showAim, state.launcherBallScale);
     }
 
     if (state.selectionBox) {
@@ -1670,5 +2233,7 @@ export class Renderer {
     if (state.isEditor) {
       this.drawEditorHUD(state.pegs.length, state.selectedPegIds?.size || 0, state.drawMode, state.drawShapeMode);
     }
+
+    this.ctx = sceneCtx;
   }
 }

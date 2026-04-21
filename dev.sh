@@ -48,8 +48,35 @@ cleanup() {
 trap cleanup EXIT
 echo ""
 
-# Open browser after a short delay
-(sleep 0.4 && open "$URL") &
+# Open Firefox in a new private window after a short delay.
+# Calling the app binary is more reliable than `open -a ... --args` when
+# Firefox is already running, because macOS can drop launch args for live apps.
+open_dev_browser() {
+  local firefox_bin=""
+  for candidate in \
+    "/Applications/Firefox.app/Contents/MacOS/firefox" \
+    "$HOME/Applications/Firefox.app/Contents/MacOS/firefox"
+  do
+    if [ -x "$candidate" ]; then
+      firefox_bin="$candidate"
+      break
+    fi
+  done
+
+  if [ -n "$firefox_bin" ]; then
+    "$firefox_bin" -private-window "$URL" >/dev/null 2>&1 &
+    return
+  fi
+
+  if open -Ra "Firefox" 2>/dev/null; then
+    open -a "Firefox" --args -private-window "$URL" >/dev/null 2>&1 && return
+    open -a "Firefox" "$URL" >/dev/null 2>&1 && return
+  fi
+
+  open "$URL"
+}
+
+(sleep 0.4 && open_dev_browser) &
 
 # Custom handler: serve editor.html for /, proxy /api/* to Vercel
 python3 -c "

@@ -15,8 +15,15 @@ import {
 } from './multiball-settings.js';
 import {
   countSurvivalTargets,
-  ensureLevelSurvival
+  ensureLevelSurvival,
+  getPegVerticalExtent,
+  isPegRemovableInSurvival,
+  normalizeSurvivalGamblePegProperties
 } from './survival-mode.js';
+import {
+  normalizeHitPegClearDelayMs,
+  normalizeLevelHitPegClearSettings
+} from './hit-peg-clear-settings.js';
 import { lightTap, initAudio, pegHitSound, resetHitCounter } from './haptics.js';
 
 // Score values
@@ -26,6 +33,7 @@ const SCORE = {
   green: 50,
   purple: 500,
   multi: 50,
+  gamble: 50,
   multiplier: {
     25: 1,
     20: 2,
@@ -39,6 +47,34 @@ const SCORE = {
 const ULTRA_AIM_V2_ROTATION_SECONDS = 2.8;
 const ULTRA_AIM_V2_MAX_ROTATIONS = 4;
 const ULTRA_AIM_V2_START_ANGLE = -Math.PI / 2;
+const PERFORMANCE_CAP30_WINDOW_MS = 2800;
+const PERFORMANCE_CAP30_MIN_WINDOW_MS = 1800;
+const PERFORMANCE_CAP30_MIN_SAMPLE_COUNT = 45;
+const PERFORMANCE_CAP30_FRAME_MIN_MS = 31;
+const PERFORMANCE_CAP30_FRAME_MAX_MS = 36.8;
+const PERFORMANCE_CAP30_STABILITY_SPAN_MS = 4.5;
+const PERFORMANCE_CAP30_MAX_WORK_MS = 18;
+const PERFORMANCE_CAP30_MAX_WORK_RATIO = 0.68;
+const SURVIVAL_GAMBLE_BALLS_PER_PEG = 2;
+
+function average(values) {
+  if (!Array.isArray(values) || values.length === 0) return 0;
+  let total = 0;
+  for (const value of values) total += value;
+  return total / values.length;
+}
+
+function percentileFromSorted(values, percentile) {
+  if (!Array.isArray(values) || values.length === 0) return 0;
+  if (values.length === 1) return values[0];
+  const clamped = Math.max(0, Math.min(1, percentile));
+  const index = (values.length - 1) * clamped;
+  const lower = Math.floor(index);
+  const upper = Math.ceil(index);
+  if (lower === upper) return values[lower];
+  const t = index - lower;
+  return values[lower] + (values[upper] - values[lower]) * t;
+}
 
 function getSimHzOverride() {
   if (typeof window === 'undefined') return null;
@@ -75,8 +111,21 @@ export class Game {
     this.shotsFired = 0;
     this.totalSurvivalTargets = 0;
     this.initialBallCount = 10;
+    this.gambleBalls = 0;
+    this.initialGambleBallCount = 0;
+    this.survivalAntiCooldownMs = 0;
+    this.survivalShotCooldownRemainingMs = 0;
+    this.survivalGambleOverlayOpen = false;
+    this.survivalEscapedPegIds = new Set();
+    this.hitPegTimedClearEnabled = false;
+    this.hitPegClearDelayMs = normalizeHitPegClearDelayMs(undefined);
+    this.pendingHitPegClears = new Map();
+    this.levelElapsedMs = 0;
     this.initialOrangePegs = 0;
     this.removedOrangePegs = 0;
+    this.bucketCatchLight = 0;
+    this.levelFxId = 0;
+    this.backgroundEvents = [];
 
     // Flippers
     this.flippers = null;
@@ -145,7 +194,10 @@ export class Game {
     this.onScoreChange = null;
     this.onPegHit = null;
     this.uiStateListeners = new Set();
+    this.performanceEventListeners = new Set();
     this.lastUiStateSignature = '';
+    this._performanceCap30Samples = [];
+    this._performanceCap30Emitted = false;
     
     // Listener cleanup
     this.abortController = new AbortController();
@@ -320,10 +372,18 @@ export class Game {
     const orangeLeft = survivalMode
       ? this.getSurvivalTargetsLeft(true)
       : Math.max(0, this.initialOrangePegs - this.removedOrangePegs - currentTurnOrangeHits);
+    const waitingForFirstGambleReward = survivalMode && this.initialGambleBallCount <= 0 && this.gambleBalls <= 0;
+    const displayBallsLeft = survivalMode
+      ? (waitingForFirstGambleReward ? Number.POSITIVE_INFINITY : this.gambleBalls)
+      : this.ballsLeft;
+    const displayInitialBalls = survivalMode
+      ? (waitingForFirstGambleReward ? 0 : Math.max(this.initialGambleBallCount, this.gambleBalls, 0))
+      : this.initialBallCount;
     return {
       state: this.state,
-      ballsLeft: this.ballsLeft,
-      initialBallCount: this.initialBallCount,
+      ballsLeft: displayBallsLeft,
+      initialBallCount: displayInitialBalls,
+      gambleBalls: this.gambleBalls,
       showFullTrajectory: !!this.showFullTrajectory,
       orangePegsLeft: orangeLeft,
       totalOrangePegs: survivalMode ? this.totalSurvivalTargets : this.initialOrangePegs,
@@ -344,6 +404,14 @@ export class Game {
     };
   }
 
+  subscribePerformanceEvents(listener) {
+    if (typeof listener !== 'function') return () => {};
+    this.performanceEventListeners.add(listener);
+    return () => {
+      this.performanceEventListeners.delete(listener);
+    };
+  }
+
   emitUiStateIfChanged(force = false, reason = 'tick') {
     const signature = this.getUiStateSignature();
     if (!force && signature === this.lastUiStateSignature) return;
@@ -354,6 +422,17 @@ export class Game {
     for (const listener of this.uiStateListeners) {
       try {
         listener(snapshot, reason);
+      } catch (error) {
+        // Listener errors must not break the game loop.
+      }
+    }
+  }
+
+  emitPerformanceEvent(type, payload = {}) {
+    if (!type || this.performanceEventListeners.size === 0) return;
+    for (const listener of this.performanceEventListeners) {
+      try {
+        listener(type, payload);
       } catch (error) {
         // Listener errors must not break the game loop.
       }
@@ -794,6 +873,13 @@ export class Game {
     return this.survivalRuntime.getCameraY();
   }
 
+  syncPhysicsViewportBounds(height = this.canvas.height) {
+    const viewportHeight = Math.max(0, Number(height) || this.canvas.height || 0);
+    const cameraY = this.isSurvivalMode() ? this.getCameraY() : 0;
+    this.physics.setBallTopY?.(Math.min(0, cameraY));
+    this.physics.setBallLossY(cameraY + viewportHeight + 50);
+  }
+
   updateLaunchPosition() {
     this.launchX = this.canvas.width / 2;
     this.launchY = 40 + this.getCameraY();
@@ -1148,11 +1234,22 @@ export class Game {
 
   detonateBombShockwave(sourceBall, sourcePeg) {
     const shockwave = buildBombShockwave(this.pegs, sourceBall, sourcePeg);
+    this.queueBackgroundEvent({
+      kind: 'bombSplash',
+      x: Number.isFinite(shockwave.centerX) ? shockwave.centerX : (sourcePeg?.x ?? sourceBall?.x ?? this.canvas.width / 2),
+      y: Number.isFinite(shockwave.centerY) ? shockwave.centerY : (sourcePeg?.y ?? sourceBall?.y ?? this.canvas.height / 2),
+      radius: Math.max(84, Number.isFinite(shockwave.radius) ? shockwave.radius * 0.95 : 120),
+      strength: 2.8,
+      burst: 2.3,
+      swirl: 1.15,
+      spread: 3.2
+    });
     if (!Array.isArray(shockwave.targets) || shockwave.targets.length === 0) return 0;
 
     let activatedCount = 0;
     for (const peg of shockwave.targets) {
       if (this.activatePeg(peg, sourceBall, { allowMultiball: true })) {
+        this.queueBombTargetShockwave(peg, sourceBall);
         activatedCount++;
       }
     }
@@ -1212,9 +1309,28 @@ export class Game {
     return new Set([...this.hitPegIds, ...this.turnHitPegIds]);
   }
 
+  getSurvivalTargetExclusionSet(includePendingHits = true) {
+    const excluded = new Set(this.survivalEscapedPegIds || []);
+    if (includePendingHits) {
+      for (const id of this.hitPegIds) excluded.add(id);
+      for (const id of this.turnHitPegIds) excluded.add(id);
+    }
+    return excluded;
+  }
+
+  syncPhysicsHitPegState() {
+    if (!this.physics?.hitPegs) return;
+    this.physics.hitPegs.clear();
+    for (const id of this.hitPegIds) this.physics.hitPegs.add(id);
+    for (const id of this.turnHitPegIds) this.physics.hitPegs.add(id);
+    if (this.survivalEscapedPegIds) {
+      for (const id of this.survivalEscapedPegIds) this.physics.hitPegs.add(id);
+    }
+  }
+
   getSurvivalTargetsLeft(includePendingHits = true) {
     if (!this.isSurvivalMode()) return this.getOrangePegsLeft();
-    const excluded = includePendingHits ? this.getActiveHitPegIdSet() : null;
+    const excluded = this.getSurvivalTargetExclusionSet(includePendingHits);
     return countSurvivalTargets(this.pegs, excluded);
   }
 
@@ -1223,9 +1339,19 @@ export class Game {
     if (this.state === 'won' || this.state === 'lost') return true;
 
     const hitSet = this.getActiveHitPegIdSet();
+    let escapedChanged = false;
     for (const peg of this.pegs) {
       if (hitSet.has(peg.id)) continue;
+      if (this.survivalEscapedPegIds.has(peg.id)) continue;
       if (this.survivalRuntime.isPegBeyondLoseLine(peg, PHYSICS_CONFIG.pegRadius)) {
+        if (!this.isOrangePeg(peg)) {
+          if (isPegRemovableInSurvival(peg)) {
+            this.survivalEscapedPegIds.add(peg.id);
+            this.physics?.hitPegs?.add?.(peg.id);
+            escapedChanged = true;
+          }
+          continue;
+        }
         this.state = 'lost';
         this.finishDeepFreezeShot();
         this.resetUltraAimRuntime();
@@ -1233,6 +1359,10 @@ export class Game {
         return true;
       }
     }
+    if (escapedChanged) {
+      this.emitUiStateIfChanged(true, 'survival-pegs-escaped');
+    }
+    this.pruneEscapedSurvivalPegs();
 
     if (this.getSurvivalTargetsLeft(true) === 0) {
       this.state = 'won';
@@ -1243,6 +1373,29 @@ export class Game {
     }
 
     return false;
+  }
+
+  pruneEscapedSurvivalPegs() {
+    if (!this.isSurvivalMode() || !this.survivalEscapedPegIds || this.survivalEscapedPegIds.size === 0) return false;
+    const before = this.pegs.length;
+    this.pegs = this.pegs.filter(peg => {
+      if (!this.survivalEscapedPegIds.has(peg.id)) return true;
+      const extent = getPegVerticalExtent(peg, PHYSICS_CONFIG.pegRadius);
+      const screenY = this.survivalRuntime.worldToScreenY(peg.y);
+      return screenY + extent > -24;
+    });
+    if (this.pegs.length === before) return false;
+
+    const liveIds = new Set(this.pegs.map(peg => peg.id));
+    for (const id of [...this.survivalEscapedPegIds]) {
+      if (!liveIds.has(id)) {
+        this.survivalEscapedPegIds.delete(id);
+        this.pendingHitPegClears.delete(id);
+      }
+    }
+    this.physics.setPegs(this.pegs);
+    this.syncPhysicsHitPegState();
+    return true;
   }
 
   applyYoyoSettings(rawSettings, options = null) {
@@ -1278,6 +1431,8 @@ export class Game {
   }
 
   loadLevel(levelData) {
+    this.levelFxId++;
+    this.backgroundEvents = [];
     const survivalSettings = ensureLevelSurvival(levelData, this.canvas.height);
     const yoyoSettings = normalizeYoyoSettings(levelData.yoyo);
     this.survivalRuntime.resize(this.canvas.height);
@@ -1303,6 +1458,9 @@ export class Game {
       if (copy.type === 'multi') {
         copy.multiballSpawnCount = normalizeMultiballSpawnCount(copy.multiballSpawnCount);
       }
+      if (copy.type === 'gamble') {
+        Object.assign(copy, normalizeSurvivalGamblePegProperties(copy, survivalSettings.gamblePeg));
+      }
       if (p.curveSlices) copy.curveSlices = p.curveSlices.map(s => ({ ...s }));
       if (p.animation) copy.animation = { ...p.animation };
       return copy;
@@ -1323,9 +1481,20 @@ export class Game {
     this.refreshFlipperState();
 
     this.physics.setBucketEnabled(!this.isSurvivalMode());
-    this.physics.setBallLossY(this.getCameraY() + this.canvas.height + 50);
+    this.syncPhysicsViewportBounds();
 
     this.score = 0;
+    this.survivalAntiCooldownMs = this.isSurvivalMode() ? (survivalSettings.antiCooldownMs || 0) : 0;
+    this.survivalShotCooldownRemainingMs = 0;
+    this.survivalGambleOverlayOpen = false;
+    this.survivalEscapedPegIds = new Set();
+    const hitPegClearSettings = normalizeLevelHitPegClearSettings(levelData);
+    this.hitPegTimedClearEnabled = hitPegClearSettings.enabled;
+    this.hitPegClearDelayMs = hitPegClearSettings.delayMs;
+    this.pendingHitPegClears = new Map();
+    this.levelElapsedMs = 0;
+    this.gambleBalls = 0;
+    this.initialGambleBallCount = 0;
     this.ballsLeft = this.isSurvivalMode() ? Number.POSITIVE_INFINITY : 10;
     this.initialBallCount = Number.isFinite(this.ballsLeft) ? this.ballsLeft : 10;
     this.hitPegIds = [];
@@ -1333,6 +1502,7 @@ export class Game {
     this.shotsFired = 0;
     this.initialOrangePegs = this.getTotalOrangePegs();
     this.removedOrangePegs = 0;
+    this.bucketCatchLight = 0;
     this.totalSurvivalTargets = this.isSurvivalMode() ? countSurvivalTargets(this.pegs) : 0;
     this.state = 'idle';
     this.trajectory = null;
@@ -1346,6 +1516,7 @@ export class Game {
     this.queuedBombPerkCharges = 0;
     this.armedBombPerk = false;
     this.lastUiStateSignature = '';
+    this._resetPerformanceCap30Detection();
 
     this.updateLaunchPosition();
     this.clearDynamicYoyoAnchors();
@@ -1353,27 +1524,141 @@ export class Game {
     this.resetBall();
   }
 
+  hasActiveBalls() {
+    return Array.isArray(this.balls) && this.balls.some(ball => ball && ball.active);
+  }
+
+  getLauncherBall() {
+    if (!Array.isArray(this.balls)) return null;
+    return this.balls.find(ball => ball && !ball.active && ball.isLauncherBall) || null;
+  }
+
+  ensureSurvivalLauncherBall() {
+    this.updateLaunchPosition();
+    let launcher = this.getLauncherBall();
+    if (!launcher) {
+      launcher = this.balls.find(ball => ball && !ball.active) || new Ball(this.launchX, this.launchY);
+    }
+
+    launcher.reset(this.launchX, this.launchY);
+    launcher.isLauncherBall = true;
+    launcher.launcherSpawnAnim = 0;
+    launcher.isDebugDragBall = false;
+    launcher.ultraAimStuck = false;
+    launcher.ultraAimQteBall = false;
+    launcher.yoyoEligible = undefined;
+    launcher.yoyoPerkBound = undefined;
+
+    const nextBalls = [];
+    const seen = new Set();
+    for (const ball of this.balls) {
+      if (!ball || ball === launcher || !ball.active) continue;
+      if (seen.has(ball.id)) continue;
+      seen.add(ball.id);
+      nextBalls.push(ball);
+    }
+    nextBalls.push(launcher);
+    this.balls = nextBalls;
+    this.physics.setBalls(this.balls);
+    this.balls = this.physics.balls;
+    return launcher;
+  }
+
   resetBall() {
     this.updateLaunchPosition();
+    this.survivalShotCooldownRemainingMs = 0;
     this.resetUltraAimRuntime();
     this.yoyoThread.clear();
     this.clearDynamicYoyoAnchors();
     this.yoyoThread.setLaunchAnchor(this.launchX, this.launchY);
-    this.balls = [new Ball(this.launchX, this.launchY)];
+    const launcher = new Ball(this.launchX, this.launchY);
+    launcher.isLauncherBall = true;
+    launcher.launcherSpawnAnim = 0;
+    this.balls = [launcher];
     this.physics.setBalls(this.balls);
     this.balls = this.physics.balls;
     this.turnHitPegIds = [];
     this.physics.clearHitPegs();
-    
-    // Re-add previously hit pegs to physics tracking
-    for (const id of this.hitPegIds) {
-      this.physics.hitPegs.add(id);
+    this.syncPhysicsHitPegState();
+  }
+
+  queueBackgroundEvent(event) {
+    if (!event || !Number.isFinite(event.x) || !Number.isFinite(event.y)) return;
+    this.backgroundEvents.push(event);
+  }
+
+  queueVictoryShockwave(peg, sourceBall = null) {
+    if (!peg || !Number.isFinite(peg.x) || !Number.isFinite(peg.y)) return;
+    this.queueBackgroundEvent({
+      kind: 'victorySplash',
+      x: peg.x,
+      y: peg.y,
+      radius: Math.max(132, PHYSICS_CONFIG.pegRadius * 13.5),
+      strength: 3.4,
+      burst: 2.8,
+      swirl: 1.35,
+      spread: 3.6,
+      speed: Number.isFinite(sourceBall?.vx) || Number.isFinite(sourceBall?.vy)
+        ? Utils.magnitude(sourceBall?.vx || 0, sourceBall?.vy || 0)
+        : 0,
+      normalX: 0,
+      normalY: -1
+    });
+  }
+
+  queueBombTargetShockwave(peg, sourceBall = null) {
+    if (!peg || !Number.isFinite(peg.x) || !Number.isFinite(peg.y)) return;
+    let radius = PHYSICS_CONFIG.pegRadius * 5.2;
+    if (peg.shape === 'brick') {
+      const width = Number.isFinite(peg.width) ? peg.width : PHYSICS_CONFIG.brickWidth;
+      const height = Number.isFinite(peg.height) ? peg.height : PHYSICS_CONFIG.brickHeight;
+      radius = Math.max(radius, Math.hypot(width, height) * 0.62);
+    } else if (peg.type === 'bumper') {
+      radius = Math.max(radius, PHYSICS_CONFIG.pegRadius * (peg.bumperScale || 1) * 5);
     }
+    this.queueBackgroundEvent({
+      kind: 'bombTargetSplash',
+      x: peg.x,
+      y: peg.y,
+      radius,
+      speed: Number.isFinite(sourceBall?.vx) || Number.isFinite(sourceBall?.vy)
+        ? Utils.magnitude(sourceBall?.vx || 0, sourceBall?.vy || 0)
+        : 0
+    });
+  }
+
+  queueLiquidPegSplash(peg, impact) {
+    if (!peg || !impact) return;
+    if (peg.type === 'obstacle' || this.isPortalPeg(peg) || this.isPermanentBumper(peg)) return;
+
+    const isOrange = this.isOrangePeg(peg);
+    const isBumper = peg.type === 'bumper';
+    const speed = Number.isFinite(impact.speed) ? impact.speed : Utils.magnitude(impact.vx || 0, impact.vy || 0);
+
+    this.queueBackgroundEvent({
+      kind: 'pegSplash',
+      x: peg.x,
+      y: peg.y,
+      radius: isOrange ? 72 : (isBumper ? 42 : 56),
+      strength: isOrange ? 1.06 : (isBumper ? 0.48 : 0.76),
+      burst: isOrange ? 1.42 : (isBumper ? 0.76 : 1.04),
+      swirl: isOrange ? 0.76 : (isBumper ? 0.24 : 0.42),
+      spread: isOrange ? 1.65 : (isBumper ? 0.92 : 1.18),
+      speed,
+      normalX: Number.isFinite(impact.normalX) ? impact.normalX : 0,
+      normalY: Number.isFinite(impact.normalY) ? impact.normalY : -1
+    });
   }
 
   launch() {
     if (this.state !== 'aiming' && this.state !== 'confirmAim') return;
     if (Number.isFinite(this.ballsLeft) && this.ballsLeft <= 0) return;
+    const survivalMode = this.isSurvivalMode();
+    const hadActiveSurvivalBalls = survivalMode && this.hasActiveBalls();
+    const launchBalls = survivalMode
+      ? [this.ensureSurvivalLauncherBall()].filter(Boolean)
+      : this.balls;
+    if (launchBalls.length === 0) return;
 
     const ultraAimLaunch = this.armUltraAimForLaunch();
     if (!this.baseFlipperConfig && !this.temporaryFlipperActive && this.temporaryFlipperTurns > 0) {
@@ -1390,8 +1675,9 @@ export class Game {
     initAudio();
     resetHitCounter();
     lightTap();
-    for (const ball of this.balls) {
+    for (const ball of launchBalls) {
       ball.launch(this.aimAngle);
+      ball.isLauncherBall = false;
       ball.ultraAimStuck = false;
       ball.ultraAimQteBall = false;
       this.configureBallYoyoState(ball, { suppressPerkBinding: ultraAimLaunch });
@@ -1400,13 +1686,18 @@ export class Game {
         this.consumeYoyoPerkUseOnBind(ball);
       }
     }
-    this.turnHitPegIds = [];
-    this.ballPositionHistory = [];
+    if (!hadActiveSurvivalBalls) {
+      this.turnHitPegIds = [];
+      this.ballPositionHistory = [];
+    }
     this.shotsFired += 1;
+    this.survivalShotCooldownRemainingMs = survivalMode ? this.survivalAntiCooldownMs : 0;
 
     if (Number.isFinite(this.ballsLeft)) {
       this.ballsLeft--;
       this.emitUiStateIfChanged(true, 'launch');
+    } else if (survivalMode) {
+      this.emitUiStateIfChanged(true, 'survival-launch');
     }
     this.trajectory = null;
   }
@@ -1463,6 +1754,54 @@ export class Game {
     return this.turnHitPegIds.includes(pegId) || this.hitPegIds.includes(pegId);
   }
 
+  scheduleHitPegClear(peg) {
+    if (!this.hitPegTimedClearEnabled) return;
+    if (!peg || !peg.id) return;
+    if (peg.type === 'obstacle' || this.isPermanentBumper(peg) || this.isPortalPeg(peg)) return;
+    const delay = Math.max(0, this.hitPegClearDelayMs || 0);
+    this.pendingHitPegClears.set(peg.id, this.levelElapsedMs + delay);
+  }
+
+  isPegTimedClearEligible(peg) {
+    if (!peg) return false;
+    if (peg.type === 'obstacle' || this.isPortalPeg(peg)) return false;
+    if (this.isPermanentBumper(peg)) return false;
+    return this.hasPegBeenActivated(peg.id);
+  }
+
+  processTimedHitPegClears() {
+    if (!this.hitPegTimedClearEnabled) return false;
+    if (!this.pendingHitPegClears || this.pendingHitPegClears.size === 0) return false;
+
+    const dueIds = new Set();
+    for (const [pegId, clearAtMs] of this.pendingHitPegClears) {
+      if (clearAtMs <= this.levelElapsedMs) dueIds.add(pegId);
+    }
+    if (dueIds.size === 0) return false;
+
+    let removed = false;
+    this.pegs = this.pegs.filter(peg => {
+      if (!dueIds.has(peg.id)) return true;
+      this.pendingHitPegClears.delete(peg.id);
+      if (!this.isPegTimedClearEligible(peg)) return true;
+      if (this.isOrangePeg(peg)) {
+        this.removedOrangePegs++;
+      }
+      removed = true;
+      return false;
+    });
+
+    for (const id of dueIds) {
+      this.pendingHitPegClears.delete(id);
+    }
+    if (!removed) return false;
+
+    this.physics.setPegs(this.pegs);
+    this.syncPhysicsHitPegState();
+    this.emitUiStateIfChanged(true, 'timed-hit-peg-clear');
+    return true;
+  }
+
   activatePeg(peg, sourceBall = null, options = null) {
     if (!peg || this.isPortalPeg(peg)) return false;
     if (peg.type === 'bumper') {
@@ -1482,6 +1821,15 @@ export class Game {
     if (this.physics?.hitPegs && typeof this.physics.hitPegs.add === 'function') {
       this.physics.hitPegs.add(peg.id);
     }
+    this.scheduleHitPegClear(peg);
+    if (this.isOrangePeg(peg)) {
+      const targetsLeft = this.isSurvivalMode()
+        ? this.getSurvivalTargetsLeft(true)
+        : this.getOrangePegsLeft();
+      if (targetsLeft === 0) {
+        this.queueVictoryShockwave(peg, sourceBall);
+      }
+    }
 
     pegHitSound();
 
@@ -1492,6 +1840,16 @@ export class Game {
     if (allowMultiball && peg.type === 'multi' && sourceBall) {
       const spawnCount = normalizeMultiballSpawnCount(peg.multiballSpawnCount);
       this.spawnMultiballs(sourceBall, spawnCount);
+    }
+    if (this.isSurvivalMode() && peg.type === 'gamble') {
+      const gamblePeg = normalizeSurvivalGamblePegProperties(peg, this.survivalRuntime.getGamblePegSettings());
+      this.grantSurvivalGambleBalls(gamblePeg.gambleBallCount);
+      if (gamblePeg.gambleKnockbackEnabled) {
+        this.survivalRuntime.applyGambleKnockback(
+          gamblePeg.gambleKnockbackDistance,
+          gamblePeg.gambleKnockbackSmoothMs
+        );
+      }
     }
 
     return true;
@@ -1526,6 +1884,9 @@ export class Game {
 
     // Add turn hit pegs to total hit pegs (they disappear now)
     this.hitPegIds = [...this.hitPegIds, ...this.turnHitPegIds];
+    for (const id of this.turnHitPegIds) {
+      this.pendingHitPegClears.delete(id);
+    }
 
     // Count orange pegs about to be removed (for health bar tracking)
     const hitSet = new Set(this.hitPegIds);
@@ -1544,6 +1905,7 @@ export class Game {
       return !hitSet.has(p.id);
     });
     this.physics.setPegs(this.pegs);
+    this.syncPhysicsHitPegState();
 
     if (this.isSurvivalMode()) {
       if (this.getSurvivalTargetsLeft(true) === 0) {
@@ -1553,9 +1915,19 @@ export class Game {
         return;
       }
 
-      this.state = 'idle';
+      const preserveAim = this.isAimingState() && !!this.getLauncherBall();
       this.hitPegIds = [];
-      this.resetBall();
+      this.turnHitPegIds = [];
+      this.survivalShotCooldownRemainingMs = 0;
+      if (preserveAim) {
+        this.state = 'aiming';
+        this.ensureSurvivalLauncherBall();
+        this.updateTrajectory();
+        this.emitUiStateIfChanged(true, 'survival-turn-ended');
+      } else {
+        this.state = 'idle';
+        this.resetBall();
+      }
       return;
     }
     
@@ -1603,9 +1975,48 @@ export class Game {
     this.balls = this.physics.balls;
   }
 
+  updateSurvivalShotCooldown(dt) {
+    if (!this.isSurvivalMode()) return;
+    if (this.state !== 'playing') return;
+    if (this.survivalAntiCooldownMs <= 0) return;
+    if (!this.hasActiveBalls()) return;
+
+    this.survivalShotCooldownRemainingMs = Math.max(
+      0,
+      this.survivalShotCooldownRemainingMs - dt * 1000
+    );
+    if (this.survivalShotCooldownRemainingMs > 0) return;
+
+    this.state = 'idle';
+    this.ensureSurvivalLauncherBall();
+    this.emitUiStateIfChanged(true, 'survival-shot-ready');
+  }
+
+  updateLauncherBallAnimations(dt) {
+    if (!Array.isArray(this.balls)) return;
+    const step = Math.max(0, dt) / 0.22;
+    for (const ball of this.balls) {
+      if (!ball || ball.active || !ball.isLauncherBall) continue;
+      const current = Number.isFinite(ball.launcherSpawnAnim) ? ball.launcherSpawnAnim : 1;
+      ball.launcherSpawnAnim = Math.min(1, current + step);
+    }
+  }
+
+  getLauncherBallScale() {
+    const launcher = this.getLauncherBall();
+    if (!launcher) return 1;
+    const t = Math.max(0, Math.min(1, Number.isFinite(launcher.launcherSpawnAnim) ? launcher.launcherSpawnAnim : 1));
+    const eased = 1 - Math.pow(1 - t, 3);
+    return 0.22 + eased * 0.78;
+  }
+
   update(deltaTime) {
     // Animate pegs continuously (idle, aiming, playing) so the level feels alive
     const dt = Math.min((deltaTime || 16.67) / 1000, 0.1);
+    this.levelElapsedMs += dt * 1000;
+    if (this.bucketCatchLight > 0) {
+      this.bucketCatchLight = Math.max(0, this.bucketCatchLight - dt * 2.6);
+    }
     const worldHeight = this.isSurvivalMode() ? this.survivalRuntime.getWorldHeight() : this.canvas.height;
     this.animator.tick(this.pegs, dt, { width: this.canvas.width, height: worldHeight });
     if (this.deepFreezeSystem.isActive()) {
@@ -1615,10 +2026,12 @@ export class Game {
     this.updateUltraAimQte(dt);
 
     if (this.isSurvivalMode()) {
-      this.survivalRuntime.update(dt);
+      this.survivalRuntime.update(this.survivalGambleOverlayOpen ? dt / 5 : dt);
     }
     this.updateLaunchPosition();
-    this.physics.setBallLossY(this.getCameraY() + this.canvas.height + 50);
+    this.syncPhysicsViewportBounds();
+    this.updateSurvivalShotCooldown(dt);
+    this.updateLauncherBallAnimations(dt);
     const retractStartY = this.physics.bucketEnabled && this.physics.bucket
       ? this.physics.bucket.y - this.physics.bucket.height / 2 - getBallRadius() - 24
       : this.physics.ballLossY - Math.max(60, this.canvas.height * 0.12);
@@ -1638,11 +2051,15 @@ export class Game {
       return;
     }
 
-    const runsPhysics = this.state === 'playing';
+    const runsPhysics = this.state === 'playing' || (this.isSurvivalMode() && this.hasActiveBalls());
     if (!runsPhysics) {
       this.yoyoThread.clear();
       this.clearDynamicYoyoAnchors();
-      if (this.balls.length === 1 && !this.balls[0].active) {
+      const launcherBall = this.getLauncherBall();
+      if (launcherBall) {
+        launcherBall.x = this.launchX;
+        launcherBall.y = this.launchY;
+      } else if (this.balls.length === 1 && !this.balls[0].active) {
         this.balls[0].x = this.launchX;
         this.balls[0].y = this.launchY;
       }
@@ -1655,6 +2072,7 @@ export class Game {
       if (this.isAimingState()) {
         this.updateTrajectory();
       }
+      this.processTimedHitPegClears();
       this.checkSurvivalEndConditions();
       return;
     }
@@ -1720,7 +2138,10 @@ export class Game {
         this.animator.notifyHit(peg.id);
         continue;
       }
-      this.activatePeg(peg, event.ball, { allowMultiball: true });
+      const activated = this.activatePeg(peg, event.ball, { allowMultiball: true });
+      if (activated) {
+        this.queueLiquidPegSplash(peg, event.impact);
+      }
       // Notify animator for hit-triggered animations
       this.animator.notifyHit(peg.id);
     }
@@ -1753,6 +2174,7 @@ export class Game {
 
     // Check for stuck balls trapped inside structures
     this.checkStuckBalls();
+    this.processTimedHitPegClears();
 
     if (this.checkSurvivalEndConditions()) {
       return;
@@ -1761,6 +2183,7 @@ export class Game {
     // Credit bucket catches immediately so the ball counter updates in real time
     if (result.bucketCatchCount > 0) {
       this.ballsLeft += result.bucketCatchCount;
+      this.bucketCatchLight = Math.min(1, this.bucketCatchLight + 0.72 + Math.max(0, result.bucketCatchCount - 1) * 0.18);
       this.emitUiStateIfChanged(true, 'bucket-catch');
     }
 
@@ -1775,6 +2198,8 @@ export class Game {
   checkStuckBalls() {
     if (this.isUltraAimQteActive()) return;
     if (this.balls.length === 0 || this.turnHitPegIds.length === 0) return;
+    const activeBalls = this.balls.filter(ball => ball && ball.active);
+    if (activeBalls.length === 0) return;
 
     const now = performance.now();
 
@@ -1786,12 +2211,12 @@ export class Game {
 
     // Average position of all active balls
     let avgX = 0, avgY = 0;
-    for (const ball of this.balls) {
+    for (const ball of activeBalls) {
       avgX += ball.x;
       avgY += ball.y;
     }
-    avgX /= this.balls.length;
-    avgY /= this.balls.length;
+    avgX /= activeBalls.length;
+    avgY /= activeBalls.length;
 
     this.ballPositionHistory.push({ x: avgX, y: avgY, t: now });
 
@@ -1842,6 +2267,7 @@ export class Game {
     // Remove the peg from play immediately so the ball can escape
     this.pegs = this.pegs.filter(p => p.id !== lowestPeg.id);
     this.physics.setPegs(this.pegs);
+    this.syncPhysicsHitPegState();
 
     // Reset history — if still stuck, detection re-triggers after another 2.5s
     this.ballPositionHistory = [];
@@ -1851,13 +2277,20 @@ export class Game {
     const allHitIds = [...this.hitPegIds, ...this.turnHitPegIds];
     const ultraAimQteActive = this.isUltraAimQteActive();
     const qteTrajectory = ultraAimQteActive ? this.ultraAimQte.trajectory : null;
+    const snapshot = this.getUiStateSnapshot();
     const survivalMode = this.isSurvivalMode();
-    const survivalTargetsLeft = this.getSurvivalTargetsLeft(true);
-    const totalTargets = survivalMode ? this.totalSurvivalTargets : this.getTotalOrangePegs();
+    const worldHeight = survivalMode ? this.survivalRuntime.getWorldHeight() : this.canvas.height;
+    const totalTargets = snapshot.totalOrangePegs;
+    const targetsLeft = snapshot.orangePegsLeft;
+    const pegProgress = totalTargets > 0
+      ? Math.max(0, Math.min(1, (totalTargets - targetsLeft) / totalTargets))
+      : 0;
     const trackerState = survivalMode ? this.survivalRuntime.getTrackerState() : null;
+    const boardProgress = survivalMode ? (trackerState?.progressRatio ?? 0) : pegProgress;
     const centerLabel = survivalMode
-      ? `PEGS ${Math.max(0, totalTargets - survivalTargetsLeft)}/${totalTargets}`
+      ? `PEGS ${Math.max(0, totalTargets - targetsLeft)}/${totalTargets}`
       : null;
+    const cameraY = this.getCameraY();
 
     this.renderer.renderGame({
       pegs: this.pegs,
@@ -1866,10 +2299,11 @@ export class Game {
       balls: this.balls,
       bucket: survivalMode ? null : this.physics.bucket,
       flippers: this.flippers,
-      cameraY: this.getCameraY(),
+      cameraY,
       showLauncher: this.state === 'idle' || this.isAimingState(),
       launchX: this.launchX,
       launchY: this.launchY,
+      launcherBallScale: this.getLauncherBallScale(),
       aimAngle: this.aimAngle,
       showAim: this.isAimingState(),
       showQteAim: ultraAimQteActive,
@@ -1883,14 +2317,24 @@ export class Game {
       yoyoThreads: this.yoyoThread.getRenderThreads(),
       score: this.score,
       ballsLeft: this.ballsLeft,
-      orangePegsLeft: survivalMode ? survivalTargetsLeft : this.getOrangePegsLeft(),
+      bucketFlash: this.bucketCatchLight,
+      orangePegsLeft: targetsLeft,
       totalOrangePegs: totalTargets,
+      levelProgress: boardProgress,
+      pegProgress,
+      liquidWorldOffset: survivalMode ? (cameraY / Math.max(1, this.canvas.height)) : 0,
+      worldHeight,
+      survivalBackground: survivalMode ? this.survivalRuntime.getBackground() : null,
+      backgroundFxId: this.levelFxId,
+      backgroundEvents: this.backgroundEvents,
+      playState: this.state,
       centerLabel,
       survivalLoseLineY: survivalMode ? this.survivalRuntime.getLoseLineY() : null,
       verticalProgress: trackerState,
       message: this.state === 'won' ? 'Уровень пройден' : (this.state === 'lost' ? 'Игра окончена' : null),
       subMessage: this.state === 'won' ? 'Продолжить' : (this.state === 'lost' ? 'Продолжить' : null)
     });
+    this.backgroundEvents = [];
 
     // Draw FPS overlay only when enabled (editor play mode)
     if (this.showPerfOverlay) this._drawPerfOverlay();
@@ -1934,6 +2378,71 @@ export class Game {
     }
     // Collect samples for diagnostics only — do NOT mutate fixedStepMs.
     // Physics always runs at 120 steps/sec; the accumulator handles variable frame rates.
+  }
+
+  _resetPerformanceCap30Detection(options = {}) {
+    this._performanceCap30Samples = [];
+    if (!options.preserveEmitted) {
+      this._performanceCap30Emitted = false;
+    }
+  }
+
+  _isPerformanceCap30Eligible() {
+    if (this.state === 'won' || this.state === 'lost') return false;
+    if (typeof document !== 'undefined' && document.hidden) return false;
+    return true;
+  }
+
+  _trackPerformanceCap30(now, frameMs, workMs) {
+    if (this._performanceCap30Emitted) return;
+    if (!this._isPerformanceCap30Eligible()) {
+      this._resetPerformanceCap30Detection({ preserveEmitted: true });
+      return;
+    }
+    if (!Number.isFinite(now) || !Number.isFinite(frameMs) || !Number.isFinite(workMs) || frameMs < 20 || frameMs > 45) {
+      this._resetPerformanceCap30Detection({ preserveEmitted: true });
+      return;
+    }
+
+    this._performanceCap30Samples.push({ now, frameMs, workMs });
+    const cutoff = now - PERFORMANCE_CAP30_WINDOW_MS;
+    while (this._performanceCap30Samples.length > 0 && this._performanceCap30Samples[0].now < cutoff) {
+      this._performanceCap30Samples.shift();
+    }
+
+    if (this._performanceCap30Samples.length < PERFORMANCE_CAP30_MIN_SAMPLE_COUNT) return;
+
+    const firstSample = this._performanceCap30Samples[0];
+    const lastSample = this._performanceCap30Samples[this._performanceCap30Samples.length - 1];
+    const windowMs = lastSample.now - firstSample.now;
+    if (windowMs < PERFORMANCE_CAP30_MIN_WINDOW_MS) return;
+
+    const frameValues = this._performanceCap30Samples
+      .map(sample => sample.frameMs)
+      .sort((a, b) => a - b);
+    const workValues = this._performanceCap30Samples
+      .map(sample => sample.workMs)
+      .sort((a, b) => a - b);
+    const medianFrameMs = percentileFromSorted(frameValues, 0.5);
+    const frameSpanMs = percentileFromSorted(frameValues, 0.9) - percentileFromSorted(frameValues, 0.1);
+    const medianWorkMs = percentileFromSorted(workValues, 0.5);
+
+    if (medianFrameMs < PERFORMANCE_CAP30_FRAME_MIN_MS || medianFrameMs > PERFORMANCE_CAP30_FRAME_MAX_MS) return;
+    if (frameSpanMs > PERFORMANCE_CAP30_STABILITY_SPAN_MS) return;
+    if (medianWorkMs > Math.min(PERFORMANCE_CAP30_MAX_WORK_MS, medianFrameMs * PERFORMANCE_CAP30_MAX_WORK_RATIO)) return;
+
+    this._performanceCap30Emitted = true;
+    this.renderer?.setPerformanceProfile?.('lite');
+    this.emitPerformanceEvent('performanceCap30', {
+      detected: true,
+      performanceProfile: 'lite',
+      averageFps: average(frameValues) > 0 ? 1000 / average(frameValues) : 0,
+      medianFrameMs,
+      frameSpanMs,
+      medianWorkMs,
+      sampleCount: this._performanceCap30Samples.length,
+      windowMs
+    });
   }
 
   gameLoop(currentTime) {
@@ -1986,6 +2495,7 @@ export class Game {
     this._perfRenderMs = _t2 - _t1;
     this._perfFrameMs = deltaMs;
     this._perfPhysicsSteps = physicsSteps;
+    this._trackPerformanceCap30(now, deltaMs, this._perfUpdateMs + this._perfRenderMs);
     if (!this._perfLog) this._perfLog = { frames: 0, nextDump: now + 2000 };
     this._perfLog.frames++;
     if (now >= this._perfLog.nextDump) {
@@ -2020,6 +2530,9 @@ export class Game {
     }
     this._paused = false;
     this.accumulatorMs = 0;
+    this._resetPerformanceCap30Detection({ preserveEmitted: true });
+    this.uiStateListeners.clear();
+    this.performanceEventListeners.clear();
     this.abortController.abort();
   }
 
@@ -2028,12 +2541,14 @@ export class Game {
     cancelAnimationFrame(this.animationId);
     this.animationId = null;
     this._paused = true;
+    this._resetPerformanceCap30Detection({ preserveEmitted: true });
   }
 
   resume() {
     if (!this._paused) return;
     this._paused = false;
     this.accumulatorMs = 0;
+    this._resetPerformanceCap30Detection({ preserveEmitted: true });
     this.lastTime = performance.now();
     this.animationId = requestAnimationFrame((t) => this.gameLoop(t));
   }
@@ -2048,7 +2563,7 @@ export class Game {
     this.survivalRuntime.resize(height);
     this.yoyoThread.resize(width, height);
     this.updateLaunchPosition();
-    this.physics.setBallLossY(this.getCameraY() + height + 50);
+    this.syncPhysicsViewportBounds(height);
     if (!this.baseFlipperConfig && this.temporaryFlipperActive) {
       this.refreshFlipperState();
     }
@@ -2071,21 +2586,71 @@ export class Game {
     }
   }
 
+  setHitPegClearDelay(delayMs) {
+    this.hitPegClearDelayMs = normalizeHitPegClearDelayMs(delayMs);
+    return this.hitPegClearDelayMs;
+  }
+
+  setHitPegTimedClearEnabled(enabled) {
+    this.hitPegTimedClearEnabled = !!enabled;
+    if (!this.hitPegTimedClearEnabled) {
+      this.pendingHitPegClears.clear();
+    }
+    return this.hitPegTimedClearEnabled;
+  }
+
+  setGambleOverlayOpen(open) {
+    this.survivalGambleOverlayOpen = !!open;
+  }
+
+  grantSurvivalGambleBalls(amount = SURVIVAL_GAMBLE_BALLS_PER_PEG) {
+    const gain = Math.max(0, Math.floor(Number(amount) || 0));
+    if (gain <= 0) return this.gambleBalls;
+    this.gambleBalls = Math.min(999, this.gambleBalls + gain);
+    this.initialGambleBallCount = Math.max(this.initialGambleBallCount, this.gambleBalls);
+    this.emitUiStateIfChanged(true, 'survival-gamble-balls-granted');
+    return this.gambleBalls;
+  }
+
+  getGambleAutoLuckRatio() {
+    if (this.isSurvivalMode()) {
+      const tracker = this.survivalRuntime.getTrackerState();
+      const progress = Number(tracker?.progressRatio);
+      return Number.isFinite(progress) ? Math.max(0, Math.min(1, progress)) : 0;
+    }
+
+    const startingBalls = this.initialBallCount;
+    const ballsLeft = this.ballsLeft;
+    if (!Number.isFinite(startingBalls) || startingBalls <= 0) return 0;
+    if (!Number.isFinite(ballsLeft)) return 0;
+    const spent = Math.max(0, startingBalls - Math.max(0, ballsLeft));
+    return Math.max(0, Math.min(1, spent / startingBalls));
+  }
+
   canGamble(ballCost = 1) {
-    if (!Number.isFinite(this.ballsLeft)) return false;
     const cost = Math.max(1, Math.floor(ballCost));
     if (!(this.state === 'idle' || this.state === 'aiming')) return false;
+    if (this.isSurvivalMode()) {
+      return this.gambleBalls >= cost;
+    }
+    if (!Number.isFinite(this.ballsLeft)) return false;
     return this.ballsLeft > cost;
   }
 
   hasShotInCurrentLevel() {
-    return this.shotsFired > 0;
+    return this.shotsFired > 0 || (this.isSurvivalMode() && this.gambleBalls > 0);
   }
 
   spendBallsForGamble(ballCost = 1) {
     if (!this.canGamble(ballCost)) return false;
     const cost = Math.max(1, Math.floor(ballCost));
+    if (this.isSurvivalMode()) {
+      this.gambleBalls = Math.max(0, this.gambleBalls - cost);
+      this.emitUiStateIfChanged(true, 'survival-gamble-spin-spent');
+      return true;
+    }
     this.ballsLeft -= cost;
+    this.emitUiStateIfChanged(true, 'gamble-spin-spent');
     return true;
   }
 
@@ -2096,7 +2661,7 @@ export class Game {
       if (blocked.has(peg.id)) return false;
       if (this.isOrangePeg(peg)) return false;
       if (this.isPortalPeg(peg)) return false;
-      if (peg.type === 'obstacle' || peg.type === 'bumper' || peg.type === 'multi') return false;
+      if (peg.type === 'obstacle' || peg.type === 'bumper' || peg.type === 'multi' || peg.type === 'gamble') return false;
       return true;
     });
 

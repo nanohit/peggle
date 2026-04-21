@@ -6,7 +6,10 @@ import { Game } from './game.js';
 import { isMuted, setMuted } from './haptics.js';
 import { VisualLayout } from './visual-layout.js';
 import { normalizeVisuals } from './visual-config.js';
+import { normalizeLevelData } from './levels.js';
 import { GambleSystem } from './gamble-system.js';
+import { DialogueController } from './dialogue-controller.js';
+import { getStoredLanguage, getPauseCopy, normalizeLanguage, setStoredLanguage } from './localization.js';
 import { topoOrder, buildNodeMap, buildParentMap, buildLevelIndexMap, graphFromLevels } from './graph/core.js';
 import { validateGraph } from './graph/validate.js';
 import { resolveWin, findNextNode, migrateProgress, isUnlocked } from './graph/progression.js';
@@ -66,7 +69,7 @@ async function loadFromHash() {
     writer.close();
     const decompressed = await new Response(ds.readable).arrayBuffer();
     const json = new TextDecoder().decode(decompressed);
-    return JSON.parse(json);
+    return normalizeLevelData(JSON.parse(json));
   } catch (e) { console.error('[player] hash decode failed:', e); return null; }
 }
 
@@ -74,7 +77,7 @@ async function loadFromHash() {
 function loadBakedLevel(name) {
   const stored = localStorage.getItem('baked:' + name);
   if (stored) {
-    try { return JSON.parse(stored); } catch { /* fall through */ }
+    try { return normalizeLevelData(JSON.parse(stored)); } catch { /* fall through */ }
   }
   return null;
 }
@@ -83,11 +86,11 @@ function loadBakedLevel(name) {
 async function fetchLevel(name) {
   try {
     const res = await fetch('/api/levels?name=' + encodeURIComponent(name));
-    if (res.ok) return await res.json();
+    if (res.ok) return normalizeLevelData(await res.json());
   } catch { /* fall through */ }
   try {
     const res = await fetch('/levels/' + encodeURIComponent(name) + '.json');
-    if (res.ok) return await res.json();
+    if (res.ok) return normalizeLevelData(await res.json());
   } catch { /* fall through */ }
   return null;
 }
@@ -293,7 +296,7 @@ function createPauseOverlay() {
     <div class="pause-panel">
       <img class="pause-bg" src="${BASE}pause_modal_background.webp" alt="" draggable="false">
       <div class="pause-content">
-        <div class="pause-title">Пауза</div>
+        <div class="pause-title" id="pauseTitleText">Пауза</div>
         <button class="pause-img-btn" id="pauseResumeBtn">
           <img class="pause-img-btn__normal" src="${BASE}continue.webp" alt="Продолжить" draggable="false">
           <img class="pause-img-btn__pressed" src="${BASE}continue_pressed1.webp" alt="" draggable="false">
@@ -303,12 +306,19 @@ function createPauseOverlay() {
           <img class="pause-img-btn__pressed" src="${BASE}again_pressed.webp" alt="" draggable="false">
         </button>
         <div class="pause-hint">
-          <span class="pause-hint__text">Второе нажатие<br>для выстрела</span>
+          <span class="pause-hint__text" id="pauseHintText">Второе нажатие<br>для выстрела</span>
           <label class="pause-check" id="pauseConfirmCheck">
             <input type="checkbox" id="pauseConfirmInput">
             <img class="pause-check__off" src="${BASE}check.webp" alt="" draggable="false">
             <img class="pause-check__on" src="${BASE}check_checked.webp" alt="" draggable="false">
           </label>
+        </div>
+        <div class="pause-lang">
+          <span class="pause-lang__label" id="pauseLanguageLabel">Язык</span>
+          <div class="pause-lang__switch">
+            <button type="button" class="pause-lang__btn" data-lang="ru">RU</button>
+            <button type="button" class="pause-lang__btn" data-lang="en">EN</button>
+          </div>
         </div>
         <button class="pause-img-btn" id="pauseLevelBtn">
           <img class="pause-img-btn__normal" src="${BASE}level.webp" alt="Уровни" draggable="false">
@@ -382,10 +392,37 @@ async function bootWithLevels(levels, campaignName, campaignData) {
   });
   visualLayout.mount();
   visualLayout.setEditMode(false);
+  const dialogueController = new DialogueController({ visualLayout, persistSeen: true });
+  dialogueController.mount();
+  let currentLanguage = getStoredLanguage();
+  dialogueController.setLanguage(currentLanguage);
 
   // Create and attach pause overlay (inside the visual frame so it covers the game area)
   const pauseOverlay = createPauseOverlay();
   visualLayout.frame.appendChild(pauseOverlay);
+
+  function applyLanguage(nextLanguage) {
+    currentLanguage = normalizeLanguage(nextLanguage);
+    document.documentElement.lang = currentLanguage;
+    const copy = getPauseCopy(currentLanguage);
+    const titleEl = pauseOverlay.querySelector('#pauseTitleText');
+    const hintEl = pauseOverlay.querySelector('#pauseHintText');
+    const labelEl = pauseOverlay.querySelector('#pauseLanguageLabel');
+    if (titleEl) titleEl.textContent = copy.pauseTitle;
+    if (hintEl) hintEl.innerHTML = copy.confirmShootHint.replace(/\n/g, '<br>');
+    if (labelEl) labelEl.textContent = copy.languageLabel;
+    for (const button of pauseOverlay.querySelectorAll('.pause-lang__btn')) {
+      button.classList.toggle('active', button.dataset.lang === currentLanguage);
+    }
+    dialogueController.setLanguage(currentLanguage);
+  }
+
+  for (const button of pauseOverlay.querySelectorAll('.pause-lang__btn')) {
+    button.addEventListener('click', () => {
+      applyLanguage(setStoredLanguage(button.dataset.lang));
+    });
+  }
+  applyLanguage(currentLanguage);
 
   function resize() {
     const viewport = document.getElementById('visualViewport');
@@ -888,6 +925,7 @@ async function bootWithLevels(levels, campaignName, campaignData) {
       allowSettings: false
     });
     gambleSystem.mount();
+    dialogueController.setGambleSystem(gambleSystem);
   }
 
   let pendingGambleMountRaf = null;
@@ -908,6 +946,7 @@ async function bootWithLevels(levels, campaignName, campaignData) {
       pendingGambleMountRaf = null;
     }
     if (gambleSystem) { gambleSystem.dispose(); gambleSystem = null; }
+    dialogueController.setGambleSystem(null);
   }
 
   // --- Transition animation (level complete -> next level) ---
@@ -973,7 +1012,8 @@ async function bootWithLevels(levels, campaignName, campaignData) {
       outgoingCanvas.width = canvas.width;
       outgoingCanvas.height = canvas.height;
       const outCtx = outgoingCanvas.getContext('2d');
-      outCtx?.drawImage(canvas, 0, 0);
+      const copied = game?.renderer?.drawCompositeTo?.(outCtx);
+      if (!copied) outCtx?.drawImage(canvas, 0, 0);
     } catch {
       outgoingCanvas = null;
     }
@@ -1061,6 +1101,7 @@ async function bootWithLevels(levels, campaignName, campaignData) {
     teardownGamble();
     if (unsubUiState) { unsubUiState(); unsubUiState = null; }
     if (game) { game.stop(); }
+    dialogueController.setGambleSystem(null);
     paused = false;
     activeLevelMapAllowClose = false;
     setLevelMapMode(false);
@@ -1077,15 +1118,26 @@ async function bootWithLevels(levels, campaignName, campaignData) {
     const visuals = normalizeVisuals(levelData.visuals);
     visualLayout.setConfig(visuals);
     game.renderer.setBackground(visuals.background);
+    game.renderer.setBallTrail(visuals.ballTrail);
+    game.renderer.setShockwave(visuals.shockwave);
 
     game.loadLevel(levelData);
     if (typeof levelData.aimLength === 'number') {
       game.setAimLength(levelData.aimLength);
     }
+    dialogueController.setContext({
+      level: levelData,
+      scopeKey: campaignName ? `campaign:${campaignName}` : 'single',
+      game,
+      gambleSystem: null,
+      persistSeen: true,
+      live: true
+    });
+    dialogueController.setLanguage(currentLanguage);
 
     // Subscribe to UI state for ball counter + health bar
     unsubUiState = game.subscribeUiState((snapshot) => {
-      if (Number.isFinite(snapshot.ballsLeft)) {
+      if (snapshot.ballsLeft != null) {
         visualLayout.updateBallCounter(snapshot.ballsLeft, snapshot.initialBallCount);
       }
       if (Number.isFinite(snapshot.orangePegsLeft)) {

@@ -37,6 +37,7 @@ export class Ball {
     this.stuckFrames = 0;
     this.speedCapBoost = 0;
     this.portalCooldown = 0;
+    this.launcherSpawnAnim = 1;
   }
 
   launch(angle, power = PHYSICS_CONFIG.launchPower) {
@@ -48,6 +49,7 @@ export class Ball {
     this.speedCapBoost = 0;
     this.portalCooldown = 0;
     this.radius = getBallRadius();
+    this.launcherSpawnAnim = 1;
   }
 
   // Phase 1: update velocity (gravity, friction, clamp). No position change.
@@ -112,6 +114,7 @@ export class Ball {
     this.speedCapBoost = 0;
     this.portalCooldown = 0;
     this.radius = getBallRadius();
+    this.launcherSpawnAnim = 1;
   }
 }
 
@@ -235,6 +238,7 @@ export class PhysicsEngine {
   constructor(width, height) {
     this.width = width;
     this.height = height;
+    this.ballTopY = 0;
     this.ballLossY = height + 50;
     this.bucketEnabled = true;
     this.balls = [];
@@ -296,6 +300,11 @@ export class PhysicsEngine {
   setBallLossY(lossY) {
     if (!Number.isFinite(lossY)) return;
     this.ballLossY = lossY;
+  }
+
+  setBallTopY(topY) {
+    if (!Number.isFinite(topY)) return;
+    this.ballTopY = topY;
   }
 
   isPortalPeg(peg) {
@@ -890,11 +899,16 @@ export class PhysicsEngine {
 
     // Check for bucket catches and ball losses
     let bucketCatchCount = 0;
+    let activeRemaining = 0;
     const remaining = [];
     for (const ball of this.balls) {
-      if (!ball.active) continue;
+      if (!ball.active) {
+        remaining.push(ball);
+        continue;
+      }
       if (ball.ultraAimStuck) {
         remaining.push(ball);
+        activeRemaining++;
         continue;
       }
       if (this.checkBucketCatch(ball)) {
@@ -904,6 +918,7 @@ export class PhysicsEngine {
       const ballLost = ball.y > this.ballLossY || ball.stuck;
       if (!ballLost) {
         remaining.push(ball);
+        activeRemaining++;
       }
     }
     // Preserve array reference
@@ -915,7 +930,7 @@ export class PhysicsEngine {
     return {
       hitEvents,
       contactEvents,
-      ballsRemaining: this.balls.length,
+      ballsRemaining: activeRemaining,
       bucketCatchCount
     };
   }
@@ -946,9 +961,11 @@ export class PhysicsEngine {
       ball.vx = -Math.abs(ball.vx) * bounce;
     }
     
-    // Top wall
-    if (ball.y - ball.radius < 0) {
-      ball.y = ball.radius;
+    // Top wall. Survival knockback can reveal negative world-space above the
+    // original board top, so the boundary is allowed to follow that viewport.
+    const topY = Number.isFinite(this.ballTopY) ? this.ballTopY : 0;
+    if (ball.y - ball.radius < topY) {
+      ball.y = topY + ball.radius;
       ball.vy = Math.abs(ball.vy) * bounce;
     }
   }
@@ -1292,8 +1309,9 @@ export class PhysicsEngine {
           simBall.x = this.width - simBall.radius;
           simBall.vx = -Math.abs(simBall.vx) * PHYSICS_CONFIG.bounce;
         }
-        if (simBall.y - simBall.radius < 0) {
-          simBall.y = simBall.radius;
+        const topY = Number.isFinite(this.ballTopY) ? this.ballTopY : 0;
+        if (simBall.y - simBall.radius < topY) {
+          simBall.y = topY + simBall.radius;
           simBall.vy = Math.abs(simBall.vy) * PHYSICS_CONFIG.bounce;
         }
 

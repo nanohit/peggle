@@ -1,7 +1,7 @@
 {
   "private": true,
   "scripts": {
-    "build": "rm -rf dist public && esbuild js/player-bootstrap.js --bundle --format=esm --splitting --outdir=dist --minify && mkdir -p public && cp player.html editor.html public/ && cp -R dist css js visuals public/"
+    "build": "rm -rf dist public && esbuild js/player-bootstrap.js --bundle --format=esm --splitting --outdir=dist --minify && mkdir -p public && cp player.html editor.html public/ && cp -R dist css js visuals fonts public/"
   },
   "dependencies": {
     "ioredis": "^5.10.0",

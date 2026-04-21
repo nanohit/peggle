@@ -1,11 +1,42 @@
 // Visual Layout Config - data model, defaults, normalization
 // Per-level visual theme configuration for decorative frame assets
 
+import { DEFAULT_BALL_TRAIL, normalizeBallTrailConfig } from './ball-trail.js';
+import { DEFAULT_SHOCKWAVE_EFFECT, normalizeShockwaveConfig } from './shockwave-effect.js';
+
+export const DEFAULT_LIQUID_PROGRESSION = {
+  colorBase: null,
+  colorMid: null,
+  colorAccent: null,
+  scale: null,
+  roughness: null,
+  distortion: null,
+  lacunarity: null,
+  trail: null,
+  motion: null,
+  reaction: null,
+};
+
 export const DEFAULT_BACKGROUND = {
   type: 'image',
   colorTop: '#16213e',
   colorBottom: '#1a1a2e',
   image: 'visuals/backgrounds/background1.webp',
+  progressionImage: null,
+  mirrored: false,
+  liquid: {
+    colorBase: '#05020f',
+    colorMid: '#24104f',
+    colorAccent: '#8d63ff',
+    scale: 1,
+    roughness: 0.58,
+    distortion: 1,
+    lacunarity: 2.25,
+    trail: 1,
+    motion: 0.44,
+    reaction: 0.82,
+    progression: { ...DEFAULT_LIQUID_PROGRESSION },
+  },
 };
 
 export const DEFAULT_FRAME_COLOR = '#0a0a14';
@@ -60,6 +91,8 @@ export const DEFAULT_VISUALS = {
   background: { ...DEFAULT_BACKGROUND },
   frameColor: DEFAULT_FRAME_COLOR,
   ballColor: null,
+  ballTrail: { ...DEFAULT_BALL_TRAIL, progression: { ...DEFAULT_BALL_TRAIL.progression } },
+  shockwave: normalizeShockwaveConfig(DEFAULT_SHOCKWAVE_EFFECT),
   slots: defaultSlots(),
   layerOrder: [...DEFAULT_LAYER_ORDER],
 };
@@ -70,6 +103,44 @@ function loadSavedDefaults() {
     if (saved) return JSON.parse(saved);
   } catch (_) {}
   return null;
+}
+
+function clamp01(value, fallback) {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.max(0, Math.min(1, value));
+}
+
+function clampRange(value, min, max, fallback) {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.max(min, Math.min(max, value));
+}
+
+export function normalizeLiquidBackground(raw) {
+  const progression = raw?.progression && typeof raw.progression === 'object' ? raw.progression : null;
+  return {
+    colorBase: typeof raw?.colorBase === 'string' ? raw.colorBase : DEFAULT_BACKGROUND.liquid.colorBase,
+    colorMid: typeof raw?.colorMid === 'string' ? raw.colorMid : DEFAULT_BACKGROUND.liquid.colorMid,
+    colorAccent: typeof raw?.colorAccent === 'string' ? raw.colorAccent : DEFAULT_BACKGROUND.liquid.colorAccent,
+    scale: clampRange(raw?.scale, 0.5, 2, DEFAULT_BACKGROUND.liquid.scale),
+    roughness: clampRange(raw?.roughness, 0, 1, DEFAULT_BACKGROUND.liquid.roughness),
+    distortion: clampRange(raw?.distortion, 0, 2, DEFAULT_BACKGROUND.liquid.distortion),
+    lacunarity: clampRange(raw?.lacunarity, 1.6, 3.1, DEFAULT_BACKGROUND.liquid.lacunarity),
+    trail: clampRange(raw?.trail, 0, 2, DEFAULT_BACKGROUND.liquid.trail),
+    motion: clamp01(raw?.motion, DEFAULT_BACKGROUND.liquid.motion),
+    reaction: clampRange(raw?.reaction, 0, 2, DEFAULT_BACKGROUND.liquid.reaction),
+    progression: {
+      colorBase: typeof progression?.colorBase === 'string' ? progression.colorBase : null,
+      colorMid: typeof progression?.colorMid === 'string' ? progression.colorMid : null,
+      colorAccent: typeof progression?.colorAccent === 'string' ? progression.colorAccent : null,
+      scale: Number.isFinite(progression?.scale) ? clampRange(progression.scale, 0.5, 2, DEFAULT_BACKGROUND.liquid.scale) : null,
+      roughness: Number.isFinite(progression?.roughness) ? clampRange(progression.roughness, 0, 1, DEFAULT_BACKGROUND.liquid.roughness) : null,
+      distortion: Number.isFinite(progression?.distortion) ? clampRange(progression.distortion, 0, 2, DEFAULT_BACKGROUND.liquid.distortion) : null,
+      lacunarity: Number.isFinite(progression?.lacunarity) ? clampRange(progression.lacunarity, 1.6, 3.1, DEFAULT_BACKGROUND.liquid.lacunarity) : null,
+      trail: Number.isFinite(progression?.trail) ? clampRange(progression.trail, 0, 2, DEFAULT_BACKGROUND.liquid.trail) : null,
+      motion: Number.isFinite(progression?.motion) ? clamp01(progression.motion, DEFAULT_BACKGROUND.liquid.motion) : null,
+      reaction: Number.isFinite(progression?.reaction) ? clampRange(progression.reaction, 0, 2, DEFAULT_BACKGROUND.liquid.reaction) : null,
+    },
+  };
 }
 
 export function normalizeVisuals(raw, _skipSaved) {
@@ -88,19 +159,25 @@ export function normalizeVisuals(raw, _skipSaved) {
   // Background
   const bg = raw.background;
   if (bg && typeof bg === 'object') {
-    const validTypes = ['solid', 'gradient', 'image'];
+    const validTypes = ['solid', 'gradient', 'image', 'liquid'];
     result.background = {
       type: validTypes.includes(bg.type) ? bg.type : 'image',
       colorTop: typeof bg.colorTop === 'string' ? bg.colorTop : DEFAULT_BACKGROUND.colorTop,
       colorBottom: typeof bg.colorBottom === 'string' ? bg.colorBottom : DEFAULT_BACKGROUND.colorBottom,
       image: typeof bg.image === 'string' ? bg.image : DEFAULT_BACKGROUND.image,
+      progressionImage: typeof bg.progressionImage === 'string' ? bg.progressionImage : null,
+      mirrored: bg.mirrored === true,
+      liquid: normalizeLiquidBackground(bg.liquid),
     };
   } else {
     result.background = { ...DEFAULT_BACKGROUND };
+    result.background.liquid = normalizeLiquidBackground(null);
   }
 
   result.frameColor = typeof raw.frameColor === 'string' ? raw.frameColor : DEFAULT_FRAME_COLOR;
   result.ballColor = typeof raw.ballColor === 'string' ? raw.ballColor : null;
+  result.ballTrail = normalizeBallTrailConfig(raw.ballTrail);
+  result.shockwave = normalizeShockwaveConfig(raw.shockwave);
 
   // Slots with position/scale
   result.slots = {};
