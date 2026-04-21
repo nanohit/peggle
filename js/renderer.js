@@ -521,10 +521,10 @@ export class Renderer {
 
     if (typeof requestIdleCallback === 'function') {
       this._shockwavePrewarmHandleType = 'idle';
-      this._shockwavePrewarmHandle = requestIdleCallback(run, { timeout: 900 });
+      this._shockwavePrewarmHandle = requestIdleCallback(run, { timeout: 2200 });
     } else {
       this._shockwavePrewarmHandleType = 'timeout';
-      this._shockwavePrewarmHandle = setTimeout(run, 120);
+      this._shockwavePrewarmHandle = setTimeout(run, 900);
     }
   }
 

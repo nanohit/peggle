@@ -7,9 +7,32 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="theme-color" content="#0d1117">
   <title>Peggle</title>
+  <script>
+    (() => {
+      try {
+        const params = new URLSearchParams(location.search);
+        if (location.hash || params.get('campaign') || params.get('level') || params.get('levels')) return;
+
+        const ttl = 60 * 1000;
+        const now = Date.now();
+        const primaryName = localStorage.getItem('config:primaryCampaign');
+        const primaryTs = parseInt(localStorage.getItem('config_ts:primaryCampaign') || '0', 10);
+        const primaryFresh = !!(primaryName && (now - primaryTs) < ttl);
+        const campaignFresh = primaryFresh
+          && !!localStorage.getItem('campaign:' + primaryName)
+          && (now - parseInt(localStorage.getItem('campaign_ts:' + primaryName) || '0', 10)) < ttl;
+        if (campaignFresh) return;
+
+        window.__PEGGLE_PRIMARY_CAMPAIGN_PRELOAD__ = fetch('/api/campaigns?primary=true&resolve=true', {
+          credentials: 'same-origin'
+        }).then(res => res.ok ? res.json() : null).catch(() => null);
+      } catch (_) {}
+    })();
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="preload" href="https://fonts.googleapis.com/css2?family=Noto+Serif:wght@600;700&display=swap" as="style" onload="this.onload=null;this.rel='stylesheet'">
+  <noscript><link href="https://fonts.googleapis.com/css2?family=Noto+Serif:wght@600;700&display=swap" rel="stylesheet"></noscript>
   <link rel="stylesheet" href="css/styles.css">
   <link rel="stylesheet" href="css/visual-layout.css">
   <style>

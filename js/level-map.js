@@ -23,14 +23,38 @@ const ASSET_PATHS = {
   locked: 'visuals/Level_graph/locked_level.webp',
 };
 const DEFAULT_CHARACTER_ASSET = resolveAssetPaths('character');
+const IMAGE_CACHE = new Map();
 
 function loadImg(src) {
-  return new Promise(resolve => {
+  if (!src || typeof Image === 'undefined') return Promise.resolve(null);
+  const cached = IMAGE_CACHE.get(src);
+  if (cached) return cached.promise;
+  const entry = { image: null, promise: null };
+  entry.promise = new Promise(resolve => {
     const img = new Image();
-    img.onload = () => resolve(img);
+    img.onload = () => {
+      const finish = () => {
+        entry.image = img;
+        resolve(img);
+      };
+      try {
+        const decodePromise = typeof img.decode === 'function' ? img.decode() : null;
+        if (decodePromise && typeof decodePromise.then === 'function') {
+          decodePromise.then(finish, finish);
+          return;
+        }
+      } catch { /* drawImage can still use the loaded image */ }
+      finish();
+    };
     img.onerror = () => resolve(null);
     img.src = src;
   });
+  IMAGE_CACHE.set(src, entry);
+  return entry.promise;
+}
+
+function getLoadedImg(src) {
+  return IMAGE_CACHE.get(src)?.image || null;
 }
 
 async function loadFirstImg(candidates) {
@@ -40,6 +64,56 @@ async function loadFirstImg(candidates) {
     if (img) return img;
   }
   return null;
+}
+
+function getFirstLoadedImg(candidates) {
+  for (const src of candidates || []) {
+    if (!src) continue;
+    const img = getLoadedImg(src);
+    if (img) return img;
+  }
+  return null;
+}
+
+function resolveLevelForNode(levels, node) {
+  if (!node) return null;
+  if (typeof node.levelIndex === 'number') return levels[node.levelIndex];
+  if (node.levelName) {
+    return levels.find(l => {
+      const safe = (l.name || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+      return safe === node.levelName || l.name === node.levelName;
+    });
+  }
+  return null;
+}
+
+function characterPortraitKey(level) {
+  const custom = level?.visuals?.slots?.character?.customSrc;
+  return (typeof custom === 'string' && custom.trim())
+    ? custom
+    : '__default_character__';
+}
+
+function characterPortraitSources(level) {
+  const custom = level?.visuals?.slots?.character?.customSrc;
+  const sources = [];
+  if (typeof custom === 'string' && custom.trim()) {
+    sources.push(custom);
+  }
+  sources.push(DEFAULT_CHARACTER_ASSET.webp, DEFAULT_CHARACTER_ASSET.png);
+  return sources;
+}
+
+export function prewarmLevelMapAssets(levels = [], graph = { nodes: [] }, options = {}) {
+  const includePortraits = options.includePortraits === true;
+  const staticLoads = Object.values(ASSET_PATHS).map(src => loadImg(src));
+  if (!includePortraits) return Promise.all(staticLoads);
+  const nodes = Array.isArray(graph?.nodes) ? graph.nodes : [];
+  const portraitLoads = nodes.map(node => {
+    const level = resolveLevelForNode(levels, node);
+    return loadFirstImg(characterPortraitSources(level));
+  });
+  return Promise.all([...staticLoads, ...portraitLoads]);
 }
 
 export class LevelMap {
@@ -96,8 +170,12 @@ export class LevelMap {
 
   async show(parent) {
     if (!this.graph?.nodes?.length) return;
-    await this._loadAssets();
-    if (this._disposed) return;
+    this._loadAssets()
+      .then(() => {
+        if (!this._disposed) this._render();
+      })
+      .catch(error => console.warn('[level-map] Asset load failed', error));
+    this._primeAssetsFromCache();
     this._buildDOM(parent);
     if (this._disposed) return;
     this._render();
@@ -195,15 +273,7 @@ export class LevelMap {
   }
 
   _resolveLevel(node) {
-    if (!node) return null;
-    if (typeof node.levelIndex === 'number') return this.levels[node.levelIndex];
-    if (node.levelName) {
-      return this.levels.find(l => {
-        const safe = (l.name || '').replace(/[^a-zA-Z0-9_-]/g, '_');
-        return safe === node.levelName || l.name === node.levelName;
-      });
-    }
-    return null;
+    return resolveLevelForNode(this.levels, node);
   }
 
   _getNodeState(nodeId) {
@@ -212,31 +282,21 @@ export class LevelMap {
   }
 
   _characterPortraitKey(level) {
-    const custom = level?.visuals?.slots?.character?.customSrc;
-    return (typeof custom === 'string' && custom.trim())
-      ? custom
-      : '__default_character__';
+    return characterPortraitKey(level);
   }
 
   _characterPortraitSources(level) {
-    const custom = level?.visuals?.slots?.character?.customSrc;
-    const sources = [];
-    if (typeof custom === 'string' && custom.trim()) {
-      sources.push(custom);
-    }
-    sources.push(DEFAULT_CHARACTER_ASSET.webp, DEFAULT_CHARACTER_ASSET.png);
-    return sources;
+    return characterPortraitSources(level);
   }
 
   // ─── Asset loading ───────────────────────────────────────
 
   async _loadAssets() {
-    // Static assets
     const entries = Object.entries(ASSET_PATHS);
-    const imgs = await Promise.all(entries.map(([, p]) => loadImg(p)));
-    entries.forEach(([k], i) => { this._assets[k] = imgs[i]; });
+    const staticLoads = Promise.all(entries.map(([, p]) => loadImg(p))).then(imgs => {
+      entries.forEach(([k], i) => { this._assets[k] = imgs[i]; });
+    });
 
-    // Character portraits per node
     const portraitLoads = [];
     for (const node of this.graph.nodes) {
       const level = this._resolveLevel(node);
@@ -246,7 +306,20 @@ export class LevelMap {
         })
       );
     }
-    await Promise.all(portraitLoads);
+    await Promise.all([staticLoads, ...portraitLoads]);
+  }
+
+  _primeAssetsFromCache() {
+    for (const [key, path] of Object.entries(ASSET_PATHS)) {
+      const img = getLoadedImg(path);
+      if (img) this._assets[key] = img;
+    }
+
+    for (const node of this.graph.nodes) {
+      const level = this._resolveLevel(node);
+      const img = getFirstLoadedImg(this._characterPortraitSources(level));
+      if (img) this._portraits.set(node.id, img);
+    }
   }
 
   // ─── DOM ─────────────────────────────────────────────────

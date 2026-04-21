@@ -7,7 +7,6 @@ import { isMuted, setMuted } from './haptics.js';
 import { VisualLayout } from './visual-layout.js';
 import { normalizeVisuals } from './visual-config.js';
 import { normalizeLevelData } from './levels.js';
-import { GambleSystem } from './gamble-system.js';
 import { DialogueController } from './dialogue-controller.js';
 import { getStoredLanguage, getPauseCopy, normalizeLanguage, setStoredLanguage } from './localization.js';
 import { topoOrder, buildNodeMap, buildParentMap, buildLevelIndexMap, graphFromLevels } from './graph/core.js';
@@ -18,8 +17,10 @@ const ASPECT_RATIO = 3 / 4.5;
 const FRAME_RATIO = 9 / 17;
 const WORLD_W = 400;
 const WORLD_H = Math.round(WORLD_W / ASPECT_RATIO); // 600
+let levelMapModulePromise = null;
 let levelMapCtorPromise = null;
 let levelMapCssPromise = null;
+let gambleSystemCtorPromise = null;
 function ensureLevelMapCss() {
   if (!levelMapCssPromise) {
     levelMapCssPromise = new Promise(resolve => {
@@ -38,18 +39,39 @@ function ensureLevelMapCss() {
   }
   return levelMapCssPromise;
 }
+function getLevelMapModule() {
+  if (!levelMapModulePromise) {
+    levelMapModulePromise = Promise.all([
+      import('./level-map.js'),
+      ensureLevelMapCss()
+    ]).then(([mod]) => mod).catch(err => {
+      // Allow retry on next call (network/CDN may have recovered)
+      levelMapModulePromise = null;
+      levelMapCtorPromise = null;
+      throw err;
+    });
+  }
+  return levelMapModulePromise;
+}
 function getLevelMapCtor() {
   if (!levelMapCtorPromise) {
-    levelMapCtorPromise = Promise.all([
-      import('./level-map.js').then(mod => mod.LevelMap),
-      ensureLevelMapCss()
-    ]).then(([Ctor]) => Ctor).catch(err => {
-      // Allow retry on next call (network/CDN may have recovered)
+    levelMapCtorPromise = getLevelMapModule().then(mod => mod.LevelMap).catch(err => {
       levelMapCtorPromise = null;
       throw err;
     });
   }
   return levelMapCtorPromise;
+}
+function getGambleSystemCtor() {
+  if (!gambleSystemCtorPromise) {
+    gambleSystemCtorPromise = import('./gamble-system.js')
+      .then(mod => mod.GambleSystem)
+      .catch(err => {
+        gambleSystemCtorPromise = null;
+        throw err;
+      });
+  }
+  return gambleSystemCtorPromise;
 }
 
 // --- Data loading (multiple sources, priority order) ---
@@ -170,22 +192,35 @@ async function loadPrimaryCampaign() {
   const cached = localStorage.getItem(cacheKey);
   const cacheFresh = !!(cached && (Date.now() - cachedAt) < CAMPAIGN_CACHE_TTL);
 
+  const storeResolvedPrimary = (data) => {
+    if (!data?.name) return;
+    try {
+      localStorage.setItem(cacheKey, data.name);
+      localStorage.setItem(cacheTimeKey, String(Date.now()));
+      localStorage.setItem('campaign:' + data.name, JSON.stringify(data));
+      localStorage.setItem('campaign_ts:' + data.name, String(Date.now()));
+    } catch { /* storage full */ }
+  };
+
   // Single-request fast path: server resolves configured primary campaign directly.
   if (!cacheFresh) {
+    const preloaded = typeof window !== 'undefined' ? window.__PEGGLE_PRIMARY_CAMPAIGN_PRELOAD__ : null;
+    if (preloaded && typeof preloaded.then === 'function') {
+      try {
+        const data = await preloaded;
+        if (hasCampaignLevels(data)) {
+          storeResolvedPrimary(data);
+          return data;
+        }
+      } catch { /* fall through */ }
+    }
+
     try {
       const res = await fetch('/api/campaigns?primary=true&resolve=true');
       if (res.ok) {
         const data = await res.json();
         if (hasCampaignLevels(data)) {
-          if (data.name) {
-            localStorage.setItem(cacheKey, data.name);
-            localStorage.setItem(cacheTimeKey, String(Date.now()));
-            // Also cache resolved campaign data so loadCampaign() hits on next visit
-            try {
-              localStorage.setItem('campaign:' + data.name, JSON.stringify(data));
-              localStorage.setItem('campaign_ts:' + data.name, String(Date.now()));
-            } catch { /* storage full */ }
-          }
+          storeResolvedPrimary(data);
           return data;
         }
       }
@@ -229,8 +264,17 @@ function showError(msg) {
 
 // --- Mirror level data horizontally ---
 
+function cloneLevelData(levelData) {
+  if (typeof structuredClone === 'function') {
+    try {
+      return structuredClone(levelData);
+    } catch { /* fall back to JSON clone for legacy payloads */ }
+  }
+  return JSON.parse(JSON.stringify(levelData));
+}
+
 function mirrorLevel(levelData, canvasWidth = WORLD_W) {
-  const m = JSON.parse(JSON.stringify(levelData));
+  const m = cloneLevelData(levelData);
 
   for (const peg of m.pegs) {
     peg.x = canvasWidth - peg.x;
@@ -294,23 +338,23 @@ function createPauseOverlay() {
 
   overlay.innerHTML = `
     <div class="pause-panel">
-      <img class="pause-bg" src="${BASE}pause_modal_background.webp" alt="" draggable="false">
+      <img class="pause-bg" data-src="${BASE}pause_modal_background.webp" alt="" draggable="false">
       <div class="pause-content">
         <div class="pause-title" id="pauseTitleText">Пауза</div>
         <button class="pause-img-btn" id="pauseResumeBtn">
-          <img class="pause-img-btn__normal" src="${BASE}continue.webp" alt="Продолжить" draggable="false">
-          <img class="pause-img-btn__pressed" src="${BASE}continue_pressed1.webp" alt="" draggable="false">
+          <img class="pause-img-btn__normal" data-src="${BASE}continue.webp" alt="Продолжить" draggable="false">
+          <img class="pause-img-btn__pressed" data-src="${BASE}continue_pressed1.webp" alt="" draggable="false">
         </button>
         <button class="pause-img-btn" id="pauseRestartBtn">
-          <img class="pause-img-btn__normal" src="${BASE}again.webp" alt="Заново" draggable="false">
-          <img class="pause-img-btn__pressed" src="${BASE}again_pressed.webp" alt="" draggable="false">
+          <img class="pause-img-btn__normal" data-src="${BASE}again.webp" alt="Заново" draggable="false">
+          <img class="pause-img-btn__pressed" data-src="${BASE}again_pressed.webp" alt="" draggable="false">
         </button>
         <div class="pause-hint">
           <span class="pause-hint__text" id="pauseHintText">Второе нажатие<br>для выстрела</span>
           <label class="pause-check" id="pauseConfirmCheck">
             <input type="checkbox" id="pauseConfirmInput">
-            <img class="pause-check__off" src="${BASE}check.webp" alt="" draggable="false">
-            <img class="pause-check__on" src="${BASE}check_checked.webp" alt="" draggable="false">
+            <img class="pause-check__off" data-src="${BASE}check.webp" alt="" draggable="false">
+            <img class="pause-check__on" data-src="${BASE}check_checked.webp" alt="" draggable="false">
           </label>
         </div>
         <div class="pause-lang">
@@ -321,17 +365,28 @@ function createPauseOverlay() {
           </div>
         </div>
         <button class="pause-img-btn" id="pauseLevelBtn">
-          <img class="pause-img-btn__normal" src="${BASE}level.webp" alt="Уровни" draggable="false">
-          <img class="pause-img-btn__pressed" src="${BASE}level_pressed.webp" alt="" draggable="false">
+          <img class="pause-img-btn__normal" data-src="${BASE}level.webp" alt="Уровни" draggable="false">
+          <img class="pause-img-btn__pressed" data-src="${BASE}level_pressed.webp" alt="" draggable="false">
         </button>
       </div>
       <button class="pause-sound-btn" id="pauseSoundBtn">
-        <img class="pause-sound-btn__on" src="visuals/pause_menu/sound_on.webp" alt="Звук вкл" draggable="false">
-        <img class="pause-sound-btn__off" src="visuals/pause_menu/sound_off.webp" alt="Звук выкл" draggable="false">
+        <img class="pause-sound-btn__on" data-src="visuals/pause_menu/sound_on.webp" alt="Звук вкл" draggable="false">
+        <img class="pause-sound-btn__off" data-src="visuals/pause_menu/sound_off.webp" alt="Звук выкл" draggable="false">
       </button>
     </div>
   `;
   return overlay;
+}
+
+function loadDeferredImages(root) {
+  if (!root?.querySelectorAll) return;
+  for (const img of root.querySelectorAll('img[data-src]')) {
+    const src = img.dataset.src;
+    if (!src) continue;
+    img.decoding = 'async';
+    img.src = src;
+    delete img.dataset.src;
+  }
 }
 
 // --- Main ---
@@ -400,6 +455,25 @@ async function bootWithLevels(levels, campaignName, campaignData) {
   // Create and attach pause overlay (inside the visual frame so it covers the game area)
   const pauseOverlay = createPauseOverlay();
   visualLayout.frame.appendChild(pauseOverlay);
+  let pauseAssetsWarmHandle = null;
+  let pauseAssetsLoaded = false;
+  function ensurePauseAssetsLoaded() {
+    if (pauseAssetsLoaded) return;
+    pauseAssetsLoaded = true;
+    loadDeferredImages(pauseOverlay);
+  }
+  function schedulePauseAssetsWarmup() {
+    if (pauseAssetsLoaded || pauseAssetsWarmHandle !== null) return;
+    const run = () => {
+      pauseAssetsWarmHandle = null;
+      ensurePauseAssetsLoaded();
+    };
+    if (typeof window.requestIdleCallback === 'function') {
+      pauseAssetsWarmHandle = window.requestIdleCallback(run, { timeout: 4200 });
+    } else {
+      pauseAssetsWarmHandle = window.setTimeout(run, 2600);
+    }
+  }
 
   function applyLanguage(nextLanguage) {
     currentLanguage = normalizeLanguage(nextLanguage);
@@ -535,8 +609,8 @@ async function bootWithLevels(levels, campaignName, campaignData) {
   let gambleSystem = null;
   let unsubUiState = null;
   let mirrorState = false; // alternates on defeat
-  // Deep-clone originals so mirror can always reference pristine data
-  const originalLevels = levels.map(l => JSON.parse(JSON.stringify(l)));
+  // Keep the campaign payload pristine; clone only the level that is about to run.
+  const originalLevels = levels;
 
   function saveProgress() {
     if (!progressKey) return;
@@ -554,6 +628,55 @@ async function bootWithLevels(levels, campaignName, campaignData) {
   resize();
   window.addEventListener('resize', resize);
 
+  let levelMapPrewarmHandle = null;
+  let levelMapPrewarmHandleType = '';
+  let levelMapShellPrewarmStarted = false;
+  let levelMapFullPrewarmStarted = false;
+  function cancelScheduledLevelMapPrewarm() {
+    if (levelMapPrewarmHandle === null) return;
+    if (levelMapPrewarmHandleType === 'idle' && typeof window.cancelIdleCallback === 'function') {
+      window.cancelIdleCallback(levelMapPrewarmHandle);
+    } else {
+      window.clearTimeout(levelMapPrewarmHandle);
+    }
+    levelMapPrewarmHandle = null;
+    levelMapPrewarmHandleType = '';
+  }
+
+  function runLevelMapPrewarm(options = {}) {
+    const includePortraits = options.includePortraits === true;
+    cancelScheduledLevelMapPrewarm();
+    if (includePortraits ? levelMapFullPrewarmStarted : levelMapShellPrewarmStarted) return;
+    levelMapShellPrewarmStarted = true;
+    if (includePortraits) levelMapFullPrewarmStarted = true;
+    getLevelMapModule()
+      .then(mod => mod.prewarmLevelMapAssets?.(levels, campaignGraph, { includePortraits }))
+      .catch(error => {
+        if (includePortraits) levelMapFullPrewarmStarted = false;
+        if (!levelMapFullPrewarmStarted) levelMapShellPrewarmStarted = false;
+        console.warn('[player] Level map prewarm failed', error);
+      });
+  }
+
+  function scheduleLevelMapPrewarm(options = {}) {
+    const includePortraits = options.includePortraits === true;
+    if (includePortraits ? levelMapFullPrewarmStarted : levelMapShellPrewarmStarted) return;
+    if (options.immediate) {
+      runLevelMapPrewarm({ includePortraits });
+      return;
+    }
+    if (levelMapPrewarmHandle !== null) return;
+    const run = () => runLevelMapPrewarm({ includePortraits });
+    if (typeof window.requestIdleCallback === 'function') {
+      levelMapPrewarmHandleType = 'idle';
+      levelMapPrewarmHandle = window.requestIdleCallback(run, { timeout: 3600 });
+    } else {
+      levelMapPrewarmHandleType = 'timer';
+      levelMapPrewarmHandle = window.setTimeout(run, 2200);
+    }
+  }
+  scheduleLevelMapPrewarm({ includePortraits: false });
+
   // --- Pause logic ---
 
   let paused = false;
@@ -561,12 +684,16 @@ async function bootWithLevels(levels, campaignName, campaignData) {
   function showPause() {
     if (paused || !game) return;
     if (game.state === 'won' || game.state === 'lost') return;
+    ensurePauseAssetsLoaded();
     paused = true;
     game.pause();
     pauseOverlay.classList.remove('pause-overlay--map-mode');
     pauseOverlay.classList.remove('pause-overlay--instant');
     pauseOverlay.classList.add('visible');
     visualLayout.frame.classList.add('visual-frame--paused');
+    requestAnimationFrame(() => {
+      scheduleLevelMapPrewarm({ immediate: true, includePortraits: true });
+    });
   }
 
   function hidePause(options = {}) {
@@ -617,6 +744,7 @@ async function bootWithLevels(levels, campaignName, campaignData) {
   // Level list button — show level map overlay
   let activeLevelMap = null;
   let activeLevelMapAllowClose = false;
+  let levelMapOpening = false;
   const LEVEL_MAP_EXIT_ICON = 'visuals/assets_webtp/left_circle_cross.webp';
 
   function setHudLockedByMap(locked) {
@@ -707,6 +835,17 @@ async function bootWithLevels(levels, campaignName, campaignData) {
   }
 
   async function showLevelMap(onSelectOverride, options = {}) {
+    if (activeLevelMap || levelMapOpening) return;
+    scheduleLevelMapPrewarm({ immediate: true, includePortraits: true });
+    levelMapOpening = true;
+    try {
+      await openLevelMap(onSelectOverride, options);
+    } finally {
+      levelMapOpening = false;
+    }
+  }
+
+  async function openLevelMap(onSelectOverride, options = {}) {
     const allowClose = options.allowClose !== false;
     const fallbackNodeId = options.fallbackNodeId;
     if (activeLevelMap) return;
@@ -845,7 +984,10 @@ async function bootWithLevels(levels, campaignName, campaignData) {
     }
   }
 
-  pauseOverlay.querySelector('#pauseLevelBtn').addEventListener('click', () => showLevelMap());
+  const pauseLevelBtn = pauseOverlay.querySelector('#pauseLevelBtn');
+  pauseLevelBtn.addEventListener('pointerenter', () => scheduleLevelMapPrewarm({ immediate: true, includePortraits: true }));
+  pauseLevelBtn.addEventListener('touchstart', () => scheduleLevelMapPrewarm({ immediate: true, includePortraits: true }), { passive: true });
+  pauseLevelBtn.addEventListener('click', () => showLevelMap());
   // Confirm-shoot checkbox (second tap to fire)
   const confirmInput = pauseOverlay.querySelector('#pauseConfirmInput');
   confirmInput.checked = !!localStorage.getItem('peggle_confirmShoot');
@@ -911,9 +1053,33 @@ async function bootWithLevels(levels, campaignName, campaignData) {
 
   // --- Gamble system ---
 
-  function mountGamble() {
-    if (!game) return;
-    gambleSystem = new GambleSystem({
+  let pendingGambleMountHandle = null;
+  let pendingGambleMountHandleType = '';
+  let gambleMountGeneration = 0;
+
+  function cancelPendingGambleMount() {
+    if (pendingGambleMountHandle === null) return;
+    if (pendingGambleMountHandleType === 'idle' && typeof window.cancelIdleCallback === 'function') {
+      window.cancelIdleCallback(pendingGambleMountHandle);
+    } else {
+      window.clearTimeout(pendingGambleMountHandle);
+    }
+    pendingGambleMountHandle = null;
+    pendingGambleMountHandleType = '';
+  }
+
+  async function mountGamble(expectedGeneration = gambleMountGeneration) {
+    if (!game || gambleSystem) return;
+    const targetGame = game;
+    let GambleSystemCtor = null;
+    try {
+      GambleSystemCtor = await getGambleSystemCtor();
+    } catch (error) {
+      console.warn('[player] Failed to load gamble UI', error);
+      return;
+    }
+    if (expectedGeneration !== gambleMountGeneration || !game || game !== targetGame || gambleSystem) return;
+    gambleSystem = new GambleSystemCtor({
       game,
       levelManager: null,
       statusBar: null,
@@ -928,23 +1094,27 @@ async function bootWithLevels(levels, campaignName, campaignData) {
     dialogueController.setGambleSystem(gambleSystem);
   }
 
-  let pendingGambleMountRaf = null;
-  function scheduleGambleMount() {
-    if (pendingGambleMountRaf) {
-      cancelAnimationFrame(pendingGambleMountRaf);
-      pendingGambleMountRaf = null;
+  function scheduleGambleMount(options = {}) {
+    cancelPendingGambleMount();
+    const token = ++gambleMountGeneration;
+    const run = () => {
+      pendingGambleMountHandle = null;
+      pendingGambleMountHandleType = '';
+      mountGamble(token);
+    };
+    const urgent = options.immediate === true || game?.isSurvivalMode?.() === true;
+    if (typeof window.requestIdleCallback === 'function') {
+      pendingGambleMountHandleType = 'idle';
+      pendingGambleMountHandle = window.requestIdleCallback(run, { timeout: urgent ? 900 : 2600 });
+    } else {
+      pendingGambleMountHandleType = 'timer';
+      pendingGambleMountHandle = window.setTimeout(run, urgent ? 450 : 1600);
     }
-    pendingGambleMountRaf = requestAnimationFrame(() => {
-      pendingGambleMountRaf = null;
-      mountGamble();
-    });
   }
 
   function teardownGamble() {
-    if (pendingGambleMountRaf) {
-      cancelAnimationFrame(pendingGambleMountRaf);
-      pendingGambleMountRaf = null;
-    }
+    gambleMountGeneration++;
+    cancelPendingGambleMount();
     if (gambleSystem) { gambleSystem.dispose(); gambleSystem = null; }
     dialogueController.setGambleSystem(null);
   }
@@ -1095,7 +1265,7 @@ async function bootWithLevels(levels, campaignName, campaignData) {
     const original = originalLevels[levelIndex];
     if (!original) return false;
     currentNodeId = nodeId;
-    const levelData = mirrorState ? mirrorLevel(original) : JSON.parse(JSON.stringify(original));
+    const levelData = mirrorState ? mirrorLevel(original) : cloneLevelData(original);
 
     // Cleanup previous
     teardownGamble();
@@ -1238,4 +1408,5 @@ async function bootWithLevels(levels, campaignName, campaignData) {
   }
 
   startLevel(currentNodeId);
+  requestAnimationFrame(() => schedulePauseAssetsWarmup());
 }
