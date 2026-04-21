@@ -2448,6 +2448,7 @@ export class Editor {
     }
     // Remove all event listeners registered with the abort signal
     this.abortController.abort();
+    this.renderer?.dispose?.();
   }
 
   resize(width, height) {

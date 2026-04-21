@@ -154,6 +154,10 @@ export class Renderer {
     this._shockwaveLayerCanvas = null;
     this._foregroundCanvas = null;
     this._foregroundCtx = null;
+    this._disposed = false;
+    this._shockwavePrewarmKey = '';
+    this._shockwavePrewarmHandle = null;
+    this._shockwavePrewarmHandleType = '';
     this.performanceProfile = 'balanced';
     this._survivalBgImage = null;
     this._survivalBgImageSrc = '';
@@ -179,6 +183,7 @@ export class Renderer {
     this._bgBaseDirty = true;
     this._bgOverlayDirty = true;
     this._bgVignetteDirty = true;
+    this._shockwavePrewarmKey = '';
     this._syncRenderLayers();
   }
 
@@ -337,10 +342,15 @@ export class Renderer {
   setShockwave(config) {
     this.shockwaveConfig = normalizeShockwaveConfig(config);
     this._shockwaveEffect.setConfig(this.shockwaveConfig);
+    this._shockwavePrewarmKey = '';
   }
 
   setPerformanceProfile(profile) {
-    this.performanceProfile = normalizeTrailPerformanceProfile(profile);
+    const nextProfile = normalizeTrailPerformanceProfile(profile);
+    if (nextProfile !== this.performanceProfile) {
+      this.performanceProfile = nextProfile;
+      this._shockwavePrewarmKey = '';
+    }
   }
 
   _loadBackgroundAsset(src, imageProp, srcProp, dirtyProp) {
@@ -490,6 +500,53 @@ export class Renderer {
     this._foregroundCtx.setTransform(1, 0, 0, 1, 0, 0);
     this._foregroundCtx.clearRect(0, 0, this.width, this.height);
     return this._foregroundCtx;
+  }
+
+  _scheduleShockwavePrewarm() {
+    if (this._disposed || this.shockwaveConfig?.enabled === false) return;
+    const key = `${this.width}|${this.height}|${this.performanceProfile}`;
+    if (this._shockwavePrewarmKey === key || this._shockwavePrewarmHandle) return;
+
+    const run = () => {
+      this._shockwavePrewarmHandle = null;
+      this._shockwavePrewarmHandleType = '';
+      if (this._disposed || this._shockwavePrewarmKey === key) return;
+      const ok = this._shockwaveEffect.prewarm(this.canvas, {
+        width: this.width,
+        height: this.height,
+        profile: this.performanceProfile
+      });
+      if (ok) this._shockwavePrewarmKey = key;
+    };
+
+    if (typeof requestIdleCallback === 'function') {
+      this._shockwavePrewarmHandleType = 'idle';
+      this._shockwavePrewarmHandle = requestIdleCallback(run, { timeout: 900 });
+    } else {
+      this._shockwavePrewarmHandleType = 'timeout';
+      this._shockwavePrewarmHandle = setTimeout(run, 120);
+    }
+  }
+
+  dispose() {
+    this._disposed = true;
+    if (this._shockwavePrewarmHandle) {
+      if (this._shockwavePrewarmHandleType === 'idle' && typeof cancelIdleCallback === 'function') {
+        cancelIdleCallback(this._shockwavePrewarmHandle);
+      } else {
+        clearTimeout(this._shockwavePrewarmHandle);
+      }
+      this._shockwavePrewarmHandle = null;
+      this._shockwavePrewarmHandleType = '';
+    }
+    if (this._foregroundCanvas?.parentNode) {
+      this._foregroundCanvas.parentNode.removeChild(this._foregroundCanvas);
+    }
+    this._foregroundCanvas = null;
+    this._foregroundCtx = null;
+    this._shockwaveEffect.dispose();
+    this._shockwaveLayerCanvas = null;
+    this.ctx = this.baseCtx;
   }
 
   drawCompositeTo(targetCtx) {
@@ -2117,6 +2174,7 @@ export class Renderer {
       this._setShockwaveLayerVisible(!!waveCanvas);
     } else {
       this._setShockwaveLayerVisible(false);
+      this._scheduleShockwavePrewarm();
     }
 
     const sceneCtx = this.ctx;

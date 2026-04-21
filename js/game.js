@@ -2534,6 +2534,7 @@ export class Game {
     this.uiStateListeners.clear();
     this.performanceEventListeners.clear();
     this.abortController.abort();
+    this.renderer?.dispose?.();
   }
 
   pause() {

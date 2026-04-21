@@ -375,6 +375,25 @@ export class ShockwaveEffectRenderer {
     this._glViewportHeight = 0;
   }
 
+  dispose() {
+    const gl = this._gl;
+    if (gl && !(typeof gl.isContextLost === 'function' && gl.isContextLost())) {
+      for (const bundle of this._glPrograms.values()) {
+        if (bundle?.program) gl.deleteProgram(bundle.program);
+      }
+      if (this._glBuffer) gl.deleteBuffer(this._glBuffer);
+      if (this._glTexture) gl.deleteTexture(this._glTexture);
+    }
+    if (this._glCanvas?.parentNode) {
+      this._glCanvas.parentNode.removeChild(this._glCanvas);
+    }
+    this._resetWebGlResources();
+    this._glCanvas = null;
+    this._glEventsBound = false;
+    this._glUnavailable = false;
+    this.waves.length = 0;
+  }
+
   _bindWebGlContextEvents() {
     if (!this._glCanvas || this._glEventsBound) return;
     this._glEventsBound = true;
@@ -611,6 +630,61 @@ export class ShockwaveEffectRenderer {
       gl.uniform4fv(loc.waveA, uniformViews.a);
       gl.uniform4fv(loc.waveB, uniformViews.b);
       gl.uniform4fv(loc.waveC, uniformViews.c);
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+      return true;
+    } catch (_) {
+      this._glUnavailable = true;
+      this._glTextureWidth = 0;
+      this._glTextureHeight = 0;
+      return false;
+    }
+  }
+
+  prewarm(sourceCanvas, options = null) {
+    if (!sourceCanvas || !this.config.enabled) return false;
+    const width = Number.isFinite(options?.width) ? options.width : sourceCanvas.width;
+    const height = Number.isFinite(options?.height) ? options.height : sourceCanvas.height;
+    const profile = normalizeProfile(options?.profile);
+    const limits = PROFILE_LIMITS[profile];
+    const gl = this._ensureWebGl(width, height);
+    if (!gl) return false;
+    if (typeof gl.isContextLost === 'function' && gl.isContextLost()) return false;
+
+    const bundle = this._getProgramBundle(gl, limits.maxWaves);
+    if (!bundle) {
+      this._glUnavailable = true;
+      return false;
+    }
+
+    const loc = bundle.locations;
+    try {
+      if (this._glViewportWidth !== width || this._glViewportHeight !== height) {
+        gl.viewport(0, 0, width, height);
+        this._glViewportWidth = width;
+        this._glViewportHeight = height;
+      }
+      gl.useProgram(bundle.program);
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, this._glBuffer);
+      const stride = 4 * Float32Array.BYTES_PER_ELEMENT;
+      if (loc.position >= 0) {
+        gl.enableVertexAttribArray(loc.position);
+        gl.vertexAttribPointer(loc.position, 2, gl.FLOAT, false, stride, 0);
+      }
+      if (loc.uv >= 0) {
+        gl.enableVertexAttribArray(loc.uv);
+        gl.vertexAttribPointer(loc.uv, 2, gl.FLOAT, false, stride, 2 * Float32Array.BYTES_PER_ELEMENT);
+      }
+
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, this._glTexture);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, sourceCanvas);
+      this._glTextureWidth = width;
+      this._glTextureHeight = height;
+
+      gl.uniform1i(loc.texture, 0);
+      gl.uniform2f(loc.resolution, width, height);
+      gl.uniform1i(loc.waveCount, 0);
       gl.drawArrays(gl.TRIANGLES, 0, 6);
       return true;
     } catch (_) {
