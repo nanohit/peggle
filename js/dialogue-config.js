@@ -4,6 +4,13 @@ export const DIALOGUE_VERSION = 1;
 export const DIALOGUE_DEFAULT_TIMEOUT_MS = 15000;
 export const DIALOGUE_TRIGGER_TYPES = ['levelStart', 'spinReward', 'pegProgress', 'performanceCap30'];
 export const DIALOGUE_DEFAULT_SEGMENT_COLOR = '#ffffff';
+export const DIALOGUE_DEFAULT_TEXT_SCALE = 1;
+
+function clampRange(value, min, max, fallback) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, n));
+}
 
 function normalizeSegment(raw) {
   if (typeof raw === 'string') {
@@ -65,6 +72,14 @@ function normalizeDismissOn(raw) {
   };
 }
 
+function normalizePlacement(raw) {
+  return {
+    anchor: 'portraitTop',
+    offsetY: Number.isFinite(raw?.offsetY) ? raw.offsetY : 0,
+    textScale: clampRange(raw?.textScale, 0.5, 1.8, DIALOGUE_DEFAULT_TEXT_SCALE)
+  };
+}
+
 export function clampDialogueTimeoutMs(value) {
   if (!Number.isFinite(value)) return DIALOGUE_DEFAULT_TIMEOUT_MS;
   return Math.max(0, Math.min(120000, Math.round(value)));
@@ -84,10 +99,7 @@ export function createDialogueEntry(overrides = null) {
     ),
     dismissOn: normalizeDismissOn(overrides?.dismissOn),
     trigger,
-    placement: {
-      anchor: 'portraitTop',
-      offsetY: Number.isFinite(overrides?.placement?.offsetY) ? overrides.placement.offsetY : 0
-    },
+    placement: normalizePlacement(overrides?.placement),
     content: {
       ru: normalizeLocale(overrides?.content?.ru),
       en: normalizeLocale(overrides?.content?.en)

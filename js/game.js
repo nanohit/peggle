@@ -157,6 +157,7 @@ export class Game {
       enabled: false,
       dragging: false
     };
+    this.inputSuppressedUntil = 0;
     
     // Performance overlay (editor only)
     this.showPerfOverlay = false;
@@ -214,6 +215,7 @@ export class Game {
     let touchDragged = false;
 
     canvas.addEventListener('touchstart', (e) => {
+      if (this._isInputSuppressed(e)) return;
       initAudio();
       if (this.handleUltraAimQteInput(e)) return;
       if (this._handleDebugDragStart(e)) return;
@@ -231,6 +233,7 @@ export class Game {
     }, { passive: false, ...sig });
 
     canvas.addEventListener('touchmove', (e) => {
+      if (this._isInputSuppressed(e)) return;
       if (this._handleDebugDragMove(e)) return;
       touchDragged = true;
       if (this.state === 'confirmAim') {
@@ -246,6 +249,7 @@ export class Game {
     }, { passive: false, ...sig });
 
     canvas.addEventListener('touchend', (e) => {
+      if (this._isInputSuppressed(e)) return;
       if (this._handleDebugDragEnd(e)) return;
       if (this.state === 'confirmAim' && !touchDragged) {
         // Second touch was a tap → fire
@@ -264,6 +268,7 @@ export class Game {
 
     // --- Mouse input (confirm-shoot: aim follows cursor freely, click = fire) ---
     canvas.addEventListener('mousedown', (e) => {
+      if (this._isInputSuppressed(e)) return;
       initAudio();
       if (this.handleUltraAimQteInput(e)) return;
       if (this._handleDebugDragStart(e)) return;
@@ -291,6 +296,7 @@ export class Game {
     }, sig);
 
     canvas.addEventListener('mousemove', (e) => {
+      if (this._isInputSuppressed(e)) return;
       if (this.debugDrag.dragging) { this._handleDebugDragMove(e); return; }
       if (this.confirmShoot) {
         // In confirm mode, aim always follows mouse when idle or aiming
@@ -308,6 +314,7 @@ export class Game {
     }, sig);
 
     canvas.addEventListener('mouseup', (e) => {
+      if (this._isInputSuppressed(e)) return;
       if (this._handleDebugDragEnd(e)) return;
       if (this.confirmShoot) return; // Handled in mousedown
       if (this.state !== 'aiming') return;
@@ -345,23 +352,46 @@ export class Game {
     }, sig);
 
     canvas.addEventListener('mousedown', (e) => {
+      if (this._isInputSuppressed(e)) return;
       if (this.debugDrag.enabled) return;
       if (this.isUltraAimQteActive()) return;
       if (this.state === 'playing') handleFlip();
     }, sig);
     canvas.addEventListener('mouseup', (e) => {
+      if (this._isInputSuppressed(e)) return;
       if (this.debugDrag.enabled) return;
       if (this.state === 'playing') handleFlipEnd();
     }, sig);
     canvas.addEventListener('touchstart', (e) => {
+      if (this._isInputSuppressed(e)) return;
       if (this.debugDrag.enabled) return;
       if (this.isUltraAimQteActive()) return;
       if (this.state === 'playing') { e.preventDefault(); handleFlip(); }
     }, { passive: false, ...sig });
     canvas.addEventListener('touchend', (e) => {
+      if (this._isInputSuppressed(e)) return;
       if (this.debugDrag.enabled) return;
       if (this.state === 'playing') handleFlipEnd();
     }, sig);
+  }
+
+  suppressInputFor(ms = 450) {
+    const now = typeof performance !== 'undefined' && typeof performance.now === 'function'
+      ? performance.now()
+      : Date.now();
+    this.inputSuppressedUntil = Math.max(this.inputSuppressedUntil || 0, now + Math.max(0, ms));
+  }
+
+  _isInputSuppressed(event = null) {
+    const until = this.inputSuppressedUntil || 0;
+    if (until <= 0) return false;
+    const now = typeof performance !== 'undefined' && typeof performance.now === 'function'
+      ? performance.now()
+      : Date.now();
+    if (now >= until) return false;
+    if (event?.cancelable) event.preventDefault();
+    if (typeof event?.stopPropagation === 'function') event.stopPropagation();
+    return true;
   }
 
   getUiStateSnapshot() {

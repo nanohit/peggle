@@ -1168,7 +1168,7 @@ async function bootWithLevels(levels, campaignName, campaignData) {
   function transitionToLevel(nodeId) {
     const frame = visualLayout.frame;
     if (!frame) {
-      startLevel(nodeId);
+      startLevel(nodeId, { suppressInputMs: 650 });
       return;
     }
 
@@ -1189,7 +1189,7 @@ async function bootWithLevels(levels, campaignName, campaignData) {
     }
 
     if (!outgoingCanvas || canvasRect.width <= 0 || canvasRect.height <= 0) {
-      startLevel(nodeId);
+      startLevel(nodeId, { suppressInputMs: 650 });
       return;
     }
 
@@ -1230,7 +1230,7 @@ async function bootWithLevels(levels, campaignName, campaignData) {
     canvas.style.transform = 'translateY(100%)';
     setPortraitScrollFx(canvasRect.height);
 
-    const started = startLevel(nodeId, { clearTransition: false });
+    const started = startLevel(nodeId, { clearTransition: false, suppressInputMs: LEVEL_SCROLL_MS + 220 });
     if (!started) {
       clearLevelTransitionArtifacts();
       return;
@@ -1282,6 +1282,9 @@ async function bootWithLevels(levels, campaignName, campaignData) {
     visualLayout.frame.classList.remove('visual-frame--paused');
 
     game = new Game(canvas);
+    if (Number.isFinite(options.suppressInputMs) && options.suppressInputMs > 0) {
+      game.suppressInputFor(options.suppressInputMs);
+    }
     game.confirmShoot = !!localStorage.getItem('peggle_confirmShoot');
 
     // Apply visuals (background + frame + slots)
@@ -1320,15 +1323,17 @@ async function bootWithLevels(levels, campaignName, campaignData) {
         // Guard: only fire once (touchstart + click can both trigger on mobile)
         let fired = false;
         const onceAction = (action) => {
-          const guarded = () => {
+          const guarded = (event) => {
             if (fired) return;
             fired = true;
+            if (event?.cancelable) event.preventDefault();
+            if (typeof event?.stopPropagation === 'function') event.stopPropagation();
             canvas.removeEventListener('click', guarded);
             canvas.removeEventListener('touchstart', guarded);
             action();
           };
           canvas.addEventListener('click', guarded, { once: true });
-          canvas.addEventListener('touchstart', guarded, { once: true });
+          canvas.addEventListener('touchstart', guarded, { once: true, passive: false });
         };
 
         if (result === 'won') {
@@ -1396,7 +1401,7 @@ async function bootWithLevels(levels, campaignName, campaignData) {
         } else {
           // Defeat — toggle mirror and restart same level
           mirrorState = !mirrorState;
-          onceAction(() => startLevel(currentNodeId));
+          onceAction(() => startLevel(currentNodeId, { suppressInputMs: 650 }));
         }
       }, 1000);
     };

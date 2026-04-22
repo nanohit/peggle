@@ -8,9 +8,28 @@ import { normalizeLanguage } from './localization.js';
 
 const DIALOGUE_SEEN_STORAGE_KEY = 'peggle_dialogue_seen_v1';
 const DIALOGUE_FADE_MS = 260;
+const GAME_WORLD_REFERENCE_WIDTH = 400;
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+function hashString(value) {
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i++) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function dialogueSeenRevision(entry) {
+  const revision = {
+    trigger: entry?.trigger || null,
+    placement: entry?.placement || null,
+    content: entry?.content || null
+  };
+  return hashString(JSON.stringify(revision));
 }
 
 export class DialogueController {
@@ -368,68 +387,97 @@ export class DialogueController {
       return { left: 32, right: 32, top: 84, fontSize: 28, maxWidth: 280 };
     }
     const frameRect = frame.getBoundingClientRect();
-    const leftCircle = this._getSlotRect('leftCircle') || this._getSlotRect('topLeft');
-    const rightCircle = this._getSlotRect('rightCircle') || this._getSlotRect('topRight');
-    const portraitCenterY = this._getPortraitCenterY(frameRect.height);
-
-    const left = leftCircle ? leftCircle.right + 10 : frameRect.width * 0.14;
-    const rightInset = rightCircle ? Math.max(10, frameRect.width - rightCircle.left + 10) : frameRect.width * 0.14;
+    const canvasRect = this._getCanvasRect(frameRect);
+    const portraitBounds = this._getPortraitBounds(frameRect);
+    const canvasScale = clamp(canvasRect.width / GAME_WORLD_REFERENCE_WIDTH, 0.55, 2.4);
     const placementOffsetY = Number.isFinite(entry?.placement?.offsetY) ? entry.placement.offsetY : 0;
+    const textScale = clamp(Number(entry?.placement?.textScale) || 1, 0.5, 1.8);
+    const maxWidth = Math.max(140, Math.min(canvasRect.width * 0.9, frameRect.width * 0.78));
+    const centerX = canvasRect.left + canvasRect.width / 2;
+    const left = clamp(centerX - maxWidth / 2, 8, Math.max(8, frameRect.width - maxWidth - 8));
+    const rightInset = Math.max(8, frameRect.width - left - maxWidth);
+    const fallbackTop = canvasRect.top + canvasRect.height * 0.25;
+    const anchorTop = portraitBounds
+      ? portraitBounds.bottom + 32 * canvasScale
+      : fallbackTop;
+    const minTop = Math.max(22, canvasRect.top + canvasRect.height * 0.12);
+    const maxTop = Math.max(minTop, canvasRect.top + canvasRect.height * 0.42);
     const top = clamp(
-      portraitCenterY - 8 + placementOffsetY,
-      28,
-      Math.max(28, frameRect.height * 0.42)
+      anchorTop + placementOffsetY * canvasScale,
+      minTop,
+      maxTop
     );
     const availableWidth = Math.max(140, frameRect.width - left - rightInset);
-    const fontSize = clamp(availableWidth * 0.12, 18, 42);
+    const fontSize = clamp(canvasRect.width * 0.105 * textScale, 12, 64);
     return {
       left,
       right: rightInset,
       top,
       fontSize,
-      maxWidth: Math.min(availableWidth, frameRect.width * 0.78)
+      maxWidth: Math.min(availableWidth, maxWidth)
     };
   }
 
-  _getPortraitTop(fallbackHeight) {
+  _getCanvasRect(frameRect) {
+    const frame = this.visualLayout?.frame;
+    const canvas = frame?.querySelector?.('#gameCanvas') || frame?.querySelector?.('canvas');
+    if (canvas && typeof canvas.getBoundingClientRect === 'function') {
+      const rect = canvas.getBoundingClientRect();
+      const width = Math.max(1, rect.width);
+      const height = Math.max(1, rect.height);
+      return {
+        left: rect.left - frameRect.left,
+        right: rect.right - frameRect.left,
+        top: rect.top - frameRect.top,
+        bottom: rect.bottom - frameRect.top,
+        width,
+        height
+      };
+    }
+
+    const width = Math.max(1, frameRect.width * 0.9);
+    const height = Math.max(1, width * 1.5);
+    const left = (frameRect.width - width) / 2;
+    const top = (frameRect.height - height) / 2;
+    return {
+      left,
+      right: left + width,
+      top,
+      bottom: top + height,
+      width,
+      height
+    };
+  }
+
+  _getPortraitBounds(frameRect) {
     const portraitIds = ['characterCircle', 'healthCircle', 'healthCharCircle', 'character'];
     let minTop = Number.POSITIVE_INFINITY;
-    for (const slotId of portraitIds) {
-      const rect = this._getSlotRect(slotId);
-      if (rect) minTop = Math.min(minTop, rect.top);
-    }
-    if (!Number.isFinite(minTop)) return fallbackHeight * 0.48;
-    return minTop;
-  }
-
-  _getPortraitBottom(fallbackHeight) {
-    const portraitIds = ['characterCircle', 'healthCircle', 'healthCharCircle', 'character'];
     let maxBottom = Number.NEGATIVE_INFINITY;
     for (const slotId of portraitIds) {
-      const rect = this._getSlotRect(slotId);
-      if (rect) maxBottom = Math.max(maxBottom, rect.bottom);
+      const rect = this._getSlotRect(slotId, frameRect);
+      if (!rect) continue;
+      minTop = Math.min(minTop, rect.top);
+      maxBottom = Math.max(maxBottom, rect.bottom);
     }
-    if (!Number.isFinite(maxBottom)) return fallbackHeight * 0.22;
-    return maxBottom;
+    if (!Number.isFinite(minTop) || !Number.isFinite(maxBottom)) return null;
+    return {
+      top: minTop,
+      bottom: maxBottom,
+      centerY: (minTop + maxBottom) / 2
+    };
   }
 
-  _getPortraitCenterY(fallbackHeight) {
-    const top = this._getPortraitTop(fallbackHeight);
-    const bottom = this._getPortraitBottom(fallbackHeight);
-    return (top + bottom) / 2;
-  }
-
-  _getSlotRect(slotId) {
+  _getSlotRect(slotId, frameRect = null) {
     const frame = this.visualLayout?.frame;
     const el = this.visualLayout?.slotElements?.[slotId];
     if (!frame || !el) return null;
-    const frameRect = frame.getBoundingClientRect();
+    const baseRect = frameRect || frame.getBoundingClientRect();
     const rect = el.getBoundingClientRect();
     return {
-      left: rect.left - frameRect.left,
-      right: rect.right - frameRect.left,
-      top: rect.top - frameRect.top,
-      bottom: rect.bottom - frameRect.top
+      left: rect.left - baseRect.left,
+      right: rect.right - baseRect.left,
+      top: rect.top - baseRect.top,
+      bottom: rect.bottom - baseRect.top
     };
   }
 
@@ -482,6 +530,6 @@ export class DialogueController {
   }
 
   _seenKey(entry) {
-    return `${this.scopeKey}|${this.level?.id || this.level?.name || 'level'}|${entry.id}`;
+    return `${this.scopeKey}|${this.level?.id || this.level?.name || 'level'}|${entry.id}|${dialogueSeenRevision(entry)}`;
   }
 }

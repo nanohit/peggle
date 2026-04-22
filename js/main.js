@@ -2880,6 +2880,19 @@ class PeggleApp {
     return 'Level start';
   }
 
+  _getDialogueTriggerHelp(entry) {
+    if (entry.trigger.type === 'spinReward') {
+      return 'Fires after the slot spin finishes and at least one perk is awarded. Leave all perk boxes unchecked to accept any rewarded perk.';
+    }
+    if (entry.trigger.type === 'pegProgress') {
+      return 'Fires when target progress reaches the selected percent. Classic levels use orange pegs; survival levels use vertical target progress.';
+    }
+    if (entry.trigger.type === 'performanceCap30') {
+      return 'Fires once the runtime observes a stable ~30 FPS cadence with low render/update cost, which usually means iOS Low Power Mode or an external frame cap.';
+    }
+    return 'Fires when this level starts. If Show once is enabled, it is remembered per campaign and per edited dialogue revision.';
+  }
+
   _formatDialogueLocaleSummary(entry) {
     const parts = [];
     if (entry.content?.ru?.segments?.some(segment => segment.text)) parts.push('RU');
@@ -2992,6 +3005,10 @@ class PeggleApp {
               <span class="dialogue-field-label">Vertical offset</span>
               <input id="dialogueOffsetInput" class="dialogue-field-input" type="number" min="-120" max="180" step="2" value="${Math.round(selectedEntry.placement?.offsetY || 0)}">
             </label>
+            <label class="dialogue-field">
+              <span class="dialogue-field-label">Text size, %</span>
+              <input id="dialogueTextScaleInput" class="dialogue-field-input" type="number" min="50" max="180" step="5" value="${Math.round((selectedEntry.placement?.textScale || 1) * 100)}">
+            </label>
           </div>
           <div class="dialogue-toggle-grid">
             <label class="dialogue-toggle"><input id="dialogueEnabledToggle" type="checkbox"${selectedEntry.enabled ? ' checked' : ''}> Enabled</label>
@@ -3013,6 +3030,7 @@ class PeggleApp {
               <option value="performanceCap30"${selectedEntry.trigger.type === 'performanceCap30' ? ' selected' : ''}>Stable ~30 FPS cap / possible power saver</option>
             </select>
           </label>
+          <div class="dialogue-block-note">${this._esc(this._getDialogueTriggerHelp(selectedEntry))}</div>
           ${selectedEntry.trigger.type === 'pegProgress' ? `
             <div class="dialogue-trigger-extra">
               <label class="dialogue-field">
@@ -3130,6 +3148,13 @@ class PeggleApp {
     body.querySelector('#dialogueOffsetInput')?.addEventListener('input', (event) => {
       this._updateDialogueEntry(selectedEntry.id, (entry) => {
         entry.placement.offsetY = Number.isFinite(Number(event.target.value)) ? Number(event.target.value) : 0;
+      }, { rerender: false });
+    });
+
+    body.querySelector('#dialogueTextScaleInput')?.addEventListener('input', (event) => {
+      this._updateDialogueEntry(selectedEntry.id, (entry) => {
+        const percent = Number(event.target.value);
+        entry.placement.textScale = Math.max(0.5, Math.min(1.8, (Number.isFinite(percent) ? percent : 100) / 100));
       }, { rerender: false });
     });
 
