@@ -113,7 +113,7 @@ const GLOW_CACHE_LIMIT = 128;
 export class Renderer {
   constructor(canvas) {
     this.canvas = canvas;
-    this.ctx = canvas.getContext('2d');
+    this.ctx = canvas.getContext('2d', { alpha: false });
     this.baseCtx = this.ctx;
     this.width = canvas.width;
     this.height = canvas.height;
@@ -154,6 +154,12 @@ export class Renderer {
     this._shockwaveLayerCanvas = null;
     this._foregroundCanvas = null;
     this._foregroundCtx = null;
+    this._renderLayerHost = null;
+    this._renderLayerHostReady = false;
+    this._layerLayoutState = new WeakMap();
+    this._layerVisibility = new WeakMap();
+    this._displaySizeScratch = { width: '', height: '' };
+    this._shockwaveLayerVisible = false;
     this._disposed = false;
     this._shockwavePrewarmKey = '';
     this._shockwavePrewarmHandle = null;
@@ -319,7 +325,6 @@ export class Renderer {
 
   setBackground(config) {
     this.backgroundConfig = config || null;
-    this._glowCache.clear();
     this._bgBaseDirty = true;
     this._bgOverlayDirty = true;
     this._bgVignetteDirty = true;
@@ -343,6 +348,9 @@ export class Renderer {
     this.shockwaveConfig = normalizeShockwaveConfig(config);
     this._shockwaveEffect.setConfig(this.shockwaveConfig);
     this._shockwavePrewarmKey = '';
+    if (!this.shockwaveConfig.enabled) {
+      this._detachShockwaveLayer();
+    }
   }
 
   setPerformanceProfile(profile) {
@@ -404,28 +412,31 @@ export class Renderer {
     return this[prop];
   }
 
-  _ensureRenderLayers() {
-    if (typeof document === 'undefined') return false;
+  _ensureLayerHost() {
+    if (typeof document === 'undefined') return null;
     const host = this.canvas.parentElement;
+    if (!host) return null;
+
+    if (this._renderLayerHost !== host) {
+      this._renderLayerHost = host;
+      this._renderLayerHostReady = false;
+    }
+
+    if (!this._renderLayerHostReady) {
+      if (typeof getComputedStyle === 'function' && getComputedStyle(host).position === 'static') {
+        host.style.position = 'relative';
+      }
+      if (!this.canvas.style.position) this.canvas.style.position = 'relative';
+      if (this.canvas.style.zIndex !== '1') this.canvas.style.zIndex = '1';
+      this._renderLayerHostReady = true;
+    }
+
+    return host;
+  }
+
+  _ensureRenderLayers() {
+    const host = this._ensureLayerHost();
     if (!host) return false;
-
-    if (typeof getComputedStyle === 'function' && getComputedStyle(host).position === 'static') {
-      host.style.position = 'relative';
-    }
-    this.canvas.style.position = this.canvas.style.position || 'relative';
-    this.canvas.style.zIndex = '1';
-
-    const shockwaveCanvas = this._shockwaveEffect.getCanvas();
-    if (shockwaveCanvas) {
-      const isNewShockwaveLayer = this._shockwaveLayerCanvas !== shockwaveCanvas;
-      this._shockwaveLayerCanvas = shockwaveCanvas;
-      if (isNewShockwaveLayer && !shockwaveCanvas.style.visibility) {
-        shockwaveCanvas.style.visibility = 'hidden';
-      }
-      if (shockwaveCanvas.parentElement !== host) {
-        host.appendChild(shockwaveCanvas);
-      }
-    }
 
     if (!this._foregroundCanvas) {
       this._foregroundCanvas = document.createElement('canvas');
@@ -437,61 +448,140 @@ export class Renderer {
       host.appendChild(this._foregroundCanvas);
     }
 
-    this._syncRenderLayers();
+    this._applyLayerLayout(this._foregroundCanvas, 3);
+    this._applyLayerVisibility(this._foregroundCanvas, true);
     return !!this._foregroundCtx;
   }
 
-  _displayCanvasSize() {
-    const rect = typeof this.canvas.getBoundingClientRect === 'function'
-      ? this.canvas.getBoundingClientRect()
-      : null;
-    const width = this.canvas.style.width
-      || `${Math.max(1, Math.round(rect?.width || this.canvas.width || this.width))}px`;
-    const height = this.canvas.style.height
-      || `${Math.max(1, Math.round(rect?.height || this.canvas.height || this.height))}px`;
-    return { width, height };
+  _ensureShockwaveLayer() {
+    if (this.shockwaveConfig?.enabled === false) return false;
+    const host = this._ensureLayerHost();
+    if (!host) return false;
+
+    const shockwaveCanvas = this._shockwaveEffect.getCanvas();
+    if (!shockwaveCanvas) return false;
+
+    if (this._shockwaveLayerCanvas !== shockwaveCanvas) {
+      this._shockwaveLayerCanvas = shockwaveCanvas;
+      this._layerLayoutState.delete(shockwaveCanvas);
+      this._layerVisibility.delete(shockwaveCanvas);
+    }
+    if (shockwaveCanvas.parentElement !== host) {
+      host.appendChild(shockwaveCanvas);
+      this._layerLayoutState.delete(shockwaveCanvas);
+    }
+
+    this._applyLayerLayout(shockwaveCanvas, 2);
+    return true;
   }
 
-  _syncLayerCanvas(canvas, zIndex, visible = true) {
+  _detachShockwaveLayer() {
+    const canvas = this._shockwaveLayerCanvas;
+    this._shockwaveLayerVisible = false;
     if (!canvas) return;
+    if (canvas.parentNode) canvas.parentNode.removeChild(canvas);
+    this._layerLayoutState.delete(canvas);
+    this._layerVisibility.delete(canvas);
+    this._shockwaveLayerCanvas = null;
+  }
+
+  _displayCanvasSize() {
+    const size = this._displaySizeScratch;
+    // Keep the render path layout-read free. The app writes explicit CSS sizes
+    // during resize; the canvas backing size is the safe fallback for tests/SSR.
+    size.width = this.canvas.style.width || `${Math.max(1, Math.round(this.canvas.width || this.width))}px`;
+    size.height = this.canvas.style.height || `${Math.max(1, Math.round(this.canvas.height || this.height))}px`;
+    return size;
+  }
+
+  _applyLayerLayout(canvas, zIndex) {
+    if (!canvas) return;
+    const display = this._displayCanvasSize();
+    const displayWidth = display.width;
+    const displayHeight = display.height;
+    const baseTransform = this.canvas.style.transform || '';
+    const transform = `translate(-50%, -50%)${baseTransform ? ` ${baseTransform}` : ''}`;
+    const transformOrigin = this.canvas.style.transformOrigin || 'center center';
+    const transition = this.canvas.style.transition || '';
+    const borderRadius = this.canvas.style.borderRadius || '4px';
+    const prev = this._layerLayoutState.get(canvas);
+
+    if (
+      prev
+      && canvas.width === this.width
+      && canvas.height === this.height
+      && prev.width === this.width
+      && prev.height === this.height
+      && prev.displayWidth === displayWidth
+      && prev.displayHeight === displayHeight
+      && prev.transform === transform
+      && prev.transformOrigin === transformOrigin
+      && prev.transition === transition
+      && prev.borderRadius === borderRadius
+      && prev.zIndex === zIndex
+    ) {
+      return;
+    }
+
+    const next = prev || {};
+    next.width = this.width;
+    next.height = this.height;
+    next.displayWidth = displayWidth;
+    next.displayHeight = displayHeight;
+    next.transform = transform;
+    next.transformOrigin = transformOrigin;
+    next.transition = transition;
+    next.borderRadius = borderRadius;
+    next.zIndex = zIndex;
+    if (!prev) this._layerLayoutState.set(canvas, next);
+
     if (canvas.width !== this.width) canvas.width = this.width;
     if (canvas.height !== this.height) canvas.height = this.height;
 
-    const display = this._displayCanvasSize();
-    const baseTransform = this.canvas.style.transform || '';
     const style = canvas.style;
     style.position = 'absolute';
     style.left = '50%';
     style.top = '50%';
-    style.width = display.width;
-    style.height = display.height;
-    style.transform = `translate(-50%, -50%)${baseTransform ? ` ${baseTransform}` : ''}`;
-    style.transformOrigin = this.canvas.style.transformOrigin || 'center center';
-    style.transition = this.canvas.style.transition || '';
+    style.width = displayWidth;
+    style.height = displayHeight;
+    style.transform = transform;
+    style.transformOrigin = transformOrigin;
+    style.transition = transition;
     style.pointerEvents = 'none';
     style.touchAction = 'none';
-    style.borderRadius = this.canvas.style.borderRadius || '4px';
+    style.borderRadius = borderRadius;
     style.boxShadow = 'none';
     style.zIndex = String(zIndex);
     style.display = 'block';
-    style.visibility = visible ? 'visible' : 'hidden';
+  }
+
+  _applyLayerVisibility(canvas, visible) {
+    if (!canvas) return;
+    const next = visible ? 'visible' : 'hidden';
+    if (this._layerVisibility.get(canvas) === next && canvas.style.visibility === next) return;
+    this._layerVisibility.set(canvas, next);
+    canvas.style.visibility = next;
   }
 
   _syncRenderLayers() {
     if (this._shockwaveLayerCanvas) {
-      this._syncLayerCanvas(this._shockwaveLayerCanvas, 2, this._shockwaveLayerCanvas.style.visibility !== 'hidden');
+      this._applyLayerLayout(this._shockwaveLayerCanvas, 2);
+      this._applyLayerVisibility(this._shockwaveLayerCanvas, this._shockwaveLayerVisible);
     }
     if (this._foregroundCanvas) {
-      this._syncLayerCanvas(this._foregroundCanvas, 3, true);
+      this._applyLayerLayout(this._foregroundCanvas, 3);
+      this._applyLayerVisibility(this._foregroundCanvas, true);
     }
   }
 
   _setShockwaveLayerVisible(visible) {
-    if (visible) {
-      this._ensureRenderLayers();
-      this._syncLayerCanvas(this._shockwaveLayerCanvas, 2, true);
+    const nextVisible = !!visible && this.shockwaveConfig?.enabled !== false;
+    this._shockwaveLayerVisible = nextVisible;
+    if (nextVisible) {
+      if (!this._ensureShockwaveLayer()) return;
+      this._applyLayerVisibility(this._shockwaveLayerCanvas, true);
     } else if (this._shockwaveLayerCanvas) {
-      this._syncLayerCanvas(this._shockwaveLayerCanvas, 2, false);
+      this._applyLayerVisibility(this._shockwaveLayerCanvas, false);
     }
   }
 
@@ -2105,7 +2195,7 @@ export class Renderer {
 
   // Render full game frame
   renderGame(state) {
-    const baseCtx = this.baseCtx || this.canvas.getContext('2d');
+    const baseCtx = this.baseCtx || this.canvas.getContext('2d', { alpha: false });
     this.ctx = baseCtx;
 
     const shockwaveActive = this._shockwaveEffect.syncEvents(state.backgroundEvents, {
