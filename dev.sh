@@ -12,8 +12,8 @@ LAN_IP=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/nul
 # Auto-kill stale process on PORT (likely a previous dev.sh run)
 EXISTING_PID=$(lsof -ti:$PORT 2>/dev/null || true)
 if [ -n "$EXISTING_PID" ]; then
-  echo "Port $PORT in use by PID $EXISTING_PID — killing stale process"
-  kill "$EXISTING_PID" 2>/dev/null || true
+  echo "Port $PORT in use by PID(s) $(echo "$EXISTING_PID" | tr '\n' ' ') — killing stale process"
+  kill $EXISTING_PID 2>/dev/null || true
   sleep 0.3
 fi
 

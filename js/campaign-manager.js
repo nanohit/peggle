@@ -383,9 +383,19 @@ export class CampaignManager {
     this.save();
     const syncPromise = this._syncCampaign(campaign);
     if (prevRemoteKey && prevRemoteKey !== campaign._remoteKey) {
+      const nextRemoteKey = campaign._remoteKey;
       this._queueRemoteSync(campaign.id, async () => {
         const synced = await syncPromise;
         if (!synced) return false;
+        const primaryName = await api.getConfig('primaryCampaign');
+        if (primaryName === prevRemoteKey) {
+          const primaryUpdated = await api.setConfig('primaryCampaign', nextRemoteKey);
+          if (!primaryUpdated) {
+            console.warn('[campaign] Failed to update primary campaign pointer:', prevRemoteKey, '->', nextRemoteKey);
+            return false;
+          }
+          console.log('[campaign] Updated primary campaign pointer:', nextRemoteKey);
+        }
         const ok = await api.deleteCampaign(prevRemoteKey);
         if (ok) console.log('[campaign] Removed old remote name:', prevRemoteKey);
         return ok;
@@ -639,16 +649,19 @@ export class CampaignManager {
     // Resolve levels in play order
     const levels = [];
     const nodeToIndex = new Map();
+    const levelNameToIndex = new Map();
     for (let i = 0; i < playOrder.length; i++) {
       const node = nMap.get(playOrder[i]);
       if (!node) continue;
       const ln = resolveNodeLevelName(node, campaign.levelNames);
       if (!ln) continue;
-      const data = this.resolveBakedLevel(ln);
-      if (data) {
-        nodeToIndex.set(node.id, levels.length);
+      if (!levelNameToIndex.has(ln)) {
+        const data = this.resolveBakedLevel(ln);
+        if (!data) continue;
+        levelNameToIndex.set(ln, levels.length);
         levels.push(data);
       }
+      nodeToIndex.set(node.id, levelNameToIndex.get(ln));
     }
 
     // Build exported graph with levelIndex
