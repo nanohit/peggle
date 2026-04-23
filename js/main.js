@@ -448,6 +448,7 @@ class PeggleApp {
         prevBackground.type !== nextBackground.type ||
         prevBackground.image !== nextBackground.image ||
         prevBackground.fit !== nextBackground.fit ||
+        prevBackground.darken !== nextBackground.darken ||
         JSON.stringify(prevBackground.liquid || null) !== JSON.stringify(nextBackground.liquid || null)
       ) {
         this.levelManager.save();
@@ -737,6 +738,7 @@ class PeggleApp {
           renderer.setBallTrail(config.ballTrail);
           renderer.setShockwave(config.shockwave);
         }
+        this.game?.setEndSequenceConfig?.(config.endSequence);
         this.dialogueController.refreshLayout();
       }
     };
@@ -1583,6 +1585,8 @@ class PeggleApp {
     const backgroundInput = document.getElementById('survivalBackgroundInput');
     const backgroundUploadBtn = document.getElementById('survivalBackgroundUploadBtn');
     const backgroundRemoveBtn = document.getElementById('survivalBackgroundRemoveBtn');
+    const backgroundDarkenSlider = document.getElementById('survivalBackgroundDarkenSlider');
+    const backgroundDarkenInput = document.getElementById('survivalBackgroundDarkenInput');
 
     if (
       !panel || !toggle ||
@@ -1773,6 +1777,23 @@ class PeggleApp {
         };
         reader.readAsDataURL(file);
       });
+    }
+
+    if (backgroundDarkenSlider && backgroundDarkenInput) {
+      const applyBackgroundDarken = (rawValue) => {
+        const value = Math.max(0, Math.min(100, Math.round(parseFloat(rawValue) || 0)));
+        backgroundDarkenSlider.value = value;
+        backgroundDarkenInput.value = value;
+        this.updateLevelSurvivalSettings({
+          background: { darken: value / 100 }
+        });
+      };
+
+      backgroundDarkenSlider.addEventListener('input', () => {
+        backgroundDarkenInput.value = backgroundDarkenSlider.value;
+      });
+      backgroundDarkenSlider.addEventListener('change', () => applyBackgroundDarken(backgroundDarkenSlider.value));
+      backgroundDarkenInput.addEventListener('change', () => applyBackgroundDarken(backgroundDarkenInput.value));
     }
   }
 
@@ -2454,19 +2475,48 @@ class PeggleApp {
     // Resize to current dimensions
     this.resizeCanvas();
 
+    const visuals = normalizeVisuals(level?.visuals);
+    this.game.renderer.setBackground(visuals.background);
+    this.game.renderer.setBallTrail(visuals.ballTrail);
+    this.game.renderer.setShockwave(visuals.shockwave);
+    this.game.setEndSequenceConfig(visuals.endSequence);
     this.game.loadLevel(level);
     this.game.setAimLength(typeof level.aimLength === 'number' ? level.aimLength : 300);
     
     this.game.onGameEnd = (result, score) => {
+      const endedGame = this.game;
+      const bindDelayMs = endedGame?.getEndOverlayInteractDelayMs?.() ?? 1000;
       setTimeout(() => {
-        // Update play count
+        if (!endedGame || this.game !== endedGame) return;
+
+        // Update play count once the end overlay becomes interactable.
         level.metadata.playCount = (level.metadata.playCount || 0) + 1;
         this.levelManager.save();
-        
-        // Allow restart
-        this.canvas.addEventListener('click', this.handleGameRestart, { once: true });
-        this.canvas.addEventListener('touchstart', this.handleGameRestart, { once: true });
-      }, 1000);
+
+        let fired = false;
+        const guardedRestart = (event) => {
+          if (fired) return;
+          fired = true;
+          if (event?.cancelable) event.preventDefault();
+          if (typeof event?.stopPropagation === 'function') event.stopPropagation();
+          this.canvas.removeEventListener('click', guardedRestart);
+          this.canvas.removeEventListener('touchstart', guardedRestart);
+          if (endedGame?.dismissEndOverlay) {
+            endedGame.dismissEndOverlay(() => {
+              if (this.game === endedGame && endedGame.handleRestart()) {
+                this.startEditor();
+              }
+            });
+            return;
+          }
+          if (this.game === endedGame && endedGame.handleRestart()) {
+            this.startEditor();
+          }
+        };
+
+        this.canvas.addEventListener('click', guardedRestart, { once: true });
+        this.canvas.addEventListener('touchstart', guardedRestart, { once: true, passive: false });
+      }, bindDelayMs);
     };
 
     this.game.start();
@@ -2554,6 +2604,7 @@ class PeggleApp {
       renderer.setBallTrail(visuals.ballTrail);
       renderer.setShockwave(visuals.shockwave);
     }
+    this.game?.setEndSequenceConfig?.(visuals.endSequence);
   }
 
   togglePlayMode() {
@@ -2678,6 +2729,15 @@ class PeggleApp {
     }
     if (antiCooldownInput) {
       antiCooldownInput.value = (Math.round(survival.antiCooldownMs || 0) / 1000).toFixed(1);
+    }
+    const backgroundDarkenSlider = document.getElementById('survivalBackgroundDarkenSlider');
+    const backgroundDarkenInput = document.getElementById('survivalBackgroundDarkenInput');
+    const backgroundDarken = Math.round(((survival.background?.darken ?? 0.5) * 100));
+    if (backgroundDarkenSlider) {
+      backgroundDarkenSlider.value = String(backgroundDarken);
+    }
+    if (backgroundDarkenInput) {
+      backgroundDarkenInput.value = String(backgroundDarken);
     }
     const curvePresetSelect = document.getElementById('survivalSpeedCurvePreset');
     if (curvePresetSelect) {

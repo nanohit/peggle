@@ -21,6 +21,7 @@ export const DEFAULT_BACKGROUND = {
   type: 'image',
   colorTop: '#16213e',
   colorBottom: '#1a1a2e',
+  darken: 0.5,
   image: 'visuals/backgrounds/background1.webp',
   progressionImage: null,
   mirrored: false,
@@ -40,6 +41,9 @@ export const DEFAULT_BACKGROUND = {
 };
 
 export const DEFAULT_FRAME_COLOR = '#0a0a14';
+export const DEFAULT_END_SEQUENCE = {
+  finalPegSlowmoStrength: 0.4,
+};
 
 // Slot definitions: each describes a decorative asset.
 // baseWidth: natural width as % of frame width at scale=1
@@ -93,6 +97,7 @@ export const DEFAULT_VISUALS = {
   ballColor: null,
   ballTrail: { ...DEFAULT_BALL_TRAIL, progression: { ...DEFAULT_BALL_TRAIL.progression } },
   shockwave: normalizeShockwaveConfig(DEFAULT_SHOCKWAVE_EFFECT),
+  endSequence: { ...DEFAULT_END_SEQUENCE },
   slots: defaultSlots(),
   layerOrder: [...DEFAULT_LAYER_ORDER],
 };
@@ -103,6 +108,31 @@ function loadSavedDefaults() {
     if (saved) return JSON.parse(saved);
   } catch (_) {}
   return null;
+}
+
+function isPlainObject(value) {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function cloneVisualValue(value) {
+  if (value == null) return value;
+  return JSON.parse(JSON.stringify(value));
+}
+
+function mergeVisualInputs(base, override) {
+  if (!isPlainObject(base)) {
+    return cloneVisualValue(override);
+  }
+  const result = cloneVisualValue(base) || {};
+  if (!isPlainObject(override)) return result;
+  for (const [key, value] of Object.entries(override)) {
+    if (isPlainObject(value) && isPlainObject(result[key])) {
+      result[key] = mergeVisualInputs(result[key], value);
+      continue;
+    }
+    result[key] = cloneVisualValue(value);
+  }
+  return result;
 }
 
 function clamp01(value, fallback) {
@@ -143,14 +173,28 @@ export function normalizeLiquidBackground(raw) {
   };
 }
 
+export function normalizeEndSequenceConfig(raw) {
+  const source = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  return {
+    finalPegSlowmoStrength: clamp01(
+      source.finalPegSlowmoStrength,
+      DEFAULT_END_SEQUENCE.finalPegSlowmoStrength
+    ),
+  };
+}
+
 export function normalizeVisuals(raw, _skipSaved) {
-  if (!raw || typeof raw !== 'object') {
-    if (!_skipSaved) {
-      const saved = loadSavedDefaults();
-      if (saved && typeof saved === 'object') {
+  if (!_skipSaved) {
+    const saved = loadSavedDefaults();
+    if (isPlainObject(saved)) {
+      if (!isPlainObject(raw)) {
         return normalizeVisuals(saved, true);
       }
+      return normalizeVisuals(mergeVisualInputs(saved, raw), true);
     }
+  }
+
+  if (!raw || typeof raw !== 'object') {
     return JSON.parse(JSON.stringify(DEFAULT_VISUALS));
   }
 
@@ -164,6 +208,7 @@ export function normalizeVisuals(raw, _skipSaved) {
       type: validTypes.includes(bg.type) ? bg.type : 'image',
       colorTop: typeof bg.colorTop === 'string' ? bg.colorTop : DEFAULT_BACKGROUND.colorTop,
       colorBottom: typeof bg.colorBottom === 'string' ? bg.colorBottom : DEFAULT_BACKGROUND.colorBottom,
+      darken: clamp01(bg.darken, DEFAULT_BACKGROUND.darken),
       image: typeof bg.image === 'string' ? bg.image : DEFAULT_BACKGROUND.image,
       progressionImage: typeof bg.progressionImage === 'string' ? bg.progressionImage : null,
       mirrored: bg.mirrored === true,
@@ -178,6 +223,7 @@ export function normalizeVisuals(raw, _skipSaved) {
   result.ballColor = typeof raw.ballColor === 'string' ? raw.ballColor : null;
   result.ballTrail = normalizeBallTrailConfig(raw.ballTrail);
   result.shockwave = normalizeShockwaveConfig(raw.shockwave);
+  result.endSequence = normalizeEndSequenceConfig(raw.endSequence);
 
   // Slots with position/scale
   result.slots = {};

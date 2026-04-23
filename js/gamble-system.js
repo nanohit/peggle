@@ -9,6 +9,7 @@ const SPIN_BUTTON_PRESSED_ASSET = 'visuals/spin_button_pressed.webp';
 const ARROW_UP_ASSET = 'visuals/arrow_up.webp';
 const ARROW_DOWN_ASSET = 'visuals/arrow_down.webp';
 const DEFAULT_ITEM_ASSET = 'visuals/assets_webtp/item_cirlce.webp';
+const PRELOADED_UI_ASSETS = new Set();
 
 export const PERK_DEFINITIONS = [
   {
@@ -87,6 +88,14 @@ function resolveUiAssetUrl(rawUrl) {
   }
 }
 
+function preloadUiAsset(url) {
+  if (!url || PRELOADED_UI_ASSETS.has(url)) return;
+  PRELOADED_UI_ASSETS.add(url);
+  const img = new Image();
+  img.decoding = 'async';
+  img.src = url;
+}
+
 function normalizeProbabilityMap(map, perkDefinitions) {
   const next = {};
   let total = 0;
@@ -162,6 +171,8 @@ export class GambleSystem {
     this.ui = null;
     this.unsubscribeGameState = null;
     this.handleResize = null;
+    this._themeAssetKey = '';
+    this._themeAssetRoot = null;
   }
 
   mount() {
@@ -181,20 +192,14 @@ export class GambleSystem {
     window.addEventListener('resize', this.handleResize);
     this.onLayoutChange?.();
     requestAnimationFrame(() => this.syncOverlayLayout());
-
-    if (typeof this.game?.subscribeUiState === 'function') {
-      this.unsubscribeGameState = this.game.subscribeUiState(() => this.refreshUi());
-    }
+    this._bindGameState();
     this.refreshUi();
   }
 
   dispose() {
     this._cancelReelAnimation();
     this.game?.setGambleOverlayOpen?.(false);
-    if (this.unsubscribeGameState) {
-      this.unsubscribeGameState();
-      this.unsubscribeGameState = null;
-    }
+    this._unbindGameState();
     this.visualLayout?.setGambleOverlayState?.({ open: false });
     this.visualLayout?.setGambleUiMode?.(false);
     if (this.ui?.root?.parentNode) {
@@ -210,7 +215,112 @@ export class GambleSystem {
     this.statusBar?.classList.remove('gamble-mode');
     if (this.pegCountEl) this.pegCountEl.style.display = '';
     if (this.selectionCountEl) this.selectionCountEl.style.display = '';
+    this._themeAssetKey = '';
+    this._themeAssetRoot = null;
+    this.game = null;
     this.onLayoutChange?.();
+  }
+
+  _bindGameState() {
+    this._unbindGameState();
+    if (typeof this.game?.subscribeUiState !== 'function') return;
+    this.unsubscribeGameState = this.game.subscribeUiState(() => this.refreshUi());
+  }
+
+  _unbindGameState() {
+    if (!this.unsubscribeGameState) return;
+    this.unsubscribeGameState();
+    this.unsubscribeGameState = null;
+  }
+
+  _resetRuntimeState() {
+    this._cancelReelAnimation();
+    this.lastWinningCells = new Set();
+    this.lastSpinGrid = this.createInitialSpinGrid();
+    this.lastMessage = 'Shoot to unlock Spin.';
+    this.lastMessageType = 'info';
+    for (const perk of this.perkDefinitions) {
+      this.inventory[perk.id] = 0;
+    }
+  }
+
+  _syncModeLabels() {
+    if (!this.ui) return;
+    const isSurvival = !!this.game?.isSurvivalMode?.();
+    const ballCostLabel = this.ui.ballCostControl?.title;
+    if (ballCostLabel) {
+      ballCostLabel.textContent = isSurvival ? 'Spin Ball Cost' : 'Ball Cost';
+    }
+    if (this.ui.autoLuckText) {
+      this.ui.autoLuckText.textContent = isSurvival
+        ? 'Auto Luck (vertical progress = more luck)'
+        : 'Auto Luck (less balls = more luck)';
+    }
+  }
+
+  _syncSettingsControls() {
+    if (!this.ui) return;
+    const syncControlValue = (control, value) => {
+      if (!control) return;
+      const next = String(value);
+      control.range.value = next;
+      control.number.value = next;
+    };
+    syncControlValue(this.ui.ballCostControl, Math.round(this.settings.ballCost));
+    syncControlValue(this.ui.manualLuckControl, Math.round(this.settings.manualLuck));
+    syncControlValue(this.ui.autoLuckScaleControl, Math.round(this.settings.autoLuckMaxBonus));
+    syncControlValue(this.ui.jackpotRewardControl, Math.round(this.settings.jackpotPerkCount));
+    if (this.ui.autoLuckToggle) {
+      this.ui.autoLuckToggle.checked = !!this.settings.autoLuckEnabled;
+    }
+    this.syncProbabilityInputs(this.ui.probabilityControls || {});
+  }
+
+  setGame(game, options = {}) {
+    const {
+      reloadSettings = true,
+      resetRuntime = true,
+      collapsePanel = true
+    } = options || {};
+    const previousGame = this.game;
+    if (previousGame === game && !reloadSettings && !resetRuntime) {
+      if (this.ui) {
+        this._syncModeLabels();
+        this.refreshUi();
+      }
+      return;
+    }
+
+    previousGame?.setGambleOverlayOpen?.(false);
+    this._unbindGameState();
+    this.game = game || null;
+
+    if (reloadSettings) {
+      this.settings = this.loadSettings();
+      this.settings.perkProbabilities = normalizeProbabilityMap(
+        this.settings.perkProbabilities,
+        this.perkDefinitions
+      );
+      this.applyProbabilitySettings();
+    }
+
+    if (resetRuntime) {
+      this._resetRuntimeState();
+    } else {
+      this._cancelReelAnimation();
+    }
+
+    if (this.ui) {
+      this._syncModeLabels();
+      this._syncSettingsControls();
+      if (collapsePanel) {
+        this.setPanelExpanded(false);
+      }
+      this.applyThemeAssets();
+    }
+
+    this._bindGameState();
+    this.refreshUi();
   }
 
   subscribeEvents(listener) {
@@ -459,6 +569,7 @@ export class GambleSystem {
     let settingsPanel = null;
     let ballCostControl = null;
     let manualLuckControl = null;
+    let autoLuckText = null;
     let autoLuckToggle = null;
     let autoLuckScaleControl = null;
     let jackpotRewardControl = null;
@@ -523,7 +634,7 @@ export class GambleSystem {
       range.addEventListener('input', (event) => sync(event.target.value));
       number.addEventListener('input', (event) => sync(event.target.value));
       settingsPanel.appendChild(wrapper);
-      return { range, number, wrapper };
+      return { range, number, wrapper, title };
     };
 
     if (this.allowSettings) {
@@ -566,7 +677,7 @@ export class GambleSystem {
 
       const autoLuckRow = document.createElement('label');
       autoLuckRow.className = 'gamble-toggle-row';
-      const autoLuckText = document.createElement('span');
+      autoLuckText = document.createElement('span');
       autoLuckText.textContent = this.game?.isSurvivalMode?.()
         ? 'Auto Luck (vertical progress = more luck)'
         : 'Auto Luck (less balls = more luck)';
@@ -654,6 +765,7 @@ export class GambleSystem {
       settingsPanel,
       ballCostControl,
       manualLuckControl,
+      autoLuckText,
       autoLuckToggle,
       autoLuckScaleControl,
       jackpotRewardControl,
@@ -683,15 +795,30 @@ export class GambleSystem {
     const boardAsset = resolveUiAssetUrl(SLOTS_BOARD_ASSET);
     const spinAsset = resolveUiAssetUrl(SPIN_BUTTON_ASSET);
     const spinPressedAsset = resolveUiAssetUrl(SPIN_BUTTON_PRESSED_ASSET);
-    this.ui.root.style.setProperty('--gamble-arrow-asset', `url("${arrowUpAsset}")`);
-    this.ui.root.style.setProperty('--gamble-arrow-down-asset', `url("${arrowDownAsset}")`);
-    this.ui.root.style.setProperty('--gamble-item-asset', `url("${itemAsset}")`);
-    this.ui.root.style.setProperty('--gamble-board-asset', `url("${boardAsset}")`);
-    this.ui.root.style.setProperty('--gamble-spin-asset', `url("${spinAsset}")`);
-    this.ui.root.style.setProperty('--gamble-spin-pressed-asset', `url("${spinPressedAsset}")`);
-    // Preload arrow_down so it's ready when panel expands
-    const img = new Image();
-    img.src = arrowDownAsset;
+    const assetKey = [
+      arrowUpAsset,
+      arrowDownAsset,
+      itemAsset,
+      boardAsset,
+      spinAsset,
+      spinPressedAsset
+    ].join('|');
+    if (this._themeAssetRoot !== this.ui.root || this._themeAssetKey !== assetKey) {
+      this.ui.root.style.setProperty('--gamble-arrow-asset', `url("${arrowUpAsset}")`);
+      this.ui.root.style.setProperty('--gamble-arrow-down-asset', `url("${arrowDownAsset}")`);
+      this.ui.root.style.setProperty('--gamble-item-asset', `url("${itemAsset}")`);
+      this.ui.root.style.setProperty('--gamble-board-asset', `url("${boardAsset}")`);
+      this.ui.root.style.setProperty('--gamble-spin-asset', `url("${spinAsset}")`);
+      this.ui.root.style.setProperty('--gamble-spin-pressed-asset', `url("${spinPressedAsset}")`);
+      this._themeAssetKey = assetKey;
+      this._themeAssetRoot = this.ui.root;
+    }
+    preloadUiAsset(arrowUpAsset);
+    preloadUiAsset(arrowDownAsset);
+    preloadUiAsset(itemAsset);
+    preloadUiAsset(boardAsset);
+    preloadUiAsset(spinAsset);
+    preloadUiAsset(spinPressedAsset);
   }
 
   syncOverlayLayout() {

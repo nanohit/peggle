@@ -8,6 +8,7 @@ import { VisualLayout } from './visual-layout.js';
 import { normalizeVisuals } from './visual-config.js';
 import { normalizeLevelData } from './levels.js';
 import { DialogueController } from './dialogue-controller.js';
+import { GambleSystem } from './gamble-system.js';
 import { getStoredLanguage, getPauseCopy, normalizeLanguage, setStoredLanguage } from './localization.js';
 import { topoOrder, buildNodeMap, buildParentMap, buildLevelIndexMap, graphFromLevels } from './graph/core.js';
 import { validateGraph } from './graph/validate.js';
@@ -20,7 +21,6 @@ const WORLD_H = Math.round(WORLD_W / ASPECT_RATIO); // 600
 let levelMapModulePromise = null;
 let levelMapCtorPromise = null;
 let levelMapCssPromise = null;
-let gambleSystemCtorPromise = null;
 function ensureLevelMapCss() {
   if (!levelMapCssPromise) {
     levelMapCssPromise = new Promise(resolve => {
@@ -62,18 +62,6 @@ function getLevelMapCtor() {
   }
   return levelMapCtorPromise;
 }
-function getGambleSystemCtor() {
-  if (!gambleSystemCtorPromise) {
-    gambleSystemCtorPromise = import('./gamble-system.js')
-      .then(mod => mod.GambleSystem)
-      .catch(err => {
-        gambleSystemCtorPromise = null;
-        throw err;
-      });
-  }
-  return gambleSystemCtorPromise;
-}
-
 // --- Data loading (multiple sources, priority order) ---
 
 // Decompress level data from URL hash (deflate + base64url)
@@ -683,7 +671,7 @@ async function bootWithLevels(levels, campaignName, campaignData) {
 
   function showPause() {
     if (paused || !game) return;
-    if (game.state === 'won' || game.state === 'lost') return;
+    if (game.isEndSequenceActive?.() || game.state === 'won' || game.state === 'lost') return;
     ensurePauseAssetsLoaded();
     paused = true;
     game.pause();
@@ -1052,35 +1040,10 @@ async function bootWithLevels(levels, campaignName, campaignData) {
   setupPauseTriggers();
 
   // --- Gamble system ---
-
-  let pendingGambleMountHandle = null;
-  let pendingGambleMountHandleType = '';
-  let gambleMountGeneration = 0;
-
-  function cancelPendingGambleMount() {
-    if (pendingGambleMountHandle === null) return;
-    if (pendingGambleMountHandleType === 'idle' && typeof window.cancelIdleCallback === 'function') {
-      window.cancelIdleCallback(pendingGambleMountHandle);
-    } else {
-      window.clearTimeout(pendingGambleMountHandle);
-    }
-    pendingGambleMountHandle = null;
-    pendingGambleMountHandleType = '';
-  }
-
-  async function mountGamble(expectedGeneration = gambleMountGeneration) {
-    if (!game || gambleSystem) return;
-    const targetGame = game;
-    let GambleSystemCtor = null;
-    try {
-      GambleSystemCtor = await getGambleSystemCtor();
-    } catch (error) {
-      console.warn('[player] Failed to load gamble UI', error);
-      return;
-    }
-    if (expectedGeneration !== gambleMountGeneration || !game || game !== targetGame || gambleSystem) return;
-    gambleSystem = new GambleSystemCtor({
-      game,
+  function ensureGambleSystem() {
+    if (gambleSystem) return gambleSystem;
+    gambleSystem = new GambleSystem({
+      game: null,
       levelManager: null,
       statusBar: null,
       pegCountEl: null,
@@ -1092,41 +1055,26 @@ async function bootWithLevels(levels, campaignName, campaignData) {
     });
     gambleSystem.mount();
     dialogueController.setGambleSystem(gambleSystem);
+    return gambleSystem;
   }
 
-  function scheduleGambleMount(options = {}) {
-    cancelPendingGambleMount();
-    const token = ++gambleMountGeneration;
-    const run = () => {
-      pendingGambleMountHandle = null;
-      pendingGambleMountHandleType = '';
-      mountGamble(token);
-    };
-    const urgent = options.immediate === true || game?.isSurvivalMode?.() === true;
-    if (typeof window.requestIdleCallback === 'function') {
-      pendingGambleMountHandleType = 'idle';
-      pendingGambleMountHandle = window.requestIdleCallback(run, { timeout: urgent ? 900 : 2600 });
-    } else {
-      pendingGambleMountHandleType = 'timer';
-      pendingGambleMountHandle = window.setTimeout(run, urgent ? 450 : 1600);
-    }
-  }
-
-  function teardownGamble() {
-    gambleMountGeneration++;
-    cancelPendingGambleMount();
-    if (gambleSystem) { gambleSystem.dispose(); gambleSystem = null; }
-    dialogueController.setGambleSystem(null);
+  function bindGambleSystem(nextGame, options = {}) {
+    const system = ensureGambleSystem();
+    system.setGame(nextGame, {
+      reloadSettings: true,
+      resetRuntime: true,
+      collapsePanel: true,
+      ...options
+    });
+    dialogueController.setGambleSystem(system);
+    return system;
   }
 
   // --- Transition animation (level complete -> next level) ---
   const LEVEL_SCROLL_MS = 760;
-  const LEVEL_MASK_FADE_MS = 380;
   const PORTRAIT_SCROLL_SLOTS = ['character', 'characterCircle', 'healthCharCircle'];
   let transitionOverlay = null;
-  let transitionMask = null;
   let transitionTimer = null;
-  let transitionMaskFadeTimer = null;
 
   function clearPortraitScrollFx() {
     if (!visualLayout) return;
@@ -1148,18 +1096,10 @@ async function bootWithLevels(levels, campaignName, campaignData) {
       clearTimeout(transitionTimer);
       transitionTimer = null;
     }
-    if (transitionMaskFadeTimer) {
-      clearTimeout(transitionMaskFadeTimer);
-      transitionMaskFadeTimer = null;
-    }
     if (transitionOverlay?.parentNode) {
       transitionOverlay.parentNode.removeChild(transitionOverlay);
     }
     transitionOverlay = null;
-    if (transitionMask?.parentNode) {
-      transitionMask.parentNode.removeChild(transitionMask);
-    }
-    transitionMask = null;
     canvas.style.transition = '';
     canvas.style.transform = '';
     clearPortraitScrollFx();
@@ -1212,20 +1152,6 @@ async function bootWithLevels(levels, campaignName, campaignData) {
     frame.appendChild(overlay);
     transitionOverlay = overlay;
 
-    const mask = document.createElement('div');
-    mask.style.position = 'absolute';
-    mask.style.left = overlay.style.left;
-    mask.style.top = overlay.style.top;
-    mask.style.width = overlay.style.width;
-    mask.style.height = overlay.style.height;
-    mask.style.pointerEvents = 'none';
-    mask.style.zIndex = '2';
-    mask.style.opacity = '1';
-    mask.style.transition = `opacity ${LEVEL_MASK_FADE_MS}ms cubic-bezier(0.22, 1, 0.36, 1)`;
-    mask.style.background = 'linear-gradient(180deg, rgba(0,0,0,0.92) 0%, rgba(0,0,0,0) 22%, rgba(0,0,0,0) 78%, rgba(0,0,0,0.92) 100%)';
-    frame.appendChild(mask);
-    transitionMask = mask;
-
     canvas.style.transition = 'none';
     canvas.style.transform = 'translateY(100%)';
     setPortraitScrollFx(canvasRect.height);
@@ -1242,13 +1168,6 @@ async function bootWithLevels(levels, campaignName, campaignData) {
       outgoingCanvas.style.transform = 'translateY(-100%)';
       setPortraitScrollFx(0);
     });
-
-    transitionMaskFadeTimer = setTimeout(() => {
-      if (transitionMask === mask) {
-        mask.style.opacity = '0';
-      }
-      transitionMaskFadeTimer = null;
-    }, Math.max(0, LEVEL_SCROLL_MS - LEVEL_MASK_FADE_MS));
 
     transitionTimer = setTimeout(() => {
       clearLevelTransitionArtifacts();
@@ -1268,10 +1187,8 @@ async function bootWithLevels(levels, campaignName, campaignData) {
     const levelData = mirrorState ? mirrorLevel(original) : cloneLevelData(original);
 
     // Cleanup previous
-    teardownGamble();
     if (unsubUiState) { unsubUiState(); unsubUiState = null; }
     if (game) { game.stop(); }
-    dialogueController.setGambleSystem(null);
     paused = false;
     activeLevelMapAllowClose = false;
     setLevelMapMode(false);
@@ -1293,8 +1210,10 @@ async function bootWithLevels(levels, campaignName, campaignData) {
     game.renderer.setBackground(visuals.background);
     game.renderer.setBallTrail(visuals.ballTrail);
     game.renderer.setShockwave(visuals.shockwave);
+    game.setEndSequenceConfig(visuals.endSequence);
 
     game.loadLevel(levelData);
+    bindGambleSystem(game);
     if (typeof levelData.aimLength === 'number') {
       game.setAimLength(levelData.aimLength);
     }
@@ -1302,7 +1221,7 @@ async function bootWithLevels(levels, campaignName, campaignData) {
       level: levelData,
       scopeKey: campaignName ? `campaign:${campaignName}` : 'single',
       game,
-      gambleSystem: null,
+      gambleSystem,
       persistSeen: true,
       live: true
     });
@@ -1319,7 +1238,10 @@ async function bootWithLevels(levels, campaignName, campaignData) {
     });
 
     game.onGameEnd = (result, score) => {
+      const endedGame = game;
+      const bindDelayMs = endedGame?.getEndOverlayInteractDelayMs?.() ?? 1000;
       setTimeout(() => {
+        if (!endedGame || game !== endedGame) return;
         // Guard: only fire once (touchstart + click can both trigger on mobile)
         let fired = false;
         const onceAction = (action) => {
@@ -1330,7 +1252,11 @@ async function bootWithLevels(levels, campaignName, campaignData) {
             if (typeof event?.stopPropagation === 'function') event.stopPropagation();
             canvas.removeEventListener('click', guarded);
             canvas.removeEventListener('touchstart', guarded);
-            action();
+            if (endedGame?.dismissEndOverlay) {
+              endedGame.dismissEndOverlay(action);
+            } else {
+              action();
+            }
           };
           canvas.addEventListener('click', guarded, { once: true });
           canvas.addEventListener('touchstart', guarded, { once: true, passive: false });
@@ -1403,15 +1329,15 @@ async function bootWithLevels(levels, campaignName, campaignData) {
           mirrorState = !mirrorState;
           onceAction(() => startLevel(currentNodeId, { suppressInputMs: 650 }));
         }
-      }, 1000);
+      }, bindDelayMs);
     };
 
     resize();
     game.start();
-    scheduleGambleMount();
     return true;
   }
 
+  ensureGambleSystem();
   startLevel(currentNodeId);
   requestAnimationFrame(() => schedulePauseAssetsWarmup());
 }

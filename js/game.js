@@ -25,6 +25,7 @@ import {
   normalizeLevelHitPegClearSettings
 } from './hit-peg-clear-settings.js';
 import { lightTap, initAudio, pegHitSound, resetHitCounter } from './haptics.js';
+import { normalizeEndSequenceConfig } from './visual-config.js';
 
 // Score values
 const SCORE = {
@@ -56,6 +57,11 @@ const PERFORMANCE_CAP30_STABILITY_SPAN_MS = 4.5;
 const PERFORMANCE_CAP30_MAX_WORK_MS = 18;
 const PERFORMANCE_CAP30_MAX_WORK_RATIO = 0.68;
 const SURVIVAL_GAMBLE_BALLS_PER_PEG = 2;
+const LAST_PEG_SLOWMO_DROP_MS = 110;
+const LAST_PEG_SLOWMO_HOLD_MS = 90;
+const LAST_PEG_SLOWMO_RECOVER_MS = 760;
+const LAST_PEG_SLOWMO_MIN_SCALE = 0.18;
+const LAST_PEG_SLOWMO_TOTAL_MS = LAST_PEG_SLOWMO_DROP_MS + LAST_PEG_SLOWMO_HOLD_MS + LAST_PEG_SLOWMO_RECOVER_MS;
 
 function average(values) {
   if (!Array.isArray(values) || values.length === 0) return 0;
@@ -74,6 +80,20 @@ function percentileFromSorted(values, percentile) {
   if (lower === upper) return values[lower];
   const t = index - lower;
   return values[lower] + (values[upper] - values[lower]) * t;
+}
+
+function clamp01(value) {
+  return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
+}
+
+function easeInCubic(t) {
+  const k = clamp01(t);
+  return k * k * k;
+}
+
+function easeOutCubic(t) {
+  const k = 1 - clamp01(t);
+  return 1 - k * k * k;
 }
 
 function getSimHzOverride() {
@@ -126,6 +146,15 @@ export class Game {
     this.bucketCatchLight = 0;
     this.levelFxId = 0;
     this.backgroundEvents = [];
+    this.renderTimeSeconds = 0;
+    this.renderDeltaSeconds = 0;
+    this.rawFrameDeltaSeconds = 0;
+    this._currentTimeScale = 1;
+    this._lastPegSlowmoElapsedMs = -1;
+    this._pendingEndResult = null;
+    this._gameEndEmitted = false;
+    this._stopped = false;
+    this.endSequenceConfig = normalizeEndSequenceConfig(null);
 
     // Flippers
     this.flippers = null;
@@ -216,10 +245,10 @@ export class Game {
 
     canvas.addEventListener('touchstart', (e) => {
       if (this._isInputSuppressed(e)) return;
+      if (this.isEndSequenceActive()) return;
       initAudio();
       if (this.handleUltraAimQteInput(e)) return;
       if (this._handleDebugDragStart(e)) return;
-      if (this.state === 'won' || this.state === 'lost') return;
       touchDragged = false;
       if (this.state === 'confirmAim') {
         // Second touch starts — will check on touchend if it was a tap or drag
@@ -269,10 +298,10 @@ export class Game {
     // --- Mouse input (confirm-shoot: aim follows cursor freely, click = fire) ---
     canvas.addEventListener('mousedown', (e) => {
       if (this._isInputSuppressed(e)) return;
+      if (this.isEndSequenceActive()) return;
       initAudio();
       if (this.handleUltraAimQteInput(e)) return;
       if (this._handleDebugDragStart(e)) return;
-      if (this.state === 'won' || this.state === 'lost') return;
       if (this.confirmShoot) {
         // In confirm mode, click fires (from any aiming state)
         if (this.isAimingState()) {
@@ -326,7 +355,7 @@ export class Game {
     const handleFlip = () => {
       if (this.debugDrag.enabled) return;
       if (!this.flippers) return;
-      if (this.state === 'won' || this.state === 'lost') return;
+      if (this.isEndSequenceActive()) return;
       this.flippers._flipperActivated = true;
     };
     const handleFlipEnd = () => {
@@ -409,8 +438,9 @@ export class Game {
     const displayInitialBalls = survivalMode
       ? (waitingForFirstGambleReward ? 0 : Math.max(this.initialGambleBallCount, this.gambleBalls, 0))
       : this.initialBallCount;
+    const state = this._pendingEndResult?.result || this.state;
     return {
-      state: this.state,
+      state,
       ballsLeft: displayBallsLeft,
       initialBallCount: displayInitialBalls,
       gambleBalls: this.gambleBalls,
@@ -467,6 +497,104 @@ export class Game {
         // Listener errors must not break the game loop.
       }
     }
+  }
+
+  isEndSequenceActive() {
+    return !!this._pendingEndResult || this.state === 'won' || this.state === 'lost';
+  }
+
+  _getFinalPegSlowmoStrength() {
+    const value = this.endSequenceConfig?.finalPegSlowmoStrength;
+    return clamp01(Number.isFinite(value) ? value : 1);
+  }
+
+  _startLastPegSlowmo() {
+    if (this._getFinalPegSlowmoStrength() <= 0.001) {
+      this._lastPegSlowmoElapsedMs = -1;
+      return false;
+    }
+    if (this._lastPegSlowmoElapsedMs >= 0) return false;
+    this._lastPegSlowmoElapsedMs = 0;
+    return true;
+  }
+
+  _isLastPegSlowmoActive() {
+    return this._lastPegSlowmoElapsedMs >= 0 && this._lastPegSlowmoElapsedMs < LAST_PEG_SLOWMO_TOTAL_MS;
+  }
+
+  _resolveTimeScale(frameDeltaMs) {
+    if (this._lastPegSlowmoElapsedMs < 0) {
+      this._currentTimeScale = 1;
+      return 1;
+    }
+
+    const strength = this._getFinalPegSlowmoStrength();
+    if (strength <= 0.001) {
+      this._lastPegSlowmoElapsedMs = -1;
+      this._currentTimeScale = 1;
+      return 1;
+    }
+
+    this._lastPegSlowmoElapsedMs += Math.max(0, frameDeltaMs);
+    const elapsed = this._lastPegSlowmoElapsedMs;
+    if (elapsed >= LAST_PEG_SLOWMO_TOTAL_MS) {
+      this._lastPegSlowmoElapsedMs = -1;
+      this._currentTimeScale = 1;
+      return 1;
+    }
+
+    const minScale = 1 - (1 - LAST_PEG_SLOWMO_MIN_SCALE) * strength;
+    let scale = 1;
+    if (elapsed < LAST_PEG_SLOWMO_DROP_MS) {
+      const t = elapsed / LAST_PEG_SLOWMO_DROP_MS;
+      scale = 1 - easeOutCubic(t) * (1 - minScale);
+    } else if (elapsed < LAST_PEG_SLOWMO_DROP_MS + LAST_PEG_SLOWMO_HOLD_MS) {
+      scale = minScale;
+    } else {
+      const recoverElapsed = elapsed - LAST_PEG_SLOWMO_DROP_MS - LAST_PEG_SLOWMO_HOLD_MS;
+      const t = recoverElapsed / LAST_PEG_SLOWMO_RECOVER_MS;
+      scale = minScale + easeInCubic(t) * (1 - minScale);
+    }
+
+    this._currentTimeScale = scale;
+    return scale;
+  }
+
+  _queuePendingEndResult(result, options = null) {
+    if (!result) return null;
+    if (this.state === result) return { result, readyToResolve: true };
+
+    const readyToResolve = options?.readyToResolve !== false;
+    if (!this._pendingEndResult || this._pendingEndResult.result !== result) {
+      this._pendingEndResult = { result, readyToResolve };
+    } else if (readyToResolve) {
+      this._pendingEndResult.readyToResolve = true;
+    }
+
+    if (result === 'won') {
+      this.finishDeepFreezeShot();
+      this.resetUltraAimRuntime();
+    }
+    return this._pendingEndResult;
+  }
+
+  _finalizeEndState(result) {
+    if (!result) return false;
+    this._pendingEndResult = null;
+    this.state = result;
+    this.finishDeepFreezeShot();
+    this.resetUltraAimRuntime();
+    if (!this._gameEndEmitted && this.onGameEnd) {
+      this._gameEndEmitted = true;
+      this.onGameEnd(result, this.score);
+    }
+    return true;
+  }
+
+  _maybeFinalizePendingEndResult() {
+    if (!this._pendingEndResult?.readyToResolve) return false;
+    if (this._isLastPegSlowmoActive()) return false;
+    return this._finalizeEndState(this._pendingEndResult.result);
   }
 
   isAimingState() {
@@ -746,7 +874,7 @@ export class Game {
 
   _handleDebugDragStart(e) {
     if (!this.debugDrag.enabled) return false;
-    if (this.state === 'won' || this.state === 'lost') return false;
+    if (this.isEndSequenceActive()) return false;
 
     e.preventDefault();
     this.state = 'playing';
@@ -1367,6 +1495,9 @@ export class Game {
   checkSurvivalEndConditions() {
     if (!this.isSurvivalMode()) return false;
     if (this.state === 'won' || this.state === 'lost') return true;
+    if (this._pendingEndResult?.result === 'won') {
+      return this._maybeFinalizePendingEndResult();
+    }
 
     const hitSet = this.getActiveHitPegIdSet();
     let escapedChanged = false;
@@ -1382,10 +1513,7 @@ export class Game {
           }
           continue;
         }
-        this.state = 'lost';
-        this.finishDeepFreezeShot();
-        this.resetUltraAimRuntime();
-        if (this.onGameEnd) this.onGameEnd('lost', this.score);
+        this._finalizeEndState('lost');
         return true;
       }
     }
@@ -1395,11 +1523,8 @@ export class Game {
     this.pruneEscapedSurvivalPegs();
 
     if (this.getSurvivalTargetsLeft(true) === 0) {
-      this.state = 'won';
-      this.finishDeepFreezeShot();
-      this.resetUltraAimRuntime();
-      if (this.onGameEnd) this.onGameEnd('won', this.score);
-      return true;
+      this._queuePendingEndResult('won', { readyToResolve: true });
+      return this._maybeFinalizePendingEndResult();
     }
 
     return false;
@@ -1463,6 +1588,13 @@ export class Game {
   loadLevel(levelData) {
     this.levelFxId++;
     this.backgroundEvents = [];
+    if (
+      levelData?.visuals
+      && typeof levelData.visuals === 'object'
+      && Object.prototype.hasOwnProperty.call(levelData.visuals, 'endSequence')
+    ) {
+      this.setEndSequenceConfig(levelData.visuals.endSequence);
+    }
     const survivalSettings = ensureLevelSurvival(levelData, this.canvas.height);
     const yoyoSettings = normalizeYoyoSettings(levelData.yoyo);
     this.survivalRuntime.resize(this.canvas.height);
@@ -1547,6 +1679,13 @@ export class Game {
     this.armedBombPerk = false;
     this.lastUiStateSignature = '';
     this._resetPerformanceCap30Detection();
+    this.renderTimeSeconds = 0;
+    this.renderDeltaSeconds = 0;
+    this.rawFrameDeltaSeconds = 0;
+    this._currentTimeScale = 1;
+    this._lastPegSlowmoElapsedMs = -1;
+    this._pendingEndResult = null;
+    this._gameEndEmitted = false;
 
     this.updateLaunchPosition();
     this.clearDynamicYoyoAnchors();
@@ -1681,6 +1820,7 @@ export class Game {
   }
 
   launch() {
+    if (this.isEndSequenceActive()) return;
     if (this.state !== 'aiming' && this.state !== 'confirmAim') return;
     if (Number.isFinite(this.ballsLeft) && this.ballsLeft <= 0) return;
     const survivalMode = this.isSurvivalMode();
@@ -1858,6 +1998,8 @@ export class Game {
         : this.getOrangePegsLeft();
       if (targetsLeft === 0) {
         this.queueVictoryShockwave(peg, sourceBall);
+        this._startLastPegSlowmo();
+        this._queuePendingEndResult('won', { readyToResolve: this.isSurvivalMode() });
       }
     }
 
@@ -1903,6 +2045,11 @@ export class Game {
   }
 
   endTurn() {
+    if (this._pendingEndResult?.result === 'won' && this._pendingEndResult.readyToResolve) {
+      this._maybeFinalizePendingEndResult();
+      if (this.state === 'won') return;
+    }
+
     this.yoyoThread.clear();
     this.finishDeepFreezeShot();
     this.resetUltraAimRuntime();
@@ -1939,10 +2086,8 @@ export class Game {
 
     if (this.isSurvivalMode()) {
       if (this.getSurvivalTargetsLeft(true) === 0) {
-        this.state = 'won';
-        this.resetUltraAimRuntime();
-        if (this.onGameEnd) this.onGameEnd('won', this.score);
-        return;
+        this._queuePendingEndResult('won', { readyToResolve: true });
+        if (this._maybeFinalizePendingEndResult()) return;
       }
 
       const preserveAim = this.isAimingState() && !!this.getLauncherBall();
@@ -1963,17 +2108,14 @@ export class Game {
     
     // Check win condition
     if (this.getOrangePegsLeft() === 0) {
-      this.state = 'won';
-      this.resetUltraAimRuntime();
-      if (this.onGameEnd) this.onGameEnd('won', this.score);
+      this._queuePendingEndResult('won', { readyToResolve: true });
+      if (this._maybeFinalizePendingEndResult()) return;
       return;
     }
 
     // Check lose condition (bucket catches already credited in onPhysicsUpdate)
     if (this.ballsLeft <= 0) {
-      this.state = 'lost';
-      this.resetUltraAimRuntime();
-      if (this.onGameEnd) this.onGameEnd('lost', this.score);
+      this._finalizeEndState('lost');
       return;
     }
 
@@ -2358,6 +2500,9 @@ export class Game {
       backgroundFxId: this.levelFxId,
       backgroundEvents: this.backgroundEvents,
       playState: this.state,
+      renderTimeSeconds: this.renderTimeSeconds,
+      renderDeltaSeconds: this.renderDeltaSeconds,
+      frameDeltaSeconds: this.rawFrameDeltaSeconds,
       centerLabel,
       survivalLoseLineY: survivalMode ? this.survivalRuntime.getLoseLineY() : null,
       verticalProgress: trackerState,
@@ -2418,7 +2563,7 @@ export class Game {
   }
 
   _isPerformanceCap30Eligible() {
-    if (this.state === 'won' || this.state === 'lost') return false;
+    if (this.isEndSequenceActive()) return false;
     if (typeof document !== 'undefined' && document.hidden) return false;
     return true;
   }
@@ -2476,6 +2621,7 @@ export class Game {
   }
 
   gameLoop(currentTime) {
+    if (this._stopped || this.abortController.signal.aborted) return;
     const now = Number.isFinite(currentTime) ? currentTime : performance.now();
     const hadLastTime = Number.isFinite(this.lastTime) && this.lastTime !== 0;
     let deltaMs = this.fixedStepMs;
@@ -2494,6 +2640,12 @@ export class Game {
     if (this.maxFrameDeltaMs && deltaMs > this.maxFrameDeltaMs) {
       deltaMs = this.maxFrameDeltaMs;
     }
+    const timeScale = this._resolveTimeScale(deltaMs);
+    const scaledDeltaMs = deltaMs * timeScale;
+    this.rawFrameDeltaSeconds = deltaMs / 1000;
+    this.renderDeltaSeconds = scaledDeltaMs / 1000;
+    this.renderTimeSeconds += this.renderDeltaSeconds;
+    this._maybeFinalizePendingEndResult();
 
     const _t0 = performance.now();
 
@@ -2501,7 +2653,7 @@ export class Game {
     let physicsSteps = 0;
     if (useFixedStep) {
       const maxAccum = this.fixedStepMs * this.maxFrameSteps;
-      this.accumulatorMs = Math.min(this.accumulatorMs + deltaMs, maxAccum);
+      this.accumulatorMs = Math.min(this.accumulatorMs + scaledDeltaMs, maxAccum);
 
       while (this.accumulatorMs >= this.fixedStepMs && physicsSteps < this.maxFrameSteps) {
         this.update(this.fixedStepMs);
@@ -2510,7 +2662,7 @@ export class Game {
       }
     } else {
       this.accumulatorMs = 0;
-      this.update(deltaMs);
+      this.update(scaledDeltaMs);
     }
 
     const _t1 = performance.now();
@@ -2542,11 +2694,16 @@ export class Game {
       this._perfLog.nextDump = now + 2000;
     }
 
+    if (this._stopped || this._paused || this.abortController.signal.aborted) {
+      this.animationId = null;
+      return;
+    }
     this.animationId = requestAnimationFrame((t) => this.gameLoop(t));
   }
 
   start() {
     if (this.animationId) return;
+    if (this._stopped) return;
     this._paused = false;
     this.accumulatorMs = 0;
     this.lastTime = performance.now();
@@ -2554,6 +2711,7 @@ export class Game {
   }
 
   stop() {
+    this._stopped = true;
     if (this.animationId) {
       cancelAnimationFrame(this.animationId);
       this.animationId = null;
@@ -2576,7 +2734,7 @@ export class Game {
   }
 
   resume() {
-    if (!this._paused) return;
+    if (!this._paused || this._stopped || this.abortController.signal.aborted) return;
     this._paused = false;
     this.accumulatorMs = 0;
     this._resetPerformanceCap30Detection({ preserveEmitted: true });
@@ -2628,6 +2786,11 @@ export class Game {
       this.pendingHitPegClears.clear();
     }
     return this.hitPegTimedClearEnabled;
+  }
+
+  setEndSequenceConfig(config) {
+    this.endSequenceConfig = normalizeEndSequenceConfig(config);
+    return this.endSequenceConfig;
   }
 
   setGambleOverlayOpen(open) {
@@ -2777,6 +2940,21 @@ export class Game {
     if (this.state === 'won' || this.state === 'lost') {
       return true; // Signal that restart is needed
     }
+    return false;
+  }
+
+  getEndOverlayInteractDelayMs() {
+    return this.renderer?.getEndOverlayInteractDelayMs?.() ?? 360;
+  }
+
+  dismissEndOverlay(onComplete) {
+    const callback = typeof onComplete === 'function' ? onComplete : null;
+    const dismissed = this.renderer?.dismissEndOverlay?.(callback);
+    if (dismissed) {
+      this.suppressInputFor(this.renderer?.getEndOverlayFadeOutMs?.() ?? 220);
+      return true;
+    }
+    if (callback) callback();
     return false;
   }
 }

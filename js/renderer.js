@@ -109,6 +109,10 @@ const PEG_COLORS = {
 };
 
 const GLOW_CACHE_LIMIT = 128;
+const END_MESSAGE_DELAY_MS = 160;
+const END_MESSAGE_FADE_IN_MS = 260;
+const END_MESSAGE_FADE_OUT_MS = 190;
+const END_MESSAGE_LIFT_PX = 18;
 
 export class Renderer {
   constructor(canvas) {
@@ -167,6 +171,17 @@ export class Renderer {
     this.performanceProfile = 'balanced';
     this._survivalBgImage = null;
     this._survivalBgImageSrc = '';
+    this._endMessage = {
+      key: '',
+      text: '',
+      subtext: '',
+      phase: 'hidden',
+      elapsedMs: 0,
+      alpha: 0,
+      fadeOutStartAlpha: 1,
+      dismissCallbacks: [],
+      dismissedKey: ''
+    };
 
     // Glow sprite cache: pre-rendered blur effects stamped via drawImage()
     // instead of per-frame ctx.shadowBlur (which is software-rasterized on
@@ -191,6 +206,31 @@ export class Renderer {
     this._bgVignetteDirty = true;
     this._shockwavePrewarmKey = '';
     this._syncRenderLayers();
+  }
+
+  getEndOverlayInteractDelayMs() {
+    return END_MESSAGE_DELAY_MS + Math.round(END_MESSAGE_FADE_IN_MS * 0.72);
+  }
+
+  getEndOverlayFadeOutMs() {
+    return END_MESSAGE_FADE_OUT_MS;
+  }
+
+  dismissEndOverlay(onComplete) {
+    const message = this._endMessage;
+    if (!message.key || message.phase === 'hidden') {
+      if (typeof onComplete === 'function') onComplete();
+      return false;
+    }
+    if (typeof onComplete === 'function') {
+      message.dismissCallbacks.push(onComplete);
+    }
+    if (message.phase !== 'fadeOut') {
+      message.phase = 'fadeOut';
+      message.elapsedMs = 0;
+      message.fadeOutStartAlpha = Math.max(0, Math.min(1, message.alpha));
+    }
+    return true;
   }
 
   // --- Glow sprite cache ---
@@ -676,6 +716,23 @@ export class Renderer {
     }
   }
 
+  _backgroundDarkenAmount(background, fallback = 0.5) {
+    const value = background && Number.isFinite(background.darken)
+      ? background.darken
+      : fallback;
+    return this._clamp01(value);
+  }
+
+  _drawBackgroundDarken(ctx, darken, width = this.width, height = this.height, x = 0, y = 0) {
+    const alpha = this._clamp01(darken);
+    if (alpha <= 0.001) return;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(x, y, width, height);
+    ctx.restore();
+  }
+
   _ensureBgBaseCache() {
     const bg = this.backgroundConfig;
     const key = `${this.width}|${this.height}|${bg?.type}|${bg?.colorTop}|${bg?.colorBottom}|${bg?.image || ''}|${bg?.mirrored ? 1 : 0}`;
@@ -721,9 +778,9 @@ export class Renderer {
     ctx.clearRect(0, 0, this.width, this.height);
 
     // Strong edge vignette — dark fade from frame into game area
-    const edgeV = 50;
-    const edgeH = 24;
-    const edgeAlpha = 0.7;
+    const edgeV = 68;
+    const edgeH = 30;
+    const edgeAlpha = 0.84;
 
     const topFade = ctx.createLinearGradient(0, 0, 0, edgeV);
     topFade.addColorStop(0, `rgba(0,0,0,${edgeAlpha})`);
@@ -779,9 +836,11 @@ export class Renderer {
   clear(progressRatio = 0, reactiveState = null) {
     this._ensureBgVignetteCache();
     const progressionBlend = this._updateBackgroundBlend(progressRatio);
+    const bgDarken = this._backgroundDarkenAmount(this.backgroundConfig);
 
     if (this.backgroundConfig?.type === 'liquid') {
       this._liquidBackground.render(this.ctx, this.backgroundConfig, reactiveState, progressionBlend);
+      this._drawBackgroundDarken(this.ctx, bgDarken);
       if (this._bgVignetteCanvas) {
         this.ctx.drawImage(this._bgVignetteCanvas, 0, 0);
       }
@@ -800,6 +859,8 @@ export class Renderer {
       this.ctx.drawImage(this._bgOverlayCanvas, 0, 0);
       this.ctx.restore();
     }
+
+    this._drawBackgroundDarken(this.ctx, bgDarken);
 
     if (this._bgVignetteCanvas) {
       this.ctx.drawImage(this._bgVignetteCanvas, 0, 0);
@@ -840,6 +901,7 @@ export class Renderer {
     ctx.translate(0, -cameraY);
     if (fit === 'stretch') {
       ctx.drawImage(image, 0, 0, destW, destH);
+      this._drawBackgroundDarken(ctx, this._backgroundDarkenAmount(background), destW, destH, 0, 0);
       ctx.restore();
       return true;
     }
@@ -852,6 +914,7 @@ export class Renderer {
     const drawX = (destW - drawW) / 2;
     const drawY = (destH - drawH) / 2;
     ctx.drawImage(image, drawX, drawY, drawW, drawH);
+    this._drawBackgroundDarken(ctx, this._backgroundDarkenAmount(background), drawW, drawH, drawX, drawY);
     ctx.restore();
     return true;
   }
@@ -1657,25 +1720,121 @@ export class Renderer {
     ctx.fillText(pegsText, this.width / 2, 20);
   }
 
-  drawMessage(text, subtext = '') {
+  _consumeEndMessageCallbacks() {
+    const callbacks = this._endMessage.dismissCallbacks.splice(0);
+    for (const callback of callbacks) {
+      try {
+        callback();
+      } catch (_) {}
+    }
+  }
+
+  _updateEndMessageState(state) {
+    const message = this._endMessage;
+    const dtMs = Math.max(
+      0,
+      Math.min(100, (Number.isFinite(state?.frameDeltaSeconds) ? state.frameDeltaSeconds : (1 / 60)) * 1000)
+    );
+    const desiredKey = state?.message ? `${state.message}|${state.subMessage || ''}` : '';
+
+    if (!desiredKey && message.dismissedKey) {
+      message.dismissedKey = '';
+    } else if (desiredKey && message.dismissedKey && desiredKey !== message.dismissedKey) {
+      message.dismissedKey = '';
+    }
+
+    if (desiredKey) {
+      if (!message.key && desiredKey === message.dismissedKey) {
+        return null;
+      }
+      if (message.key !== desiredKey) {
+        message.key = desiredKey;
+        message.text = state.message;
+        message.subtext = state.subMessage || '';
+        message.phase = 'delay';
+        message.elapsedMs = 0;
+        message.alpha = 0;
+        message.fadeOutStartAlpha = 1;
+        message.dismissCallbacks.length = 0;
+      }
+    } else if (message.key && message.phase !== 'fadeOut') {
+      message.phase = 'fadeOut';
+      message.elapsedMs = 0;
+      message.fadeOutStartAlpha = Math.max(0, Math.min(1, message.alpha));
+    }
+
+    if (!message.key) return null;
+
+    if (message.phase === 'delay') {
+      message.elapsedMs += dtMs;
+      message.alpha = 0;
+      if (message.elapsedMs >= END_MESSAGE_DELAY_MS) {
+        message.phase = 'fadeIn';
+        message.elapsedMs -= END_MESSAGE_DELAY_MS;
+      }
+    }
+
+    if (message.phase === 'fadeIn') {
+      message.elapsedMs += dtMs;
+      const t = Math.max(0, Math.min(1, message.elapsedMs / END_MESSAGE_FADE_IN_MS));
+      message.alpha = 1 - Math.pow(1 - t, 3);
+      if (t >= 1) {
+        message.phase = 'visible';
+        message.alpha = 1;
+      }
+    } else if (message.phase === 'visible') {
+      message.alpha = 1;
+    } else if (message.phase === 'fadeOut') {
+      message.elapsedMs += dtMs;
+      const t = Math.max(0, Math.min(1, message.elapsedMs / END_MESSAGE_FADE_OUT_MS));
+      message.alpha = message.fadeOutStartAlpha * (1 - t * t * t);
+      if (t >= 1) {
+        message.dismissedKey = desiredKey || message.key || message.dismissedKey;
+        message.key = '';
+        message.text = '';
+        message.subtext = '';
+        message.phase = 'hidden';
+        message.elapsedMs = 0;
+        message.alpha = 0;
+        message.fadeOutStartAlpha = 1;
+        this._consumeEndMessageCallbacks();
+        return null;
+      }
+    }
+
+    return message.alpha > 0.001 ? message : null;
+  }
+
+  drawMessage(text, subtext = '', alpha = 1) {
     const ctx = this.ctx;
+    const t = Math.max(0, Math.min(1, Number.isFinite(alpha) ? alpha : 1));
+    if (t <= 0.001) return;
+    const lift = (1 - t) * END_MESSAGE_LIFT_PX;
+    const scale = 0.97 + t * 0.03;
     
-    // Overlay
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+    ctx.save();
+    ctx.globalAlpha = 0.75 * t;
+    ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, this.width, this.height);
+    ctx.restore();
 
     // Main text
+    ctx.save();
+    ctx.translate(this.width / 2, this.height / 2 - lift);
+    ctx.scale(scale, scale);
+    ctx.globalAlpha = t;
     ctx.fillStyle = COLORS.text;
     ctx.font = "bold 28px 'Noto Serif', Georgia, serif";
     ctx.textAlign = 'center';
-    ctx.fillText(text, this.width / 2, this.height / 2 - 15);
+    ctx.fillText(text, 0, -15);
 
     // Subtext
     if (subtext) {
       ctx.fillStyle = COLORS.textDim;
       ctx.font = "14px 'Noto Serif', Georgia, serif";
-      ctx.fillText(subtext, this.width / 2, this.height / 2 + 15);
+      ctx.fillText(subtext, 0, 15);
     }
+    ctx.restore();
   }
 
   drawSurvivalLoseLine(lineY) {
@@ -2200,6 +2359,7 @@ export class Renderer {
 
     const shockwaveActive = this._shockwaveEffect.syncEvents(state.backgroundEvents, {
       preview: !!state.shockwavePreview,
+      timeSeconds: state.renderTimeSeconds,
       width: this.width,
       height: this.height
     });
@@ -2259,6 +2419,7 @@ export class Renderer {
         height: this.height,
         profile: this.performanceProfile,
         preview: !!state.shockwavePreview,
+        timeSeconds: state.renderTimeSeconds,
         skipPrune: true
       });
       this._setShockwaveLayerVisible(!!waveCanvas);
@@ -2374,8 +2535,9 @@ export class Renderer {
     //   this.drawScore(state.score, state.ballsLeft, state.orangePegsLeft, state.totalOrangePegs, state.centerLabel || null);
     // }
 
-    if (state.message) {
-      this.drawMessage(state.message, state.subMessage);
+    const endMessage = this._updateEndMessageState(state);
+    if (endMessage) {
+      this.drawMessage(endMessage.text, endMessage.subtext, endMessage.alpha);
     }
 
     if (state.isEditor) {

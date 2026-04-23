@@ -801,7 +801,9 @@ export class LiquidBackground {
   }
 
   _tick(reactiveState) {
-    const now = performance.now();
+    const now = Number.isFinite(reactiveState?.renderTimeSeconds)
+      ? reactiveState.renderTimeSeconds * 1000
+      : performance.now();
     if (!this._lastFrameTime) {
       this._lastFrameTime = now;
       this._dirty = true;

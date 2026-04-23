@@ -105,14 +105,14 @@ const FULLSCREEN_QUAD = new Float32Array([
 ]);
 
 const DEFAULT_SHOCKWAVE_COLOR = '#ffffff';
-const DEFAULT_SHOCKWAVE_VICTORY_SETTINGS = Object.freeze({
-  color: DEFAULT_SHOCKWAVE_COLOR,
-  radius: 1,
-  strength: 1,
-  width: 1,
-  duration: 0.82,
-  ripple: 1,
-  opacity: 0.86
+export const DEFAULT_SHOCKWAVE_VICTORY_SETTINGS = Object.freeze({
+  color: '#6EFCD7',
+  radius: 1.2,
+  strength: 2.8,
+  width: 2.4,
+  duration: 0.72,
+  ripple: 0,
+  opacity: 0.22
 });
 
 export const DEFAULT_SHOCKWAVE_EFFECT = Object.freeze({
@@ -122,12 +122,12 @@ export const DEFAULT_SHOCKWAVE_EFFECT = Object.freeze({
   victory: true,
   color: DEFAULT_SHOCKWAVE_COLOR,
   radius: 1,
-  strength: 1,
-  width: 1,
-  duration: 0.82,
-  ripple: 1,
-  opacity: 0.86,
-  victorySeparate: false,
+  strength: 1.09,
+  width: 2.4,
+  duration: 0.4,
+  ripple: 0.59,
+  opacity: 0,
+  victorySeparate: true,
   victorySettings: DEFAULT_SHOCKWAVE_VICTORY_SETTINGS
 });
 
@@ -186,14 +186,20 @@ function screenWaveRadius(event, config, width, height) {
 export function normalizeShockwaveConfig(raw = null) {
   const source = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
   const base = normalizeShockwaveStyle(source, DEFAULT_SHOCKWAVE_EFFECT);
+  const rawVictorySettings = source.victorySettings && typeof source.victorySettings === 'object' && !Array.isArray(source.victorySettings)
+    ? source.victorySettings
+    : null;
   return {
     enabled: source.enabled !== false,
     bomb: source.bomb !== false,
     bombTargets: source.bombTargets === true,
     victory: source.victory !== false,
     ...base,
-    victorySeparate: source.victorySeparate === true,
-    victorySettings: normalizeShockwaveStyle(source.victorySettings, base)
+    victorySeparate: source.victorySeparate !== false,
+    victorySettings: normalizeShockwaveStyle(
+      rawVictorySettings,
+      rawVictorySettings ? base : DEFAULT_SHOCKWAVE_VICTORY_SETTINGS
+    )
   };
 }
 
@@ -294,7 +300,7 @@ export class ShockwaveEffectRenderer {
   }
 
   syncEvents(events, options = null) {
-    const now = this._timeSeconds();
+    const now = Number.isFinite(options?.timeSeconds) ? options.timeSeconds : this._timeSeconds();
     if (Array.isArray(events)) {
       for (const event of events) {
         if (this._shouldAcceptEvent(event)) this._enqueue(event, now);
@@ -729,7 +735,7 @@ export class ShockwaveEffectRenderer {
     if (!sourceCanvas) return null;
     const width = Number.isFinite(options?.width) ? options.width : sourceCanvas.width;
     const height = Number.isFinite(options?.height) ? options.height : sourceCanvas.height;
-    const now = this._timeSeconds();
+    const now = Number.isFinite(options?.timeSeconds) ? options.timeSeconds : this._timeSeconds();
     const preview = !!options?.preview;
     if (!options?.skipPrune) this._prune(now);
     if (!this.config.enabled || (!preview && this.waves.length === 0)) return null;
@@ -752,7 +758,7 @@ export class ShockwaveEffectRenderer {
     }
     const width = Number.isFinite(options?.width) ? options.width : sourceCanvas.width;
     const height = Number.isFinite(options?.height) ? options.height : sourceCanvas.height;
-    const now = this._timeSeconds();
+    const now = Number.isFinite(options?.timeSeconds) ? options.timeSeconds : this._timeSeconds();
     const preview = !!options?.preview;
     if (!options?.skipPrune) this._prune(now);
     if (!this.config.enabled || (!preview && this.waves.length === 0)) return false;

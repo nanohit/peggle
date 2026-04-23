@@ -1,7 +1,8 @@
 // Visual Layout - DOM frame, draggable asset slots, theme panel
 // Wraps the canvas in a 9:17 frame with decorative elements and a side editor panel
 
-import { SLOT_DEFS, DEFAULT_LAYER_ORDER, resolveAssetPaths, normalizeVisuals } from './visual-config.js';
+import { DEFAULT_SHOCKWAVE_EFFECT, DEFAULT_SHOCKWAVE_VICTORY_SETTINGS } from './shockwave-effect.js';
+import { DEFAULT_END_SEQUENCE, SLOT_DEFS, DEFAULT_LAYER_ORDER, resolveAssetPaths, normalizeVisuals } from './visual-config.js';
 
 const imageCache = new Map();
 
@@ -212,7 +213,7 @@ export class VisualLayout {
     this.config = normalizeVisuals(rawConfig);
     // Clear per-slot resolved assets so each level loads its own images fresh
     this._resolvedAssets = {};
-    if (this.frame) this.frame.style.backgroundColor = this.config.frameColor;
+    if (this.frame) this.frame.style.backgroundColor = '#000000';
     this._loadAndPositionSlots();
     this._syncPanelValues();
   }
@@ -378,6 +379,13 @@ export class VisualLayout {
           <div class="theme-row" id="themeBgBottomRow">
             <span class="theme-row-label">Bottom</span>
             <input type="color" id="themeBgBottom" value="#1a1a2e" class="theme-color">
+          </div>
+          <div class="theme-row" id="themeBgDarkenRow">
+            <span class="theme-row-label">Darken</span>
+            <div class="theme-row-actions">
+              <input type="range" id="themeBgDarken" class="theme-row-range" min="0" max="100" value="50">
+              <span id="themeBgDarkenValue" class="theme-range-value">50%</span>
+            </div>
           </div>
           <div class="theme-row" id="themeBgLiquidBaseRow">
             <span class="theme-row-label">Base</span>
@@ -719,6 +727,17 @@ export class VisualLayout {
           </div>
         </div>
         <div class="theme-section">
+          <div class="theme-label">End Slow-Mo</div>
+          <div class="theme-row">
+            <span class="theme-row-label">Strength</span>
+            <div class="theme-row-actions">
+              <input type="range" id="themeEndSlowmoStrength" class="theme-row-range" min="0" max="100" value="40">
+              <span id="themeEndSlowmoStrengthValue" class="theme-range-value">40%</span>
+              <button id="themeEndSlowmoSetDefaultBtn" class="theme-row-btn theme-row-btn--secondary">Set as default</button>
+            </div>
+          </div>
+        </div>
+        <div class="theme-section" style="display:none">
           <div class="theme-label">Frame</div>
           <div class="theme-row">
             <span class="theme-row-label">Color</span>
@@ -796,6 +815,14 @@ export class VisualLayout {
     this.panel.querySelector('#themeBgBottom').addEventListener('input', e => {
       if (!this.config) return;
       this.config.background.colorBottom = e.target.value;
+      this._emitChange();
+    }, { signal: sig });
+
+    this.panel.querySelector('#themeBgDarken').addEventListener('input', e => {
+      if (!this.config) return;
+      const value = Math.max(0, Math.min(100, parseInt(e.target.value, 10) || 0));
+      this.config.background.darken = value / 100;
+      this._syncBackgroundButtons();
       this._emitChange();
     }, { signal: sig });
 
@@ -1079,17 +1106,24 @@ export class VisualLayout {
       }
       return this.config.shockwave;
     };
+    const ensureEndSequence = () => {
+      if (!this.config) return null;
+      if (!this.config.endSequence || typeof this.config.endSequence !== 'object') {
+        this.config.endSequence = normalizeVisuals({ endSequence: {} }, true).endSequence;
+      }
+      return this.config.endSequence;
+    };
     const ensureShockwaveVictorySettings = (shockwave) => {
       if (!shockwave) return null;
       if (!shockwave.victorySettings || typeof shockwave.victorySettings !== 'object') {
         shockwave.victorySettings = {
-          color: shockwave.color || '#ffffff',
-          radius: shockwave.radius ?? 1,
-          strength: shockwave.strength ?? 1,
-          width: shockwave.width ?? 1,
-          duration: shockwave.duration ?? 0.82,
-          ripple: shockwave.ripple ?? 1,
-          opacity: shockwave.opacity ?? 0.86
+          color: DEFAULT_SHOCKWAVE_VICTORY_SETTINGS.color,
+          radius: DEFAULT_SHOCKWAVE_VICTORY_SETTINGS.radius,
+          strength: DEFAULT_SHOCKWAVE_VICTORY_SETTINGS.strength,
+          width: DEFAULT_SHOCKWAVE_VICTORY_SETTINGS.width,
+          duration: DEFAULT_SHOCKWAVE_VICTORY_SETTINGS.duration,
+          ripple: DEFAULT_SHOCKWAVE_VICTORY_SETTINGS.ripple,
+          opacity: DEFAULT_SHOCKWAVE_VICTORY_SETTINGS.opacity
         };
       }
       return shockwave.victorySettings;
@@ -1187,10 +1221,40 @@ export class VisualLayout {
     this.panel.querySelector('#themeShockwaveVictoryRipple').addEventListener('input', e => setShockwaveVictoryRange('ripple', e.target.value), { signal: sig });
     this.panel.querySelector('#themeShockwaveVictoryOpacity').addEventListener('input', e => setShockwaveVictoryRange('opacity', e.target.value), { signal: sig });
 
+    this.panel.querySelector('#themeEndSlowmoStrength').addEventListener('input', e => {
+      const endSequence = ensureEndSequence();
+      if (!endSequence) return;
+      endSequence.finalPegSlowmoStrength = Math.max(0, parseInt(e.target.value, 10) || 0) / 100;
+      this._syncEndSequenceButtons();
+      this._emitChange();
+    }, { signal: sig });
+
+    this.panel.querySelector('#themeEndSlowmoSetDefaultBtn').addEventListener('click', () => {
+      const endSequence = ensureEndSequence();
+      if (!endSequence) return;
+      const btn = this.panel.querySelector('#themeEndSlowmoSetDefaultBtn');
+      try {
+        this._emitChange();
+        const saved = localStorage.getItem('peggle_visualDefaults');
+        const defaults = normalizeVisuals(saved ? JSON.parse(saved) : null, true);
+        defaults.endSequence = JSON.parse(JSON.stringify(endSequence));
+        const json = JSON.stringify(defaults);
+        localStorage.setItem('peggle_visualDefaults', json);
+        btn.textContent = localStorage.getItem('peggle_visualDefaults') === json ? 'Saved!' : 'Error!';
+      } catch (error) {
+        btn.textContent = 'Error!';
+        console.error('[visuals] End slow-mo default save failed', error);
+      }
+      setTimeout(() => {
+        const current = this.panel?.querySelector('#themeEndSlowmoSetDefaultBtn');
+        if (current) current.textContent = 'Set as default';
+      }, 1200);
+    }, { signal: sig });
+
     this.panel.querySelector('#themeFrameColor').addEventListener('input', e => {
       if (!this.config) return;
       this.config.frameColor = e.target.value;
-      this.frame.style.backgroundColor = e.target.value;
+      if (this.frame) this.frame.style.backgroundColor = '#000000';
       this._emitChange();
     }, { signal: sig });
 
@@ -1452,6 +1516,8 @@ export class VisualLayout {
     if (bgTop) bgTop.value = bg.colorTop;
     const bgBot = sel('#themeBgBottom');
     if (bgBot) bgBot.value = bg.colorBottom;
+    const bgDarken = sel('#themeBgDarken');
+    if (bgDarken) bgDarken.value = String(Math.round((bg.darken ?? 0.5) * 100));
     const liquidBase = sel('#themeBgLiquidBase');
     if (liquidBase) liquidBase.value = bg.liquid?.colorBase || '#05020f';
     const liquidMid = sel('#themeBgLiquidMid');
@@ -1556,23 +1622,27 @@ export class VisualLayout {
     const victorySettings = shockwave.victorySettings || {};
     const shockwaveVictoryColor = sel('#themeShockwaveVictoryColor');
     if (shockwaveVictoryColor) shockwaveVictoryColor.value = victorySettings.color || shockwave.color || '#ffffff';
-    setTrailRange('#themeShockwaveRadius', shockwave.radius, 1);
-    setTrailRange('#themeShockwaveStrength', shockwave.strength, 1);
-    setTrailRange('#themeShockwaveWidth', shockwave.width, 1);
-    setTrailRange('#themeShockwaveDuration', shockwave.duration, 0.82);
-    setTrailRange('#themeShockwaveRipple', shockwave.ripple, 1);
-    setTrailRange('#themeShockwaveOpacity', shockwave.opacity, 0.86);
-    setTrailRange('#themeShockwaveVictoryRadius', victorySettings.radius, shockwave.radius ?? 1);
-    setTrailRange('#themeShockwaveVictoryStrength', victorySettings.strength, shockwave.strength ?? 1);
-    setTrailRange('#themeShockwaveVictoryWidth', victorySettings.width, shockwave.width ?? 1);
-    setTrailRange('#themeShockwaveVictoryDuration', victorySettings.duration, shockwave.duration ?? 0.82);
-    setTrailRange('#themeShockwaveVictoryRipple', victorySettings.ripple, shockwave.ripple ?? 1);
-    setTrailRange('#themeShockwaveVictoryOpacity', victorySettings.opacity, shockwave.opacity ?? 0.86);
+    setTrailRange('#themeShockwaveRadius', shockwave.radius, DEFAULT_SHOCKWAVE_EFFECT.radius);
+    setTrailRange('#themeShockwaveStrength', shockwave.strength, DEFAULT_SHOCKWAVE_EFFECT.strength);
+    setTrailRange('#themeShockwaveWidth', shockwave.width, DEFAULT_SHOCKWAVE_EFFECT.width);
+    setTrailRange('#themeShockwaveDuration', shockwave.duration, DEFAULT_SHOCKWAVE_EFFECT.duration);
+    setTrailRange('#themeShockwaveRipple', shockwave.ripple, DEFAULT_SHOCKWAVE_EFFECT.ripple);
+    setTrailRange('#themeShockwaveOpacity', shockwave.opacity, DEFAULT_SHOCKWAVE_EFFECT.opacity);
+    setTrailRange('#themeShockwaveVictoryRadius', victorySettings.radius, DEFAULT_SHOCKWAVE_VICTORY_SETTINGS.radius);
+    setTrailRange('#themeShockwaveVictoryStrength', victorySettings.strength, DEFAULT_SHOCKWAVE_VICTORY_SETTINGS.strength);
+    setTrailRange('#themeShockwaveVictoryWidth', victorySettings.width, DEFAULT_SHOCKWAVE_VICTORY_SETTINGS.width);
+    setTrailRange('#themeShockwaveVictoryDuration', victorySettings.duration, DEFAULT_SHOCKWAVE_VICTORY_SETTINGS.duration);
+    setTrailRange('#themeShockwaveVictoryRipple', victorySettings.ripple, DEFAULT_SHOCKWAVE_VICTORY_SETTINGS.ripple);
+    setTrailRange('#themeShockwaveVictoryOpacity', victorySettings.opacity, DEFAULT_SHOCKWAVE_VICTORY_SETTINGS.opacity);
+    const endSequence = this.config.endSequence || {};
+    setTrailRange('#themeEndSlowmoStrength', endSequence.finalPegSlowmoStrength, DEFAULT_END_SEQUENCE.finalPegSlowmoStrength);
     this._syncBgRowVisibility();
+    this._syncBackgroundButtons();
     this._syncProgressBgButtons();
     this._syncLiquidBgButtons();
     this._syncBallTrailButtons();
     this._syncShockwaveButtons();
+    this._syncEndSequenceButtons();
     this._syncProgressionPreviewButton();
     this._buildSlotList();
   }
@@ -1634,6 +1704,15 @@ export class VisualLayout {
     if (liquidProgMotionRow) liquidProgMotionRow.style.display = type === 'liquid' ? '' : 'none';
     if (liquidProgReactionRow) liquidProgReactionRow.style.display = type === 'liquid' ? '' : 'none';
     if (topRow && type === 'liquid') topRow.style.display = 'none';
+  }
+
+  _syncBackgroundButtons() {
+    if (!this.panel || !this.config?.background) return;
+    const value = Math.round((Number.isFinite(this.config.background.darken) ? this.config.background.darken : 0.5) * 100);
+    const slider = this.panel.querySelector('#themeBgDarken');
+    const label = this.panel.querySelector('#themeBgDarkenValue');
+    if (slider) slider.value = String(value);
+    if (label) label.textContent = `${value}%`;
   }
 
   _syncProgressBgButtons() {
@@ -1784,19 +1863,19 @@ export class VisualLayout {
       const el = this.panel.querySelector(id);
       if (el) el.textContent = format(Number.isFinite(value) ? value : fallback);
     };
-    setValue('#themeShockwaveRadiusValue', shockwave.radius, 1);
-    setValue('#themeShockwaveStrengthValue', shockwave.strength, 1);
-    setValue('#themeShockwaveWidthValue', shockwave.width, 1);
-    setValue('#themeShockwaveDurationValue', shockwave.duration, 0.82, value => `${value.toFixed(2)}s`);
-    setValue('#themeShockwaveRippleValue', shockwave.ripple, 1);
-    setValue('#themeShockwaveOpacityValue', shockwave.opacity, 0.86);
+    setValue('#themeShockwaveRadiusValue', shockwave.radius, DEFAULT_SHOCKWAVE_EFFECT.radius);
+    setValue('#themeShockwaveStrengthValue', shockwave.strength, DEFAULT_SHOCKWAVE_EFFECT.strength);
+    setValue('#themeShockwaveWidthValue', shockwave.width, DEFAULT_SHOCKWAVE_EFFECT.width);
+    setValue('#themeShockwaveDurationValue', shockwave.duration, DEFAULT_SHOCKWAVE_EFFECT.duration, value => `${value.toFixed(2)}s`);
+    setValue('#themeShockwaveRippleValue', shockwave.ripple, DEFAULT_SHOCKWAVE_EFFECT.ripple);
+    setValue('#themeShockwaveOpacityValue', shockwave.opacity, DEFAULT_SHOCKWAVE_EFFECT.opacity);
     const victorySettings = shockwave.victorySettings || {};
-    setValue('#themeShockwaveVictoryRadiusValue', victorySettings.radius, shockwave.radius ?? 1);
-    setValue('#themeShockwaveVictoryStrengthValue', victorySettings.strength, shockwave.strength ?? 1);
-    setValue('#themeShockwaveVictoryWidthValue', victorySettings.width, shockwave.width ?? 1);
-    setValue('#themeShockwaveVictoryDurationValue', victorySettings.duration, shockwave.duration ?? 0.82, value => `${value.toFixed(2)}s`);
-    setValue('#themeShockwaveVictoryRippleValue', victorySettings.ripple, shockwave.ripple ?? 1);
-    setValue('#themeShockwaveVictoryOpacityValue', victorySettings.opacity, shockwave.opacity ?? 0.86);
+    setValue('#themeShockwaveVictoryRadiusValue', victorySettings.radius, DEFAULT_SHOCKWAVE_VICTORY_SETTINGS.radius);
+    setValue('#themeShockwaveVictoryStrengthValue', victorySettings.strength, DEFAULT_SHOCKWAVE_VICTORY_SETTINGS.strength);
+    setValue('#themeShockwaveVictoryWidthValue', victorySettings.width, DEFAULT_SHOCKWAVE_VICTORY_SETTINGS.width);
+    setValue('#themeShockwaveVictoryDurationValue', victorySettings.duration, DEFAULT_SHOCKWAVE_VICTORY_SETTINGS.duration, value => `${value.toFixed(2)}s`);
+    setValue('#themeShockwaveVictoryRippleValue', victorySettings.ripple, DEFAULT_SHOCKWAVE_VICTORY_SETTINGS.ripple);
+    setValue('#themeShockwaveVictoryOpacityValue', victorySettings.opacity, DEFAULT_SHOCKWAVE_VICTORY_SETTINGS.opacity);
 
     const enabled = shockwave.enabled !== false;
     for (const id of [
@@ -1847,6 +1926,17 @@ export class VisualLayout {
     }
 
     this._syncShockwavePreviewButton();
+  }
+
+  _syncEndSequenceButtons() {
+    if (!this.panel || !this.config?.endSequence) return;
+    const strength = Number.isFinite(this.config.endSequence.finalPegSlowmoStrength)
+      ? this.config.endSequence.finalPegSlowmoStrength
+      : DEFAULT_END_SEQUENCE.finalPegSlowmoStrength;
+    const slider = this.panel.querySelector('#themeEndSlowmoStrength');
+    const label = this.panel.querySelector('#themeEndSlowmoStrengthValue');
+    if (slider) slider.value = String(Math.round(strength * 100));
+    if (label) label.textContent = `${Math.round(strength * 100)}%`;
   }
 
   _syncLiquidBgButtons() {

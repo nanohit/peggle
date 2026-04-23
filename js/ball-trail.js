@@ -563,7 +563,7 @@ export class BallTrailRenderer {
     }
 
     const config = this._resolveConfig(baseConfig, progressBlend);
-    const time = this._timeSeconds();
+    const time = Number.isFinite(state?.renderTimeSeconds) ? state.renderTimeSeconds : this._timeSeconds();
     const maxAge = 0.14 + config.length * 0.34;
     const radius = Number.isFinite(ballRadius) ? ballRadius : 8.5;
 

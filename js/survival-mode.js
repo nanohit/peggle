@@ -245,6 +245,7 @@ export const SURVIVAL_DEFAULTS = Object.freeze({
     type: 'none',
     image: null,
     fit: 'cover',
+    darken: 0.5,
     liquid: null
   })
 });
@@ -294,20 +295,26 @@ export function normalizeSurvivalBackground(rawSettings = null) {
   const fit = SURVIVAL_BACKGROUND_FITS.has(rawBackground.fit)
     ? rawBackground.fit
     : SURVIVAL_DEFAULTS.background.fit;
+  const darken = Utils.clamp(
+    toFiniteNumber(rawBackground.darken, SURVIVAL_DEFAULTS.background.darken),
+    0,
+    1
+  );
   const liquid = rawBackground.liquid && typeof rawBackground.liquid === 'object' && !Array.isArray(rawBackground.liquid)
     ? { ...rawBackground.liquid }
     : null;
 
   if (type === 'image' && image) {
-    return { type, image, fit, liquid };
+    return { type, image, fit, darken, liquid };
   }
   if (type === 'liquid') {
-    return { type, image: image || null, fit, liquid };
+    return { type, image: image || null, fit, darken, liquid };
   }
   return {
     type: 'none',
     image: null,
     fit,
+    darken,
     liquid
   };
 }
