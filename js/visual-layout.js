@@ -90,6 +90,8 @@ export class VisualLayout {
     this._compactShift = 0;
     this._abortController = null;
     this._slotRuntimeFx = {};
+    this._survivalProgressIndicator = null;
+    this._survivalProgressState = null;
     this.gambleUiMode = false;
     this.gambleOverlayState = { open: false, target: null };
     this._includePanel = opts.includePanel !== false;
@@ -206,6 +208,8 @@ export class VisualLayout {
     this._slotClip = null;
     this._slotBg = null;
     this.slotElements = {};
+    this._survivalProgressIndicator = null;
+    this._survivalProgressState = null;
     this.mounted = false;
   }
 
@@ -215,6 +219,7 @@ export class VisualLayout {
     this._resolvedAssets = {};
     if (this.frame) this.frame.style.backgroundColor = '#000000';
     this._loadAndPositionSlots();
+    this.updateSurvivalProgressIndicator(this._survivalProgressState);
     this._syncPanelValues();
   }
 
@@ -262,6 +267,7 @@ export class VisualLayout {
       this._refreshSlotPositions();
     }
     this._applyGambleOverlayState();
+    this.updateSurvivalProgressIndicator(this._survivalProgressState);
   }
 
   setSpinMode(active) {
@@ -2018,6 +2024,7 @@ export class VisualLayout {
     for (const def of SLOT_DEFS) {
       this._positionSlot(def.id);
     }
+    this.updateSurvivalProgressIndicator(this._survivalProgressState);
   }
 
   _getAdjustedSlotY(slotId, rawY) {
@@ -2186,6 +2193,61 @@ export class VisualLayout {
       el.style.backgroundImage = '';
     }
     this._ballCountPrev = undefined;
+  }
+
+  // ─── Survival vertical progress marker ────────────────
+
+  _ensureSurvivalProgressIndicator() {
+    if (this._survivalProgressIndicator?.isConnected) return this._survivalProgressIndicator;
+    if (!this._slotClip) return null;
+
+    const el = document.createElement('div');
+    el.className = 'survival-column-progress-marker';
+    const inner = document.createElement('div');
+    inner.className = 'survival-column-progress-marker__inner';
+    el.appendChild(inner);
+    this._slotClip.appendChild(el);
+    this._survivalProgressIndicator = el;
+    return el;
+  }
+
+  updateSurvivalProgressIndicator(progressState) {
+    this._survivalProgressState = progressState || null;
+    const el = this._ensureSurvivalProgressIndicator();
+    if (!el) return;
+
+    const columnDef = SLOT_DEFS.find(def => def.id === 'columnLeft');
+    const columnCfg = this.config?.slots?.columnLeft;
+    if (!progressState || !columnDef || !columnCfg || columnCfg.visible === false) {
+      el.style.display = 'none';
+      return;
+    }
+
+    const progressRatio = Math.max(0, Math.min(1, progressState.progressRatio ?? 0));
+    const frameW = Math.max(1, this._frameW || this.frame?.clientWidth || 1);
+    const frameH = Math.max(1, this._frameH || this.frame?.clientHeight || 1);
+    const frameScale = Math.min(1, frameW / 444);
+    const hudSqueeze = Math.max(0.82, Math.min(1, this._frameSqueeze || 1));
+    const dockTop = ((frameH - (96 * frameScale * hudSqueeze)) / frameH) * 100;
+
+    const topLeftDef = SLOT_DEFS.find(def => def.id === 'topLeft');
+    const topLeftCfg = this.config?.slots?.topLeft;
+    const topLeftWidth = topLeftDef && topLeftCfg
+      ? topLeftDef.baseWidth * (topLeftCfg.scale || 1)
+      : 0;
+    const topLeftHeight = topLeftWidth * (frameW / frameH);
+    const topLeftCenterY = topLeftCfg
+      ? this._getAdjustedSlotY('topLeft', topLeftCfg.y)
+      : 10;
+
+    const travelTop = Math.max(9, topLeftCenterY + topLeftHeight * 0.5 + 1.5);
+    const travelBottom = Math.max(travelTop + 8, Math.min(92, dockTop - 2));
+    const top = travelTop + progressRatio * (travelBottom - travelTop);
+
+    el.style.display = '';
+    el.style.left = '0';
+    el.style.top = `${top}%`;
+    el.style.setProperty('--survival-progress-ratio', progressRatio.toFixed(4));
   }
 
   // ─── Health bar (orange pegs) ──────────────────────

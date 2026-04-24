@@ -1,6 +1,7 @@
 // Peggle Physics Engine - Custom lightweight physics
 
 import { Utils } from './utils.js';
+import { getPortalScale, isPortalType } from './portal-defaults.js';
 
 // Default physics config - can be modified at runtime
 export const PHYSICS_CONFIG = {
@@ -308,13 +309,13 @@ export class PhysicsEngine {
   }
 
   isPortalPeg(peg) {
-    return peg && (peg.type === 'portalBlue' || peg.type === 'portalOrange');
+    return !!peg && isPortalType(peg.type);
   }
 
   getPegCollisionRadius(peg) {
     if (!peg) return PHYSICS_CONFIG.pegRadius;
     if (peg.type === 'bumper') return PHYSICS_CONFIG.pegRadius * (peg.bumperScale || 1);
-    if (this.isPortalPeg(peg)) return PHYSICS_CONFIG.pegRadius * (peg.portalScale || 1);
+    if (this.isPortalPeg(peg)) return PHYSICS_CONFIG.pegRadius * getPortalScale(peg);
     return PHYSICS_CONFIG.pegRadius;
   }
 
@@ -341,7 +342,7 @@ export class PhysicsEngine {
 
   getPortalHalfLength(portal) {
     if (!portal) return PHYSICS_CONFIG.pegRadius;
-    return PHYSICS_CONFIG.pegRadius * (portal.portalScale || 1);
+    return PHYSICS_CONFIG.pegRadius * getPortalScale(portal);
   }
 
   _getPegGridCellSize() {

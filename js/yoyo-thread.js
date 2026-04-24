@@ -3,6 +3,7 @@
 
 import { PHYSICS_CONFIG } from './physics.js';
 import { Utils } from './utils.js';
+import { getPortalScale, isPortalType } from './portal-defaults.js';
 
 const YOYO_DEFAULTS = Object.freeze({
   enabled: false,
@@ -28,6 +29,10 @@ const YOYO_DEFAULTS = Object.freeze({
   collisionMargin: 1.2,
   curveSamples: 4
 });
+
+const YOYO_MAX_SOLVER_ITERATIONS = 22;
+const YOYO_MAX_SUBSTEPS = 3;
+const YOYO_LENGTH_BOOST_DIVISOR = 16;
 
 function toFiniteNumber(value, fallback) {
   return Number.isFinite(value) ? value : fallback;
@@ -131,30 +136,11 @@ function getPegWrapRadius(peg, wrapPadding) {
     return PHYSICS_CONFIG.pegRadius * (peg.bumperScale || 1) + wrapPadding;
   }
 
-  if (peg.type === 'portalBlue' || peg.type === 'portalOrange') {
-    return PHYSICS_CONFIG.pegRadius * (peg.portalScale || 1) + wrapPadding;
+  if (isPortalType(peg.type)) {
+    return PHYSICS_CONFIG.pegRadius * getPortalScale(peg) + wrapPadding;
   }
 
   return PHYSICS_CONFIG.pegRadius + wrapPadding;
-}
-
-function catmullRom(p0, p1, p2, p3, t) {
-  const t2 = t * t;
-  const t3 = t2 * t;
-  return {
-    x: 0.5 * (
-      (2 * p1.x) +
-      (-p0.x + p2.x) * t +
-      (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 +
-      (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3
-    ),
-    y: 0.5 * (
-      (2 * p1.y) +
-      (-p0.y + p2.y) * t +
-      (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 +
-      (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3
-    )
-  };
 }
 
 function makeNode(x, y) {
@@ -181,7 +167,7 @@ export function normalizeYoyoSettings(rawSettings = null) {
     ropeSegmentLength: clamp(toFiniteNumber(merged.ropeSegmentLength, YOYO_DEFAULTS.ropeSegmentLength), 5, 20),
     minNodes: Math.round(clamp(toFiniteNumber(merged.minNodes, YOYO_DEFAULTS.minNodes), 6, 80)),
     maxNodes: Math.round(clamp(toFiniteNumber(merged.maxNodes, YOYO_DEFAULTS.maxNodes), 20, 240)),
-    solverIterations: Math.round(clamp(toFiniteNumber(merged.solverIterations, YOYO_DEFAULTS.solverIterations), 4, 40)),
+    solverIterations: Math.round(clamp(toFiniteNumber(merged.solverIterations, YOYO_DEFAULTS.solverIterations), 4, YOYO_MAX_SOLVER_ITERATIONS)),
     bendStiffnessExtend: clamp(toFiniteNumber(merged.bendStiffnessExtend, YOYO_DEFAULTS.bendStiffnessExtend), 0, 0.7),
     bendStiffnessRetract: clamp(toFiniteNumber(merged.bendStiffnessRetract, YOYO_DEFAULTS.bendStiffnessRetract), 0, 0.7),
     ropeThickness: clamp(toFiniteNumber(merged.ropeThickness, YOYO_DEFAULTS.ropeThickness), 1.5, 8),
@@ -229,9 +215,9 @@ export class YoyoThreadSystem {
     this.launchAnchor.y = y;
   }
 
-  registerBallLaunch(ball, anchorX = this.launchAnchor.x, anchorY = this.launchAnchor.y) {
+  registerBallLaunch(ball, anchorX = this.launchAnchor.x, anchorY = this.launchAnchor.y, options = null) {
     if (!ball) return;
-    const state = this._createState(ball, anchorX, anchorY);
+    const state = this._createState(ball, anchorX, anchorY, options);
     this.states.set(ball.id, state);
   }
 
@@ -245,16 +231,29 @@ export class YoyoThreadSystem {
     const prevY = Number.isFinite(state.anchorY) ? state.anchorY : y;
     const dx = x - prevX;
     const dy = y - prevY;
-    if (Math.abs(dx) < 1e-6 && Math.abs(dy) < 1e-6) return;
+    const hasAnchorPegOption = options && Object.prototype.hasOwnProperty.call(options, 'anchorPegId');
+    if (Math.abs(dx) < 1e-6 && Math.abs(dy) < 1e-6) {
+      if (hasAnchorPegOption) {
+        state.anchorPegId = options.anchorPegId || null;
+      }
+      return;
+    }
 
     state.anchorX = x;
     state.anchorY = y;
+    if (hasAnchorPegOption) {
+      state.anchorPegId = options.anchorPegId || null;
+    }
 
     if (options?.moveOriginalAnchor !== false) {
       const originalX = Number.isFinite(state.originalAnchorX) ? state.originalAnchorX : prevX;
       const originalY = Number.isFinite(state.originalAnchorY) ? state.originalAnchorY : prevY;
       state.originalAnchorX = originalX + dx;
       state.originalAnchorY = originalY + dy;
+    }
+
+    if (options?.shiftNodes !== false) {
+      this._shiftNodesFromAnchor(state.nodes, dx, dy);
     }
 
     if (Array.isArray(state.portalSegments) && state.portalSegments.length > 0) {
@@ -265,6 +264,9 @@ export class YoyoThreadSystem {
         }
         seg.anchorX = (seg.anchorX ?? prevX) + dx;
         seg.anchorY = (seg.anchorY ?? prevY) + dy;
+        if (options?.shiftNodes !== false) {
+          this._shiftNodesFromAnchor(seg.nodes, dx, dy);
+        }
       }
     }
   }
@@ -533,7 +535,7 @@ export class YoyoThreadSystem {
   _simulateAllPortalSegments(state, obstacles) {
     if (!state.portalSegments || state.portalSegments.length === 0) return;
     for (const seg of state.portalSegments) {
-      this._simulatePortalSegment(seg, obstacles);
+      this._simulatePortalSegment(seg, this._filterObstaclesForNodes(seg.nodes, obstacles));
     }
   }
 
@@ -549,29 +551,37 @@ export class YoyoThreadSystem {
       if (state.portalSegments) {
         for (const seg of state.portalSegments) {
           if (!seg.nodes || seg.nodes.length < 2) continue;
-          const pts = this._buildRenderPoints(seg.nodes);
-          if (pts && pts.length >= 2) {
-            threads.push({ ballId: state.ballId, mode: state.mode, points: pts });
+          const pts = this._buildRenderPoints(seg.nodes, seg);
+          if (pts && pts.pointCount >= 2) {
+            threads.push({
+              ballId: state.ballId,
+              mode: state.mode,
+              points: pts.points,
+              pointCount: pts.pointCount,
+              flatPoints: true
+            });
           }
         }
       }
 
       // Active segment (from current anchor to ball)
       if (!Array.isArray(state.nodes) || state.nodes.length < 2) continue;
-      const points = this._buildRenderPoints(state.nodes);
-      if (!points || points.length < 2) continue;
+      const points = this._buildRenderPoints(state.nodes, state);
+      if (!points || points.pointCount < 2) continue;
 
       threads.push({
         ballId: state.ballId,
         mode: state.mode,
-        points
+        points: points.points,
+        pointCount: points.pointCount,
+        flatPoints: true
       });
     }
 
     return threads;
   }
 
-  _createState(ball, anchorX, anchorY) {
+  _createState(ball, anchorX, anchorY, options = null) {
     const ax = Number.isFinite(anchorX) ? anchorX : this.launchAnchor.x;
     const ay = Number.isFinite(anchorY) ? anchorY : this.launchAnchor.y;
     const startLen = Utils.distance(ax, ay, ball.x, ball.y) + this.settings.extendSlackPixels;
@@ -592,7 +602,8 @@ export class YoyoThreadSystem {
       prevBallX: ball.x,
       prevBallY: ball.y,
       retractNodeCount: 0,
-      portalSegments: []
+      portalSegments: [],
+      anchorPegId: options?.anchorPegId || null
     };
   }
 
@@ -604,6 +615,25 @@ export class YoyoThreadSystem {
     }
     state.ballRef = ball;
     return state;
+  }
+
+  _shiftNodesFromAnchor(nodes, dx, dy) {
+    if (!Array.isArray(nodes) || nodes.length < 2) return;
+    if (Math.abs(dx) < 1e-6 && Math.abs(dy) < 1e-6) return;
+
+    const lastIndex = nodes.length - 1;
+    for (let i = 0; i <= lastIndex; i++) {
+      const node = nodes[i];
+      if (!node) continue;
+      const weight = 1 - (i / lastIndex);
+      if (weight <= 0) continue;
+      const sx = dx * weight;
+      const sy = dy * weight;
+      node.x += sx;
+      node.y += sy;
+      node.px += sx;
+      node.py += sy;
+    }
   }
 
   _updateState(state, ball, dt, retractStartY, obstacles, releaseEvents = null) {
@@ -632,9 +662,10 @@ export class YoyoThreadSystem {
 
     state.visible = true;
     this._ensureNodes(state, ball);
+    const activeObstacles = this._filterObstaclesForState(state, ball, obstacles);
 
     if (state.mode === 'extending') {
-      this._simulateRope(state, ball, obstacles, dt, prevBallX, prevBallY);
+      this._simulateRope(state, ball, activeObstacles, dt, prevBallX, prevBallY);
       const direct = Utils.distance(state.anchorX, state.anchorY, ball.x, ball.y) + this.settings.extendSlackPixels;
       // Allow rope to grow when wrapping adds path length around obstacles.
       // The actual node path after collision solving may be longer than direct.
@@ -676,87 +707,23 @@ export class YoyoThreadSystem {
       return;
     }
 
+    if (this._tryFinishRetractionAtAnchor(state, ball, releaseEvents)) {
+      return;
+    }
+
     const retractScale = this._getRetractSpeedScale(state, ball);
     const currentPathLen = this._computeNodePathLength(state.nodes);
     const shorten = this.settings.retractSpeed * retractScale * dt;
     const maxOver = this.settings.ropeSegmentLength * 2.25;
     const minByPath = Math.max(0, currentPathLen - maxOver);
     state.ropeLength = Math.max(minByPath, state.ropeLength - shorten);
-    this._simulateRope(state, ball, obstacles, dt, prevBallX, prevBallY);
+    this._simulateRope(state, ball, activeObstacles, dt, prevBallX, prevBallY);
     const prePullX = ball.x;
     const prePullY = ball.y;
     this._applyRetractionForce(state, ball, retractScale);
-    this._simulateRope(state, ball, obstacles, dt, prePullX, prePullY);
+    this._simulateRope(state, ball, activeObstacles, dt, prePullX, prePullY);
 
-    const distToAnchor = Utils.distance(ball.x, ball.y, state.anchorX, state.anchorY);
-    const nearAnchor = distToAnchor <= this.settings.releaseRadius;
-    const nearAnchorBand = ball.y <= state.anchorY + this.settings.releaseRadius * 0.85
-      && Math.abs(ball.x - state.anchorX) <= this.settings.releaseRadius * 1.5
-      && ball.vy < 1;
-    if (nearAnchor || nearAnchorBand) {
-      // If there are portal segments, unwind through the portal instead of releasing.
-      // The ball is near the current anchor (exit portal). Teleport the ball to the
-      // entry point of the last segment so it continues retracting toward the launcher.
-      if (state.portalSegments && state.portalSegments.length > 0) {
-        const popped = state.portalSegments.pop();
-
-        // Teleport ball to the entry portal surface of the popped segment
-        // (that's where the rope entered the portal from the other side).
-        // Use the surface pin position so the ball lands outside the portal obstacle.
-        ball.x = popped.entryPinX != null ? popped.entryPinX : popped.entryX;
-        ball.y = popped.entryPinY != null ? popped.entryPinY : popped.entryY;
-        ball.vx = 0;
-        ball.vy = 0;
-
-        // Restore anchor to where this segment started
-        state.anchorX = popped.anchorX;
-        state.anchorY = popped.anchorY;
-
-        // Take over this segment's nodes (they're already simulated/settled)
-        // as the active rope, so the ball retracts along the wrapped path.
-        if (popped.nodes && popped.nodes.length >= 2) {
-          // Reverse the nodes so [0]=anchor, [last]=ball (entry portal)
-          // The segment stored them as anchor→entry, which is correct direction already.
-          state.nodes = popped.nodes;
-          // Update last node to ball position
-          const last = state.nodes[state.nodes.length - 1];
-          last.x = ball.x;
-          last.y = ball.y;
-          last.px = ball.x;
-          last.py = ball.y;
-          // Use the actual settled path length — nodes may have tightened during simulation.
-          const settledLen = this._computeNodePathLength(state.nodes);
-          state.ropeLength = Math.min(popped.ropeLength, settledLen + this.settings.extendSlackPixels);
-        } else {
-          const dist = Utils.distance(state.anchorX, state.anchorY, ball.x, ball.y);
-          state.ropeLength = Math.max(dist + this.settings.extendSlackPixels, this.settings.ropeSegmentLength * 2);
-          state.nodes = this._buildLinearNodes(state.anchorX, state.anchorY, ball.x, ball.y,
-            Math.max(this.settings.minNodes, Math.ceil(dist / this.settings.ropeSegmentLength) + 1));
-        }
-
-        state.retractStartDist = Math.max(1, Utils.distance(state.anchorX, state.anchorY, ball.x, ball.y));
-        state.prevBallX = ball.x;
-        state.prevBallY = ball.y;
-        return;
-      }
-
-      state.mode = 'released';
-      state.visible = false;
-      state.releaseTimer = this.settings.rearmDelay;
-      state.nodes.length = 0;
-      state.retractStartDist = 0;
-      state.portalSegments = [];
-      state.anchorX = state.originalAnchorX || this.launchAnchor.x;
-      state.anchorY = state.originalAnchorY || this.launchAnchor.y;
-      state.prevBallX = ball.x;
-      state.prevBallY = ball.y;
-      state.retractNodeCount = 0;
-      if (ball.vy < -2) {
-        ball.vy *= 0.35;
-      }
-      if (Array.isArray(releaseEvents)) {
-        releaseEvents.push(state.ballId);
-      }
+    if (this._tryFinishRetractionAtAnchor(state, ball, releaseEvents)) {
       return;
     }
 
@@ -780,20 +747,180 @@ export class YoyoThreadSystem {
     return minScale + (1 - minScale) * progress;
   }
 
+  _isNearAnchorForRelease(state, ball) {
+    const ballRadius = Number.isFinite(ball?.radius) ? ball.radius : PHYSICS_CONFIG.pegRadius;
+    const releaseRadius = Math.max(
+      this.settings.releaseRadius,
+      ballRadius * 2 + this.settings.ropeSegmentLength * 0.65
+    );
+    const distToAnchor = Utils.distance(ball.x, ball.y, state.anchorX, state.anchorY);
+    if (distToAnchor <= releaseRadius) return true;
+
+    return ball.y <= state.anchorY + releaseRadius * 0.9
+      && Math.abs(ball.x - state.anchorX) <= releaseRadius * 1.6
+      && ball.vy < 1.1;
+  }
+
+  _tryFinishRetractionAtAnchor(state, ball, releaseEvents = null) {
+    if (!this._isNearAnchorForRelease(state, ball)) return false;
+
+    // If there are portal segments, unwind through the portal instead of releasing.
+    // The ball is near the current anchor (exit portal), so move it to the entry
+    // surface of the previous segment and keep retracting toward the launcher.
+    if (state.portalSegments && state.portalSegments.length > 0) {
+      const popped = state.portalSegments.pop();
+
+      ball.x = popped.entryPinX != null ? popped.entryPinX : popped.entryX;
+      ball.y = popped.entryPinY != null ? popped.entryPinY : popped.entryY;
+      ball.vx = 0;
+      ball.vy = 0;
+
+      state.anchorX = popped.anchorX;
+      state.anchorY = popped.anchorY;
+
+      if (popped.nodes && popped.nodes.length >= 2) {
+        state.nodes = popped.nodes;
+        const last = state.nodes[state.nodes.length - 1];
+        last.x = ball.x;
+        last.y = ball.y;
+        last.px = ball.x;
+        last.py = ball.y;
+        const settledLen = this._computeNodePathLength(state.nodes);
+        state.ropeLength = Math.min(popped.ropeLength, settledLen + this.settings.extendSlackPixels);
+      } else {
+        const dist = Utils.distance(state.anchorX, state.anchorY, ball.x, ball.y);
+        state.ropeLength = Math.max(dist + this.settings.extendSlackPixels, this.settings.ropeSegmentLength * 2);
+        state.nodes = this._buildLinearNodes(state.anchorX, state.anchorY, ball.x, ball.y,
+          Math.max(this.settings.minNodes, Math.ceil(dist / this.settings.ropeSegmentLength) + 1));
+      }
+
+      state.retractStartDist = Math.max(1, Utils.distance(state.anchorX, state.anchorY, ball.x, ball.y));
+      state.prevBallX = ball.x;
+      state.prevBallY = ball.y;
+      return true;
+    }
+
+    state.mode = 'released';
+    state.visible = false;
+    state.releaseTimer = this.settings.rearmDelay;
+    state.nodes.length = 0;
+    state.retractStartDist = 0;
+    state.portalSegments = [];
+    state.anchorX = state.originalAnchorX || this.launchAnchor.x;
+    state.anchorY = state.originalAnchorY || this.launchAnchor.y;
+    state.anchorPegId = null;
+    state.prevBallX = ball.x;
+    state.prevBallY = ball.y;
+    state.retractNodeCount = 0;
+    if (ball.vy < -2) {
+      ball.vy *= 0.35;
+    }
+    if (Array.isArray(releaseEvents)) {
+      releaseEvents.push(state.ballId);
+    }
+    return true;
+  }
+
+  _getNodeBounds(nodes, margin = 0) {
+    if (!Array.isArray(nodes) || nodes.length === 0) return null;
+
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const node of nodes) {
+      if (!node || !Number.isFinite(node.x) || !Number.isFinite(node.y)) continue;
+      minX = Math.min(minX, node.x);
+      minY = Math.min(minY, node.y);
+      maxX = Math.max(maxX, node.x);
+      maxY = Math.max(maxY, node.y);
+    }
+
+    if (!Number.isFinite(minX)) return null;
+    return {
+      minX: minX - margin,
+      minY: minY - margin,
+      maxX: maxX + margin,
+      maxY: maxY + margin
+    };
+  }
+
+  _boundsOverlap(a, b) {
+    if (!a || !b) return true;
+    return a.minX <= b.maxX && a.maxX >= b.minX
+      && a.minY <= b.maxY && a.maxY >= b.minY;
+  }
+
+  _obstacleContainsPoint(obs, x, y, padding = 0) {
+    if (!obs || !Number.isFinite(x) || !Number.isFinite(y)) return false;
+    if (obs.kind === 'circle') {
+      const dx = x - obs.x;
+      const dy = y - obs.y;
+      const radius = obs.radius + padding;
+      return dx * dx + dy * dy <= radius * radius;
+    }
+
+    const dx = x - obs.x;
+    const dy = y - obs.y;
+    const lx = dx * obs.cos + dy * obs.sin;
+    const ly = -dx * obs.sin + dy * obs.cos;
+    return Math.abs(lx) <= obs.halfW + padding
+      && Math.abs(ly) <= obs.halfH + padding;
+  }
+
+  _filterObstaclesForNodes(nodes, obstacles, skipPegId = null, anchorX = null, anchorY = null) {
+    if (!Array.isArray(obstacles) || obstacles.length === 0) return [];
+
+    const ropeRadius = this.settings.ropeThickness * 0.5 + this.settings.collisionMargin;
+    const margin = Math.max(this.settings.ropeSegmentLength * 4, ropeRadius + 24);
+    const bounds = this._getNodeBounds(nodes, margin);
+    if (!bounds) return obstacles;
+
+    return obstacles.filter(obs => {
+      if (!obs) return false;
+      if (skipPegId && obs.pegId === skipPegId) return false;
+      if (this._obstacleContainsPoint(obs, anchorX, anchorY, ropeRadius + 0.5)) return false;
+      return this._boundsOverlap(bounds, obs);
+    });
+  }
+
+  _filterObstaclesForState(state, ball, obstacles) {
+    if (!Array.isArray(obstacles) || obstacles.length === 0) return [];
+
+    let nodes = state.nodes;
+    if (!Array.isArray(nodes) || nodes.length < 2) {
+      nodes = [
+        { x: state.anchorX, y: state.anchorY },
+        { x: ball.x, y: ball.y }
+      ];
+    }
+
+    return this._filterObstaclesForNodes(
+      nodes,
+      obstacles,
+      state.anchorPegId,
+      state.anchorX,
+      state.anchorY
+    );
+  }
+
   _ensureNodes(state, ball) {
     const direct = Utils.distance(state.anchorX, state.anchorY, ball.x, ball.y);
     const refLen = Math.max(state.ropeLength, direct + this.settings.extendSlackPixels);
     const extending = state.mode === 'extending';
     const retracting = state.mode === 'retracting';
+    const finalRetract = retracting
+      && !(state.portalSegments && state.portalSegments.length > 0)
+      && direct <= this.settings.releaseRadius * 2.5;
     const minNodes = extending
       ? Math.max(6, Math.min(this.settings.minNodes, 10))
-      : Math.max(4, this.settings.minNodes);
+      : (finalRetract ? 4 : Math.max(4, this.settings.minNodes));
     const maxNodes = Math.max(minNodes + 1, this.settings.maxNodes);
     const segmentLen = extending
       ? this.settings.ropeSegmentLength * 1.14
       : this.settings.ropeSegmentLength;
     let targetCount = Math.round(clamp(Math.ceil(refLen / segmentLen) + 1, minNodes, maxNodes));
-    if (retracting && Number.isFinite(state.retractNodeCount) && state.retractNodeCount >= 8) {
+    if (!finalRetract && retracting && Number.isFinite(state.retractNodeCount) && state.retractNodeCount >= 8) {
       targetCount = Math.round(clamp(state.retractNodeCount, minNodes, maxNodes));
     }
 
@@ -877,7 +1004,7 @@ export class YoyoThreadSystem {
   _simulateRope(state, ball, obstacles, dt, prevBallX = ball.x, prevBallY = ball.y) {
     const moveDist = Utils.distance(prevBallX, prevBallY, ball.x, ball.y);
     const maxStep = Math.max(2, this.settings.ropeSegmentLength * 0.65);
-    const substeps = Math.round(clamp(Math.ceil(moveDist / maxStep), 1, 6));
+    const substeps = Math.round(clamp(Math.ceil(moveDist / maxStep), 1, YOYO_MAX_SUBSTEPS));
     if (substeps <= 1) {
       this._simulateRopeOnce(state, ball, obstacles, dt);
       return;
@@ -958,22 +1085,20 @@ export class YoyoThreadSystem {
     const retractBoost = retracting ? 2 : 0;
     // Longer ropes need more iterations for corrections to propagate end-to-end.
     // Verlet propagates ~1 node/iteration, so scale with node count.
-    const lengthBoost = Math.round(clamp((nodes.length - 20) / 8, 0, 10));
-    const iterations = Math.round(clamp(this.settings.solverIterations + speedBoost + retractBoost + lengthBoost, this.settings.solverIterations, 50));
+    const lengthBoost = Math.round(clamp((nodes.length - 20) / YOYO_LENGTH_BOOST_DIVISOR, 0, 10));
+    const baseIterations = Math.min(this.settings.solverIterations, YOYO_MAX_SOLVER_ITERATIONS);
+    const iterations = Math.round(clamp(
+      baseIterations + speedBoost + retractBoost + lengthBoost,
+      baseIterations,
+      YOYO_MAX_SOLVER_ITERATIONS
+    ));
 
     for (let iter = 0; iter < iterations; iter++) {
       this._pinEndpoints(state, ball);
       this._solveDistanceConstraints(state, allowCompression);
-      // Collision after EVERY distance pass — critical for wrapping stability.
-      // Without this, distance pulls nodes through pegs 2x per iteration
-      // while collision only pushes them back 1x. For long ropes where mid-chain
-      // nodes have no endpoint authority, distance overwhelms collision.
       this._solveNodeObstacleConstraints(state, obstacles, ropeRadius, retracting);
       this._solveSegmentObstacleConstraints(state, obstacles, ropeRadius, retracting);
       this._solveBendConstraints(state, bendStiffness, obstacles, ropeRadius);
-      this._solveDistanceConstraints(state, allowCompression);
-      this._solveNodeObstacleConstraints(state, obstacles, ropeRadius, retracting);
-      this._solveSegmentObstacleConstraints(state, obstacles, ropeRadius, retracting);
     }
 
     this._pinEndpoints(state, ball);
@@ -1342,7 +1467,11 @@ export class YoyoThreadSystem {
     const over = pathLen - state.ropeLength;
     if (over <= 0) return;
 
-    const pivot = this._getTailGuidePoint(nodes) || { x: state.anchorX, y: state.anchorY };
+    const distToAnchor = Utils.distance(ball.x, ball.y, state.anchorX, state.anchorY);
+    const finalApproachRadius = Math.max(this.settings.releaseRadius * 2.4, this.settings.ropeSegmentLength * 5);
+    const pivot = distToAnchor <= finalApproachRadius
+      ? { x: state.anchorX, y: state.anchorY }
+      : (this._getTailGuidePoint(nodes) || { x: state.anchorX, y: state.anchorY });
     const dx = ball.x - pivot.x;
     const dy = ball.y - pivot.y;
     const dist = Math.sqrt(dx * dx + dy * dy) || 0.0001;
@@ -1351,7 +1480,8 @@ export class YoyoThreadSystem {
     const ny = dy / dist;
 
     const forceScale = clamp(retractScale * 0.85 + 0.15, 0.15, 1);
-    const correction = Math.min(over, 18) * 0.54 * forceScale;
+    const nearAnchorScale = clamp(distToAnchor / finalApproachRadius, 0.28, 1);
+    const correction = Math.min(over, 18) * 0.54 * forceScale * nearAnchorScale;
     ball.x -= nx * correction;
     ball.y -= ny * correction;
 
@@ -1370,7 +1500,7 @@ export class YoyoThreadSystem {
     ball.vx -= tx * tangentialVel * spinDamping;
     ball.vy -= ty * tangentialVel * spinDamping;
 
-    const pull = over * this.settings.tensionStrength * forceScale;
+    const pull = over * this.settings.tensionStrength * forceScale * nearAnchorScale;
     ball.vx -= nx * pull;
     ball.vy -= ny * pull;
 
@@ -1401,17 +1531,28 @@ export class YoyoThreadSystem {
       const wrapPad = 3.5;
 
       // Portals are line triggers — treat as thin bricks so rope wraps around them.
-      if (peg.type === 'portalBlue' || peg.type === 'portalOrange') {
-        const halfLen = PHYSICS_CONFIG.pegRadius * (peg.portalScale || 1);
+      if (isPortalType(peg.type)) {
+        const halfLen = PHYSICS_CONFIG.pegRadius * getPortalScale(peg);
         const angle = peg.angle || 0;
+        const halfW = halfLen + wrapPad;
+        const halfH = PHYSICS_CONFIG.pegRadius * 0.35 + wrapPad;
+        const cos = Math.cos(angle);
+        const sin = Math.sin(angle);
+        const extX = Math.abs(cos) * halfW + Math.abs(sin) * halfH;
+        const extY = Math.abs(sin) * halfW + Math.abs(cos) * halfH;
         out.push({
           kind: 'brick',
+          pegId: peg.id,
           x: peg.x,
           y: peg.y,
-          halfW: halfLen + wrapPad,
-          halfH: PHYSICS_CONFIG.pegRadius * 0.35 + wrapPad,
-          cos: Math.cos(angle),
-          sin: Math.sin(angle)
+          halfW,
+          halfH,
+          cos,
+          sin,
+          minX: peg.x - extX,
+          maxX: peg.x + extX,
+          minY: peg.y - extY,
+          maxY: peg.y + extY
         });
         continue;
       }
@@ -1420,77 +1561,190 @@ export class YoyoThreadSystem {
         const width = peg.width || PHYSICS_CONFIG.brickWidth;
         const height = peg.height || PHYSICS_CONFIG.brickHeight;
         const angle = peg.angle || 0;
+        const halfW = width * 0.5 + wrapPad;
+        const halfH = height * 0.5 + wrapPad;
+        const cos = Math.cos(angle);
+        const sin = Math.sin(angle);
+        const extX = Math.abs(cos) * halfW + Math.abs(sin) * halfH;
+        const extY = Math.abs(sin) * halfW + Math.abs(cos) * halfH;
         out.push({
           kind: 'brick',
+          pegId: peg.id,
           x: peg.x,
           y: peg.y,
-          halfW: width * 0.5 + wrapPad,
-          halfH: height * 0.5 + wrapPad,
-          cos: Math.cos(angle),
-          sin: Math.sin(angle)
+          halfW,
+          halfH,
+          cos,
+          sin,
+          minX: peg.x - extX,
+          maxX: peg.x + extX,
+          minY: peg.y - extY,
+          maxY: peg.y + extY
         });
         continue;
       }
+      const radius = getPegWrapRadius(peg, wrapPad);
       out.push({
         kind: 'circle',
+        pegId: peg.id,
         x: peg.x,
         y: peg.y,
-        radius: getPegWrapRadius(peg, wrapPad)
+        radius,
+        minX: peg.x - radius,
+        maxX: peg.x + radius,
+        minY: peg.y - radius,
+        maxY: peg.y + radius
       });
     }
 
     return out;
   }
 
-  _buildRenderPoints(nodes) {
-    if (!Array.isArray(nodes) || nodes.length < 2) return [];
-    if (nodes.length === 2 || this.settings.curveSamples <= 1) {
-      return nodes.map(n => ({ x: n.x, y: n.y }));
+  _growRenderCapacity(required) {
+    let capacity = 16;
+    while (capacity < required) {
+      capacity *= 2;
+    }
+    return capacity;
+  }
+
+  _getRenderScratch(owner, nodeCount, pointCount) {
+    const target = owner || this;
+    let scratch = target._yoyoRenderScratch;
+    if (!scratch) {
+      scratch = {
+        source: null,
+        smooth: null,
+        points: null,
+        result: {
+          points: null,
+          pointCount: 0
+        }
+      };
+      target._yoyoRenderScratch = scratch;
     }
 
-    let src = nodes.map(n => ({ x: n.x, y: n.y }));
+    const nodeCoordCount = Math.max(4, nodeCount * 2);
+    if (!scratch.source || scratch.source.length < nodeCoordCount) {
+      const capacity = this._growRenderCapacity(nodeCoordCount);
+      scratch.source = new Float32Array(capacity);
+      scratch.smooth = new Float32Array(capacity);
+    }
+
+    const pointCoordCount = Math.max(4, pointCount * 2);
+    if (!scratch.points || scratch.points.length < pointCoordCount) {
+      scratch.points = new Float32Array(this._growRenderCapacity(pointCoordCount));
+      scratch.result.points = scratch.points;
+    }
+
+    return scratch;
+  }
+
+  _buildRenderPoints(nodes, owner = null) {
+    if (!Array.isArray(nodes) || nodes.length < 2) return null;
+
+    const nodeCount = nodes.length;
+    const samples = this.settings.curveSamples;
+    const direct = nodeCount === 2 || samples <= 1;
+    const maxPointCount = direct ? nodeCount : 1 + (nodeCount - 1) * samples;
+    const scratch = this._getRenderScratch(owner, nodeCount, maxPointCount);
+    const out = scratch.points;
+    let count = 0;
+
+    if (direct) {
+      for (let i = 0; i < nodeCount; i++) {
+        const writeIndex = count * 2;
+        out[writeIndex] = nodes[i].x;
+        out[writeIndex + 1] = nodes[i].y;
+        count++;
+      }
+      scratch.result.pointCount = count;
+      return scratch.result;
+    }
+
+    let src = scratch.source;
+    let smoothed = scratch.smooth;
+    for (let i = 0; i < nodeCount; i++) {
+      const writeIndex = i * 2;
+      src[writeIndex] = nodes[i].x;
+      src[writeIndex + 1] = nodes[i].y;
+    }
+
     // Render-time low-pass to remove tiny solver jitter without changing physics.
     for (let pass = 0; pass < 2; pass++) {
-      const smoothed = src.map(p => ({ x: p.x, y: p.y }));
-      for (let i = 1; i < src.length - 1; i++) {
-        smoothed[i] = {
-          x: src[i - 1].x * 0.22 + src[i].x * 0.56 + src[i + 1].x * 0.22,
-          y: src[i - 1].y * 0.22 + src[i].y * 0.56 + src[i + 1].y * 0.22
-        };
+      smoothed[0] = src[0];
+      smoothed[1] = src[1];
+      const lastCoord = (nodeCount - 1) * 2;
+      smoothed[lastCoord] = src[lastCoord];
+      smoothed[lastCoord + 1] = src[lastCoord + 1];
+
+      for (let i = 1; i < nodeCount - 1; i++) {
+        const curr = i * 2;
+        const prev = curr - 2;
+        const next = curr + 2;
+        smoothed[curr] = src[prev] * 0.22 + src[curr] * 0.56 + src[next] * 0.22;
+        smoothed[curr + 1] = src[prev + 1] * 0.22 + src[curr + 1] * 0.56 + src[next + 1] * 0.22;
       }
+
+      const tmp = src;
       src = smoothed;
+      smoothed = tmp;
     }
 
-    const points = [{ x: nodes[0].x, y: nodes[0].y }];
-    const samples = this.settings.curveSamples;
+    out[0] = nodes[0].x;
+    out[1] = nodes[0].y;
+    count = 1;
 
-    for (let i = 0; i < src.length - 1; i++) {
-      const p1 = src[i];
-      const p2 = src[i + 1];
-      const nearEndpoint = i < 2 || i > src.length - 4;
+    for (let i = 0; i < nodeCount - 1; i++) {
+      const p1Index = i * 2;
+      const p2Index = p1Index + 2;
+      const p1x = src[p1Index];
+      const p1y = src[p1Index + 1];
+      const p2x = src[p2Index];
+      const p2y = src[p2Index + 1];
+      const nearEndpoint = i < 2 || i > nodeCount - 4;
 
       if (nearEndpoint) {
         // Keep endpoint segments linear to prevent Catmull overshoot loops.
         for (let s = 1; s <= samples; s++) {
           const t = s / samples;
-          points.push({
-            x: p1.x + (p2.x - p1.x) * t,
-            y: p1.y + (p2.y - p1.y) * t
-          });
+          const writeIndex = count * 2;
+          out[writeIndex] = p1x + (p2x - p1x) * t;
+          out[writeIndex + 1] = p1y + (p2y - p1y) * t;
+          count++;
         }
         continue;
       }
 
-      const p0 = src[i - 1];
-      const p3 = src[i + 2];
+      const p0Index = p1Index - 2;
+      const p3Index = p2Index + 2;
+      const p0x = src[p0Index];
+      const p0y = src[p0Index + 1];
+      const p3x = src[p3Index];
+      const p3y = src[p3Index + 1];
       for (let s = 1; s <= samples; s++) {
         const t = s / samples;
-        const p = catmullRom(p0, p1, p2, p3, t);
-        points.push({ x: p.x, y: p.y });
+        const t2 = t * t;
+        const t3 = t2 * t;
+        const writeIndex = count * 2;
+        out[writeIndex] = 0.5 * (
+          (2 * p1x) +
+          (-p0x + p2x) * t +
+          (2 * p0x - 5 * p1x + 4 * p2x - p3x) * t2 +
+          (-p0x + 3 * p1x - 3 * p2x + p3x) * t3
+        );
+        out[writeIndex + 1] = 0.5 * (
+          (2 * p1y) +
+          (-p0y + p2y) * t +
+          (2 * p0y - 5 * p1y + 4 * p2y - p3y) * t2 +
+          (-p0y + 3 * p1y - 3 * p2y + p3y) * t3
+        );
+        count++;
       }
     }
 
-    return points;
+    scratch.result.pointCount = count;
+    return scratch.result;
   }
 
   _isWrappablePeg(peg) {

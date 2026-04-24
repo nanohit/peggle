@@ -368,7 +368,13 @@ html, body {
   color: var(--orange);
 }
 .peg-btn[data-type="orange"]::after {
-  background: var(--orange);
+  border: 1px solid rgba(255, 147, 48, 0.95);
+  background:
+    radial-gradient(ellipse at 35% 24%, rgba(255, 255, 245, 0.82) 0%, rgba(255, 255, 245, 0.82) 12%, rgba(255, 255, 245, 0) 24%),
+    radial-gradient(circle at 48% 44%, #ffd7a0 0%, #ff9230 22%, #ff6b35 54%, #b83712 78%, #571607 100%);
+  box-shadow:
+    inset 0 -2px 3px rgba(72, 14, 4, 0.58),
+    inset 0 1px 2px rgba(255, 190, 92, 0.72);
 }
 
 .peg-btn[data-type="blue"] {
@@ -376,7 +382,11 @@ html, body {
   color: var(--blue);
 }
 .peg-btn[data-type="blue"]::after {
-  background: var(--blue);
+  border: 1px solid rgba(142, 255, 247, 0.88);
+  background:
+    radial-gradient(ellipse at 35% 24%, rgba(255, 255, 255, 0.78) 0%, rgba(255, 255, 255, 0.78) 12%, rgba(255, 255, 255, 0) 24%),
+    radial-gradient(circle at 48% 44%, #d7fffb 0%, #7df4ed 22%, #4ecdc4 56%, #168178 80%, #07323b 100%);
+  box-shadow: inset 0 -2px 3px rgba(7, 50, 59, 0.58);
 }
 
 .peg-btn[data-type="green"] {
@@ -384,7 +394,11 @@ html, body {
   color: var(--green);
 }
 .peg-btn[data-type="green"]::after {
-  background: var(--green);
+  border: 1px solid rgba(209, 255, 222, 0.86);
+  background:
+    radial-gradient(ellipse at 35% 24%, rgba(255, 255, 255, 0.76) 0%, rgba(255, 255, 255, 0.76) 12%, rgba(255, 255, 255, 0) 24%),
+    radial-gradient(circle at 48% 44%, #f0fff4 0%, #c3f7d7 22%, #95d5b2 56%, #4b9a6d 80%, #163927 100%);
+  box-shadow: inset 0 -2px 3px rgba(22, 57, 39, 0.56);
 }
 
 .peg-btn[data-type="purple"] {
@@ -392,7 +406,11 @@ html, body {
   color: var(--purple);
 }
 .peg-btn[data-type="purple"]::after {
-  background: var(--purple);
+  border: 1px solid rgba(229, 186, 255, 0.9);
+  background:
+    radial-gradient(ellipse at 35% 24%, rgba(255, 255, 255, 0.78) 0%, rgba(255, 255, 255, 0.78) 12%, rgba(255, 255, 255, 0) 24%),
+    radial-gradient(circle at 48% 44%, #f6e6ff 0%, #dfadff 22%, #c77dff 56%, #8037bd 80%, #32114f 100%);
+  box-shadow: inset 0 -2px 3px rgba(50, 17, 79, 0.58);
 }
 
 .peg-btn[data-type="multi"] {
@@ -400,7 +418,11 @@ html, body {
   color: var(--multi);
 }
 .peg-btn[data-type="multi"]::after {
-  background: var(--multi);
+  border: 1px solid rgba(255, 165, 207, 0.9);
+  background:
+    radial-gradient(ellipse at 35% 24%, rgba(255, 255, 255, 0.78) 0%, rgba(255, 255, 255, 0.78) 12%, rgba(255, 255, 255, 0) 24%),
+    radial-gradient(circle at 48% 44%, #ffe0f0 0%, #ff8cc5 22%, #ff4d9d 56%, #b91f6d 80%, #4e0a2c 100%);
+  box-shadow: inset 0 -2px 3px rgba(78, 10, 44, 0.58);
 }
 
 .peg-btn[data-type="gamble"] {
@@ -408,8 +430,11 @@ html, body {
   color: var(--gamble);
 }
 .peg-btn[data-type="gamble"]::after {
-  background: radial-gradient(circle at 45% 38%, #ffffff 0%, #f8fff0 34%, var(--gamble) 76%);
-  box-shadow: 0 0 8px rgba(140, 255, 0, 0.8), inset 0 0 3px rgba(255,255,255,0.85);
+  border: 1px solid rgba(219, 255, 114, 0.9);
+  background:
+    radial-gradient(ellipse at 35% 24%, rgba(255, 255, 255, 0.82) 0%, rgba(255, 255, 255, 0.82) 12%, rgba(255, 255, 255, 0) 24%),
+    radial-gradient(circle at 48% 44%, #f6ffd6 0%, #cfff5c 22%, #8cff00 56%, #4d9a00 80%, #173900 100%);
+  box-shadow: inset 0 -2px 3px rgba(23, 57, 0, 0.56);
 }
 
 .peg-btn[data-type="obstacle"] {
@@ -417,7 +442,11 @@ html, body {
   color: var(--obstacle);
 }
 .peg-btn[data-type="obstacle"]::after {
-  background: var(--obstacle);
+  border: 1px solid rgba(220, 226, 236, 0.72);
+  background:
+    radial-gradient(ellipse at 35% 24%, rgba(255, 255, 255, 0.62) 0%, rgba(255, 255, 255, 0.62) 12%, rgba(255, 255, 255, 0) 24%),
+    radial-gradient(circle at 48% 44%, #e8edf5 0%, #aab3c2 22%, #6b7280 56%, #3e4654 80%, #171b23 100%);
+  box-shadow: inset 0 -2px 3px rgba(23, 27, 35, 0.58);
 }
 
 .peg-btn[data-type="bumper"] {

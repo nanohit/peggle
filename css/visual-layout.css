@@ -93,6 +93,29 @@
   /* darken controlled inline via filter: brightness() from config */
 }
 
+.survival-column-progress-marker {
+  position: absolute;
+  width: clamp(13px, 3.7%, 21px);
+  height: clamp(9px, 2.2%, 15px);
+  transform: translate(0, -50%);
+  pointer-events: none;
+  z-index: 12;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.74));
+}
+
+.survival-column-progress-marker__inner {
+  position: absolute;
+  inset: 0;
+  clip-path: polygon(0 0, 68% 0, 100% 50%, 68% 100%, 0 100%);
+  border-radius: 2px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(255, 255, 255, 0) 42%),
+    linear-gradient(90deg, #b8c0c8 0%, #f7fbff 46%, #ffffff 100%);
+  box-shadow:
+    inset 0 -1px 2px rgba(55, 65, 81, 0.48),
+    inset 0 1px 1px rgba(255, 255, 255, 0.86);
+}
+
 /* In edit mode: slots become interactive */
 .visual-slot--editable {
   pointer-events: auto;

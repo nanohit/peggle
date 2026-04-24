@@ -5,7 +5,7 @@ import { Renderer } from './renderer.js';
 import { Utils } from './utils.js';
 import { PegAnimator } from './animation.js';
 import { SurvivalRuntime } from './survival-runtime.js';
-import { createDefaultFlipperConfig, normalizeFlipperConfig } from './flipper-defaults.js';
+import { FLIPPER_DEFAULTS, createDefaultFlipperConfig, normalizeFlipperConfig } from './flipper-defaults.js';
 import { YoyoThreadSystem, normalizeYoyoSettings } from './yoyo-thread.js';
 import { buildBombShockwave } from './perk-bomb.js';
 import { DeepFreezeSystem } from './perk-deep-freeze.js';
@@ -24,6 +24,7 @@ import {
   normalizeHitPegClearDelayMs,
   normalizeLevelHitPegClearSettings
 } from './hit-peg-clear-settings.js';
+import { isPortalType, normalizePortalPegProperties } from './portal-defaults.js';
 import { lightTap, initAudio, pegHitSound, resetHitCounter } from './haptics.js';
 import { normalizeEndSequenceConfig } from './visual-config.js';
 
@@ -154,6 +155,7 @@ export class Game {
     this._pendingEndResult = null;
     this._gameEndEmitted = false;
     this._stopped = false;
+    this._frozenSurvivalTrackerState = null;
     this.endSequenceConfig = normalizeEndSequenceConfig(null);
 
     // Flippers
@@ -190,6 +192,7 @@ export class Game {
     
     // Performance overlay (editor only)
     this.showPerfOverlay = false;
+    this._portalFxDecayPerSecond = 2.8;
 
     // Trajectory preview
     this.trajectory = null;
@@ -431,12 +434,12 @@ export class Game {
     const orangeLeft = survivalMode
       ? this.getSurvivalTargetsLeft(true)
       : Math.max(0, this.initialOrangePegs - this.removedOrangePegs - currentTurnOrangeHits);
-    const waitingForFirstGambleReward = survivalMode && this.initialGambleBallCount <= 0 && this.gambleBalls <= 0;
+    const waitingForSurvivalSpinBalls = survivalMode && this.gambleBalls <= 0;
     const displayBallsLeft = survivalMode
-      ? (waitingForFirstGambleReward ? Number.POSITIVE_INFINITY : this.gambleBalls)
+      ? (waitingForSurvivalSpinBalls ? Number.POSITIVE_INFINITY : this.gambleBalls)
       : this.ballsLeft;
     const displayInitialBalls = survivalMode
-      ? (waitingForFirstGambleReward ? 0 : Math.max(this.initialGambleBallCount, this.gambleBalls, 0))
+      ? (waitingForSurvivalSpinBalls ? 0 : Math.max(this.initialGambleBallCount, this.gambleBalls, 0))
       : this.initialBallCount;
     const state = this._pendingEndResult?.result || this.state;
     return {
@@ -652,7 +655,10 @@ export class Game {
       const anchor = this.resolveUltraAimAnchorPosition(peg, binding.anchorX, binding.anchorY);
       binding.anchorX = anchor.x;
       binding.anchorY = anchor.y;
-      this.yoyoThread.setBallAnchor(ballId, anchor.x, anchor.y, { moveOriginalAnchor: true });
+      this.yoyoThread.setBallAnchor(ballId, anchor.x, anchor.y, {
+        moveOriginalAnchor: true,
+        anchorPegId: binding.pegId
+      });
     }
   }
 
@@ -1313,7 +1319,7 @@ export class Game {
     this.yoyoThread.setLaunchAnchor(anchorX, anchorY);
     this.configureBallYoyoState(ball);
     if (ball.yoyoEligible !== false) {
-      this.yoyoThread.registerBallLaunch(ball, anchorX, anchorY);
+      this.yoyoThread.registerBallLaunch(ball, anchorX, anchorY, { anchorPegId: anchorPeg?.id || null });
       this.consumeYoyoPerkUseOnBind(ball);
       if (anchorPeg?.id) {
         this.bindDynamicYoyoAnchor(ball.id, anchorPeg.id, anchorX, anchorY);
@@ -1428,13 +1434,50 @@ export class Game {
   }
 
   createRuntimeFlipper(config) {
+    const cameraY = this.isSurvivalMode() ? this.getCameraY() : 0;
+    const defaultScreenY = Math.max(30, this.canvas.height - FLIPPER_DEFAULTS.yOffset);
+    const rawScreenY = Number.isFinite(config?._screenY)
+      ? config._screenY
+      : (Number.isFinite(config?.screenY)
+        ? config.screenY
+        : (Number.isFinite(config?.y) ? config.y - cameraY : defaultScreenY));
+    const screenY = this.isSurvivalMode()
+      ? Utils.clamp(rawScreenY, 30, Math.max(30, this.canvas.height - 35))
+      : rawScreenY;
     return {
       ...config,
       enabled: true,
+      y: this.isSurvivalMode() ? cameraY + screenY : config.y,
+      _screenY: screenY,
       _flipperT: 0,
       _flipperActivated: false,
       _angularDelta: 0
     };
+  }
+
+  syncSurvivalFlipperAnchor() {
+    if (!this.isSurvivalMode() || !this.flippers || !this.flippers.enabled) return;
+    const defaultScreenY = Math.max(30, this.canvas.height - FLIPPER_DEFAULTS.yOffset);
+    const rawScreenY = Number.isFinite(this.flippers._screenY)
+      ? this.flippers._screenY
+      : (Number.isFinite(this.flippers.y) ? this.flippers.y - this.getCameraY() : defaultScreenY);
+    const screenY = Utils.clamp(rawScreenY, 30, Math.max(30, this.canvas.height - 35));
+    this.flippers._screenY = screenY;
+    this.flippers.y = this.getCameraY() + screenY;
+  }
+
+  triggerPortalPulse(peg) {
+    if (!peg || !isPortalType(peg.type)) return;
+    peg._portalPulse = 1;
+  }
+
+  updatePortalPulses(dt) {
+    const decay = Math.max(0, dt) * this._portalFxDecayPerSecond;
+    if (decay <= 0 || !Array.isArray(this.pegs)) return;
+    for (const peg of this.pegs) {
+      if (!peg || !isPortalType(peg.type) || !Number.isFinite(peg._portalPulse)) continue;
+      peg._portalPulse = Math.max(0, peg._portalPulse - decay);
+    }
   }
 
   createTemporaryFlipperConfig() {
@@ -1456,6 +1499,7 @@ export class Game {
 
     if (flipperConfig) {
       this.flippers = this.createRuntimeFlipper(flipperConfig);
+      this.syncSurvivalFlipperAnchor();
       this.physics.setFlippers(this.flippers);
     } else {
       this.flippers = null;
@@ -1623,6 +1667,9 @@ export class Game {
       if (copy.type === 'gamble') {
         Object.assign(copy, normalizeSurvivalGamblePegProperties(copy, survivalSettings.gamblePeg));
       }
+      if (isPortalType(copy.type)) {
+        normalizePortalPegProperties(copy, { upgradeLegacyDefault: true });
+      }
       if (p.curveSlices) copy.curveSlices = p.curveSlices.map(s => ({ ...s }));
       if (p.animation) copy.animation = { ...p.animation };
       return copy;
@@ -1686,6 +1733,7 @@ export class Game {
     this._lastPegSlowmoElapsedMs = -1;
     this._pendingEndResult = null;
     this._gameEndEmitted = false;
+    this._frozenSurvivalTrackerState = null;
 
     this.updateLaunchPosition();
     this.clearDynamicYoyoAnchors();
@@ -1877,7 +1925,7 @@ export class Game {
   }
 
   isPortalPeg(p) {
-    return p.type === 'portalBlue' || p.type === 'portalOrange';
+    return !!p && isPortalType(p.type);
   }
 
   getOrangePegsLeft() {
@@ -2051,6 +2099,7 @@ export class Game {
     }
 
     this.yoyoThread.clear();
+    this.clearDynamicYoyoAnchors();
     this.finishDeepFreezeShot();
     this.resetUltraAimRuntime();
 
@@ -2189,6 +2238,7 @@ export class Game {
     if (this.bucketCatchLight > 0) {
       this.bucketCatchLight = Math.max(0, this.bucketCatchLight - dt * 2.6);
     }
+    this.updatePortalPulses(dt);
     const worldHeight = this.isSurvivalMode() ? this.survivalRuntime.getWorldHeight() : this.canvas.height;
     this.animator.tick(this.pegs, dt, { width: this.canvas.width, height: worldHeight });
     if (this.deepFreezeSystem.isActive()) {
@@ -2202,6 +2252,7 @@ export class Game {
     }
     this.updateLaunchPosition();
     this.syncPhysicsViewportBounds();
+    this.syncSurvivalFlipperAnchor();
     this.updateSurvivalShotCooldown(dt);
     this.updateLauncherBallAnimations(dt);
     const retractStartY = this.physics.bucketEnabled && this.physics.bucket
@@ -2293,7 +2344,9 @@ export class Game {
 
       // Portal teleport: notify animator and yoyo thread, no peg activation
       if (event.portalHit) {
+        this.triggerPortalPulse(event.peg);
         if (event.portalExit) {
+          this.triggerPortalPulse(event.portalExit);
           this.yoyoThread.notePortalTeleport(event.ball, event.peg, event.portalExit);
         }
         this.animator.notifyHit(peg.id);
@@ -2457,12 +2510,23 @@ export class Game {
     const pegProgress = totalTargets > 0
       ? Math.max(0, Math.min(1, (totalTargets - targetsLeft) / totalTargets))
       : 0;
-    const trackerState = survivalMode ? this.survivalRuntime.getTrackerState() : null;
+    let trackerState = survivalMode ? this.survivalRuntime.getTrackerState() : null;
+    const endStateActive = survivalMode
+      && (!!this._pendingEndResult || this.state === 'won' || this.state === 'lost');
+    if (endStateActive) {
+      if (!this._frozenSurvivalTrackerState && trackerState) {
+        this._frozenSurvivalTrackerState = { ...trackerState };
+      }
+      trackerState = this._frozenSurvivalTrackerState || trackerState;
+    } else {
+      this._frozenSurvivalTrackerState = null;
+    }
     const boardProgress = survivalMode ? (trackerState?.progressRatio ?? 0) : pegProgress;
     const centerLabel = survivalMode
       ? `PEGS ${Math.max(0, totalTargets - targetsLeft)}/${totalTargets}`
       : null;
     const cameraY = this.getCameraY();
+    this.syncSurvivalFlipperAnchor();
 
     this.renderer.renderGame({
       pegs: this.pegs,

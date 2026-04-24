@@ -11,6 +11,7 @@ import {
   ShockwaveEffectRenderer,
   normalizeShockwaveConfig
 } from './shockwave-effect.js';
+import { getPortalScale, isPortalType } from './portal-defaults.js';
 
 // Color palette
 const COLORS = {
@@ -108,6 +109,107 @@ const PEG_COLORS = {
   portalOrange: { main: COLORS.portalOrange, hit: COLORS.portalOrange, glow: COLORS.portalOrangeGlow }
 };
 
+const PEG_SURFACE_STYLES = {
+  orange: {
+    bright: '#ffd7a0',
+    light: '#ff9230',
+    main: '#ff6b35',
+    deep: '#b83712',
+    shadow: '#571607',
+    rimLight: 'rgba(255, 147, 48, 0.96)',
+    line: 'rgba(255, 184, 84, 0.48)',
+    core: 'rgba(255, 111, 36, 0.5)',
+    glow: 'rgba(255, 91, 15, 0.32)',
+    hitBright: '#fff1bc',
+    hitLight: '#ffbd4c',
+    hitMain: '#ff8b24'
+  },
+  blue: {
+    bright: '#d7fffb',
+    light: '#7df4ed',
+    main: '#4ecdc4',
+    deep: '#168178',
+    shadow: '#07323b',
+    rimLight: 'rgba(142, 255, 247, 0.9)',
+    line: 'rgba(202, 255, 250, 0.42)',
+    core: 'rgba(95, 230, 222, 0.45)',
+    glow: 'rgba(78, 205, 196, 0.3)',
+    hitBright: '#ffffff',
+    hitLight: '#a5fff8',
+    hitMain: '#6ee2db'
+  },
+  green: {
+    bright: '#f0fff4',
+    light: '#c3f7d7',
+    main: '#95d5b2',
+    deep: '#4b9a6d',
+    shadow: '#163927',
+    rimLight: 'rgba(209, 255, 222, 0.88)',
+    line: 'rgba(237, 255, 232, 0.4)',
+    core: 'rgba(178, 235, 198, 0.43)',
+    glow: 'rgba(149, 213, 178, 0.27)',
+    hitBright: '#ffffff',
+    hitLight: '#d9ffe5',
+    hitMain: '#afe6c3'
+  },
+  purple: {
+    bright: '#f6e6ff',
+    light: '#dfadff',
+    main: '#c77dff',
+    deep: '#8037bd',
+    shadow: '#32114f',
+    rimLight: 'rgba(229, 186, 255, 0.9)',
+    line: 'rgba(247, 224, 255, 0.4)',
+    core: 'rgba(203, 130, 255, 0.42)',
+    glow: 'rgba(199, 125, 255, 0.28)',
+    hitBright: '#ffffff',
+    hitLight: '#eecaff',
+    hitMain: '#d99aff'
+  },
+  multi: {
+    bright: '#ffe0f0',
+    light: '#ff8cc5',
+    main: '#ff4d9d',
+    deep: '#b91f6d',
+    shadow: '#4e0a2c',
+    rimLight: 'rgba(255, 165, 207, 0.92)',
+    line: 'rgba(255, 224, 240, 0.42)',
+    core: 'rgba(255, 93, 168, 0.44)',
+    glow: 'rgba(255, 77, 157, 0.3)',
+    hitBright: '#ffffff',
+    hitLight: '#ffadd2',
+    hitMain: '#ff70b3'
+  },
+  gamble: {
+    bright: '#f6ffd6',
+    light: '#cfff5c',
+    main: '#8cff00',
+    deep: '#4d9a00',
+    shadow: '#173900',
+    rimLight: 'rgba(219, 255, 114, 0.9)',
+    line: 'rgba(245, 255, 198, 0.42)',
+    core: 'rgba(162, 255, 36, 0.45)',
+    glow: 'rgba(140, 255, 0, 0.28)',
+    hitBright: '#ffffff',
+    hitLight: '#e5ff99',
+    hitMain: '#b5ff3c'
+  },
+  obstacle: {
+    bright: '#e8edf5',
+    light: '#aab3c2',
+    main: '#6b7280',
+    deep: '#3e4654',
+    shadow: '#171b23',
+    rimLight: 'rgba(220, 226, 236, 0.72)',
+    line: 'rgba(236, 241, 248, 0.28)',
+    core: 'rgba(160, 170, 186, 0.25)',
+    glow: 'rgba(107, 114, 128, 0.18)',
+    hitBright: '#f4f7fb',
+    hitLight: '#c5ccd8',
+    hitMain: '#8b94a3'
+  }
+};
+
 const GLOW_CACHE_LIMIT = 128;
 const END_MESSAGE_DELAY_MS = 160;
 const END_MESSAGE_FADE_IN_MS = 260;
@@ -171,6 +273,7 @@ export class Renderer {
     this.performanceProfile = 'balanced';
     this._survivalBgImage = null;
     this._survivalBgImageSrc = '';
+    this.onVerticalProgress = null;
     this._endMessage = {
       key: '',
       text: '',
@@ -360,6 +463,214 @@ export class Renderer {
     g.fillStyle = 'rgba(255, 255, 255, 0.45)';
     g.fill();
     e = { img: oc, half: c };
+    return this._storeGlowCache(key, e);
+  }
+
+  _getPegSurfaceStyle(type) {
+    return PEG_SURFACE_STYLES[type] || null;
+  }
+
+  _pegSurfaceColors(style, isHit = false) {
+    return {
+      bright: isHit ? (style.hitBright || style.bright) : style.bright,
+      light: isHit ? (style.hitLight || style.light) : style.light,
+      main: isHit ? (style.hitMain || style.main) : style.main,
+      deep: style.deep,
+      shadow: style.shadow,
+      rimLight: style.rimLight,
+      line: style.line,
+      core: isHit ? (style.hitCore || style.core) : style.core,
+      glow: isHit ? (style.hitGlow || style.glow) : style.glow
+    };
+  }
+
+  _pegBodySprite(type, r, isHit = false) {
+    const style = this._getPegSurfaceStyle(type);
+    if (!style) return null;
+
+    const rr = Math.round(r * 10) / 10;
+    const key = `pbody|${type}|${rr}|${isHit ? 1 : 0}`;
+    let e = this._touchGlowCache(key);
+    if (e) return e;
+
+    const colors = this._pegSurfaceColors(style, isHit);
+    const pad = 2;
+    const size = Math.ceil((rr + pad) * 2);
+    const oc = document.createElement('canvas');
+    oc.width = size;
+    oc.height = size;
+    const g = oc.getContext('2d');
+    const c = size / 2;
+    const tau = Math.PI * 2;
+
+    g.beginPath();
+    g.arc(c, c, rr, 0, tau);
+    g.fillStyle = colors.shadow;
+    g.fill();
+
+    const body = g.createRadialGradient(
+      c - rr * 0.33,
+      c - rr * 0.36,
+      rr * 0.08,
+      c + rr * 0.08,
+      c + rr * 0.1,
+      rr
+    );
+    body.addColorStop(0, colors.bright);
+    body.addColorStop(0.18, colors.light);
+    body.addColorStop(0.5, colors.main);
+    body.addColorStop(0.76, colors.deep);
+    body.addColorStop(1, colors.deep);
+    g.beginPath();
+    g.arc(c, c, rr, 0, tau);
+    g.fillStyle = body;
+    g.fill();
+
+    const core = g.createRadialGradient(c + rr * 0.08, c + rr * 0.03, 0, c + rr * 0.05, c + rr * 0.06, rr * 0.74);
+    core.addColorStop(0, colors.core);
+    core.addColorStop(0.34, colors.core);
+    core.addColorStop(1, 'rgba(255, 112, 8, 0)');
+    g.beginPath();
+    g.arc(c, c, rr * 0.74, 0, tau);
+    g.fillStyle = core;
+    g.fill();
+
+    g.save();
+    g.beginPath();
+    g.arc(c, c, rr * 0.79, 0, tau);
+    g.clip();
+    g.beginPath();
+    const steps = 48;
+    for (let i = 0; i < steps; i++) {
+      const t = i / (steps - 1);
+      const a = -0.65 + t * Math.PI * 5.45;
+      const sr = rr * (0.07 + t * 0.55);
+      const x = c + Math.cos(a) * sr * 1.06;
+      const y = c + Math.sin(a) * sr * 0.86;
+      if (i === 0) g.moveTo(x, y);
+      else g.lineTo(x, y);
+    }
+    g.strokeStyle = colors.line;
+    g.lineWidth = Math.max(0.55, rr * 0.055);
+    g.lineCap = 'round';
+    g.stroke();
+    g.restore();
+
+    g.beginPath();
+    g.arc(c, c, rr * 0.68, 0.2, Math.PI * 1.86);
+    g.strokeStyle = colors.line;
+    g.lineWidth = Math.max(0.65, rr * 0.07);
+    g.stroke();
+
+    const rimWidth = Math.max(1.05, rr * 0.16);
+    g.beginPath();
+    g.arc(c, c, rr - rimWidth * 0.5, Math.PI * 0.12, Math.PI * 0.95);
+    g.strokeStyle = colors.shadow;
+    g.lineWidth = rimWidth;
+    g.stroke();
+
+    g.beginPath();
+    g.arc(c, c, rr - rimWidth * 0.5, Math.PI * 1.12, Math.PI * 1.78);
+    g.strokeStyle = colors.rimLight;
+    g.lineWidth = Math.max(0.95, rr * 0.13);
+    g.stroke();
+
+    g.save();
+    g.translate(c - rr * 0.34, c - rr * 0.36);
+    g.rotate(-0.5);
+    g.beginPath();
+    g.ellipse(0, 0, rr * 0.27, rr * 0.12, 0, 0, tau);
+    g.fillStyle = isHit ? 'rgba(255, 255, 255, 0.92)' : 'rgba(255, 255, 245, 0.72)';
+    g.fill();
+    g.beginPath();
+    g.ellipse(rr * 0.14, rr * 0.18, rr * 0.13, rr * 0.055, 0, 0, tau);
+    g.fillStyle = 'rgba(255, 255, 255, 0.45)';
+    g.fill();
+    g.restore();
+
+    g.beginPath();
+    g.arc(c, c, rr - 0.45, 0, tau);
+    g.strokeStyle = colors.rimLight;
+    g.lineWidth = Math.max(0.75, rr * 0.085);
+    g.stroke();
+
+    e = { img: oc, half: c };
+    return this._storeGlowCache(key, e);
+  }
+
+  _brickPegBodySprite(type, w, h, isHit = false) {
+    const style = this._getPegSurfaceStyle(type);
+    if (!style) return null;
+
+    const ww = Math.round(w * 10) / 10;
+    const hh = Math.round(h * 10) / 10;
+    const key = `bbody|${type}|${ww}|${hh}|${isHit ? 1 : 0}`;
+    let e = this._touchGlowCache(key);
+    if (e) return e;
+
+    const colors = this._pegSurfaceColors(style, isHit);
+    const cr = Math.max(2, Math.min(5, hh * 0.42));
+    const pad = 2;
+    const cw = Math.ceil(ww + pad * 2);
+    const ch = Math.ceil(hh + pad * 2);
+    const oc = document.createElement('canvas');
+    oc.width = cw;
+    oc.height = ch;
+    const g = oc.getContext('2d');
+    const x = pad;
+    const y = pad;
+
+    g.beginPath();
+    g.roundRect(x, y, ww, hh, cr);
+    g.fillStyle = colors.shadow;
+    g.fill();
+
+    const inset = Math.max(1.15, hh * 0.15);
+    const ix = x + inset;
+    const iy = y + inset;
+    const iw = Math.max(1, ww - inset * 2);
+    const ih = Math.max(1, hh - inset * 2);
+    g.beginPath();
+    g.roundRect(ix, iy, iw, ih, Math.max(1, cr - inset));
+    g.fillStyle = colors.main;
+    g.fill();
+
+    g.save();
+    g.beginPath();
+    g.roundRect(ix, iy, iw, ih, Math.max(1, cr - inset));
+    g.clip();
+
+    g.beginPath();
+    g.moveTo(ix + iw * 0.12, iy + ih * 0.28);
+    g.lineTo(ix + iw * 0.76, iy + ih * 0.22);
+    g.strokeStyle = colors.line;
+    g.lineWidth = Math.max(0.8, hh * 0.12);
+    g.lineCap = 'round';
+    g.stroke();
+
+    g.beginPath();
+    g.moveTo(ix + iw * 0.18, iy + ih * 0.24);
+    g.lineTo(ix + iw * 0.36, iy + ih * 0.22);
+    g.strokeStyle = 'rgba(255, 255, 255, 0.28)';
+    g.lineWidth = Math.max(0.55, hh * 0.07);
+    g.lineCap = 'round';
+    g.stroke();
+    g.restore();
+
+    g.beginPath();
+    g.roundRect(x + 0.5, y + 0.5, ww - 1, hh - 1, cr);
+    g.strokeStyle = colors.rimLight;
+    g.lineWidth = Math.max(0.75, hh * 0.1);
+    g.stroke();
+
+    g.beginPath();
+    g.moveTo(ix + iw * 0.12, iy + ih * 0.82);
+    g.lineTo(ix + iw * 0.88, iy + ih * 0.82);
+    g.strokeStyle = colors.deep;
+    g.lineWidth = Math.max(0.7, hh * 0.12);
+    g.stroke();
+
+    e = { img: oc, hw: cw / 2, hh: ch / 2 };
     return this._storeGlowCache(key, e);
   }
 
@@ -965,6 +1276,57 @@ export class Renderer {
     ctx.closePath();
   }
 
+  strokeCurvedBrickEdge(ctx, slices, offset) {
+    if (!slices || slices.length < 2) return;
+    ctx.beginPath();
+    ctx.moveTo(slices[0].x + slices[0].nx * offset, slices[0].y + slices[0].ny * offset);
+    for (let i = 1; i < slices.length; i++) {
+      ctx.lineTo(slices[i].x + slices[i].nx * offset, slices[i].y + slices[i].ny * offset);
+    }
+    ctx.stroke();
+  }
+
+  drawStyledCurvedBrick(ctx, slices, halfH, style, isHit = false) {
+    if (!style || !slices || slices.length < 2) return false;
+    const colors = this._pegSurfaceColors(style, isHit);
+
+    this.drawCurvedBrickPath(ctx, slices, halfH, -halfH);
+    ctx.fillStyle = colors.shadow;
+    ctx.fill();
+
+    const insetH = Math.max(1, halfH * 0.72);
+    this.drawCurvedBrickPath(ctx, slices, insetH, -insetH);
+    ctx.fillStyle = colors.main;
+    ctx.fill();
+
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    ctx.strokeStyle = colors.line;
+    ctx.lineWidth = Math.max(0.8, halfH * 0.24);
+    this.strokeCurvedBrickEdge(ctx, slices, halfH * 0.42);
+
+    ctx.save();
+    ctx.globalAlpha *= 0.55;
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.34)';
+    ctx.lineWidth = Math.max(0.55, halfH * 0.12);
+    this.strokeCurvedBrickEdge(ctx, slices, halfH * 0.56);
+    ctx.restore();
+
+    ctx.strokeStyle = colors.rimLight;
+    ctx.lineWidth = Math.max(0.75, halfH * 0.16);
+    this.strokeCurvedBrickEdge(ctx, slices, halfH * 0.86);
+
+    ctx.strokeStyle = colors.shadow;
+    ctx.lineWidth = Math.max(0.85, halfH * 0.2);
+    this.strokeCurvedBrickEdge(ctx, slices, -halfH * 0.9);
+
+    ctx.strokeStyle = colors.deep;
+    ctx.lineWidth = Math.max(0.8, halfH * 0.16);
+    this.strokeCurvedBrickEdge(ctx, slices, -halfH * 0.45);
+    return true;
+  }
+
   drawPeg(peg, isHit = false, isSelected = false) {
     const ctx = this.ctx;
     const colors = PEG_COLORS[peg.type] || PEG_COLORS.blue;
@@ -1041,57 +1403,146 @@ export class Renderer {
     }
 
     // ── Portal: oriented line trigger ──
-    if (peg.type === 'portalBlue' || peg.type === 'portalOrange') {
-      const halfLen = radius * (peg.portalScale || 1);
-      const lineColor = peg.type === 'portalBlue' ? COLORS.portalBlue : COLORS.portalOrange;
-      const glowColor = peg.type === 'portalBlue' ? COLORS.portalBlueGlow : COLORS.portalOrangeGlow;
-      const lineWidth = Math.max(3, radius * 0.5);
+    if (isPortalType(peg.type)) {
+      const isBluePortal = peg.type === 'portalBlue';
+      const halfLen = radius * getPortalScale(peg);
+      const lineWidth = Math.max(6, radius * 0.82);
+      const palette = isBluePortal
+        ? {
+          bright: '#d7fffb',
+          light: '#7df4ed',
+          main: COLORS.portalBlue,
+          deep: '#126c78',
+          shadow: 'rgba(4, 15, 21, 0.92)',
+          aura: 'rgba(78, 205, 196, 0.34)'
+        }
+        : {
+          bright: '#ffe3c4',
+          light: '#ffa15f',
+          main: COLORS.portalOrange,
+          deep: '#a83b12',
+          shadow: 'rgba(26, 8, 3, 0.92)',
+          aura: 'rgba(255, 115, 38, 0.34)'
+        };
+      const pulse = Math.max(0, Math.min(1, peg._portalPulse || (isHit ? 0.45 : 0)));
+      const time = this._renderTimeSeconds || 0;
+      const blockedSign = peg.portalOneWayFlip ? -1 : 1;
+      const openSign = -blockedSign;
 
       ctx.save();
       ctx.translate(peg.x, peg.y);
       ctx.rotate(peg.angle || 0);
 
-      if (!isHit) {
-        const lg = this._lineGlow(glowColor, halfLen, lineWidth, 16);
-        ctx.drawImage(lg.img, -lg.hw, -lg.hh);
-      }
+      const glow = this._lineGlow(palette.aura, halfLen + lineWidth * 0.3, lineWidth * 1.22, 10);
+      ctx.save();
+      ctx.globalAlpha = isHit ? 0.34 : (0.5 + pulse * 0.45);
+      ctx.drawImage(glow.img, -glow.hw, -glow.hh);
+      ctx.restore();
 
-      ctx.strokeStyle = lineColor;
-      ctx.lineWidth = lineWidth;
       ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+
+      ctx.strokeStyle = palette.shadow;
+      ctx.lineWidth = lineWidth + 4.5;
       ctx.beginPath();
       ctx.moveTo(-halfLen, 0);
       ctx.lineTo(halfLen, 0);
       ctx.stroke();
-      ctx.lineCap = 'butt';
 
-      if (peg.portalOneWay) {
-        const blockedSign = peg.portalOneWayFlip ? -1 : 1;
-        const yOff = blockedSign * (lineWidth * 0.9 + 2);
-        ctx.strokeStyle = 'rgba(170, 170, 170, 0.9)';
-        ctx.lineWidth = Math.max(2, lineWidth * 0.45);
+      const body = ctx.createLinearGradient(-halfLen, 0, halfLen, 0);
+      body.addColorStop(0, palette.deep);
+      body.addColorStop(0.18, palette.main);
+      body.addColorStop(0.5, palette.light);
+      body.addColorStop(0.82, palette.main);
+      body.addColorStop(1, palette.deep);
+      ctx.strokeStyle = body;
+      ctx.lineWidth = lineWidth;
+      ctx.beginPath();
+      ctx.moveTo(-halfLen, 0);
+      ctx.lineTo(halfLen, 0);
+      ctx.stroke();
+
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.46)';
+      ctx.lineWidth = Math.max(1, lineWidth * 0.16);
+      ctx.beginPath();
+      ctx.moveTo(-halfLen * 0.74, -lineWidth * 0.18);
+      ctx.lineTo(halfLen * 0.74, -lineWidth * 0.18);
+      ctx.stroke();
+
+      ctx.strokeStyle = palette.deep;
+      ctx.lineWidth = Math.max(1.15, lineWidth * 0.22);
+      ctx.beginPath();
+      ctx.moveTo(-halfLen * 0.86, lineWidth * 0.28);
+      ctx.lineTo(halfLen * 0.86, lineWidth * 0.28);
+      ctx.stroke();
+
+      const blockedY = blockedSign * (lineWidth * 1.05 + 2);
+      ctx.strokeStyle = 'rgba(7, 9, 13, 0.88)';
+      ctx.lineWidth = Math.max(4.2, lineWidth * 0.58);
+      ctx.beginPath();
+      ctx.moveTo(-halfLen * 1.02, blockedY);
+      ctx.lineTo(halfLen * 1.02, blockedY);
+      ctx.stroke();
+
+      ctx.strokeStyle = isBluePortal ? 'rgba(149, 245, 238, 0.24)' : 'rgba(255, 161, 95, 0.24)';
+      ctx.lineWidth = Math.max(1.2, lineWidth * 0.16);
+      ctx.beginPath();
+      ctx.moveTo(-halfLen * 0.88, blockedY - blockedSign * 1.7);
+      ctx.lineTo(halfLen * 0.88, blockedY - blockedSign * 1.7);
+      ctx.stroke();
+
+      const notchCount = Math.max(4, Math.min(9, Math.floor((halfLen * 2) / 13)));
+      ctx.fillStyle = 'rgba(3, 5, 8, 0.82)';
+      for (let i = 0; i < notchCount; i++) {
+        const x = -halfLen * 0.78 + (halfLen * 1.56) * (i / Math.max(1, notchCount - 1));
         ctx.beginPath();
-        ctx.moveTo(-halfLen, yOff);
-        ctx.lineTo(halfLen, yOff);
-        ctx.stroke();
+        ctx.moveTo(x - 2.8, blockedY - blockedSign * 1.8);
+        ctx.lineTo(x + 2.8, blockedY - blockedSign * 1.8);
+        ctx.lineTo(x, blockedY + blockedSign * 3.2);
+        ctx.closePath();
+        ctx.fill();
       }
 
-      // Direction marker along portal tangent.
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(halfLen * 0.05, 0);
-      ctx.lineTo(halfLen * 0.35, 0);
-      ctx.stroke();
+      const travel = lineWidth * (1.7 + pulse * 0.45);
+      const particleCount = pulse > 0.01 ? 16 : 10;
+      const streamHalfWidth = halfLen * 0.8;
+      const particleColor = isBluePortal ? 'rgba(125, 244, 237, 1)' : 'rgba(255, 142, 64, 1)';
+      const speed = isBluePortal ? 0.34 : 0.3;
+      const yStart = openSign * (lineWidth * 0.5 + travel);
+      const yEnd = openSign * (lineWidth * 0.12);
+      const hash01 = (a, b) => {
+        const v = Math.sin(a * 127.1 + b * 311.7) * 43758.5453123;
+        return v - Math.floor(v);
+      };
+      for (let particleIndex = 0; particleIndex < particleCount; particleIndex++) {
+        const phaseBase = time * speed + particleIndex * 0.173;
+        const cycle = Math.floor(phaseBase);
+        const phase = phaseBase - cycle;
+        const flow = isBluePortal ? phase : (1 - phase);
+        const spawnRand = hash01(particleIndex + 1, cycle + 1);
+        const spawnX = (spawnRand - 0.5) * streamHalfWidth * 2;
+        const jitterX = (hash01(particleIndex + 7, cycle + 19) - 0.5) * Math.max(1.1, lineWidth * 0.16);
+        const jitterY = (hash01(particleIndex + 13, cycle + 23) - 0.5) * Math.max(0.7, lineWidth * 0.1);
+        const y = yStart + (yEnd - yStart) * flow + jitterY;
+        const fade = Math.sin(Math.PI * phase);
+        const baseAlpha = 0.18 + fade * 0.2;
+        const rDot = (isBluePortal ? 1.3 : 1.2) + (particleIndex % 3) * 0.18 + pulse * 0.7;
+        ctx.globalAlpha = Math.min(0.72, baseAlpha + pulse * 0.22);
+        ctx.fillStyle = particleColor;
+        ctx.beginPath();
+        ctx.arc(spawnX + jitterX, y, rDot, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
 
       if (isSelected) {
         ctx.strokeStyle = COLORS.selection;
         ctx.lineWidth = 2;
         ctx.strokeRect(
-          -halfLen - 7,
-          -(lineWidth * 0.5) - 7,
-          halfLen * 2 + 14,
-          lineWidth + 14
+          -halfLen - 8,
+          -lineWidth * 1.5 - 8,
+          halfLen * 2 + 16,
+          lineWidth * 3 + 16
         );
       }
 
@@ -1103,12 +1554,15 @@ export class Renderer {
     if (peg.shape === 'brick' && peg.curveSlices && peg.curveSlices.length >= 2) {
       const halfH = (peg.height || PHYSICS_CONFIG.pegRadius * 1.2) / 2;
       const sl = peg.curveSlices;
+      const surfaceStyle = !peg.color ? this._getPegSurfaceStyle(peg.type) : null;
       ctx.save();
 
       // Main fill
-      this.drawCurvedBrickPath(ctx, sl, halfH, -halfH);
-      ctx.fillStyle = isHit ? colors.hit : (peg.color || colors.main);
-      ctx.fill();
+      if (!this.drawStyledCurvedBrick(ctx, sl, halfH, surfaceStyle, isHit)) {
+        this.drawCurvedBrickPath(ctx, sl, halfH, -halfH);
+        ctx.fillStyle = isHit ? colors.hit : (peg.color || colors.main);
+        ctx.fill();
+      }
 
       // Selection ring
       if (isSelected) {
@@ -1135,47 +1589,59 @@ export class Renderer {
     ctx.save();
     ctx.translate(peg.x, peg.y);
     ctx.rotate(peg.angle || 0);
+    const surfaceStyle = !peg.color ? this._getPegSurfaceStyle(peg.type) : null;
 
     if (peg.shape === 'brick') {
       const w = peg.width || PHYSICS_CONFIG.pegRadius * 4;
       const h = peg.height || PHYSICS_CONFIG.pegRadius * 1.2;
+      const brickSprite = surfaceStyle ? this._brickPegBodySprite(peg.type, w, h, isHit) : null;
 
-      ctx.beginPath();
-      ctx.roundRect(-w/2, -h/2, w, h, 2);
-      ctx.fillStyle = isHit ? colors.hit : (peg.color || colors.main);
-      ctx.fill();
+      if (brickSprite) {
+        ctx.drawImage(brickSprite.img, -brickSprite.hw, -brickSprite.hh);
+      } else {
+        ctx.beginPath();
+        ctx.roundRect(-w/2, -h/2, w, h, 2);
+        ctx.fillStyle = isHit ? colors.hit : (peg.color || colors.main);
+        ctx.fill();
+      }
     } else {
       // Draw circle peg
-      ctx.beginPath();
-      ctx.arc(0, 0, radius, 0, Math.PI * 2);
-      if (peg.type === 'gamble' && !isHit) {
-        const edgeColor = peg.color || colors.main;
-        const gradient = ctx.createRadialGradient(
-          -radius * 0.25,
-          -radius * 0.28,
-          radius * 0.08,
-          0,
-          0,
-          radius
-        );
-        gradient.addColorStop(0, '#ffffff');
-        gradient.addColorStop(0.36, '#fbfff4');
-        gradient.addColorStop(0.72, edgeColor);
-        gradient.addColorStop(1, edgeColor);
-        ctx.fillStyle = gradient;
+      const pegSprite = surfaceStyle ? this._pegBodySprite(peg.type, radius, isHit) : null;
+      if (pegSprite) {
+        const angle = peg.angle || 0;
+        if (angle) ctx.rotate(-angle);
+        ctx.drawImage(pegSprite.img, -pegSprite.half, -pegSprite.half);
+        if (angle) ctx.rotate(angle);
       } else {
-        ctx.fillStyle = isHit ? colors.hit : (peg.color || colors.main);
+        ctx.beginPath();
+        ctx.arc(0, 0, radius, 0, Math.PI * 2);
+        if (peg.type === 'gamble' && !isHit) {
+          const edgeColor = peg.color || colors.main;
+          const gradient = ctx.createRadialGradient(
+            -radius * 0.25,
+            -radius * 0.28,
+            radius * 0.08,
+            0,
+            0,
+            radius
+          );
+          gradient.addColorStop(0, '#ffffff');
+          gradient.addColorStop(0.36, '#fbfff4');
+          gradient.addColorStop(0.72, edgeColor);
+          gradient.addColorStop(1, edgeColor);
+          ctx.fillStyle = gradient;
+        } else {
+          ctx.fillStyle = isHit ? colors.hit : (peg.color || colors.main);
+        }
+        ctx.fill();
       }
-      ctx.fill();
 
       if (peg.type === 'gamble' && peg.gambleKnockbackEnabled && !isHit) {
-        const arrowColor = '#FF00B2';
-        const arrowGlow = 'rgba(255, 0, 178, 0.52)';
-        const arrowWidth = Math.max(2.6, radius * 0.32);
-        const shaftTop = -radius * 0.56;
-        const tipY = radius * 0.55;
-        const shoulderY = radius * 0.12;
-        const shoulderX = radius * 0.42;
+        const arrowWidth = Math.max(2.8, radius * 0.34);
+        const shaftTop = -radius * 0.66;
+        const tipY = radius * 0.67;
+        const shoulderY = radius * 0.17;
+        const shoulderX = radius * 0.5;
 
         ctx.save();
         ctx.lineCap = 'round';
@@ -1187,8 +1653,8 @@ export class Renderer {
         ctx.lineTo(-shoulderX, shoulderY);
         ctx.moveTo(0, tipY);
         ctx.lineTo(shoulderX, shoulderY);
-        ctx.strokeStyle = arrowGlow;
-        ctx.lineWidth = arrowWidth * 2.2;
+        ctx.strokeStyle = 'rgba(20, 57, 0, 0.82)';
+        ctx.lineWidth = arrowWidth * 2.1;
         ctx.stroke();
 
         ctx.beginPath();
@@ -1197,8 +1663,15 @@ export class Renderer {
         ctx.lineTo(-shoulderX, shoulderY);
         ctx.moveTo(0, tipY);
         ctx.lineTo(shoulderX, shoulderY);
-        ctx.strokeStyle = arrowColor;
+        ctx.strokeStyle = '#f6ffd6';
         ctx.lineWidth = arrowWidth;
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(-arrowWidth * 0.34, shaftTop + radius * 0.08);
+        ctx.lineTo(-arrowWidth * 0.34, tipY - radius * 0.22);
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.32)';
+        ctx.lineWidth = Math.max(0.7, arrowWidth * 0.22);
         ctx.stroke();
         ctx.restore();
       }
@@ -1492,7 +1965,7 @@ export class Renderer {
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
 
-    const trace = (points) => {
+    const traceObjects = (points) => {
       ctx.beginPath();
       ctx.moveTo(points[0].x, points[0].y);
       for (let i = 1; i < points.length; i++) {
@@ -1500,18 +1973,33 @@ export class Renderer {
       }
     };
 
+    const traceFlat = (points, pointCount) => {
+      ctx.beginPath();
+      ctx.moveTo(points[0], points[1]);
+      for (let i = 1; i < pointCount; i++) {
+        const index = i * 2;
+        ctx.lineTo(points[index], points[index + 1]);
+      }
+    };
+
     for (const thread of threads) {
-      const points = thread && Array.isArray(thread.points) ? thread.points : null;
-      if (!points || points.length < 2) continue;
+      const points = thread ? thread.points : null;
+      const flatPoints = !!thread?.flatPoints || ArrayBuffer.isView(points);
+      const pointCount = flatPoints
+        ? Math.floor(Number.isFinite(thread?.pointCount) ? thread.pointCount : ((points?.length || 0) / 2))
+        : (Array.isArray(points) ? points.length : 0);
+      if (!points || pointCount < 2) continue;
 
       ctx.strokeStyle = COLORS.yoyoThreadGlow;
       ctx.lineWidth = 6;
-      trace(points);
+      if (flatPoints) traceFlat(points, pointCount);
+      else traceObjects(points);
       ctx.stroke();
 
       ctx.strokeStyle = COLORS.yoyoThreadCore;
       ctx.lineWidth = 3.2;
-      trace(points);
+      if (flatPoints) traceFlat(points, pointCount);
+      else traceObjects(points);
       ctx.stroke();
     }
 
@@ -1837,20 +2325,47 @@ export class Renderer {
     ctx.restore();
   }
 
-  drawSurvivalLoseLine(lineY) {
+  drawSurvivalLoseLine(lineY, timeSeconds = 0) {
     if (!Number.isFinite(lineY)) return;
     const ctx = this.ctx;
-    const y = Math.max(0, Math.min(this.height, lineY));
+    const baseY = Math.round(Math.max(0, Math.min(this.height, lineY))) + 0.5;
+    const t = Number.isFinite(timeSeconds) ? timeSeconds : 0;
+    const dash = 16;
+    const gap = 10;
+    const step = dash + gap;
+    const offset = (t * 8) % step;
 
     ctx.save();
-    ctx.strokeStyle = 'rgba(255, 96, 96, 0.55)';
-    ctx.lineWidth = 1.5;
-    ctx.setLineDash([8, 6]);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = 'rgba(34, 4, 5, 0.94)';
+    ctx.lineWidth = 3.8;
     ctx.beginPath();
-    ctx.moveTo(0, y + 0.5);
-    ctx.lineTo(this.width, y + 0.5);
+    for (let x = -step - offset; x < this.width + step; x += step) {
+      const x1 = Math.max(0, x);
+      const x2 = Math.min(this.width, x + dash);
+      if (x2 <= 0 || x1 >= this.width) continue;
+      const y1 = baseY + Math.sin((x1 * 0.036) + t * 0.7) * 1.2;
+      const y2 = baseY + Math.sin((x2 * 0.036) + t * 0.7) * 1.2;
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+    }
     ctx.stroke();
-    ctx.setLineDash([]);
+
+    ctx.strokeStyle = 'rgba(117, 16, 18, 0.7)';
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    for (let x = -step - offset; x < this.width + step; x += step) {
+      const x1 = Math.max(0, x + 1);
+      const x2 = Math.min(this.width, x + dash - 1);
+      if (x2 <= 0 || x1 >= this.width) continue;
+      const y1 = baseY + Math.sin((x1 * 0.036) + t * 0.7) * 1.2;
+      const y2 = baseY + Math.sin((x2 * 0.036) + t * 0.7) * 1.2;
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+    }
+    ctx.stroke();
+
     ctx.restore();
   }
 
@@ -1902,6 +2417,7 @@ export class Renderer {
     if (!ghostBricks || ghostBricks.length === 0) return;
     const ctx = this.ctx;
     const colors = PEG_COLORS[pegType] || PEG_COLORS.blue;
+    const surfaceStyle = this._getPegSurfaceStyle(pegType);
     const radius = PHYSICS_CONFIG.pegRadius;
     const halfH = brickH / 2;
     ctx.save();
@@ -1909,32 +2425,48 @@ export class Renderer {
     for (const gb of ghostBricks) {
       if (pegShape === 'brick' && gb.slices && gb.slices.length >= 2) {
         // Curved ghost brick — warped ribbon
-        this.drawCurvedBrickPath(ctx, gb.slices, halfH, -halfH);
-        ctx.fillStyle = colors.main;
-        ctx.fill();
+        if (!this.drawStyledCurvedBrick(ctx, gb.slices, halfH, surfaceStyle, false)) {
+          this.drawCurvedBrickPath(ctx, gb.slices, halfH, -halfH);
+          ctx.fillStyle = colors.main;
+          ctx.fill();
+        }
       } else if (pegShape === 'brick') {
         // Flat ghost brick fallback
         ctx.save();
         ctx.translate(gb.x, gb.y);
         ctx.rotate(gb.angle || 0);
-        ctx.beginPath();
-        ctx.roundRect(-brickW / 2, -brickH / 2, brickW, brickH, 2);
-        ctx.fillStyle = colors.main;
-        ctx.fill();
+        const brickSprite = surfaceStyle ? this._brickPegBodySprite(pegType, brickW, brickH, false) : null;
+        if (brickSprite) {
+          ctx.drawImage(brickSprite.img, -brickSprite.hw, -brickSprite.hh);
+        } else {
+          ctx.beginPath();
+          ctx.roundRect(-brickW / 2, -brickH / 2, brickW, brickH, 2);
+          ctx.fillStyle = colors.main;
+          ctx.fill();
+        }
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
         ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.roundRect(-brickW / 2, -brickH / 2, brickW, brickH, 2);
         ctx.stroke();
         ctx.restore();
       } else {
         // Circle ghost
         ctx.save();
         ctx.translate(gb.x, gb.y);
-        ctx.beginPath();
-        ctx.arc(0, 0, radius, 0, Math.PI * 2);
-        ctx.fillStyle = colors.main;
-        ctx.fill();
+        const pegSprite = surfaceStyle ? this._pegBodySprite(pegType, radius, false) : null;
+        if (pegSprite) {
+          ctx.drawImage(pegSprite.img, -pegSprite.half, -pegSprite.half);
+        } else {
+          ctx.beginPath();
+          ctx.arc(0, 0, radius, 0, Math.PI * 2);
+          ctx.fillStyle = colors.main;
+          ctx.fill();
+        }
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
         ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(0, 0, radius, 0, Math.PI * 2);
         ctx.stroke();
         ctx.restore();
       }
@@ -2356,6 +2888,9 @@ export class Renderer {
   renderGame(state) {
     const baseCtx = this.baseCtx || this.canvas.getContext('2d', { alpha: false });
     this.ctx = baseCtx;
+    this._renderTimeSeconds = Number.isFinite(state.renderTimeSeconds)
+      ? state.renderTimeSeconds
+      : (typeof performance !== 'undefined' ? performance.now() / 1000 : 0);
 
     const shockwaveActive = this._shockwaveEffect.syncEvents(state.backgroundEvents, {
       preview: !!state.shockwavePreview,
@@ -2522,11 +3057,11 @@ export class Renderer {
     }
 
     if (state.survivalLoseLineY != null) {
-      this.drawSurvivalLoseLine(state.survivalLoseLineY);
+      this.drawSurvivalLoseLine(state.survivalLoseLineY, state.renderTimeSeconds);
     }
 
-    if (state.verticalProgress) {
-      this.drawVerticalProgressTracker(state.verticalProgress);
+    if (typeof this.onVerticalProgress === 'function') {
+      this.onVerticalProgress(state.verticalProgress || null);
     }
 
     // Legacy HUD hidden — score/balls/orange pegs now shown via visual layout slots

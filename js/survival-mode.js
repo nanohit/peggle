@@ -1,4 +1,5 @@
 import { Utils } from './utils.js';
+import { isPortalType } from './portal-defaults.js';
 
 const MIN_SPEED_CURVE_Y = 0.05;
 const MAX_SPEED_CURVE_Y = 3;
@@ -405,7 +406,7 @@ export function getPegVerticalExtent(peg, pegRadius = 10) {
     return r * Math.max(0.2, toFiniteNumber(peg.bumperScale, 1));
   }
 
-  if (peg.type === 'portalBlue' || peg.type === 'portalOrange') {
+  if (isPortalType(peg.type)) {
     return Math.max(2, r * 0.3);
   }
 
@@ -421,7 +422,7 @@ export function isPegBeyondLoseLine(peg, cameraY, loseLineY, pegRadius = 10) {
 export function isPegRemovableInSurvival(peg) {
   if (!peg) return false;
   if (peg.type === 'obstacle') return false;
-  if (peg.type === 'portalBlue' || peg.type === 'portalOrange') return false;
+  if (isPortalType(peg.type)) return false;
   if (peg.type === 'bumper' && !peg.bumperDisappear && !peg.bumperOrange) return false;
   return true;
 }

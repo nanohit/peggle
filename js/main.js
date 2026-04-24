@@ -30,6 +30,11 @@ import {
   MULTIBALL_MIN_SPAWN_COUNT,
   normalizeMultiballSpawnCount
 } from './multiball-settings.js';
+import {
+  PORTAL_DEFAULT_SCALE,
+  PORTAL_MAX_SCALE,
+  PORTAL_MIN_SCALE
+} from './portal-defaults.js';
 import { VisualLayout } from './visual-layout.js';
 import { normalizeVisuals } from './visual-config.js';
 import { CampaignManager } from './campaign-manager.js';
@@ -1284,7 +1289,7 @@ class PeggleApp {
 
     const setScale = (rawValue) => {
       if (!this.editor) return;
-      const v = Math.max(0.5, Math.min(5.0, rawValue));
+      const v = Math.max(PORTAL_MIN_SCALE, Math.min(PORTAL_MAX_SCALE, rawValue));
       this.editor.setSelectedPortalScale(v);
     };
 
@@ -1295,8 +1300,8 @@ class PeggleApp {
     });
 
     scaleInput.addEventListener('input', () => {
-      const v = parseFloat(scaleInput.value) || 1.0;
-      scaleSlider.value = Math.max(5, Math.min(50, Math.round(v * 10)));
+      const v = parseFloat(scaleInput.value) || PORTAL_DEFAULT_SCALE;
+      scaleSlider.value = Math.max(PORTAL_MIN_SCALE * 10, Math.min(PORTAL_MAX_SCALE * 10, Math.round(v * 10)));
       setScale(v);
     });
 
@@ -1337,6 +1342,7 @@ class PeggleApp {
     document.getElementById('portalScaleInput').value = props.scale.toFixed(1);
     document.getElementById('portalOneWayToggle').checked = !!props.oneWay;
     document.getElementById('portalOneWayFlipToggle').checked = !!props.oneWayFlip;
+    document.getElementById('portalOneWayToggle').disabled = false;
     document.getElementById('portalOneWayFlipToggle').disabled = !props.oneWay;
     document.getElementById('portalPanel').classList.add('visible');
   }
@@ -2340,6 +2346,9 @@ class PeggleApp {
 
     this.mode = 'editor';
     this.editor = new Editor(this.canvas, this.levelManager);
+    this.editor.renderer.onVerticalProgress = (progress) => {
+      this.visualLayout.updateSurvivalProgressIndicator(progress);
+    };
     
     // Resize to current dimensions
     this.resizeCanvas();
@@ -2467,6 +2476,9 @@ class PeggleApp {
     this.mode = 'play';
     this.game = new Game(this.canvas);
     this.game.showPerfOverlay = true; // editor play mode shows debug info
+    this.game.renderer.onVerticalProgress = (progress) => {
+      this.visualLayout.updateSurvivalProgressIndicator(progress);
+    };
 
     // Apply trajectory setting
     const trajectoryToggle = document.getElementById('trajectoryToggle');

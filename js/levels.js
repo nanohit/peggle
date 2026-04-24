@@ -12,6 +12,7 @@ import { normalizeMultiballSpawnCount } from './multiball-settings.js';
 import { normalizeVisuals } from './visual-config.js';
 import { normalizeDialogueConfig } from './dialogue-config.js';
 import { normalizeLevelHitPegClearSettings } from './hit-peg-clear-settings.js';
+import { isPortalType, normalizePortalPegProperties } from './portal-defaults.js';
 
 const STORAGE_KEY = 'peggle_levels';
 const TRAINING_KEY = 'peggle_training_data';
@@ -63,6 +64,9 @@ export function normalizeLevelData(level) {
       delete peg.knockbackStrength;
       delete peg.knockbackSmooth;
       delete peg.knockbackSmoothMs;
+    }
+    if (peg && isPortalType(peg.type)) {
+      normalizePortalPegProperties(peg, { upgradeLegacyDefault: true });
     }
   }
 
@@ -227,11 +231,9 @@ export class LevelManager {
     }
 
     // Portal properties
-    if (peg.type === 'portalBlue' || peg.type === 'portalOrange') {
-      newPeg.portalScale = peg.portalScale ?? 1.0;
-      newPeg.portalOneWay = !!peg.portalOneWay;
-      newPeg.portalOneWayFlip = !!peg.portalOneWayFlip;
-      newPeg.shape = 'circle'; // kept for backward compatibility; rendered/triggered as lines
+    if (isPortalType(peg.type)) {
+      newPeg.portalScale = peg.portalScale;
+      normalizePortalPegProperties(newPeg);
     }
 
     if (peg.type === 'multi') {

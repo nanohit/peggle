@@ -12,6 +12,13 @@ import {
   normalizeMultiballSpawnCount
 } from './multiball-settings.js';
 import {
+  getPortalScale,
+  isPortalType,
+  normalizePortalPegProperties,
+  normalizePortalScale,
+  PORTAL_DEFAULT_SCALE
+} from './portal-defaults.js';
+import {
   PegAnimator,
   MIN_VISIBLE_RATIO,
   ANIMATION_WRAP_VISIBLE_RATIO,
@@ -739,8 +746,8 @@ export class Editor {
         if (Math.abs(localX) <= w/2 + 8 && Math.abs(localY) <= h/2 + 8) {
           return peg;
         }
-      } else if (peg.type === 'portalBlue' || peg.type === 'portalOrange') {
-        const halfLen = PHYSICS_CONFIG.pegRadius * (peg.portalScale || 1);
+      } else if (isPortalType(peg.type)) {
+        const halfLen = PHYSICS_CONFIG.pegRadius * getPortalScale(peg);
         const halfThick = Math.max(4, PHYSICS_CONFIG.pegRadius * 0.45);
         const cos = Math.cos(-(peg.angle || 0));
         const sin = Math.sin(-(peg.angle || 0));
@@ -852,8 +859,8 @@ export class Editor {
           const r = PHYSICS_CONFIG.pegRadius * (peg.bumperScale || 1);
           extentX = r;
           extentY = r;
-        } else if (peg.type === 'portalBlue' || peg.type === 'portalOrange') {
-          const halfLen = PHYSICS_CONFIG.pegRadius * (peg.portalScale || 1);
+        } else if (isPortalType(peg.type)) {
+          const halfLen = PHYSICS_CONFIG.pegRadius * getPortalScale(peg);
           const halfThick = Math.max(2, PHYSICS_CONFIG.pegRadius * 0.25);
           const c = Math.abs(Math.cos(peg.angle || 0));
           const s = Math.abs(Math.sin(peg.angle || 0));
@@ -1705,8 +1712,7 @@ export class Editor {
     }
     
     const forceCircle = this.selectedPegType === 'bumper'
-      || this.selectedPegType === 'portalBlue'
-      || this.selectedPegType === 'portalOrange';
+      || isPortalType(this.selectedPegType);
     const shape = forceCircle ? 'circle' : this.selectedShape;
 
     const pegData = {
@@ -1714,7 +1720,7 @@ export class Editor {
       y: y,
       type: this.selectedPegType,
       shape: shape,
-      angle: shape === 'brick' || this.selectedPegType === 'portalBlue' || this.selectedPegType === 'portalOrange'
+      angle: shape === 'brick' || isPortalType(this.selectedPegType)
         ? this.currentRotation
         : 0
     };
@@ -1728,10 +1734,11 @@ export class Editor {
       pegData.bumperBounce = 2.0;
       pegData.bumperScale = 1.0;
     }
-    if (this.selectedPegType === 'portalBlue' || this.selectedPegType === 'portalOrange') {
-      pegData.portalScale = 1.0;
-      pegData.portalOneWay = false;
-      pegData.portalOneWayFlip = false;
+    if (isPortalType(this.selectedPegType)) {
+      pegData.portalScale = PORTAL_DEFAULT_SCALE;
+      pegData.portalOneWay = true;
+      pegData.portalOneWayFlip = true;
+      normalizePortalPegProperties(pegData);
     }
     if (this.selectedPegType === 'multi') {
       pegData.multiballSpawnCount = MULTIBALL_DEFAULT_SPAWN_COUNT;
@@ -1908,11 +1915,12 @@ export class Editor {
           delete peg.gambleKnockbackEnabled;
           delete peg.gambleKnockbackDistance;
           delete peg.gambleKnockbackSmoothMs;
-        } else if (type === 'portalBlue' || type === 'portalOrange') {
+        } else if (isPortalType(type)) {
           peg.shape = 'circle';
-          if (peg.portalScale == null) peg.portalScale = 1.0;
-          if (peg.portalOneWay == null) peg.portalOneWay = false;
-          if (peg.portalOneWayFlip == null) peg.portalOneWayFlip = false;
+          if (peg.portalScale == null) peg.portalScale = PORTAL_DEFAULT_SCALE;
+          if (peg.portalOneWay == null) peg.portalOneWay = true;
+          if (peg.portalOneWayFlip == null) peg.portalOneWayFlip = true;
+          normalizePortalPegProperties(peg, { upgradeLegacyDefault: true });
           delete peg.bumperBounce;
           delete peg.bumperScale;
           delete peg.bumperDisappear;
@@ -2002,8 +2010,7 @@ export class Editor {
       const peg = level.pegs.find(p => p.id === pegId);
       if (peg) {
         const forceCircle = peg.type === 'bumper'
-          || peg.type === 'portalBlue'
-          || peg.type === 'portalOrange';
+          || isPortalType(peg.type);
         peg.shape = forceCircle ? 'circle' : shape;
         if (peg.shape === 'brick') {
           peg.width = peg.width || this.getBrickWidth();
@@ -2161,8 +2168,8 @@ export class Editor {
           pegData.bumperDisappear = peg.bumperDisappear;
           pegData.bumperOrange = peg.bumperOrange;
         }
-        if (peg.type === 'portalBlue' || peg.type === 'portalOrange') {
-          pegData.portalScale = peg.portalScale;
+        if (isPortalType(peg.type)) {
+          pegData.portalScale = normalizePortalScale(peg.portalScale);
           pegData.portalOneWay = !!peg.portalOneWay;
           pegData.portalOneWayFlip = !!peg.portalOneWayFlip;
         }
@@ -2213,8 +2220,8 @@ export class Editor {
           pegData.bumperDisappear = peg.bumperDisappear;
           pegData.bumperOrange = peg.bumperOrange;
         }
-        if (peg.type === 'portalBlue' || peg.type === 'portalOrange') {
-          pegData.portalScale = peg.portalScale;
+        if (isPortalType(peg.type)) {
+          pegData.portalScale = normalizePortalScale(peg.portalScale);
           pegData.portalOneWay = !!peg.portalOneWay;
           pegData.portalOneWayFlip = !!peg.portalOneWayFlip;
         }
@@ -2511,7 +2518,7 @@ export class Editor {
     if (!level || this.selectedPegIds.size === 0) return false;
     for (const pegId of this.selectedPegIds) {
       const peg = level.pegs.find(p => p.id === pegId);
-      if (!peg || (peg.type !== 'portalBlue' && peg.type !== 'portalOrange')) return false;
+      if (!peg || !isPortalType(peg.type)) return false;
     }
     return true;
   }
@@ -2596,8 +2603,9 @@ export class Editor {
     const clamped = Utils.clamp(scale, 0.5, 5.0);
     for (const pegId of this.selectedPegIds) {
       const peg = level.pegs.find(p => p.id === pegId);
-      if (peg && (peg.type === 'portalBlue' || peg.type === 'portalOrange')) {
-        peg.portalScale = clamped;
+      if (peg && isPortalType(peg.type)) {
+        peg.portalScale = normalizePortalScale(clamped);
+        normalizePortalPegProperties(peg);
       }
     }
     this.levelManager.save();
@@ -2609,7 +2617,7 @@ export class Editor {
     const enabled = !!oneWay;
     for (const pegId of this.selectedPegIds) {
       const peg = level.pegs.find(p => p.id === pegId);
-      if (peg && (peg.type === 'portalBlue' || peg.type === 'portalOrange')) {
+      if (peg && isPortalType(peg.type)) {
         peg.portalOneWay = enabled;
       }
     }
@@ -2622,7 +2630,7 @@ export class Editor {
     const enabled = !!oneWayFlip;
     for (const pegId of this.selectedPegIds) {
       const peg = level.pegs.find(p => p.id === pegId);
-      if (peg && (peg.type === 'portalBlue' || peg.type === 'portalOrange')) {
+      if (peg && isPortalType(peg.type)) {
         peg.portalOneWayFlip = enabled;
       }
     }
@@ -2634,9 +2642,10 @@ export class Editor {
     if (!level || this.selectedPegIds.size === 0) return null;
     for (const pegId of this.selectedPegIds) {
       const peg = level.pegs.find(p => p.id === pegId);
-      if (peg && (peg.type === 'portalBlue' || peg.type === 'portalOrange')) {
+      if (peg && isPortalType(peg.type)) {
+        normalizePortalPegProperties(peg);
         return {
-          scale: peg.portalScale ?? 1.0,
+          scale: normalizePortalScale(peg.portalScale),
           oneWay: !!peg.portalOneWay,
           oneWayFlip: !!peg.portalOneWayFlip
         };

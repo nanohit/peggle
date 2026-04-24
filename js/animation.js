@@ -1,6 +1,7 @@
 // Peg Animation System - cyclic peg/group animations during gameplay
 
 import { PHYSICS_CONFIG } from './physics.js';
+import { getPortalScale, isPortalType } from './portal-defaults.js';
 
 function linear(t) { return t; }
 function easeInOut(t) { return t < 0.5 ? 2 * t * t : 1 - 2 * (1 - t) * (1 - t); }
@@ -212,8 +213,8 @@ export function estimatePegExtents(peg, centerX, centerY, angle = 0, slices = nu
     let r = PHYSICS_CONFIG.pegRadius;
     if (peg && peg.type === 'bumper') {
       r *= (peg.bumperScale || 1);
-    } else if (peg && (peg.type === 'portalBlue' || peg.type === 'portalOrange')) {
-      const halfLen = r * (peg.portalScale || 1);
+    } else if (peg && isPortalType(peg.type)) {
+      const halfLen = r * getPortalScale(peg);
       const halfThick = Math.max(2, PHYSICS_CONFIG.pegRadius * 0.25);
       const c = Math.abs(Math.cos(angle || peg.angle || 0));
       const s = Math.abs(Math.sin(angle || peg.angle || 0));

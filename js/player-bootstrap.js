@@ -1210,6 +1210,9 @@ async function bootWithLevels(levels, campaignName, campaignData) {
     game.renderer.setBackground(visuals.background);
     game.renderer.setBallTrail(visuals.ballTrail);
     game.renderer.setShockwave(visuals.shockwave);
+    game.renderer.onVerticalProgress = (progress) => {
+      visualLayout.updateSurvivalProgressIndicator(progress);
+    };
     game.setEndSequenceConfig(visuals.endSequence);
 
     game.loadLevel(levelData);
