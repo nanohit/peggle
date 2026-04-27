@@ -90,6 +90,7 @@ export class VisualLayout {
     this._compactShift = 0;
     this._abortController = null;
     this._slotRuntimeFx = {};
+    this._characterPortraitRuntime = null;
     this._survivalProgressIndicator = null;
     this._survivalProgressState = null;
     this.gambleUiMode = false;
@@ -214,6 +215,7 @@ export class VisualLayout {
   }
 
   setConfig(rawConfig) {
+    this.clearCharacterPortraitRuntime();
     this.config = normalizeVisuals(rawConfig);
     // Clear per-slot resolved assets so each level loads its own images fresh
     this._resolvedAssets = {};
@@ -342,6 +344,76 @@ export class VisualLayout {
 
   clearSlotRuntimeFx(slotId) {
     this._setSlotRuntimeFx(slotId, null);
+  }
+
+  setCharacterPortraitSource(src, options = {}) {
+    const el = this.slotElements.character;
+    if (!el || typeof src !== 'string' || !src.trim()) return;
+    const source = src.trim();
+    const fadeMs = Math.max(0, Math.min(2000, Number(options.fadeMs) || 0));
+    const cssUrl = this._cssUrl(source);
+
+    if (!this._characterPortraitRuntime) {
+      this._characterPortraitRuntime = {
+        activeSrc: null,
+        activeLayer: null,
+        cleanupTimer: null
+      };
+      el.classList.add('visual-slot--portrait-runtime');
+      el.style.backgroundImage = 'none';
+    }
+
+    const runtime = this._characterPortraitRuntime;
+    if (runtime.activeSrc === source) return;
+
+    const nextLayer = document.createElement('div');
+    nextLayer.className = 'visual-portrait-layer';
+    nextLayer.dataset.emotionSlot = options.slotName || '';
+    nextLayer.style.backgroundImage = cssUrl;
+    nextLayer.style.transitionDuration = `${fadeMs}ms`;
+    nextLayer.style.opacity = fadeMs > 0 ? '0' : '1';
+    el.appendChild(nextLayer);
+
+    const previousLayer = runtime.activeLayer;
+    runtime.activeLayer = nextLayer;
+    runtime.activeSrc = source;
+
+    if (runtime.cleanupTimer) {
+      clearTimeout(runtime.cleanupTimer);
+      runtime.cleanupTimer = null;
+    }
+    el.querySelectorAll?.('.visual-portrait-layer').forEach(layer => {
+      if (layer !== previousLayer && layer !== nextLayer) layer.remove();
+    });
+
+    if (fadeMs > 0) {
+      requestAnimationFrame(() => {
+        nextLayer.style.opacity = '1';
+        if (previousLayer) {
+          previousLayer.style.transitionDuration = '0ms';
+          previousLayer.style.opacity = '1';
+        }
+      });
+      runtime.cleanupTimer = setTimeout(() => {
+        el.querySelectorAll?.('.visual-portrait-layer').forEach(layer => {
+          if (layer !== runtime.activeLayer) layer.remove();
+        });
+        runtime.cleanupTimer = null;
+      }, fadeMs + 60);
+    } else if (previousLayer?.parentNode) {
+      previousLayer.parentNode.removeChild(previousLayer);
+    }
+  }
+
+  clearCharacterPortraitRuntime() {
+    const runtime = this._characterPortraitRuntime;
+    if (runtime?.cleanupTimer) clearTimeout(runtime.cleanupTimer);
+    const el = this.slotElements?.character;
+    if (el) {
+      el.classList.remove('visual-slot--portrait-runtime');
+      el.querySelectorAll?.('.visual-portrait-layer').forEach(layer => layer.remove());
+    }
+    this._characterPortraitRuntime = null;
   }
 
   // ─── Panel ────────────────────────────────────────────
@@ -2053,11 +2125,13 @@ export class VisualLayout {
 
     // Dynamic slots (ball counter) don't load image assets
     if (def.dynamic) return;
+    if (def.id === 'character' && this._characterPortraitRuntime) return;
 
     const slotCfg = this.config?.slots[def.id];
 
     // Custom source takes priority
     if (slotCfg?.customSrc) {
+      if (def.id === 'character' && this._characterPortraitRuntime) return;
       el.style.backgroundImage = `url('${slotCfg.customSrc}')`;
       this._resolvedAssets[def.id] = slotCfg.customSrc;
       return;
@@ -2065,6 +2139,7 @@ export class VisualLayout {
 
     // Check cache
     if (this._resolvedAssets[def.id]) {
+      if (def.id === 'character' && this._characterPortraitRuntime) return;
       el.style.backgroundImage = `url('${this._resolvedAssets[def.id]}')`;
       return;
     }
@@ -2072,10 +2147,14 @@ export class VisualLayout {
     const url = await preloadAsset(def.basename);
     if (url) {
       this._resolvedAssets[def.id] = url;
-      if (el.dataset.slotId === def.id) {
+      if (el.dataset.slotId === def.id && !(def.id === 'character' && this._characterPortraitRuntime)) {
         el.style.backgroundImage = `url('${url}')`;
       }
     }
+  }
+
+  _cssUrl(src) {
+    return `url("${String(src).replace(/"/g, '\\"')}")`;
   }
 
   // ─── Ball counter ───────────────────────────────────

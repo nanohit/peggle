@@ -1,4 +1,5 @@
 import {
+  DIALOGUE_DEFAULT_IMPULSE_MAGNITUDE,
   DIALOGUE_DEFAULT_TIMEOUT_MS,
   getDialogueContentForLanguage,
   hasDialogueLocaleContent,
@@ -45,6 +46,7 @@ export class DialogueController {
     this.level = null;
     this.config = normalizeDialogueConfig(null);
     this.live = false;
+    this.portraitReactionController = null;
 
     this.root = null;
     this.card = null;
@@ -113,6 +115,10 @@ export class DialogueController {
     if (this._active) {
       this._renderEntry(this._active.entry, this._active.previewLanguage || this.language);
     }
+  }
+
+  setPortraitReactionController(controller) {
+    this.portraitReactionController = controller || null;
   }
 
   setConfig(rawConfig) {
@@ -233,6 +239,9 @@ export class DialogueController {
     if (!this._active) return;
     const immediate = !!options.immediate;
     const active = this._active;
+    if (active?.emotionToken && this.portraitReactionController?.clearDialogueOverride) {
+      this.portraitReactionController.clearDialogueOverride(active.emotionToken);
+    }
     this._clearTimers();
     this._active = null;
 
@@ -343,11 +352,31 @@ export class DialogueController {
     });
 
     const timeoutMs = Number.isFinite(entry.timeoutMs) ? entry.timeoutMs : DIALOGUE_DEFAULT_TIMEOUT_MS;
+    this._applyEntryEmotion(entry, timeoutMs);
     if (timeoutMs > 0) {
       this._dismissTimer = setTimeout(() => {
         this.dismissActive('timeout');
       }, timeoutMs);
     }
+  }
+
+  _applyEntryEmotion(entry, timeoutMs) {
+    const emotion = typeof entry?.emotion === 'string' ? entry.emotion.trim() : '';
+    if (!emotion || !this.portraitReactionController) return;
+    const mode = entry.mode === 'impulse' ? 'impulse' : 'override';
+    if (mode === 'impulse') {
+      this.portraitReactionController.fireDialogueImpulse?.(emotion, {
+        magnitude: Number.isFinite(entry.emotionMagnitude)
+          ? entry.emotionMagnitude
+          : DIALOGUE_DEFAULT_IMPULSE_MAGNITUDE,
+        eventType: 'dialogue_impulse'
+      });
+      return;
+    }
+    const token = this.portraitReactionController.setDialogueOverride?.(emotion, {
+      durationMs: Number.isFinite(timeoutMs) ? timeoutMs : DIALOGUE_DEFAULT_TIMEOUT_MS
+    });
+    if (this._active && token) this._active.emotionToken = token;
   }
 
   _renderEntry(entry, preferredLanguage) {

@@ -49,6 +49,8 @@ export class Ball {
     this.stuckFrames = 0;
     this.speedCapBoost = 0;
     this.portalCooldown = 0;
+    this._lastPortalTeleport = null;
+    this._portalOscillationCount = 0;
     this.radius = getBallRadius();
     this.launcherSpawnAnim = 1;
   }
@@ -114,6 +116,8 @@ export class Ball {
     this.stuckFrames = 0;
     this.speedCapBoost = 0;
     this.portalCooldown = 0;
+    this._lastPortalTeleport = null;
+    this._portalOscillationCount = 0;
     this.radius = getBallRadius();
     this.launcherSpawnAnim = 1;
   }
@@ -714,6 +718,8 @@ export class PhysicsEngine {
 
       const entryAngle = entry.angle || 0;
       const exitAngle = exit.angle || 0;
+      const cIn = Math.cos(entryAngle);
+      const sIn = Math.sin(entryAngle);
       const cOut = Math.cos(exitAngle);
       const sOut = Math.sin(exitAngle);
 
@@ -724,23 +730,66 @@ export class PhysicsEngine {
       // One-way portals always eject from their configured open side,
       // never from their blocked gray side.
       const exitBlockedFromPositive = !exit.portalOneWayFlip;
-      const openSign = exitBlockedFromPositive ? -1 : 1;
-      const localY = exit.portalOneWay ? openSign * baseOffset : crossing.side * baseOffset;
+      const exitOpenSign = exitBlockedFromPositive ? -1 : 1;
+      const localY = exit.portalOneWay ? exitOpenSign * baseOffset : crossing.side * baseOffset;
       ballLike.x = exit.x + (localX * cOut - localY * sOut);
       ballLike.y = exit.y + (localX * sOut + localY * cOut);
 
-      // Preserve incoming angle relative to portal orientation.
-      const delta = exitAngle - entryAngle;
-      const cDelta = Math.cos(delta);
-      const sDelta = Math.sin(delta);
-      const vx = ballLike.vx;
-      const vy = ballLike.vy;
-      ballLike.vx = vx * cDelta - vy * sDelta;
-      ballLike.vy = vx * sDelta + vy * cDelta;
+      // Decompose incoming velocity in the entry portal's local frame.
+      // Tangent (along the portal line) is preserved on exit; normal (across the line)
+      // is mapped to the exit so the ball comes out at the same angle relative to the
+      // exit's surface — symmetric in both directions.
+      const vt = ballLike.vx * cIn + ballLike.vy * sIn;
+      const vn = ballLike.vx * (-sIn) + ballLike.vy * cIn;
 
-      if (exit.portalOneWay) {
-        this.enforceOneWayExitVelocity(ballLike, exitAngle, exitBlockedFromPositive);
+      // Detect oscillation: ball repeatedly bouncing between the same pair of portals.
+      const teleportNow = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+        ? performance.now()
+        : Date.now();
+      const lastTp = ballLike._lastPortalTeleport;
+      const oscillating = !!(
+        lastTp
+        && teleportNow - lastTp.atMs < 380
+        && lastTp.exitId === entry.id
+      );
+      if (oscillating) {
+        ballLike._portalOscillationCount = (ballLike._portalOscillationCount || 0) + 1;
+      } else {
+        ballLike._portalOscillationCount = 0;
       }
+
+      let outVt = vt;
+      let outVn;
+      if (exit.portalOneWay) {
+        // Force exit through the open side, preserving |vn| so the angle relative
+        // to the portal surface is mirrored on the way out.
+        outVn = exitOpenSign * Math.abs(vn);
+      } else {
+        // Two-way portal: pass straight through (normal direction preserved).
+        outVn = vn;
+      }
+
+      if (oscillating) {
+        const osc = ballLike._portalOscillationCount;
+        // Small tangent perturbation to break perfect ping-pong symmetry.
+        // Grows slowly with repeats; never large enough to feel like a kick.
+        const jitterMag = 0.3 + osc * 0.18;
+        outVt += (Math.random() - 0.5) * 2 * jitterMag;
+        // Only enforce a normal floor for genuinely slow exits, and only after
+        // we've actually been bouncing repeatedly. Don't accelerate fast balls.
+        if (osc >= 2) {
+          const minNormalSpeed = 1.0 + (osc - 2) * 0.4;
+          if (Math.abs(outVn) < minNormalSpeed) {
+            const sign = outVn >= 0 ? 1 : -1;
+            outVn = sign * minNormalSpeed;
+          }
+        }
+      }
+
+      ballLike.vx = outVt * cOut + outVn * (-sOut);
+      ballLike.vy = outVt * sOut + outVn * cOut;
+
+      ballLike._lastPortalTeleport = { entryId: entry.id, exitId: exit.id, atMs: teleportNow };
 
       ballLike.portalCooldown = 6;
       this._clampBallLikeSpeed(ballLike);

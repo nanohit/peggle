@@ -93,6 +93,24 @@
   /* darken controlled inline via filter: brightness() from config */
 }
 
+.visual-slot--portrait-runtime {
+  background-image: none !important;
+  overflow: hidden;
+}
+
+.visual-portrait-layer {
+  position: absolute;
+  inset: 0;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  opacity: 0;
+  pointer-events: none;
+  transition-property: opacity;
+  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: opacity;
+}
+
 .survival-column-progress-marker {
   position: absolute;
   width: clamp(13px, 3.7%, 21px);

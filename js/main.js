@@ -37,12 +37,34 @@ import {
 } from './portal-defaults.js';
 import { VisualLayout } from './visual-layout.js';
 import { normalizeVisuals } from './visual-config.js';
+import {
+  attachCharacterSnapshotToLevel,
+  CANONICAL_EMOTION_SLOTS,
+  createDefaultCharacter,
+  DEFAULT_CHARACTER_ID,
+  DEFAULT_PERSONALITY,
+  getCharacterSlotSource,
+  getCharacterSlotSources,
+  loadCharacterRegistry,
+  makeCharacterId,
+  mergePersonalityPatch,
+  normalizeCharacter,
+  normalizeCharacterRegistry,
+  normalizeLevelCharacterAssignment,
+  normalizePersonality,
+  normalizePersonalityPatch,
+  readCharacterImageFile,
+  resolveCharacterForLevel,
+  saveCharacterRegistry
+} from './character-config.js';
+import { PortraitReactionController } from './portrait-reactions.js';
 import { CampaignManager } from './campaign-manager.js';
 import { api } from './api.js';
 import { computeLayout, toPixelPositions } from './graph/layout.js';
 import { Utils } from './utils.js';
 import { DialogueController } from './dialogue-controller.js';
 import {
+  clampDialogueEmotionMagnitude,
   clampDialogueTimeoutMs,
   createDialogueEntry,
   normalizeDialogueConfig
@@ -53,6 +75,182 @@ import { PERK_DEFINITIONS } from './gamble-system.js';
 // Fixed aspect ratio: 3:4.5 (width:height)
 const ASPECT_RATIO = 3 / 4.5;
 const MAX_WIDTH = 400;
+
+const CHARACTER_SLOT_LABELS = {
+  idle: 'Composed',
+  amused: 'Amused',
+  enthralled: 'Excited',
+  disappointed: 'Disappointed',
+  'happy-mocking': 'Playfully mocking',
+  worried: 'Worried',
+  anger: 'Angry',
+  victory: 'After-win'
+};
+
+const CHARACTER_EVENT_META = {
+  peg_hit: { label: 'Peg hit', group: 'Core play' },
+  peg_streak_N: { label: 'Combo milestone', group: 'Core play' },
+  spin_triggered: { label: 'Spin starts', group: 'Spin' },
+  spin_win_small: { label: 'Small spin win', group: 'Spin' },
+  spin_win_big: { label: 'Big spin win', group: 'Spin' },
+  spin_lose: { label: 'Spin miss', group: 'Spin' },
+  jackpot: { label: 'Jackpot', group: 'Big moments' },
+  ball_lost_clean: { label: 'Ball lost', group: 'Losses' },
+  ball_lost_after_streak: { label: 'Ball lost after combo', group: 'Losses' },
+  pressure_low_balls: { label: 'Low balls pressure', group: 'Losses' },
+  level_clear: { label: 'Level cleared', group: 'Big moments' },
+  aim_held_too_long: { label: 'Aiming too long', group: 'Personality' },
+  safe_play_pattern: { label: 'Playing too safely', group: 'Personality' },
+  dialogue_impulse: { label: 'Dialogue nudge', group: 'Dialogue' }
+};
+
+const CHARACTER_EVENT_UI_HIDDEN = new Set(['dialogue_impulse']);
+
+const CHARACTER_SCALAR_CONTROLS = [
+  { path: ['refractoryMs'], label: 'Cooldown window', min: 0, max: 3000, step: 50, suffix: 'ms' },
+  { path: ['refractoryScale'], label: 'Cooldown softness', min: 0, max: 1, step: 0.05, format: 'percent' },
+  { path: ['preemptThreshold'], label: 'Big reaction threshold', min: 0.2, max: 1.6, step: 0.05 },
+  { path: ['saturationCap'], label: 'Maximum emotion strength', min: 0.5, max: 3, step: 0.05 },
+  { path: ['dwellMs'], label: 'Minimum hold time', min: 0, max: 2000, step: 50, suffix: 'ms' },
+  { path: ['returnToBaselineDelayMs'], label: 'Return to rest delay', min: 0, max: 6000, step: 100, suffix: 'ms' },
+  { path: ['leadMargin'], label: 'Swap confidence margin', min: 0, max: 0.6, step: 0.01, format: 'percent' },
+  { path: ['crossfadeMs'], label: 'Normal fade', min: 0, max: 1200, step: 25, suffix: 'ms' },
+  { path: ['fastCrossfadeMs'], label: 'Fast fade', min: 0, max: 600, step: 25, suffix: 'ms' }
+];
+
+const CHARACTER_RESTING_CONTROLS = [
+  { path: ['baseline', 'target'], label: 'Resting intensity', min: 0, max: 1.5, step: 0.05 },
+  { path: ['baseline', 'rate'], label: 'Return speed', min: 0, max: 1, step: 0.01 },
+  { path: ['boredom', 'afterMs'], label: 'Quiet delay', min: 1000, max: 20000, step: 500, suffix: 'ms' },
+  { path: ['boredom', 'magnitudePerSecond'], label: 'Quiet mood strength', min: 0, max: 0.2, step: 0.005 }
+];
+
+const CHARACTER_AMBIENT_CONTROLS = [
+  { path: ['ambient', 'idleAfterMs'], label: 'Start ambient after', min: 2000, max: 30000, step: 500, suffix: 'ms' },
+  { path: ['ambient', 'samplerMinMs'], label: 'Shortest pause between looks', min: 1000, max: 15000, step: 500, suffix: 'ms' },
+  { path: ['ambient', 'samplerMaxMs'], label: 'Longest pause between looks', min: 1000, max: 30000, step: 500, suffix: 'ms' }
+];
+
+function clonePlain(value) {
+  return value == null ? value : JSON.parse(JSON.stringify(value));
+}
+
+function pathKey(path) {
+  return path.join('|');
+}
+
+function parsePathKey(key) {
+  return String(key || '').split('|').filter(Boolean);
+}
+
+function getPathValue(source, path) {
+  let cursor = source;
+  for (const part of path) {
+    if (!cursor || typeof cursor !== 'object') return undefined;
+    cursor = cursor[part];
+  }
+  return cursor;
+}
+
+function setPathValue(target, path, value) {
+  let cursor = target;
+  for (let i = 0; i < path.length - 1; i++) {
+    const part = path[i];
+    if (!cursor[part] || typeof cursor[part] !== 'object' || Array.isArray(cursor[part])) cursor[part] = {};
+    cursor = cursor[part];
+  }
+  cursor[path[path.length - 1]] = value;
+}
+
+function deletePathValue(target, path) {
+  const stack = [];
+  let cursor = target;
+  for (let i = 0; i < path.length - 1; i++) {
+    const part = path[i];
+    if (!cursor || typeof cursor !== 'object') return;
+    stack.push([cursor, part]);
+    cursor = cursor[part];
+  }
+  if (cursor && typeof cursor === 'object') delete cursor[path[path.length - 1]];
+  for (let i = stack.length - 1; i >= 0; i--) {
+    const [parent, key] = stack[i];
+    const value = parent[key];
+    if (value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 0) {
+      delete parent[key];
+    }
+  }
+}
+
+function pruneEmptyObjects(value) {
+  if (!value || typeof value !== 'object') return value;
+  for (const key of Object.keys(value)) {
+    const child = value[key];
+    if (child && typeof child === 'object' && !Array.isArray(child)) {
+      pruneEmptyObjects(child);
+      if (Object.keys(child).length === 0) delete value[key];
+    }
+  }
+  return value;
+}
+
+function formatCharacterLabel(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return 'Expression';
+  if (CHARACTER_SLOT_LABELS[raw]) return CHARACTER_SLOT_LABELS[raw];
+  return raw
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, char => char.toUpperCase());
+}
+
+function formatTuningValue(value, control = {}) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '';
+  if (control.format === 'percent') return `${Math.round(n * 100)}%`;
+  if (control.suffix === 'ms') return `${Math.round(n)}ms`;
+  return Number.isInteger(n) ? String(n) : n.toFixed(control.step && control.step < 0.01 ? 3 : 2);
+}
+
+function countPersonalityPatchFields(value) {
+  if (!value || typeof value !== 'object') return 0;
+  if (Array.isArray(value)) return value.length > 0 ? 1 : 0;
+  let count = 0;
+  for (const child of Object.values(value)) {
+    if (child && typeof child === 'object' && !Array.isArray(child)) count += countPersonalityPatchFields(child);
+    else if (child !== undefined) count += 1;
+  }
+  return count;
+}
+
+function characterOverrideComment(path, label = 'this setting') {
+  const key = pathKey(path);
+  const comments = {
+    'baseline|slot': 'Use a different resting face for this level only.',
+    'baseline|target': 'Changes how strongly the resting face holds when nothing else is happening.',
+    'baseline|rate': 'Changes how quickly the character settles back after reactions.',
+    'boredom|slot': 'Chooses the face she drifts toward during quiet or paused play.',
+    'boredom|afterMs': 'Changes how long quiet play waits before the character starts drifting.',
+    'boredom|magnitudePerSecond': 'Changes how strongly the quiet mood builds over time.',
+    refractoryMs: 'After a big reaction, this is how long later reactions are softened.',
+    refractoryScale: 'Controls how much smaller reactions become during that cooldown.',
+    preemptThreshold: 'Sets how strong a reaction must be to interrupt the current face immediately.',
+    saturationCap: 'Limits how intense any one expression can become.',
+    dwellMs: 'Keeps a face on screen for at least this long during normal swaps.',
+    returnToBaselineDelayMs: 'Waits this long after a reaction before letting the face settle back to rest.',
+    leadMargin: 'Requires a new mood to be clearly stronger before it replaces the current face.',
+    crossfadeMs: 'Sets the fade speed for ordinary expression changes.',
+    fastCrossfadeMs: 'Sets the faster fade used by big moments like jackpots and clears.',
+    streakThresholds: 'Chooses which combo counts fire special combo reactions.'
+  };
+  if (comments[key]) return comments[key];
+  if (path[0] === 'impulseTable' && path[2] === 'magnitude') {
+    const eventLabel = CHARACTER_EVENT_META[path[1]]?.label || formatCharacterLabel(path[1]);
+    return `Changes how strongly ${eventLabel.toLowerCase()} pushes the character mood in this level.`;
+  }
+  if (path[0] === 'impulseTable' && path[2] === 'distribution') {
+    return `Changes which expressions ${label.toLowerCase()} can roll in this level.`;
+  }
+  return `Overrides ${label.toLowerCase()} for this level only.`;
+}
 
 class PeggleApp {
   constructor() {
@@ -83,11 +281,16 @@ class PeggleApp {
     this._pendingRemoteLevelSaves = new Map();
     this._remoteLevelSyncFailures = new Map();
     this._editorSideSheetLayer = null;
-    this._editorSideSheetIds = ['levelListOverlay', 'campaignOverlay', 'campaignEditOverlay', 'dialogueOverlay'];
+    this._editorSideSheetIds = ['levelListOverlay', 'campaignOverlay', 'campaignEditOverlay', 'dialogueOverlay', 'characterOverlay'];
     this._dialogueSelectedEntryId = null;
     this._dialoguePreviewState = null;
+    this.characterRegistry = loadCharacterRegistry();
+    this._selectedCharacterEditorId = this.characterRegistry.selectedId || DEFAULT_CHARACTER_ID;
+    this._expressionVariantIndex = new Map();
     this.dialogueLanguage = getStoredLanguage();
     this.dialogueController = new DialogueController({ visualLayout: this.visualLayout, persistSeen: false });
+    this.portraitReactionController = new PortraitReactionController({ visualLayout: this.visualLayout });
+    this.dialogueController.setPortraitReactionController(this.portraitReactionController);
 
     this.campaignManager.beforeSyncCampaign = (campaign) => this._awaitCampaignRemoteLevelSaves(campaign);
     this.mode = 'editor'; // 'editor' or 'play'
@@ -104,6 +307,7 @@ class PeggleApp {
     this.dialogueController.mount();
     this.dialogueController.setLanguage(this.dialogueLanguage);
     this._injectAdminPanel();
+    this._ensureCharacterOverlay();
     this.setupCanvas();
     this._mountEditorSideSheets();
     this.setupUI();
@@ -135,6 +339,7 @@ class PeggleApp {
           </select>
           <label class="admin-toggle"><input type="checkbox" id="yoyoThreadToggle"> Yo-yo Thread</label>
           <label class="admin-toggle"><input type="checkbox" id="yoyoDebugDragToggle"> Yo-yo Debug Drag</label>
+          <button id="characterBtn" class="admin-btn">Characters</button>
           <button id="dialogueBtn" class="admin-btn">Dialogues</button>
           <button id="addToTrainingBtn" class="admin-btn">Add to Training</button>
           <button id="themeDefaultBtn" class="admin-btn">Default Theme</button>
@@ -160,6 +365,22 @@ class PeggleApp {
     `;
     viewport.appendChild(panel);
     this.adminPanel = panel;
+  }
+
+  _ensureCharacterOverlay() {
+    if (document.getElementById('characterOverlay')) return;
+    const overlay = document.createElement('div');
+    overlay.id = 'characterOverlay';
+    overlay.className = 'campaign-overlay character-overlay';
+    overlay.innerHTML = `
+      <div class="level-list-header">
+        <button id="closeCharacterOverlay" class="header-btn">&larr;</button>
+        <h2 class="level-list-title">Characters</h2>
+        <button id="addCharacterBtn" class="header-btn" title="New Character">+</button>
+      </div>
+      <div id="characterEditorBody" class="dialogue-edit-body character-edit-body"></div>
+    `;
+    document.body.appendChild(overlay);
   }
 
   _mountEditorSideSheets() {
@@ -274,7 +495,7 @@ class PeggleApp {
       const level = this.levelManager.getCurrentLevel();
       if (!level) return;
       const safeName = (level.name || 'untitled').replace(/[^a-zA-Z0-9_-]/g, '_');
-      const snapshot = cloneLevelSnapshot(level);
+      const snapshot = this._cloneLevelSnapshot(level);
       if (!snapshot) return;
       api.saveLevel(safeName, snapshot).then(ok => {
         if (ok) console.log('[auto-sync] Saved to remote:', safeName);
@@ -730,6 +951,10 @@ class PeggleApp {
       this.showDialogueEditor();
     });
 
+    document.getElementById('characterBtn')?.addEventListener('click', () => {
+      this.showCharacterEditor();
+    });
+
     // Visual layout: config change callback — deep clone so the level owns its
     // own copy and future VisualLayout mutations don't silently change it.
     this.visualLayout.onConfigChange = (config) => {
@@ -745,6 +970,9 @@ class PeggleApp {
         }
         this.game?.setEndSequenceConfig?.(config.endSequence);
         this.dialogueController.refreshLayout();
+        if (this.mode === 'editor') {
+          this._setPortraitControllerContextForCurrentLevel({ live: false });
+        }
       }
     };
     this.visualLayout.onPreviewProgressionChange = (enabled) => {
@@ -817,6 +1045,14 @@ class PeggleApp {
 
     document.getElementById('addDialogueEntryBtn').addEventListener('click', () => {
       this._addDialogueEntry();
+    });
+
+    document.getElementById('closeCharacterOverlay')?.addEventListener('click', () => {
+      this.closeCharacterEditor();
+    });
+
+    document.getElementById('addCharacterBtn')?.addEventListener('click', () => {
+      this._addCharacter();
     });
 
     // Close physics panel
@@ -2330,6 +2566,7 @@ class PeggleApp {
 
   startEditor() {
     this.teardownGambleSystem();
+    this.portraitReactionController.dispose();
 
     // Clean up ball counter
     if (this._unsubBallCounter) {
@@ -2435,11 +2672,13 @@ class PeggleApp {
     this.visualLayout.setPanelVisible(true);
     if (this.adminPanel) this.adminPanel.classList.remove('hidden');
     this.resizeCanvas(); // re-fit frame with panel visible
+    this._setPortraitControllerContextForCurrentLevel({ live: false });
     this._setDialogueControllerContextForCurrentLevel({ live: false, refreshPreview: true });
   }
 
   startGame() {
     this.closeDialogueEditor();
+    this.closeCharacterEditor();
     this.teardownGambleSystem();
 
     if (this.editor) {
@@ -2554,8 +2793,9 @@ class PeggleApp {
     this.visualLayout.setPanelVisible(false);
     if (this.adminPanel) this.adminPanel.classList.add('hidden');
     this.resizeCanvas(); // re-fit frame without panel
-    this._setDialogueControllerContextForCurrentLevel({ live: true, refreshPreview: false });
     this.mountGambleSystem();
+    this._setPortraitControllerContextForCurrentLevel({ live: true });
+    this._setDialogueControllerContextForCurrentLevel({ live: true, refreshPreview: false });
   }
 
   mountGambleSystem() {
@@ -2577,6 +2817,7 @@ class PeggleApp {
     });
     this.gambleSystem.mount();
     this.dialogueController.setGambleSystem(this.gambleSystem);
+    this.portraitReactionController.setGambleSystem(this.gambleSystem);
   }
 
   teardownGambleSystem() {
@@ -2584,6 +2825,7 @@ class PeggleApp {
     this.gambleSystem.dispose();
     this.gambleSystem = null;
     this.dialogueController.setGambleSystem(null);
+    this.portraitReactionController.setGambleSystem(null);
   }
 
   handleGameRestart = () => {
@@ -2617,6 +2859,9 @@ class PeggleApp {
       renderer.setShockwave(visuals.shockwave);
     }
     this.game?.setEndSequenceConfig?.(visuals.endSequence);
+    if (this.mode === 'editor') {
+      this._showAssignedCharacterIdlePortrait(level);
+    }
   }
 
   togglePlayMode() {
@@ -2859,6 +3104,986 @@ class PeggleApp {
     document.getElementById('levelListOverlay').classList.remove('visible');
   }
 
+  _showAssignedCharacterIdlePortrait(level = this.levelManager.getCurrentLevel()) {
+    if (!level || !this.visualLayout) return;
+    const character = this._resolveLevelCharacter(level);
+    const src = getCharacterSlotSource(character, 'idle');
+    this.visualLayout.setCharacterPortraitSource(src, { fadeMs: 0, slotName: 'idle' });
+  }
+
+  _resolveLevelCharacter(level = this.levelManager.getCurrentLevel()) {
+    this.characterRegistry = normalizeCharacterRegistry(this.characterRegistry);
+    return resolveCharacterForLevel(level, this.characterRegistry);
+  }
+
+  _setPortraitControllerContextForCurrentLevel(options = {}) {
+    const level = this.levelManager.getCurrentLevel();
+    const live = !!options.live;
+    if (!level) {
+      this.portraitReactionController.dispose();
+      return;
+    }
+    if (!live || !this.game) {
+      this.portraitReactionController.setContext({
+        level,
+        registry: this.characterRegistry,
+        game: null,
+        gambleSystem: null,
+        scopeKey: `editor:${level.id}`,
+        paused: false
+      });
+      return;
+    }
+    this.portraitReactionController.setContext({
+      level,
+      registry: this.characterRegistry,
+      game: this.game,
+      gambleSystem: this.gambleSystem,
+      scopeKey: level ? `editor:${level.id}` : 'editor',
+      paused: false
+    });
+  }
+
+  _saveCharacterRegistry(registry = this.characterRegistry) {
+    this.characterRegistry = saveCharacterRegistry(registry);
+    return this.characterRegistry;
+  }
+
+  _updateCurrentLevelCharacter(mutator, options = {}) {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level) return null;
+    const assignment = normalizeLevelCharacterAssignment(level.character);
+    if (mutator(assignment) === false) return null;
+    level.character = normalizeLevelCharacterAssignment(assignment);
+    attachCharacterSnapshotToLevel(level, this.characterRegistry);
+    if (level.metadata) level.metadata.modified = new Date().toISOString();
+    this.levelManager.save();
+    if (this.mode === 'play') {
+      this._setPortraitControllerContextForCurrentLevel({ live: true });
+    } else {
+      this._showAssignedCharacterIdlePortrait(level);
+    }
+    if (options.rerender !== false && document.getElementById('characterOverlay')?.classList.contains('visible')) {
+      this._renderCharacterEditor();
+    }
+    return level.character;
+  }
+
+  _refreshCurrentLevelForCharacterChange(characterId) {
+    const level = this.levelManager.getCurrentLevel();
+    const id = makeCharacterId(characterId);
+    if (normalizeLevelCharacterAssignment(level?.character).characterId !== id) return;
+    if (this.mode === 'play') {
+      this._setPortraitControllerContextForCurrentLevel({ live: true });
+    } else {
+      this._showAssignedCharacterIdlePortrait(level);
+    }
+  }
+
+  _replaceAssignedCharacterIdAcrossLevels(previousId, nextId) {
+    const oldId = makeCharacterId(previousId);
+    const replacementId = makeCharacterId(nextId, oldId);
+    const levels = typeof this.levelManager.getAllLevels === 'function'
+      ? this.levelManager.getAllLevels()
+      : [];
+    let touched = false;
+    for (const level of levels) {
+      const assignment = normalizeLevelCharacterAssignment(level?.character);
+      if (assignment.characterId !== oldId) continue;
+      assignment.characterId = replacementId;
+      level.character = normalizeLevelCharacterAssignment(assignment);
+      attachCharacterSnapshotToLevel(level, this.characterRegistry);
+      if (level.metadata) level.metadata.modified = new Date().toISOString();
+      touched = true;
+    }
+    if (touched) this.levelManager.save();
+    return touched;
+  }
+
+  showCharacterEditor() {
+    this.closeLevelList();
+    this.closeDialogueEditor();
+    this.characterRegistry = loadCharacterRegistry();
+    const selectedId = makeCharacterId(this._selectedCharacterEditorId || this.characterRegistry.selectedId || DEFAULT_CHARACTER_ID);
+    this._selectedCharacterEditorId = this.characterRegistry.characters[selectedId] ? selectedId : this.characterRegistry.selectedId;
+    this._renderCharacterEditor();
+    document.getElementById('characterOverlay')?.classList.add('visible');
+    this._positionEditorSideSheets();
+  }
+
+  closeCharacterEditor() {
+    document.getElementById('characterOverlay')?.classList.remove('visible');
+  }
+
+  _addCharacter() {
+    const registry = normalizeCharacterRegistry(this.characterRegistry);
+    let index = Object.keys(registry.characters).length + 1;
+    let id = `character-${index}`;
+    while (registry.characters[id]) {
+      index++;
+      id = `character-${index}`;
+    }
+    registry.characters[id] = normalizeCharacter({
+      ...createDefaultCharacter({ id, name: `Character ${index}` }),
+      id,
+      name: `Character ${index}`
+    });
+    registry.selectedId = id;
+    this._selectedCharacterEditorId = id;
+    this._saveCharacterRegistry(registry);
+    this._renderCharacterEditor();
+  }
+
+  _slotLabel(slot) {
+    return formatCharacterLabel(slot);
+  }
+
+  _eventLabel(eventType) {
+    return CHARACTER_EVENT_META[eventType]?.label || formatCharacterLabel(eventType);
+  }
+
+  _getCharacterSlotList(character, { authoredOnly = false } = {}) {
+    const personality = normalizePersonality(character?.personality);
+    const slots = new Set([
+      ...CANONICAL_EMOTION_SLOTS,
+      ...Object.keys(character?.slots || {}),
+      ...Object.keys(personality.decayRates || {}),
+      personality.baseline?.slot,
+      personality.boredom?.slot,
+      ...Object.keys(personality.ambient?.distribution || {}),
+      ...Object.keys(personality.pressure?.distribution || {}),
+      ...Object.values(personality.escalation || {})
+    ].filter(Boolean));
+    for (const row of Object.values(personality.impulseTable || {})) {
+      for (const slot of Object.keys(row.distribution || {})) slots.add(slot);
+      if (row.escalationSlot) slots.add(row.escalationSlot);
+    }
+    const ordered = [
+      ...CANONICAL_EMOTION_SLOTS.filter(slot => slots.has(slot)),
+      ...Array.from(slots).filter(slot => !CANONICAL_EMOTION_SLOTS.includes(slot)).sort()
+    ];
+    if (!authoredOnly) return ordered;
+    const authored = ordered.filter(slot => {
+      const value = character?.slots?.[slot];
+      if (Array.isArray(value)) return value.some(item => typeof item === 'string' && item.trim());
+      return typeof value === 'string' && value.trim();
+    });
+    return authored.length ? authored : ['idle'];
+  }
+
+  _getCharacterEventTypes(personality) {
+    const events = new Set([
+      ...Object.keys(DEFAULT_PERSONALITY.impulseTable || {}),
+      ...Object.keys(personality?.impulseTable || {})
+    ]);
+    return Array.from(events).filter(eventType => !CHARACTER_EVENT_UI_HIDDEN.has(eventType)).sort((a, b) => {
+      const groupA = CHARACTER_EVENT_META[a]?.group || 'Z';
+      const groupB = CHARACTER_EVENT_META[b]?.group || 'Z';
+      if (groupA !== groupB) return groupA.localeCompare(groupB);
+      return this._eventLabel(a).localeCompare(this._eventLabel(b));
+    });
+  }
+
+  _renderSlotOptions(slots, selectedSlot) {
+    return slots.map(slot => `
+      <option value="${this._esc(slot)}"${slot === selectedSlot ? ' selected' : ''}>${this._esc(this._slotLabel(slot))}</option>
+    `).join('');
+  }
+
+  _distributionPercent(distribution, slot) {
+    const value = Number(distribution?.[slot]);
+    return Math.max(0, Math.min(100, Math.round((Number.isFinite(value) ? value : 0) * 100)));
+  }
+
+  _renderCharacterSlider({ path, control, value, scope = 'character', disabled = false, inherited = null }) {
+    const key = pathKey(path);
+    const n = Number(value);
+    const safeValue = Number.isFinite(n) ? n : control.min;
+    const dataAttr = scope === 'level' ? 'data-level-number' : 'data-character-number';
+    const inheritedHtml = inherited == null ? '' : `<span class="character-inherited">Inherited ${this._esc(formatTuningValue(inherited, control))}</span>`;
+    return `
+      <label class="character-tune-row${disabled ? ' is-disabled' : ''}">
+        <span class="character-tune-head">
+          <span class="character-tune-label">${this._esc(control.label)}</span>
+          <span class="character-tune-value" data-character-value-for="${this._esc(key)}">${this._esc(formatTuningValue(safeValue, control))}</span>
+        </span>
+        ${inheritedHtml}
+        <input class="character-range" type="range" min="${control.min}" max="${control.max}" step="${control.step}" value="${safeValue}" ${dataAttr}="${this._esc(key)}"${disabled ? ' disabled' : ''}>
+      </label>
+    `;
+  }
+
+  _renderCharacterSelect({ path, label, slots, value, scope = 'character', disabled = false, inherited = null }) {
+    const key = pathKey(path);
+    const dataAttr = scope === 'level' ? 'data-level-select' : 'data-character-select';
+    const inheritedHtml = inherited == null ? '' : `<span class="character-inherited">Inherited ${this._esc(this._slotLabel(inherited))}</span>`;
+    return `
+      <label class="character-tune-row${disabled ? ' is-disabled' : ''}">
+        <span class="character-tune-head">
+          <span class="character-tune-label">${this._esc(label)}</span>
+        </span>
+        ${inheritedHtml}
+        <select class="dialogue-field-select" ${dataAttr}="${this._esc(key)}"${disabled ? ' disabled' : ''}>
+          ${this._renderSlotOptions(slots, value)}
+        </select>
+      </label>
+    `;
+  }
+
+  _renderDistributionWeights({ distribution, slots, scope = 'character', pathPrefix, disabled = false }) {
+    const dataAttr = scope === 'level' ? 'data-level-weight' : 'data-character-weight';
+    return `
+      <div class="character-weight-grid${disabled ? ' is-disabled' : ''}">
+        ${slots.map(slot => {
+          const path = [...pathPrefix, slot];
+          const key = pathKey(path);
+          const percent = this._distributionPercent(distribution, slot);
+          return `
+            <label class="character-weight-row">
+              <span>${this._esc(this._slotLabel(slot))}</span>
+              <input class="character-range" type="range" min="0" max="100" step="1" value="${percent}" ${dataAttr}="${this._esc(key)}"${disabled ? ' disabled' : ''}>
+              <b data-character-value-for="${this._esc(key)}">${percent}%</b>
+            </label>
+          `;
+        }).join('')}
+      </div>
+    `;
+  }
+
+  _renderOverrideSlider({ path, control, basePersonality, patch }) {
+    const active = getPathValue(patch, path) !== undefined;
+    const inherited = getPathValue(basePersonality, path);
+    const value = active ? getPathValue(patch, path) : inherited;
+    const key = pathKey(path);
+    const comment = characterOverrideComment(path, control.label);
+    return `
+      <div class="character-override-item">
+        <label class="character-override-toggle">
+          <input type="checkbox" data-level-toggle="${this._esc(key)}" data-level-toggle-kind="number" data-level-inherited="${this._esc(JSON.stringify(inherited))}"${active ? ' checked' : ''}>
+          <span><b>${this._esc(control.label)}</b><small>${this._esc(comment)}</small></span>
+        </label>
+        ${this._renderCharacterSlider({ path, control, value, scope: 'level', disabled: !active, inherited })}
+      </div>
+    `;
+  }
+
+  _renderOverrideSelect({ path, label, slots, basePersonality, patch }) {
+    const active = getPathValue(patch, path) !== undefined;
+    const inherited = getPathValue(basePersonality, path);
+    const value = active ? getPathValue(patch, path) : inherited;
+    const key = pathKey(path);
+    const comment = characterOverrideComment(path, label);
+    return `
+      <div class="character-override-item">
+        <label class="character-override-toggle">
+          <input type="checkbox" data-level-toggle="${this._esc(key)}" data-level-toggle-kind="string" data-level-inherited="${this._esc(JSON.stringify(inherited))}"${active ? ' checked' : ''}>
+          <span><b>${this._esc(label)}</b><small>${this._esc(comment)}</small></span>
+        </label>
+        ${this._renderCharacterSelect({ path, label, slots, value, scope: 'level', disabled: !active, inherited })}
+      </div>
+    `;
+  }
+
+  _renderExpressionGrid(character, slotNames) {
+    return `
+      <div class="character-expression-grid">
+        ${slotNames.map(slot => {
+          const sources = getCharacterSlotSources(character, slot);
+          const hasImage = sources.length > 0;
+          const variantIndex = hasImage ? this._getExpressionVariantIndex(character.id, slot, sources.length) : 0;
+          const currentSrc = hasImage ? sources[variantIndex] : '';
+          const isIdle = slot === 'idle';
+          const canPreview = !isIdle && hasImage;
+          const multi = sources.length > 1;
+          const counterLabel = hasImage
+            ? `${variantIndex + 1}/${sources.length}${sources.length > 1 ? ' · random' : ''}`
+            : '';
+          const stateLabel = hasImage
+            ? (sources.length > 1 ? `${sources.length} variants · random in play` : 'Ready')
+            : 'Uses composed image';
+          return `
+            <div class="character-expression-card" data-character-slot="${this._esc(slot)}">
+              <div class="character-expression-stage">
+                <div class="character-expression-thumb"${currentSrc ? ` style="background-image:url('${this._esc(currentSrc)}')"` : ''}></div>
+                ${multi ? `
+                  <button class="character-variant-arrow character-variant-arrow--prev" type="button" data-character-variant-prev="${this._esc(slot)}" title="Previous image">‹</button>
+                  <button class="character-variant-arrow character-variant-arrow--next" type="button" data-character-variant-next="${this._esc(slot)}" title="Next image">›</button>
+                ` : ''}
+                ${hasImage && multi ? `<div class="character-variant-counter">${this._esc(counterLabel)}</div>` : ''}
+              </div>
+              <div class="character-expression-title">${this._esc(this._slotLabel(slot))}</div>
+              <div class="character-expression-key">${this._esc(slot)}</div>
+              <div class="character-expression-state">${this._esc(stateLabel)}</div>
+              <div class="character-expression-actions">
+                <button class="dialogue-chip-btn" type="button" data-character-upload-slot="${this._esc(slot)}">${hasImage ? 'Add image' : 'Upload'}</button>
+                ${isIdle ? '' : `<button class="dialogue-preview-btn" type="button" data-character-preview-slot="${this._esc(slot)}"${canPreview ? '' : ' disabled'}>Preview</button>`}
+                <button class="dialogue-icon-btn dialogue-icon-btn--danger" type="button" title="${multi ? 'Remove this image' : 'Clear expression'}" data-character-clear-slot="${this._esc(slot)}">×</button>
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `;
+  }
+
+  _expressionVariantKey(characterId, slot) {
+    return `${characterId}::${slot}`;
+  }
+
+  _getExpressionVariantIndex(characterId, slot, length) {
+    if (!length || length <= 0) return 0;
+    const key = this._expressionVariantKey(characterId, slot);
+    const stored = Number(this._expressionVariantIndex?.get?.(key));
+    if (!Number.isFinite(stored) || stored < 0) return 0;
+    return stored % length;
+  }
+
+  _setExpressionVariantIndex(characterId, slot, index) {
+    if (!this._expressionVariantIndex) this._expressionVariantIndex = new Map();
+    this._expressionVariantIndex.set(this._expressionVariantKey(characterId, slot), Math.max(0, Math.floor(Number(index) || 0)));
+  }
+
+  _cycleExpressionVariant(characterId, slot, delta) {
+    const registry = normalizeCharacterRegistry(this.characterRegistry);
+    const character = registry.characters[makeCharacterId(characterId)];
+    if (!character) return;
+    const sources = getCharacterSlotSources(character, slot);
+    if (sources.length <= 1) return;
+    const current = this._getExpressionVariantIndex(character.id, slot, sources.length);
+    const next = ((current + delta) % sources.length + sources.length) % sources.length;
+    this._setExpressionVariantIndex(character.id, slot, next);
+    this._renderCharacterEditor();
+  }
+
+  _renderCharacterRestingPanel(character, slots) {
+    const personality = normalizePersonality(character.personality);
+    return `
+      <div class="dialogue-card-block character-panel-block">
+        <div class="dialogue-block-title">Resting Mood</div>
+        ${this._renderCharacterSelect({ path: ['baseline', 'slot'], label: 'Default expression', slots, value: personality.baseline.slot })}
+        ${CHARACTER_RESTING_CONTROLS.map(control => this._renderCharacterSlider({
+          path: control.path,
+          control,
+          value: getPathValue(personality, control.path)
+        })).join('')}
+        ${this._renderCharacterSelect({ path: ['boredom', 'slot'], label: 'Quiet mood expression', slots, value: personality.boredom.slot })}
+        <div class="character-mini-heading">Expression return speeds</div>
+        ${slots.map(slot => this._renderCharacterSlider({
+          path: ['decayRates', slot],
+          control: { label: this._slotLabel(slot), min: 0, max: 1.4, step: 0.01 },
+          value: personality.decayRates?.[slot] ?? 0.3
+        })).join('')}
+      </div>
+    `;
+  }
+
+  _renderCharacterEventsPanel(character, slots) {
+    const personality = normalizePersonality(character.personality);
+    const eventTypes = this._getCharacterEventTypes(personality);
+    return `
+      <div class="dialogue-card-block character-panel-block">
+        <div class="dialogue-block-title">Reaction Events</div>
+        <div class="character-event-list">
+          ${eventTypes.map(eventType => {
+            const row = personality.impulseTable[eventType] || { magnitude: 0.3, distribution: { idle: 1 } };
+            return `
+              <div class="character-event-card">
+                <div class="character-event-title">
+                  <span>${this._esc(this._eventLabel(eventType))}</span>
+                  <small>${this._esc(CHARACTER_EVENT_META[eventType]?.group || 'Custom')}</small>
+                </div>
+                ${this._renderCharacterSlider({
+                  path: ['impulseTable', eventType, 'magnitude'],
+                  control: { label: 'Reaction strength', min: 0, max: 2, step: 0.05 },
+                  value: row.magnitude
+                })}
+                <div class="character-mini-heading">Expression chances</div>
+                ${this._renderDistributionWeights({
+                  distribution: row.distribution,
+                  slots,
+                  pathPrefix: ['impulseTable', eventType, 'distribution']
+                })}
+              </div>
+            `;
+          }).join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  _renderCharacterTimingPanel(character) {
+    const personality = normalizePersonality(character.personality);
+    return `
+      <div class="dialogue-card-block character-panel-block">
+        <div class="dialogue-block-title">Character Timing</div>
+        ${CHARACTER_SCALAR_CONTROLS.map(control => this._renderCharacterSlider({
+          path: control.path,
+          control,
+          value: getPathValue(personality, control.path)
+        })).join('')}
+        <label class="character-tune-row">
+          <span class="character-tune-head">
+            <span class="character-tune-label">Combo milestones</span>
+            <span class="character-tune-value">${this._esc((personality.streakThresholds || []).join(', '))}</span>
+          </span>
+          <input class="dialogue-field-input" type="text" value="${this._esc((personality.streakThresholds || []).join(', '))}" placeholder="3, 6, 10" data-character-streaks>
+        </label>
+      </div>
+    `;
+  }
+
+  _renderCharacterAmbientPanel(character, slots) {
+    const personality = normalizePersonality(character.personality);
+    return `
+      <div class="dialogue-card-block character-panel-block">
+        <div class="dialogue-block-title">Ambient / Pause</div>
+        ${CHARACTER_AMBIENT_CONTROLS.map(control => this._renderCharacterSlider({
+          path: control.path,
+          control,
+          value: getPathValue(personality, control.path)
+        })).join('')}
+        <div class="character-mini-heading">Calm expression chances</div>
+        ${this._renderDistributionWeights({
+          distribution: personality.ambient.distribution,
+          slots,
+          pathPrefix: ['ambient', 'distribution']
+        })}
+      </div>
+    `;
+  }
+
+  _renderCharacterEscalationPanel(character, slots) {
+    const personality = normalizePersonality(character.personality);
+    return `
+      <div class="dialogue-card-block character-panel-block">
+        <div class="dialogue-block-title">Repeat Variety</div>
+        <div class="character-escalation-grid">
+          ${slots.map(slot => `
+            <label class="character-tune-row">
+              <span class="character-tune-head">
+                <span class="character-tune-label">${this._esc(this._slotLabel(slot))} repeats into</span>
+              </span>
+              <select class="dialogue-field-select" data-character-select="${this._esc(pathKey(['escalation', slot]))}">
+                ${this._renderSlotOptions(slots, personality.escalation?.[slot] || slot)}
+              </select>
+            </label>
+          `).join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  _renderLevelOverridesPanel(level, registry, slots = null) {
+    const assignment = normalizeLevelCharacterAssignment(level?.character);
+    const assignedBase = normalizeCharacter(
+      registry.characters[assignment.characterId]
+      || assignment.snapshot
+      || registry.characters[DEFAULT_CHARACTER_ID]
+      || createDefaultCharacter()
+    );
+    slots = this._getCharacterSlotList(assignedBase, { authoredOnly: true });
+    const basePersonality = normalizePersonality(assignedBase.personality);
+    const patch = normalizePersonalityPatch(assignment.personalityPatch || {});
+    const patchedPersonality = mergePersonalityPatch(basePersonality, patch);
+    const overrideCount = countPersonalityPatchFields(patch);
+    const eventTypes = this._getCharacterEventTypes(patchedPersonality);
+
+    return `
+      <div class="dialogue-card-block character-panel-block">
+        <div class="dialogue-block-title">Level Character</div>
+        <label class="dialogue-field">
+          <span class="dialogue-field-label">Character for this level</span>
+          <select id="levelCharacterSelect" class="dialogue-field-select">
+            ${Object.keys(registry.characters).sort().map(id => `
+              <option value="${this._esc(id)}"${id === assignment.characterId ? ' selected' : ''}>${this._esc(registry.characters[id]?.name || id)} (${this._esc(id)})</option>
+            `).join('')}
+          </select>
+        </label>
+        <div class="character-override-summary">${overrideCount} level override${overrideCount === 1 ? '' : 's'} active</div>
+        <div class="character-override-help">This level is linked to the saved character above. Switch a row on only when this level needs its own exception.</div>
+        ${this._renderOverrideSelect({ path: ['baseline', 'slot'], label: 'Default expression', slots, basePersonality, patch })}
+        ${this._renderOverrideSlider({ path: ['baseline', 'target'], control: CHARACTER_RESTING_CONTROLS[0], basePersonality, patch })}
+        ${this._renderOverrideSlider({ path: ['baseline', 'rate'], control: CHARACTER_RESTING_CONTROLS[1], basePersonality, patch })}
+        ${this._renderOverrideSelect({ path: ['boredom', 'slot'], label: 'Quiet mood expression', slots, basePersonality, patch })}
+        ${this._renderOverrideSlider({ path: ['boredom', 'afterMs'], control: CHARACTER_RESTING_CONTROLS[2], basePersonality, patch })}
+        ${this._renderOverrideSlider({ path: ['boredom', 'magnitudePerSecond'], control: CHARACTER_RESTING_CONTROLS[3], basePersonality, patch })}
+        <div class="character-mini-heading">Timing overrides</div>
+        ${CHARACTER_SCALAR_CONTROLS.map(control => this._renderOverrideSlider({ path: control.path, control, basePersonality, patch })).join('')}
+        <div class="character-override-item">
+          <label class="character-override-toggle">
+            <input type="checkbox" data-level-toggle="${this._esc(pathKey(['streakThresholds']))}" data-level-toggle-kind="array" data-level-inherited="${this._esc(JSON.stringify(basePersonality.streakThresholds || []))}"${Array.isArray(patch.streakThresholds) ? ' checked' : ''}>
+            <span><b>Combo milestones</b><small>${this._esc(characterOverrideComment(['streakThresholds'], 'Combo milestones'))}</small></span>
+          </label>
+          <input class="dialogue-field-input" type="text" value="${this._esc((Array.isArray(patch.streakThresholds) ? patch.streakThresholds : basePersonality.streakThresholds || []).join(', '))}" data-level-streaks${Array.isArray(patch.streakThresholds) ? '' : ' disabled'}>
+          <span class="character-inherited">Inherited ${this._esc((basePersonality.streakThresholds || []).join(', '))}</span>
+        </div>
+        <div class="character-mini-heading">Event overrides</div>
+        ${eventTypes.map(eventType => {
+          const inheritedRow = basePersonality.impulseTable[eventType] || { magnitude: 0.3, distribution: { idle: 1 } };
+          const patchRow = patch.impulseTable?.[eventType] || {};
+          const magnitudePath = ['impulseTable', eventType, 'magnitude'];
+          const distributionPath = ['impulseTable', eventType, 'distribution'];
+          const magnitudeActive = getPathValue(patch, magnitudePath) !== undefined;
+          const distributionActive = getPathValue(patch, distributionPath) !== undefined;
+          const distribution = distributionActive ? patchRow.distribution : inheritedRow.distribution;
+          return `
+            <div class="character-event-card">
+              <div class="character-event-title">
+                <span>${this._esc(this._eventLabel(eventType))}</span>
+                <small>${this._esc(CHARACTER_EVENT_META[eventType]?.group || 'Custom')}</small>
+              </div>
+              ${this._renderOverrideSlider({
+                path: magnitudePath,
+                control: { label: 'Reaction strength', min: 0, max: 2, step: 0.05 },
+                basePersonality,
+                patch
+              })}
+              <label class="character-override-toggle">
+                <input type="checkbox" data-level-toggle="${this._esc(pathKey(distributionPath))}" data-level-toggle-kind="object" data-level-inherited="${this._esc(JSON.stringify(inheritedRow.distribution || { idle: 1 }))}"${distributionActive ? ' checked' : ''}>
+                <span><b>Override expression chances</b><small>${this._esc(characterOverrideComment(distributionPath, this._eventLabel(eventType)))}</small></span>
+              </label>
+              ${this._renderDistributionWeights({
+                distribution,
+                slots,
+                scope: 'level',
+                pathPrefix: distributionPath,
+                disabled: !distributionActive
+              })}
+            </div>
+          `;
+        }).join('')}
+        <div class="dialogue-editor-toolbar">
+          <button class="dialogue-preview-btn" type="button" data-character-clear-patch>Clear All Level Overrides</button>
+        </div>
+      </div>
+    `;
+  }
+
+  _renderCharacterEditor() {
+    const body = document.getElementById('characterEditorBody');
+    if (!body) return;
+    const level = this.levelManager.getCurrentLevel();
+    this.characterRegistry = normalizeCharacterRegistry(this.characterRegistry);
+    const registry = this.characterRegistry;
+    const characterIds = Object.keys(registry.characters).sort();
+    const selectedId = registry.characters[this._selectedCharacterEditorId]
+      ? this._selectedCharacterEditorId
+      : (registry.selectedId || DEFAULT_CHARACTER_ID);
+    this._selectedCharacterEditorId = selectedId;
+    const selected = normalizeCharacter(registry.characters[selectedId] || createDefaultCharacter());
+    const slotNames = this._getCharacterSlotList(selected);
+    const authoredSlots = this._getCharacterSlotList(selected, { authoredOnly: true });
+    const editorOptions = characterIds.map(id => `
+      <option value="${this._esc(id)}"${id === selectedId ? ' selected' : ''}>${this._esc(registry.characters[id]?.name || id)} (${this._esc(id)})</option>
+    `).join('');
+
+    body.innerHTML = `
+      <div class="dialogue-editor-toolbar">
+        <button class="dialogue-chip-btn" type="button" data-character-new>+ Character</button>
+        <button class="dialogue-preview-btn" type="button" data-character-export-trace>Export Trace CSV</button>
+        <div class="dialogue-toolbar-spacer"></div>
+        <button class="dialogue-chip-btn" type="button" data-character-assign-current>Assign to Level</button>
+      </div>
+      <div class="dialogue-editor-note">Characters save automatically. Any level assigned to this character ID uses the latest version; import/export is only backup.</div>
+
+      <div class="dialogue-card-block character-panel-block">
+        <div class="dialogue-block-title">Expressions</div>
+        ${this._renderExpressionGrid(selected, slotNames)}
+        <div class="dialogue-inline-grid character-custom-slot">
+          <label class="dialogue-field">
+            <span class="dialogue-field-label">Add expression slot</span>
+            <input id="characterCustomSlotInput" class="dialogue-field-input" type="text" placeholder="composed">
+          </label>
+          <button class="dialogue-chip-btn" type="button" data-character-add-slot>Add Expression</button>
+        </div>
+      </div>
+
+      <div class="dialogue-card-block character-panel-block">
+        <div class="dialogue-block-title">Character</div>
+        <label class="dialogue-field">
+          <span class="dialogue-field-label">Editing character</span>
+          <select id="characterEditorSelect" class="dialogue-field-select">${editorOptions}</select>
+        </label>
+        <div class="dialogue-inline-grid">
+          <label class="dialogue-field">
+            <span class="dialogue-field-label">ID</span>
+            <input id="characterIdInput" class="dialogue-field-input" type="text" value="${this._esc(selected.id)}">
+          </label>
+          <label class="dialogue-field">
+            <span class="dialogue-field-label">Name</span>
+            <input id="characterNameInput" class="dialogue-field-input" type="text" value="${this._esc(selected.name)}">
+          </label>
+        </div>
+        <div class="dialogue-editor-toolbar">
+          <button class="dialogue-chip-btn" type="button" data-character-save-details>Save Details</button>
+          <button class="dialogue-preview-btn" type="button" data-character-export-personality>Export Personality</button>
+          <button class="dialogue-preview-btn" type="button" data-character-import-personality>Import Personality</button>
+          <button class="dialogue-preview-btn" type="button" data-character-reset-personality>Restore Defaults</button>
+        </div>
+      </div>
+
+      ${this._renderLevelOverridesPanel(level, registry, authoredSlots)}
+
+      ${this._renderCharacterRestingPanel(selected, authoredSlots)}
+      ${this._renderCharacterEventsPanel(selected, authoredSlots)}
+      ${this._renderCharacterTimingPanel(selected)}
+      ${this._renderCharacterAmbientPanel(selected, authoredSlots)}
+      ${this._renderCharacterEscalationPanel(selected, authoredSlots)}
+    `;
+
+    this._bindFriendlyCharacterEditor(body, selected);
+  }
+
+  _bindFriendlyCharacterEditor(body, selected) {
+    body.querySelector('[data-character-new]')?.addEventListener('click', () => this._addCharacter());
+    body.querySelector('[data-character-export-trace]')?.addEventListener('click', () => {
+      this.portraitReactionController.downloadTraceCsv();
+    });
+    body.querySelector('[data-character-assign-current]')?.addEventListener('click', () => {
+      this._updateCurrentLevelCharacter((next) => {
+        next.characterId = selected.id;
+      });
+    });
+    body.querySelector('#levelCharacterSelect')?.addEventListener('change', (event) => {
+      this._updateCurrentLevelCharacter((next) => {
+        next.characterId = event.target.value;
+      });
+    });
+    body.querySelector('[data-character-clear-patch]')?.addEventListener('click', () => {
+      this._updateCurrentLevelCharacter((next) => {
+        next.personalityPatch = {};
+      });
+    });
+    body.querySelector('#characterEditorSelect')?.addEventListener('change', (event) => {
+      this._selectedCharacterEditorId = event.target.value;
+      this.characterRegistry.selectedId = this._selectedCharacterEditorId;
+      this._saveCharacterRegistry(this.characterRegistry);
+      this._renderCharacterEditor();
+    });
+    body.querySelector('[data-character-save-details]')?.addEventListener('click', () => {
+      const rawId = body.querySelector('#characterIdInput')?.value || selected.id;
+      const nextId = makeCharacterId(rawId, selected.id);
+      const name = (body.querySelector('#characterNameInput')?.value || selected.name || nextId).trim();
+      this._saveCharacterEdits(selected.id, { id: nextId, name });
+    });
+    body.querySelector('[data-character-export-personality]')?.addEventListener('click', () => {
+      this._downloadJson(`${selected.id}-personality.json`, normalizePersonality(selected.personality));
+    });
+    body.querySelector('[data-character-import-personality]')?.addEventListener('click', () => {
+      this._importCharacterPersonality(selected.id);
+    });
+    body.querySelector('[data-character-reset-personality]')?.addEventListener('click', () => {
+      this._mutateCharacter(selected.id, (character) => {
+        character.personality = createDefaultCharacter({ id: character.id, name: character.name }).personality;
+      });
+    });
+    body.querySelectorAll('[data-character-upload-slot]').forEach((button) => {
+      button.addEventListener('click', () => this._uploadCharacterSlot(selected.id, button.dataset.characterUploadSlot));
+    });
+    body.querySelectorAll('[data-character-preview-slot]').forEach((button) => {
+      button.addEventListener('click', () => this._previewCharacterExpressionTransition(selected.id, button.dataset.characterPreviewSlot));
+    });
+    body.querySelectorAll('[data-character-clear-slot]').forEach((button) => {
+      button.addEventListener('click', () => this._removeCharacterSlotVariant(selected.id, button.dataset.characterClearSlot));
+    });
+    body.querySelectorAll('[data-character-variant-prev]').forEach((button) => {
+      button.addEventListener('click', (event) => {
+        event.preventDefault();
+        this._cycleExpressionVariant(selected.id, button.dataset.characterVariantPrev, -1);
+      });
+    });
+    body.querySelectorAll('[data-character-variant-next]').forEach((button) => {
+      button.addEventListener('click', (event) => {
+        event.preventDefault();
+        this._cycleExpressionVariant(selected.id, button.dataset.characterVariantNext, 1);
+      });
+    });
+    body.querySelectorAll('.character-expression-card').forEach((card) => {
+      card.addEventListener('wheel', (event) => {
+        const slot = card.dataset.characterSlot;
+        if (!slot) return;
+        const registry = normalizeCharacterRegistry(this.characterRegistry);
+        const character = registry.characters[makeCharacterId(selected.id)];
+        if (!character) return;
+        if (getCharacterSlotSources(character, slot).length <= 1) return;
+        event.preventDefault();
+        const delta = event.deltaY > 0 ? 1 : (event.deltaY < 0 ? -1 : 0);
+        if (delta) this._cycleExpressionVariant(selected.id, slot, delta);
+      }, { passive: false });
+    });
+    body.querySelector('[data-character-add-slot]')?.addEventListener('click', () => {
+      const slot = (body.querySelector('#characterCustomSlotInput')?.value || '').trim();
+      if (!slot) return;
+      this._mutateCharacter(selected.id, (character) => {
+        if (!Object.prototype.hasOwnProperty.call(character.slots, slot)) character.slots[slot] = null;
+      });
+    });
+    body.querySelectorAll('[data-character-number]').forEach((input) => {
+      input.addEventListener('input', () => {
+        const path = parsePathKey(input.dataset.characterNumber);
+        const value = Number(input.value);
+        this._updateValueReadout(body, input.dataset.characterNumber, formatTuningValue(value, this._controlForPath(path)));
+        this._mutateCharacter(selected.id, (character) => {
+          character.personality = normalizePersonality(character.personality);
+          setPathValue(character.personality, path, value);
+        }, { rerender: false });
+      });
+    });
+    body.querySelectorAll('[data-character-select]').forEach((input) => {
+      input.addEventListener('change', () => {
+        const path = parsePathKey(input.dataset.characterSelect);
+        this._mutateCharacter(selected.id, (character) => {
+          character.personality = normalizePersonality(character.personality);
+          setPathValue(character.personality, path, input.value);
+        }, { rerender: false });
+      });
+    });
+    body.querySelectorAll('[data-character-weight]').forEach((input) => {
+      input.addEventListener('input', () => {
+        const path = parsePathKey(input.dataset.characterWeight);
+        this._updateValueReadout(body, input.dataset.characterWeight, `${Math.round(Number(input.value) || 0)}%`);
+        this._mutateCharacter(selected.id, (character) => {
+          character.personality = normalizePersonality(character.personality);
+          setPathValue(character.personality, path, Math.max(0, Number(input.value) || 0) / 100);
+        }, { rerender: false });
+      });
+    });
+    body.querySelector('[data-character-streaks]')?.addEventListener('change', (event) => {
+      this._mutateCharacter(selected.id, (character) => {
+        character.personality = normalizePersonality(character.personality);
+        character.personality.streakThresholds = this._parseNumberList(event.target.value);
+      });
+    });
+
+    this._bindLevelOverrideControls(body);
+  }
+
+  _bindLevelOverrideControls(body) {
+    body.querySelectorAll('[data-level-toggle]').forEach((toggle) => {
+      toggle.addEventListener('change', () => {
+        const path = parsePathKey(toggle.dataset.levelToggle);
+        const inherited = this._parseJsonAttribute(toggle.dataset.levelInherited);
+        this._updateCurrentLevelPersonalityPatch((patch) => {
+          if (toggle.checked) setPathValue(patch, path, inherited);
+          else deletePathValue(patch, path);
+        });
+      });
+    });
+    body.querySelectorAll('[data-level-number]').forEach((input) => {
+      input.addEventListener('input', () => {
+        const path = parsePathKey(input.dataset.levelNumber);
+        const value = Number(input.value);
+        this._updateValueReadout(body, input.dataset.levelNumber, formatTuningValue(value, this._controlForPath(path)));
+        this._updateCurrentLevelPersonalityPatch((patch) => {
+          setPathValue(patch, path, value);
+        }, { rerender: false });
+      });
+    });
+    body.querySelectorAll('[data-level-select]').forEach((input) => {
+      input.addEventListener('change', () => {
+        const path = parsePathKey(input.dataset.levelSelect);
+        this._updateCurrentLevelPersonalityPatch((patch) => {
+          setPathValue(patch, path, input.value);
+        }, { rerender: false });
+      });
+    });
+    body.querySelectorAll('[data-level-weight]').forEach((input) => {
+      input.addEventListener('input', () => {
+        const path = parsePathKey(input.dataset.levelWeight);
+        this._updateValueReadout(body, input.dataset.levelWeight, `${Math.round(Number(input.value) || 0)}%`);
+        this._updateCurrentLevelPersonalityPatch((patch) => {
+          setPathValue(patch, path, Math.max(0, Number(input.value) || 0) / 100);
+        }, { rerender: false });
+      });
+    });
+    body.querySelector('[data-level-streaks]')?.addEventListener('change', (event) => {
+      this._updateCurrentLevelPersonalityPatch((patch) => {
+        patch.streakThresholds = this._parseNumberList(event.target.value);
+      });
+    });
+  }
+
+  _updateCurrentLevelPersonalityPatch(mutator, options = {}) {
+    return this._updateCurrentLevelCharacter((assignment) => {
+      const patch = clonePlain(assignment.personalityPatch || {}) || {};
+      mutator(patch);
+      pruneEmptyObjects(patch);
+      assignment.personalityPatch = normalizePersonalityPatch(patch);
+    }, options);
+  }
+
+  _parseNumberList(value) {
+    const values = String(value || '')
+      .split(',')
+      .map(part => Math.round(Number(part.trim())))
+      .filter(number => Number.isFinite(number) && number > 0);
+    return Array.from(new Set(values)).sort((a, b) => a - b);
+  }
+
+  _parseJsonAttribute(value) {
+    try {
+      return JSON.parse(value || 'null');
+    } catch (error) {
+      return null;
+    }
+  }
+
+  _controlForPath(path) {
+    const key = pathKey(path);
+    return [
+      ...CHARACTER_SCALAR_CONTROLS,
+      ...CHARACTER_RESTING_CONTROLS,
+      ...CHARACTER_AMBIENT_CONTROLS,
+      { path: ['impulseTable', 'x', 'magnitude'], label: 'Reaction strength', min: 0, max: 2, step: 0.05 }
+    ].find(control => pathKey(control.path) === key || (path[0] === 'impulseTable' && path[2] === 'magnitude')) || { step: 0.05 };
+  }
+
+  _updateValueReadout(root, key, value) {
+    root.querySelectorAll('[data-character-value-for]').forEach((node) => {
+      if (node.dataset.characterValueFor === key) node.textContent = value;
+    });
+  }
+
+  _downloadJson(filename, payload) {
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  _importCharacterPersonality(characterId) {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json,application/json';
+    input.onchange = async (event) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      try {
+        const raw = await file.text();
+        const parsed = JSON.parse(raw);
+        this._mutateCharacter(characterId, (character) => {
+          character.personality = normalizePersonality(parsed);
+        });
+      } catch (error) {
+        alert('Could not import that personality file. Check that it is valid JSON.');
+      }
+    };
+    input.click();
+  }
+
+  _previewCharacterExpressionTransition(characterId, slotName) {
+    if (!this.visualLayout || !slotName || slotName === 'idle') return;
+    const registry = normalizeCharacterRegistry(this.characterRegistry);
+    const character = normalizeCharacter(registry.characters[makeCharacterId(characterId)] || createDefaultCharacter());
+    const idleSrc = getCharacterSlotSource(character, 'idle');
+    const sources = getCharacterSlotSources(character, slotName);
+    let targetSrc;
+    if (sources.length > 0) {
+      const index = this._getExpressionVariantIndex(character.id, slotName, sources.length);
+      targetSrc = sources[index];
+    } else {
+      targetSrc = getCharacterSlotSource(character, slotName);
+    }
+    if (!targetSrc || targetSrc === idleSrc) return;
+    const personality = normalizePersonality(character.personality);
+    const fadeMs = Number.isFinite(personality.crossfadeMs) ? personality.crossfadeMs : 320;
+    this.visualLayout.setCharacterPortraitSource(idleSrc, { fadeMs: 0, slotName: 'idle' });
+    this.visualLayout.setCharacterPortraitSource(targetSrc, {
+      fadeMs,
+      slotName
+    });
+  }
+
+  _mutateCharacter(characterId, mutator, options = {}) {
+    const registry = normalizeCharacterRegistry(this.characterRegistry);
+    const id = makeCharacterId(characterId);
+    const character = normalizeCharacter(registry.characters[id] || createDefaultCharacter({ id }));
+    if (mutator(character) === false) return null;
+    registry.characters[id] = normalizeCharacter(character);
+    registry.selectedId = id;
+    this._selectedCharacterEditorId = id;
+    this._saveCharacterRegistry(registry);
+    this._refreshCurrentLevelForCharacterChange(id);
+    if (options.rerender !== false) this._renderCharacterEditor();
+    return registry.characters[id];
+  }
+
+  _saveCharacterEdits(previousId, edits) {
+    const registry = normalizeCharacterRegistry(this.characterRegistry);
+    const oldId = makeCharacterId(previousId);
+    const nextId = makeCharacterId(edits.id, oldId);
+    const prev = normalizeCharacter(registry.characters[oldId] || createDefaultCharacter({ id: oldId }));
+    const next = normalizeCharacter({
+      ...prev,
+      id: nextId,
+      name: edits.name || prev.name,
+      personality: edits.personality || prev.personality
+    });
+    if (nextId !== oldId) delete registry.characters[oldId];
+    registry.characters[nextId] = next;
+    registry.selectedId = nextId;
+    this._selectedCharacterEditorId = nextId;
+    this._saveCharacterRegistry(registry);
+    if (nextId !== oldId) {
+      this._replaceAssignedCharacterIdAcrossLevels(oldId, nextId);
+    }
+    this._refreshCurrentLevelForCharacterChange(nextId);
+    this._renderCharacterEditor();
+  }
+
+  _uploadCharacterSlot(characterId, slotName) {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/webp,image/*';
+    input.onchange = async (event) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      const dataUrl = await readCharacterImageFile(file);
+      if (!dataUrl) {
+        alert('Could not read that image.');
+        return;
+      }
+      this._mutateCharacter(characterId, (character) => {
+        const existing = character.slots[slotName];
+        const list = Array.isArray(existing)
+          ? existing.filter(v => typeof v === 'string' && v.trim())
+          : (typeof existing === 'string' && existing.trim() ? [existing] : []);
+        list.push(dataUrl);
+        character.slots[slotName] = list.length > 1 ? list : list[0];
+        this._setExpressionVariantIndex(character.id, slotName, list.length - 1);
+      });
+    };
+    input.click();
+  }
+
+  _removeCharacterSlotVariant(characterId, slotName) {
+    this._mutateCharacter(characterId, (character) => {
+      const existing = character.slots[slotName];
+      const list = Array.isArray(existing)
+        ? existing.filter(v => typeof v === 'string' && v.trim())
+        : (typeof existing === 'string' && existing.trim() ? [existing] : []);
+      if (list.length === 0) {
+        character.slots[slotName] = null;
+        this._setExpressionVariantIndex(character.id, slotName, 0);
+        return;
+      }
+      const index = this._getExpressionVariantIndex(character.id, slotName, list.length);
+      list.splice(index, 1);
+      if (list.length === 0) {
+        character.slots[slotName] = null;
+      } else if (list.length === 1) {
+        character.slots[slotName] = list[0];
+      } else {
+        character.slots[slotName] = list;
+      }
+      const nextIndex = list.length === 0 ? 0 : Math.min(index, list.length - 1);
+      this._setExpressionVariantIndex(character.id, slotName, nextIndex);
+    });
+  }
+
   _setDialogueControllerContextForCurrentLevel(options = {}) {
     const level = this.levelManager.getCurrentLevel();
     const live = !!options.live;
@@ -3034,6 +4259,16 @@ class PeggleApp {
     const config = this._getCurrentDialogueConfig();
     const selectedEntry = this._getSelectedDialogueEntry();
     const previewState = this._dialoguePreviewState;
+    const dialogueEmotionSlots = Array.from(new Set([
+      ...CANONICAL_EMOTION_SLOTS,
+      ...Object.keys(this._resolveLevelCharacter(level).slots || {})
+    ]));
+    const emotionOptions = [
+      '<option value="">No portrait reaction</option>',
+      ...dialogueEmotionSlots.map(slot => `
+        <option value="${this._esc(slot)}"${selectedEntry?.emotion === slot ? ' selected' : ''}>${this._esc(slot)}</option>
+      `)
+    ].join('');
 
     const entryListHtml = config.entries.length > 0
       ? config.entries.map((entry, index) => {
@@ -3047,7 +4282,7 @@ class PeggleApp {
                 <span class="dialogue-entry-badge">${this._esc(this._formatDialogueTriggerSummary(entry))}</span>
               </div>
               <div class="dialogue-entry-meta">
-                ${this._esc(this._formatDialogueLocaleSummary(entry))} · ${Math.round((entry.timeoutMs || 0) / 1000)}s${entry.once ? ' · once' : ' · repeat'}${entry.enabled ? '' : ' · disabled'}${isPreviewing ? ` · preview ${this._esc(previewState.language.toUpperCase())}` : ''}
+                ${this._esc(this._formatDialogueLocaleSummary(entry))} · ${Math.round((entry.timeoutMs || 0) / 1000)}s${entry.once ? ' · once' : ' · repeat'}${entry.emotion ? ` · ${this._esc(entry.mode || 'override')}:${this._esc(entry.emotion)}` : ''}${entry.enabled ? '' : ' · disabled'}${isPreviewing ? ` · preview ${this._esc(previewState.language.toUpperCase())}` : ''}
               </div>
             </button>
             <div class="dialogue-entry-actions">
@@ -3089,6 +4324,25 @@ class PeggleApp {
             <label class="dialogue-toggle"><input id="dialogueDismissSpinToggle" type="checkbox"${selectedEntry.dismissOn?.spin ? ' checked' : ''}> Hide on spin</label>
           </div>
           <div class="dialogue-block-note">Dismiss only reacts to a real shot or a real spin start, not random taps.</div>
+          <div class="dialogue-inline-grid">
+            <label class="dialogue-field">
+              <span class="dialogue-field-label">Portrait emotion</span>
+              <select id="dialogueEmotionSelect" class="dialogue-field-select">
+                ${emotionOptions}
+              </select>
+            </label>
+            <label class="dialogue-field">
+              <span class="dialogue-field-label">Portrait mode</span>
+              <select id="dialogueEmotionModeSelect" class="dialogue-field-select">
+                <option value="override"${selectedEntry.mode === 'override' ? ' selected' : ''}>Hold this expression during the line</option>
+                <option value="impulse"${selectedEntry.mode === 'impulse' ? ' selected' : ''}>Nudge mood when line starts</option>
+              </select>
+            </label>
+            <label class="dialogue-field dialogue-impulse-strength${selectedEntry.mode === 'impulse' ? '' : ' is-hidden'}">
+              <span class="dialogue-field-label">Mood nudge strength <b id="dialogueEmotionMagnitudeValue">${Number(selectedEntry.emotionMagnitude || 0.55).toFixed(2)}</b></span>
+              <input id="dialogueEmotionMagnitudeInput" class="character-range" type="range" min="0" max="2" step="0.05" value="${Number(selectedEntry.emotionMagnitude || 0.55).toFixed(2)}"${selectedEntry.mode === 'impulse' ? '' : ' disabled'}>
+            </label>
+          </div>
         </div>
 
         <div class="dialogue-card-block">
@@ -3254,6 +4508,29 @@ class PeggleApp {
       });
     });
 
+    body.querySelector('#dialogueEmotionSelect')?.addEventListener('change', (event) => {
+      this._updateDialogueEntry(selectedEntry.id, (entry) => {
+        entry.emotion = event.target.value || '';
+        if (entry.emotion && !entry.mode) entry.mode = 'override';
+        if (!entry.emotion) entry.mode = '';
+      });
+    });
+
+    body.querySelector('#dialogueEmotionModeSelect')?.addEventListener('change', (event) => {
+      this._updateDialogueEntry(selectedEntry.id, (entry) => {
+        entry.mode = event.target.value === 'impulse' ? 'impulse' : 'override';
+      });
+    });
+
+    body.querySelector('#dialogueEmotionMagnitudeInput')?.addEventListener('input', (event) => {
+      const value = clampDialogueEmotionMagnitude(Number(event.target.value));
+      const valueEl = body.querySelector('#dialogueEmotionMagnitudeValue');
+      if (valueEl) valueEl.textContent = value.toFixed(2);
+      this._updateDialogueEntry(selectedEntry.id, (entry) => {
+        entry.emotionMagnitude = value;
+      }, { rerender: false });
+    });
+
     body.querySelector('#dialogueTriggerType')?.addEventListener('change', (event) => {
       this._updateDialogueEntry(selectedEntry.id, (entry) => {
         entry.trigger.type = event.target.value;
@@ -3406,7 +4683,8 @@ class PeggleApp {
     const level = this.levelManager.getCurrentLevel();
     if (!level) return;
 
-    const json = this.levelManager.exportLevel(level.id);
+    const snapshot = this._cloneLevelSnapshot(level);
+    const json = JSON.stringify(snapshot, null, 2);
     const blob = new Blob([json], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     
@@ -3475,7 +4753,10 @@ class PeggleApp {
   }
 
   _cloneLevelSnapshot(level) {
-    return cloneLevelSnapshot(level);
+    if (!level) return null;
+    const copy = Utils.deepClone(level);
+    attachCharacterSnapshotToLevel(copy, this.characterRegistry);
+    return cloneLevelSnapshot(copy);
   }
 
   _readBakedLevelSnapshot(bakedName) {

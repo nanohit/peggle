@@ -11,6 +11,7 @@ import { normalizeYoyoSettings } from './yoyo-thread.js';
 import { normalizeMultiballSpawnCount } from './multiball-settings.js';
 import { normalizeVisuals } from './visual-config.js';
 import { normalizeDialogueConfig } from './dialogue-config.js';
+import { normalizeLevelCharacterAssignment } from './character-config.js';
 import { normalizeLevelHitPegClearSettings } from './hit-peg-clear-settings.js';
 import { isPortalType, normalizePortalPegProperties } from './portal-defaults.js';
 
@@ -88,6 +89,7 @@ export function normalizeLevelData(level) {
   }
 
   level.visuals = normalizeVisuals(level.visuals);
+  level.character = normalizeLevelCharacterAssignment(level.character);
   level.dialogue = normalizeDialogueConfig(level.dialogue);
   return level;
 }
@@ -122,6 +124,7 @@ export class LevelManager {
       hitPegClearDelayMs: hitPegClear.delayMs,
       survival: ensureLevelSurvival({}, 600),
       visuals: normalizeVisuals(null),
+      character: normalizeLevelCharacterAssignment(null),
       dialogue: normalizeDialogueConfig(null),
       metadata: {
         created: new Date().toISOString().split('T')[0],

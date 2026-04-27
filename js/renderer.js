@@ -1835,7 +1835,6 @@ export class Renderer {
     const ctx = this.ctx;
     const outerRadius = getBallRadius() + 8;
     const innerRadius = getBallRadius() + 2;
-    const indicatorLen = outerRadius + 14;
     const ringStart = angle - Math.PI * 0.22;
     const ringEnd = angle + Math.PI * 0.22;
 
@@ -1858,24 +1857,6 @@ export class Renderer {
     ctx.strokeStyle = COLORS.launcherAim;
     ctx.lineWidth = 3;
     ctx.stroke();
-
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-    ctx.lineTo(x + Math.cos(angle) * indicatorLen, y + Math.sin(angle) * indicatorLen);
-    ctx.strokeStyle = COLORS.launcherAim;
-    ctx.lineWidth = 3;
-    ctx.stroke();
-
-    ctx.beginPath();
-    ctx.arc(
-      x + Math.cos(angle) * indicatorLen,
-      y + Math.sin(angle) * indicatorLen,
-      3,
-      0,
-      Math.PI * 2
-    );
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
-    ctx.fill();
 
     ctx.restore();
   }
@@ -1948,12 +1929,17 @@ export class Renderer {
     const end = trajectory.points[trajectory.points.length - 1];
 
     ctx.save();
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.34)';
-    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = COLORS.launcherAim;
+    ctx.lineWidth = 3;
     ctx.beginPath();
     ctx.moveTo(start.x, start.y);
     ctx.lineTo(end.x, end.y);
     ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(end.x, end.y, 3, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+    ctx.fill();
     ctx.restore();
   }
 

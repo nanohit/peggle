@@ -9,6 +9,8 @@ import { normalizeVisuals } from './visual-config.js';
 import { normalizeLevelData } from './levels.js';
 import { DialogueController } from './dialogue-controller.js';
 import { GambleSystem } from './gamble-system.js';
+import { loadCharacterRegistry } from './character-config.js';
+import { PortraitReactionController } from './portrait-reactions.js';
 import { getStoredLanguage, getPauseCopy, normalizeLanguage, setStoredLanguage } from './localization.js';
 import { topoOrder, buildNodeMap, buildParentMap, buildLevelIndexMap, graphFromLevels } from './graph/core.js';
 import { validateGraph } from './graph/validate.js';
@@ -269,6 +271,8 @@ function mirrorLevel(levelData, canvasWidth = WORLD_W) {
 
     if (peg.shape === 'brick') {
       peg.angle = -peg.angle;
+    } else if (peg.type === 'portalBlue' || peg.type === 'portalOrange') {
+      peg.angle = -(peg.angle || 0);
     }
 
     if (peg.curveSlices && peg.curveSlices.length > 0) {
@@ -436,6 +440,9 @@ async function bootWithLevels(levels, campaignName, campaignData) {
   visualLayout.mount();
   visualLayout.setEditMode(false);
   const dialogueController = new DialogueController({ visualLayout, persistSeen: true });
+  const characterRegistry = loadCharacterRegistry();
+  const portraitReactionController = new PortraitReactionController({ visualLayout });
+  dialogueController.setPortraitReactionController(portraitReactionController);
   dialogueController.mount();
   let currentLanguage = getStoredLanguage();
   dialogueController.setLanguage(currentLanguage);
@@ -676,6 +683,7 @@ async function bootWithLevels(levels, campaignName, campaignData) {
     ensurePauseAssetsLoaded();
     paused = true;
     game.pause();
+    portraitReactionController.setPaused(true);
     pauseOverlay.classList.remove('pause-overlay--map-mode');
     pauseOverlay.classList.remove('pause-overlay--instant');
     pauseOverlay.classList.add('visible');
@@ -694,6 +702,7 @@ async function bootWithLevels(levels, campaignName, campaignData) {
     pauseOverlay.classList.remove('pause-overlay--map-mode');
     if (!fromMap) pauseOverlay.classList.remove('pause-overlay--instant');
     visualLayout.frame.classList.remove('visual-frame--paused');
+    portraitReactionController.setPaused(false);
     if (fromMap) {
       requestAnimationFrame(() => {
         pauseOverlay.classList.remove('pause-overlay--instant');
@@ -900,6 +909,7 @@ async function bootWithLevels(levels, campaignName, campaignData) {
           pauseOverlay.classList.remove('pause-overlay--map-mode');
           visualLayout.frame.classList.remove('visual-frame--paused');
           paused = false;
+          portraitReactionController.setPaused(false);
           if (game) game.resume();
           await closingMap.hide({ fadeMs: 120 });
           activeLevelMap = null;
@@ -1068,6 +1078,7 @@ async function bootWithLevels(levels, campaignName, campaignData) {
       ...options
     });
     dialogueController.setGambleSystem(system);
+    portraitReactionController.setGambleSystem(system);
     return system;
   }
 
@@ -1218,6 +1229,14 @@ async function bootWithLevels(levels, campaignName, campaignData) {
 
     game.loadLevel(levelData);
     bindGambleSystem(game);
+    portraitReactionController.setContext({
+      level: levelData,
+      registry: characterRegistry,
+      game,
+      gambleSystem,
+      scopeKey: campaignName ? `campaign:${campaignName}` : 'single',
+      paused: false
+    });
     if (typeof levelData.aimLength === 'number') {
       game.setAimLength(levelData.aimLength);
     }

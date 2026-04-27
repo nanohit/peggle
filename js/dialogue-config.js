@@ -5,6 +5,8 @@ export const DIALOGUE_DEFAULT_TIMEOUT_MS = 15000;
 export const DIALOGUE_TRIGGER_TYPES = ['levelStart', 'spinReward', 'pegProgress', 'performanceCap30'];
 export const DIALOGUE_DEFAULT_SEGMENT_COLOR = '#ffffff';
 export const DIALOGUE_DEFAULT_TEXT_SCALE = 1;
+export const DIALOGUE_EMOTION_MODES = ['override', 'impulse'];
+export const DIALOGUE_DEFAULT_IMPULSE_MAGNITUDE = 0.55;
 
 function clampRange(value, min, max, fallback) {
   const n = Number(value);
@@ -85,8 +87,19 @@ export function clampDialogueTimeoutMs(value) {
   return Math.max(0, Math.min(120000, Math.round(value)));
 }
 
+export function clampDialogueEmotionMagnitude(value) {
+  if (!Number.isFinite(value)) return DIALOGUE_DEFAULT_IMPULSE_MAGNITUDE;
+  return Math.max(0, Math.min(2, Number(value)));
+}
+
 export function createDialogueEntry(overrides = null) {
   const trigger = normalizeTrigger(overrides?.trigger);
+  const emotion = typeof overrides?.emotion === 'string' && overrides.emotion.trim()
+    ? overrides.emotion.trim()
+    : '';
+  const mode = DIALOGUE_EMOTION_MODES.includes(overrides?.mode)
+    ? overrides.mode
+    : (emotion ? 'override' : '');
   return {
     id: typeof overrides?.id === 'string' && overrides.id ? overrides.id : Utils.generateId(),
     title: typeof overrides?.title === 'string' && overrides.title.trim()
@@ -99,6 +112,11 @@ export function createDialogueEntry(overrides = null) {
     ),
     dismissOn: normalizeDismissOn(overrides?.dismissOn),
     trigger,
+    emotion,
+    mode,
+    emotionMagnitude: clampDialogueEmotionMagnitude(
+      Number.isFinite(overrides?.emotionMagnitude) ? overrides.emotionMagnitude : DIALOGUE_DEFAULT_IMPULSE_MAGNITUDE
+    ),
     placement: normalizePlacement(overrides?.placement),
     content: {
       ru: normalizeLocale(overrides?.content?.ru),

@@ -130,6 +130,7 @@ export class Game {
     this.hitPegIds = [];
     this.turnHitPegIds = [];
     this.shotsFired = 0;
+    this._turnBucketCatchCount = 0;
     this.totalSurvivalTargets = 0;
     this.initialBallCount = 10;
     this.gambleBalls = 0;
@@ -154,6 +155,7 @@ export class Game {
     this._lastPegSlowmoElapsedMs = -1;
     this._pendingEndResult = null;
     this._gameEndEmitted = false;
+    this._levelClearEmitted = false;
     this._stopped = false;
     this._frozenSurvivalTrackerState = null;
     this.endSequenceConfig = normalizeEndSequenceConfig(null);
@@ -228,6 +230,7 @@ export class Game {
     this.onPegHit = null;
     this.uiStateListeners = new Set();
     this.performanceEventListeners = new Set();
+    this.gameplayEventListeners = new Set();
     this.lastUiStateSignature = '';
     this._performanceCap30Samples = [];
     this._performanceCap30Emitted = false;
@@ -475,6 +478,14 @@ export class Game {
     };
   }
 
+  subscribeGameplayEvents(listener) {
+    if (typeof listener !== 'function') return () => {};
+    this.gameplayEventListeners.add(listener);
+    return () => {
+      this.gameplayEventListeners.delete(listener);
+    };
+  }
+
   emitUiStateIfChanged(force = false, reason = 'tick') {
     const signature = this.getUiStateSignature();
     if (!force && signature === this.lastUiStateSignature) return;
@@ -494,6 +505,17 @@ export class Game {
   emitPerformanceEvent(type, payload = {}) {
     if (!type || this.performanceEventListeners.size === 0) return;
     for (const listener of this.performanceEventListeners) {
+      try {
+        listener(type, payload);
+      } catch (error) {
+        // Listener errors must not break the game loop.
+      }
+    }
+  }
+
+  emitGameplayEvent(type, payload = {}) {
+    if (!type || this.gameplayEventListeners.size === 0) return;
+    for (const listener of this.gameplayEventListeners) {
       try {
         listener(type, payload);
       } catch (error) {
@@ -587,6 +609,15 @@ export class Game {
     this.state = result;
     this.finishDeepFreezeShot();
     this.resetUltraAimRuntime();
+    const isWin = result === 'won';
+    if (!isWin || !this._levelClearEmitted) {
+      this.emitGameplayEvent(isWin ? 'level_clear' : 'level_failed', {
+        result,
+        score: this.score,
+        shotsFired: this.shotsFired
+      });
+      if (isWin) this._levelClearEmitted = true;
+    }
     if (!this._gameEndEmitted && this.onGameEnd) {
       this._gameEndEmitted = true;
       this.onGameEnd(result, this.score);
@@ -702,35 +733,61 @@ export class Game {
     const localOriginY = -(originX - pegX) * sin + (originY - pegY) * cos;
     const localDirX = dirX * cos + dirY * sin;
     const localDirY = -dirX * sin + dirY * cos;
-    const halfW = (Number.isFinite(peg.width) ? peg.width : PHYSICS_CONFIG.brickWidth) * 0.5 + padding;
-    const halfH = (Number.isFinite(peg.height) ? peg.height : PHYSICS_CONFIG.brickHeight) * 0.5 + padding;
+    const baseHalfW = (Number.isFinite(peg.width) ? peg.width : PHYSICS_CONFIG.brickWidth) * 0.5;
+    const baseHalfH = (Number.isFinite(peg.height) ? peg.height : PHYSICS_CONFIG.brickHeight) * 0.5;
+    const halfW = baseHalfW + padding;
+    const halfH = baseHalfH + padding;
 
+    // Slab test against the inflated rectangle.
     let tMin = -Infinity;
     let tMax = Infinity;
-    const slabs = [
-      { origin: localOriginX, dir: localDirX, min: -halfW, max: halfW },
-      { origin: localOriginY, dir: localDirY, min: -halfH, max: halfH }
-    ];
-
-    for (const slab of slabs) {
-      if (Math.abs(slab.dir) < 1e-6) {
-        if (slab.origin < slab.min || slab.origin > slab.max) return null;
-        continue;
-      }
-      let t1 = (slab.min - slab.origin) / slab.dir;
-      let t2 = (slab.max - slab.origin) / slab.dir;
-      if (t1 > t2) {
-        const tmp = t1;
-        t1 = t2;
-        t2 = tmp;
-      }
+    if (Math.abs(localDirX) < 1e-6) {
+      if (localOriginX < -halfW || localOriginX > halfW) return null;
+    } else {
+      let t1 = (-halfW - localOriginX) / localDirX;
+      let t2 = (halfW - localOriginX) / localDirX;
+      if (t1 > t2) { const tmp = t1; t1 = t2; t2 = tmp; }
       tMin = Math.max(tMin, t1);
       tMax = Math.min(tMax, t2);
       if (tMin > tMax) return null;
     }
-
+    if (Math.abs(localDirY) < 1e-6) {
+      if (localOriginY < -halfH || localOriginY > halfH) return null;
+    } else {
+      let t1 = (-halfH - localOriginY) / localDirY;
+      let t2 = (halfH - localOriginY) / localDirY;
+      if (t1 > t2) { const tmp = t1; t1 = t2; t2 = tmp; }
+      tMin = Math.max(tMin, t1);
+      tMax = Math.min(tMax, t2);
+      if (tMin > tMax) return null;
+    }
     if (tMax <= 0.001) return null;
-    return tMin > 0.001 ? tMin : tMax;
+    const tEnter = tMin > 0.001 ? tMin : tMax;
+
+    // The inflated rectangle over-detects at corners (square instead of rounded
+    // by ballRadius). If the entry lands in a corner region, refine with a
+    // ray-vs-circle test against the corresponding corner — matching the proper
+    // Minkowski hitbox the real ball physics uses.
+    const px = localOriginX + localDirX * tEnter;
+    const py = localOriginY + localDirY * tEnter;
+    if (Math.abs(px) <= baseHalfW || Math.abs(py) <= baseHalfH) {
+      return tEnter;
+    }
+
+    // Corner region: ray vs quarter-circle of radius `padding` at the brick corner.
+    const cx = (px > 0 ? baseHalfW : -baseHalfW);
+    const cy = (py > 0 ? baseHalfH : -baseHalfH);
+    const ex = localOriginX - cx;
+    const ey = localOriginY - cy;
+    const b = ex * localDirX + ey * localDirY;
+    const c = ex * ex + ey * ey - padding * padding;
+    const disc = b * b - c;
+    if (disc < 0) return null;
+    const root = Math.sqrt(disc);
+    const near = -b - root;
+    if (near > 0.001) return near;
+    const far = -b + root;
+    return far > 0.001 ? far : null;
   }
 
   getUltraAimBoundaryDistance(originX, originY, dirX, dirY) {
@@ -761,6 +818,8 @@ export class Game {
     const ballRadius = getBallRadius();
     let bestDistance = this.getUltraAimBoundaryDistance(origin.x, origin.y, dirX, dirY);
     let hit = null;
+    let hitPeg = null;
+    let hitPose = null;
 
     for (const peg of this.pegs) {
       if (!peg || peg.id === sourcePeg?.id || this.isPortalPeg(peg)) continue;
@@ -784,11 +843,29 @@ export class Game {
           y: origin.y + dirY * distance,
           pegId: peg.id
         };
+        hitPeg = peg;
+        hitPose = pose;
       }
     }
 
-    const endX = origin.x + dirX * bestDistance;
-    const endY = origin.y + dirY * bestDistance;
+    // The collision math gives ball-center-at-collision, which sits a ball-radius
+    // away from the peg surface — drawing the line there leaves a visible gap.
+    // Extend the endpoint along the ray (not toward peg center, which would push
+    // it off-axis and make the line wobble) by up to ballRadius, capped at the
+    // ray's closest approach to the peg so we never overshoot. For head-on hits
+    // this lands on the peg surface; for grazing hits it gracefully shortens.
+    let endX = origin.x + dirX * bestDistance;
+    let endY = origin.y + dirY * bestDistance;
+    if (hitPeg) {
+      const pegX = Number.isFinite(hitPose?.x) ? hitPose.x : hitPeg.x;
+      const pegY = Number.isFinite(hitPose?.y) ? hitPose.y : hitPeg.y;
+      const alongRayToPeg = (pegX - origin.x) * dirX + (pegY - origin.y) * dirY;
+      const chordHalf = alongRayToPeg - bestDistance;
+      const extension = Math.min(ballRadius, Math.max(0, chordHalf));
+      endX = origin.x + dirX * (bestDistance + extension);
+      endY = origin.y + dirY * (bestDistance + extension);
+    }
+
     return {
       points: [
         { x: origin.x, y: origin.y },
@@ -1733,6 +1810,7 @@ export class Game {
     this._lastPegSlowmoElapsedMs = -1;
     this._pendingEndResult = null;
     this._gameEndEmitted = false;
+    this._levelClearEmitted = false;
     this._frozenSurvivalTrackerState = null;
 
     this.updateLaunchPosition();
@@ -1907,6 +1985,7 @@ export class Game {
     if (!hadActiveSurvivalBalls) {
       this.turnHitPegIds = [];
       this.ballPositionHistory = [];
+      this._turnBucketCatchCount = 0;
     }
     this.shotsFired += 1;
     this.survivalShotCooldownRemainingMs = survivalMode ? this.survivalAntiCooldownMs : 0;
@@ -1918,6 +1997,11 @@ export class Game {
       this.emitUiStateIfChanged(true, 'survival-launch');
     }
     this.trajectory = null;
+    this.emitGameplayEvent('shot_launched', {
+      shotsFired: this.shotsFired,
+      ballsLeft: this.ballsLeft,
+      survivalMode
+    });
   }
 
   isOrangePeg(p) {
@@ -2048,12 +2132,30 @@ export class Game {
         this.queueVictoryShockwave(peg, sourceBall);
         this._startLastPegSlowmo();
         this._queuePendingEndResult('won', { readyToResolve: this.isSurvivalMode() });
+        if (!this._levelClearEmitted) {
+          this._levelClearEmitted = true;
+          this.emitGameplayEvent('level_clear', {
+            result: 'won',
+            score: this.score,
+            shotsFired: this.shotsFired,
+            atLastPeg: true
+          });
+        }
       }
     }
 
     pegHitSound();
 
     if (this.onPegHit) this.onPegHit(peg, points);
+    this.emitGameplayEvent('peg_hit', {
+      pegId: peg.id,
+      pegType: peg.type,
+      points,
+      turnHitCount: this.turnHitPegIds.length,
+      orangePegsLeft: this.isSurvivalMode()
+        ? this.getSurvivalTargetsLeft(true)
+        : this.getOrangePegsLeft()
+    });
     if (this.onScoreChange) this.onScoreChange(this.score);
 
     const allowMultiball = options?.allowMultiball !== false;
@@ -2098,6 +2200,18 @@ export class Game {
       if (this.state === 'won') return;
     }
 
+    const endedTurnHitCount = this.turnHitPegIds.length;
+    const endedTurnBucketCatchCount = this._turnBucketCatchCount || 0;
+    const emitBallLostReaction = () => {
+      if (endedTurnBucketCatchCount > 0) return;
+      const eventType = endedTurnHitCount >= 4 ? 'ball_lost_after_streak' : 'ball_lost_clean';
+      this.emitGameplayEvent(eventType, {
+        turnHitCount: endedTurnHitCount,
+        ballsLeft: this.ballsLeft,
+        shotsFired: this.shotsFired
+      });
+    };
+
     this.yoyoThread.clear();
     this.clearDynamicYoyoAnchors();
     this.finishDeepFreezeShot();
@@ -2139,6 +2253,7 @@ export class Game {
         if (this._maybeFinalizePendingEndResult()) return;
       }
 
+      emitBallLostReaction();
       const preserveAim = this.isAimingState() && !!this.getLauncherBall();
       this.hitPegIds = [];
       this.turnHitPegIds = [];
@@ -2161,6 +2276,8 @@ export class Game {
       if (this._maybeFinalizePendingEndResult()) return;
       return;
     }
+
+    emitBallLostReaction();
 
     // Check lose condition (bucket catches already credited in onPhysicsUpdate)
     if (this.ballsLeft <= 0) {
@@ -2408,8 +2525,13 @@ export class Game {
     // Credit bucket catches immediately so the ball counter updates in real time
     if (result.bucketCatchCount > 0) {
       this.ballsLeft += result.bucketCatchCount;
+      this._turnBucketCatchCount += result.bucketCatchCount;
       this.bucketCatchLight = Math.min(1, this.bucketCatchLight + 0.72 + Math.max(0, result.bucketCatchCount - 1) * 0.18);
       this.emitUiStateIfChanged(true, 'bucket-catch');
+      this.emitGameplayEvent('bucket_catch', {
+        count: result.bucketCatchCount,
+        ballsLeft: this.ballsLeft
+      });
     }
 
     // End turn when all balls are gone
@@ -2785,6 +2907,7 @@ export class Game {
     this._resetPerformanceCap30Detection({ preserveEmitted: true });
     this.uiStateListeners.clear();
     this.performanceEventListeners.clear();
+    this.gameplayEventListeners.clear();
     this.abortController.abort();
     this.renderer?.dispose?.();
   }

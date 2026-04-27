@@ -6,7 +6,7 @@
 import { topoOrder } from './graph/core.js';
 import { computeLayout, toPixelPositions } from './graph/layout.js';
 import { getNodeState } from './graph/progression.js';
-import { resolveAssetPaths } from './visual-config.js';
+import { getLevelCharacterPortraitSources, loadCharacterRegistry, resolveCharacterForLevel } from './character-config.js';
 
 const BIG_R = 38;
 const SMALL_R = 24;
@@ -22,7 +22,6 @@ const ASSET_PATHS = {
   completedSmall: 'visuals/Level_graph/completed_level_small.webp',
   locked: 'visuals/Level_graph/locked_level.webp',
 };
-const DEFAULT_CHARACTER_ASSET = resolveAssetPaths('character');
 const IMAGE_CACHE = new Map();
 
 function loadImg(src) {
@@ -88,20 +87,13 @@ function resolveLevelForNode(levels, node) {
 }
 
 function characterPortraitKey(level) {
-  const custom = level?.visuals?.slots?.character?.customSrc;
-  return (typeof custom === 'string' && custom.trim())
-    ? custom
-    : '__default_character__';
+  const character = resolveCharacterForLevel(level, loadCharacterRegistry());
+  const idle = character?.slots?.idle;
+  return `${character?.id || 'character'}:${idle || '__default_character__'}`;
 }
 
 function characterPortraitSources(level) {
-  const custom = level?.visuals?.slots?.character?.customSrc;
-  const sources = [];
-  if (typeof custom === 'string' && custom.trim()) {
-    sources.push(custom);
-  }
-  sources.push(DEFAULT_CHARACTER_ASSET.webp, DEFAULT_CHARACTER_ASSET.png);
-  return sources;
+  return getLevelCharacterPortraitSources(level, loadCharacterRegistry(), 'idle');
 }
 
 export function prewarmLevelMapAssets(levels = [], graph = { nodes: [] }, options = {}) {
