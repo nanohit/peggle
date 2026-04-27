@@ -551,6 +551,7 @@ async function bootWithLevels(levels, campaignName, campaignData) {
 
     if (game) game.resize(WORLD_W, WORLD_H);
     visualLayout.resize(fw, fh);
+    dialogueController.refreshLayout();
   }
 
   // --- Graph setup ---

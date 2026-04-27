@@ -670,7 +670,12 @@ export class PhysicsEngine {
   tryPortalTeleport(ballLike, prevX = ballLike?.x, prevY = ballLike?.y, options = null) {
     if (!ballLike) return false;
     if (!Number.isFinite(prevX) || !Number.isFinite(prevY)) return false;
-    const portals = (this.portalPegs && this.portalPegs.length > 0) ? this.portalPegs : this.pegs;
+    const portalSource = (this.portalPegs && this.portalPegs.length > 0)
+      ? this.portalPegs
+      : this.pegs;
+    const portals = Array.isArray(portalSource)
+      ? portalSource.filter(peg => this.isPortalPeg(peg))
+      : [];
     if (!portals || portals.length === 0) return false;
     const previewOnly = !!(options && options.previewOnly);
     const canTeleport = (ballLike.portalCooldown || 0) <= 0;

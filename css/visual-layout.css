@@ -1093,7 +1093,6 @@
   text-align: center;
   position: relative;
   isolation: isolate;
-  transform: translateY(-50%);
 }
 
 .dialogue-card::before {

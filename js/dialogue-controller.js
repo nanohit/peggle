@@ -9,6 +9,10 @@ import { normalizeLanguage } from './localization.js';
 const DIALOGUE_SEEN_STORAGE_KEY = 'peggle_dialogue_seen_v1';
 const DIALOGUE_FADE_MS = 260;
 const GAME_WORLD_REFERENCE_WIDTH = 400;
+const DIALOGUE_FRAME_SIDE_PADDING = 8;
+const DIALOGUE_SAFE_TOP_PADDING = 18;
+const DIALOGUE_PORTRAIT_GAP = 18;
+const DIALOGUE_MAX_BOTTOM_RATIO = 0.46;
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -58,6 +62,7 @@ export class DialogueController {
     this._sessionTriggered = new Set();
     this._previewState = null;
     this._seenMap = null;
+    this._fontsReadyPromise = null;
   }
 
   mount() {
@@ -76,6 +81,7 @@ export class DialogueController {
     this.card = root.querySelector('.dialogue-card');
     this.textEl = root.querySelector('.dialogue-text');
     this.refreshLayout();
+    this._ensureFontLayoutRefresh();
 
     if (typeof ResizeObserver !== 'undefined') {
       this._resizeObserver = new ResizeObserver(() => this.refreshLayout());
@@ -173,6 +179,9 @@ export class DialogueController {
     this.root.style.bottom = 'auto';
     this.root.style.setProperty('--dialogue-font-size', `${bounds.fontSize}px`);
     this.root.style.setProperty('--dialogue-max-width', `${Math.round(bounds.maxWidth)}px`);
+    const cardHeight = this._measureCardHeight(bounds.fontSize);
+    const adjustedTop = this._resolveTop(bounds, cardHeight);
+    this.root.style.top = `${Math.round(adjustedTop)}px`;
   }
 
   previewEntry(entryOrId, options = {}) {
@@ -358,6 +367,7 @@ export class DialogueController {
       span.style.color = segment.color || '#ffffff';
       this.textEl.appendChild(span);
     }
+    this._ensureFontLayoutRefresh();
     return true;
   }
 
@@ -384,7 +394,16 @@ export class DialogueController {
   _computeBounds(entry = null) {
     const frame = this.visualLayout?.frame;
     if (!frame) {
-      return { left: 32, right: 32, top: 84, fontSize: 28, maxWidth: 280 };
+      return {
+        left: 32,
+        right: 32,
+        top: 84,
+        desiredTop: 84,
+        minTop: 32,
+        maxBottom: 220,
+        fontSize: 28,
+        maxWidth: 280
+      };
     }
     const frameRect = frame.getBoundingClientRect();
     const canvasRect = this._getCanvasRect(frameRect);
@@ -394,28 +413,49 @@ export class DialogueController {
     const textScale = clamp(Number(entry?.placement?.textScale) || 1, 0.5, 1.8);
     const maxWidth = Math.max(140, Math.min(canvasRect.width * 0.9, frameRect.width * 0.78));
     const centerX = canvasRect.left + canvasRect.width / 2;
-    const left = clamp(centerX - maxWidth / 2, 8, Math.max(8, frameRect.width - maxWidth - 8));
-    const rightInset = Math.max(8, frameRect.width - left - maxWidth);
-    const fallbackTop = canvasRect.top + canvasRect.height * 0.25;
-    const anchorTop = portraitBounds
-      ? portraitBounds.bottom + 32 * canvasScale
-      : fallbackTop;
-    const minTop = Math.max(22, canvasRect.top + canvasRect.height * 0.12);
-    const maxTop = Math.max(minTop, canvasRect.top + canvasRect.height * 0.42);
-    const top = clamp(
-      anchorTop + placementOffsetY * canvasScale,
-      minTop,
-      maxTop
+    const left = clamp(
+      centerX - maxWidth / 2,
+      DIALOGUE_FRAME_SIDE_PADDING,
+      Math.max(DIALOGUE_FRAME_SIDE_PADDING, frameRect.width - maxWidth - DIALOGUE_FRAME_SIDE_PADDING)
     );
+    const rightInset = Math.max(DIALOGUE_FRAME_SIDE_PADDING, frameRect.width - left - maxWidth);
+    const fallbackTop = canvasRect.top + canvasRect.height * 0.18;
+    const anchorTop = portraitBounds
+      ? portraitBounds.bottom + DIALOGUE_PORTRAIT_GAP * canvasScale
+      : fallbackTop;
+    const desiredTop = anchorTop + placementOffsetY * canvasScale;
+    const minTop = Math.max(DIALOGUE_SAFE_TOP_PADDING, canvasRect.top + canvasRect.height * 0.08);
+    const maxBottom = Math.max(minTop + 44, canvasRect.top + canvasRect.height * DIALOGUE_MAX_BOTTOM_RATIO);
     const availableWidth = Math.max(140, frameRect.width - left - rightInset);
     const fontSize = clamp(canvasRect.width * 0.105 * textScale, 12, 64);
     return {
       left,
       right: rightInset,
-      top,
+      top: desiredTop,
+      desiredTop,
+      minTop,
+      maxBottom,
       fontSize,
       maxWidth: Math.min(availableWidth, maxWidth)
     };
+  }
+
+  _measureCardHeight(fontSize = 28) {
+    const cardRect = this.card?.getBoundingClientRect?.();
+    if (cardRect?.height && cardRect.height > 0) {
+      return cardRect.height;
+    }
+    const textRect = this.textEl?.getBoundingClientRect?.();
+    if (textRect?.height && textRect.height > 0) {
+      return textRect.height;
+    }
+    return Math.max(fontSize * 1.6, 44);
+  }
+
+  _resolveTop(bounds, cardHeight) {
+    const safeHeight = Number.isFinite(cardHeight) && cardHeight > 0 ? cardHeight : 0;
+    const maxTop = Math.max(bounds.minTop, bounds.maxBottom - safeHeight);
+    return clamp(bounds.desiredTop, bounds.minTop, maxTop);
   }
 
   _getCanvasRect(frameRect) {
@@ -486,6 +526,16 @@ export class DialogueController {
     if (!this.root) return;
     this.root.classList.remove('dialogue-layer--visible', 'dialogue-layer--hiding', 'dialogue-layer--mounted');
     this.root.removeAttribute('data-lang');
+  }
+
+  _ensureFontLayoutRefresh() {
+    if (this._fontsReadyPromise || !document.fonts?.ready) return;
+    this._fontsReadyPromise = document.fonts.ready
+      .then(() => this.refreshLayout())
+      .catch(() => {})
+      .finally(() => {
+        this._fontsReadyPromise = null;
+      });
   }
 
   _clearTimers() {
