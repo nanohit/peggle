@@ -2581,6 +2581,22 @@ class PeggleApp {
       this.game = null;
     }
 
+    // Defensive: dispose any existing editor before constructing a new one.
+    // Several call sites (level import, campaign open, mode toggles) re-enter
+    // startEditor while the previous Editor is still mounted; without this,
+    // its mousedown / mousemove / keydown listeners leak and a second instance
+    // runs alongside the new one — producing draw-mode "stickiness", duplicate
+    // pegs on commit, and double alt-drag copies.
+    if (this.editor) {
+      this.closeAnimationPanel?.();
+      this.closeBumperPanel?.();
+      this.closePortalPanel?.();
+      this.closeMultiballPanel?.();
+      this.closeFlipperPanel?.();
+      this.editor.stop();
+      this.editor = null;
+    }
+
     this.mode = 'editor';
     this.editor = new Editor(this.canvas, this.levelManager);
     this.editor.renderer.onVerticalProgress = (progress) => {
