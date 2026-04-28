@@ -16,6 +16,8 @@ export class CampaignManager {
     this.campaigns = [];
     this.beforeSyncCampaign = null;
     this._remoteSyncQueue = new Map();
+    this._remoteSyncTimers = new Map();
+    this._syncDebounceMs = 1500;
     this.load();
   }
 
@@ -284,7 +286,34 @@ export class CampaignManager {
     this._normalizeGraph(campaign, reason);
     campaign.modified = new Date().toISOString();
     this.save();
-    this._syncCampaign(campaign);
+    this._scheduleSyncCampaign(campaign);
+  }
+
+  // Coalesce a flurry of edits (reorder spamming, branch toggles, secret
+  // toggles) into a single remote POST. Without this the editor fires one
+  // /api/campaigns POST per click and burns through Vercel edge requests.
+  _scheduleSyncCampaign(campaign) {
+    if (!campaign?.id) return Promise.resolve(false);
+    const existing = this._remoteSyncTimers.get(campaign.id);
+    if (existing) clearTimeout(existing);
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this._remoteSyncTimers.delete(campaign.id);
+        const fresh = this.getById(campaign.id) || campaign;
+        this._syncCampaign(fresh).then(resolve, () => resolve(false));
+      }, this._syncDebounceMs);
+      this._remoteSyncTimers.set(campaign.id, timer);
+    });
+  }
+
+  _flushPendingSync(campaignId) {
+    const timer = this._remoteSyncTimers.get(campaignId);
+    if (!timer) return Promise.resolve(false);
+    clearTimeout(timer);
+    this._remoteSyncTimers.delete(campaignId);
+    const campaign = this.getById(campaignId);
+    if (!campaign) return Promise.resolve(false);
+    return this._syncCampaign(campaign);
   }
 
   _queueRemoteSync(campaignId, task) {

@@ -615,7 +615,11 @@ export function normalizeLevelCharacterAssignment(raw = null) {
     personalityPatch: normalizePersonalityPatch(source.personalityPatch || source.patch)
   };
   if (isPlainObject(source.snapshot)) {
-    assignment.snapshot = normalizeCharacter(source.snapshot);
+    // Older builds embedded the full character (including slot image data
+    // URLs) here, which bloated localStorage and remote payloads. Strip the
+    // images on load — registry is the source of truth for emotion assets.
+    const normalized = normalizeCharacter(source.snapshot);
+    assignment.snapshot = createCharacterRefSnapshot(normalized);
   }
   return assignment;
 }
@@ -678,8 +682,24 @@ export function mergePersonalityPatch(personality, patch) {
   return normalizePersonality(merged);
 }
 
+// Full snapshot (includes slot image data URLs). Use only for stand-alone
+// exports where the level needs to render without a registry. NEVER store
+// this in localStorage or push it through the per-level sync pipeline —
+// images would be duplicated across every level + bake + remote save.
 export function createCharacterSnapshot(character) {
   return normalizeCharacter(character);
+}
+
+// Reference snapshot — id, name, personality only. Slot images live in the
+// registry (one copy, sourced once at runtime). This is what gets embedded
+// into level.character.snapshot so per-level storage stays small.
+export function createCharacterRefSnapshot(character) {
+  const normalized = normalizeCharacter(character);
+  return {
+    id: normalized.id,
+    name: normalized.name,
+    personality: normalized.personality
+  };
 }
 
 export function attachCharacterSnapshotToLevel(level, registry = loadCharacterRegistry()) {
@@ -689,22 +709,12 @@ export function attachCharacterSnapshotToLevel(level, registry = loadCharacterRe
   const existingSnapshot = isPlainObject(level.character?.snapshot)
     ? normalizeCharacter(level.character.snapshot)
     : null;
-  let character = normalizedRegistry.characters[assignment.characterId]
+  const character = normalizedRegistry.characters[assignment.characterId]
     || existingSnapshot
     || normalizedRegistry.characters[DEFAULT_CHARACTER_ID];
-  const legacySrc = level?.visuals?.slots?.character?.customSrc;
-  if (
-    typeof legacySrc === 'string'
-    && legacySrc.trim()
-    && !existingSnapshot
-    && assignment.characterId === DEFAULT_CHARACTER_ID
-  ) {
-    character = normalizeCharacter(character);
-    character.slots.idle = legacySrc.trim();
-  }
   level.character = {
     ...assignment,
-    snapshot: createCharacterSnapshot(character)
+    snapshot: createCharacterRefSnapshot(character)
   };
   return level;
 }

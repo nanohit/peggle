@@ -9,7 +9,7 @@ import { normalizeVisuals } from './visual-config.js';
 import { normalizeLevelData } from './levels.js';
 import { DialogueController } from './dialogue-controller.js';
 import { GambleSystem } from './gamble-system.js';
-import { loadCharacterRegistry } from './character-config.js';
+import { loadCharacterRegistry, normalizeCharacterRegistry, saveCharacterRegistry, CHARACTER_REGISTRY_STORAGE_KEY } from './character-config.js';
 import { PortraitReactionController } from './portrait-reactions.js';
 import { getStoredLanguage, getPauseCopy, normalizeLanguage, setStoredLanguage } from './localization.js';
 import { topoOrder, buildNodeMap, buildParentMap, buildLevelIndexMap, graphFromLevels } from './graph/core.js';
@@ -241,6 +241,29 @@ function getQueryParam(key) {
   return new URLSearchParams(window.location.search).get(key);
 }
 
+async function fetchCharacterRegistryWithFallback(timeoutMs = 2000) {
+  const localFallback = () => loadCharacterRegistry();
+  if (typeof fetch !== 'function') return localFallback();
+  try {
+    const ctrl = (typeof AbortController === 'function') ? new AbortController() : null;
+    const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
+    const res = await fetch('/api/characters', ctrl ? { signal: ctrl.signal } : undefined);
+    if (timer) clearTimeout(timer);
+    if (!res.ok) return localFallback();
+    const remote = await res.json();
+    if (!remote || typeof remote !== 'object') return localFallback();
+    const normalized = normalizeCharacterRegistry(remote);
+    try {
+      saveCharacterRegistry(normalized);
+    } catch (e) {
+      console.warn('[player] character registry cache write failed', e);
+    }
+    return normalized;
+  } catch (e) {
+    return localFallback();
+  }
+}
+
 function getRequestedNames() {
   const raw = getQueryParam('level') || getQueryParam('levels');
   if (!raw) return [];
@@ -440,7 +463,11 @@ async function bootWithLevels(levels, campaignName, campaignData) {
   visualLayout.mount();
   visualLayout.setEditMode(false);
   const dialogueController = new DialogueController({ visualLayout, persistSeen: true });
-  const characterRegistry = loadCharacterRegistry();
+  // Pull the latest character registry from the server (best-effort, bounded
+  // 2s timeout). Falls back to whatever's in localStorage on failure. Per-
+  // level snapshots no longer carry slot images, so the registry is the only
+  // source of emotion assets at runtime.
+  const characterRegistry = await fetchCharacterRegistryWithFallback();
   const portraitReactionController = new PortraitReactionController({ visualLayout });
   dialogueController.setPortraitReactionController(portraitReactionController);
   dialogueController.mount();

@@ -2560,8 +2560,28 @@ class PeggleApp {
 
     // Async: pull remote levels into local cache
     this._pullRemoteLevels();
+    // Background-pull the character registry so portraits show without
+    // manually clicking Pull from Server. Local data wins if user already
+    // has custom characters here.
+    this._backgroundPullCharacterRegistry();
     this.updateLevelTitle();
     this.updateLevelSettings();
+  }
+
+  async _backgroundPullCharacterRegistry() {
+    if (this._characterRegistryAutoPulled) return;
+    this._characterRegistryAutoPulled = true;
+    if (this._characterRegistryHasUserData(this.characterRegistry)) return;
+    try {
+      await this._pullCharacterRegistryFromServer(null, { silent: true });
+      // Refresh portrait display for the current level if we got new data.
+      const level = this.levelManager.getCurrentLevel();
+      if (level && this.mode === 'editor') {
+        this._showAssignedCharacterIdlePortrait?.(level);
+      }
+    } catch (e) {
+      console.warn('[characters] background pull failed', e);
+    }
   }
 
   startEditor() {
