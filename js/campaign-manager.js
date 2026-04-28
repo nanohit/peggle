@@ -628,6 +628,97 @@ export class CampaignManager {
     this._commitGraphChange(campaign, 'graph node type updated');
   }
 
+  // ── Reorder helpers ──
+  // Swap a node's levelName with its unique predecessor / successor in the
+  // chain. Graph structure stays stable, only the level reference moves.
+  // Returns true if a swap happened.
+  _findGraphParents(graph, nodeId) {
+    return graph.nodes.filter(n => Array.isArray(n.children) && n.children.includes(nodeId));
+  }
+
+  moveGraphNodeUp(campaignId, nodeId) {
+    const campaign = this.getById(campaignId);
+    if (!campaign || !campaign.graph) return false;
+    const graph = campaign.graph;
+    const node = graph.nodes.find(n => n.id === nodeId);
+    if (!node) return false;
+    const parents = this._findGraphParents(graph, nodeId);
+    if (parents.length !== 1) return false;
+    const parent = parents[0];
+    if (parent.children.length !== 1) return false;
+    const tmp = parent.levelName;
+    parent.levelName = node.levelName;
+    node.levelName = tmp;
+    this._commitGraphChange(campaign, 'graph node moved up');
+    return true;
+  }
+
+  moveGraphNodeDown(campaignId, nodeId) {
+    const campaign = this.getById(campaignId);
+    if (!campaign || !campaign.graph) return false;
+    const graph = campaign.graph;
+    const node = graph.nodes.find(n => n.id === nodeId);
+    if (!node) return false;
+    if (!Array.isArray(node.children) || node.children.length !== 1) return false;
+    const child = graph.nodes.find(n => n.id === node.children[0]);
+    if (!child) return false;
+    const childParents = this._findGraphParents(graph, child.id);
+    if (childParents.length !== 1) return false;
+    const tmp = node.levelName;
+    node.levelName = child.levelName;
+    child.levelName = tmp;
+    this._commitGraphChange(campaign, 'graph node moved down');
+    return true;
+  }
+
+  // Reorder a sibling within its parent's children array. delta = -1 for left,
+  // +1 for right. Only works if the node has a single parent and has siblings.
+  moveGraphBranchSibling(campaignId, nodeId, delta) {
+    const campaign = this.getById(campaignId);
+    if (!campaign || !campaign.graph) return false;
+    const graph = campaign.graph;
+    const parents = this._findGraphParents(graph, nodeId);
+    if (parents.length !== 1) return false;
+    const parent = parents[0];
+    if (!Array.isArray(parent.children) || parent.children.length < 2) return false;
+    const idx = parent.children.indexOf(nodeId);
+    const target = idx + delta;
+    if (idx < 0 || target < 0 || target >= parent.children.length) return false;
+    const next = parent.children.slice();
+    [next[idx], next[target]] = [next[target], next[idx]];
+    parent.children = next;
+    this._commitGraphChange(campaign, 'graph branch reordered');
+    return true;
+  }
+
+  canMoveGraphNodeUp(campaignId, nodeId) {
+    const campaign = this.getById(campaignId);
+    if (!campaign || !campaign.graph) return false;
+    const parents = this._findGraphParents(campaign.graph, nodeId);
+    return parents.length === 1 && parents[0].children.length === 1;
+  }
+
+  canMoveGraphNodeDown(campaignId, nodeId) {
+    const campaign = this.getById(campaignId);
+    if (!campaign || !campaign.graph) return false;
+    const node = campaign.graph.nodes.find(n => n.id === nodeId);
+    if (!node || !Array.isArray(node.children) || node.children.length !== 1) return false;
+    const childParents = this._findGraphParents(campaign.graph, node.children[0]);
+    return childParents.length === 1;
+  }
+
+  canMoveGraphBranchSibling(campaignId, nodeId, delta) {
+    const campaign = this.getById(campaignId);
+    if (!campaign || !campaign.graph) return false;
+    const parents = this._findGraphParents(campaign.graph, nodeId);
+    if (parents.length !== 1) return false;
+    const parent = parents[0];
+    if (!Array.isArray(parent.children) || parent.children.length < 2) return false;
+    const idx = parent.children.indexOf(nodeId);
+    const target = idx + delta;
+    return idx >= 0 && target >= 0 && target < parent.children.length;
+  }
+
   static graphPlayOrder(graph) { return topoOrder(graph, true); }
 
   _syncGraphToLevelNames(campaign) {

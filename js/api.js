@@ -159,5 +159,32 @@ export const api = {
       console.warn('[api] setConfig failed:', e);
       return false;
     }
+  },
+
+  // ─── Characters ───────────────────────────────
+
+  async getCharacterRegistry() {
+    try {
+      const res = await fetch(`${API_BASE}/characters`);
+      if (!res.ok) return null;
+      return await res.json();
+    } catch (e) {
+      console.warn('[api] getCharacterRegistry failed:', e);
+      return null;
+    }
+  },
+
+  async saveCharacterRegistry(data) {
+    try {
+      const res = await fetch(`${API_BASE}/characters`, {
+        method: 'POST',
+        headers: adminHeaders(),
+        body: JSON.stringify({ data })
+      });
+      return res.ok;
+    } catch (e) {
+      console.warn('[api] saveCharacterRegistry failed:', e);
+      return false;
+    }
   }
 };

@@ -3165,6 +3165,109 @@ class PeggleApp {
     return this.characterRegistry;
   }
 
+  async _pushCharacterRegistryToServer(button = null) {
+    const registry = normalizeCharacterRegistry(this.characterRegistry);
+    let originalLabel = '';
+    if (button) {
+      originalLabel = button.textContent;
+      button.disabled = true;
+      button.textContent = 'Pushing...';
+    }
+    try {
+      const ok = await api.saveCharacterRegistry(registry);
+      if (button) {
+        button.textContent = ok ? 'Pushed ✓' : 'Push failed';
+        if (!ok) button.title = 'Server rejected the push — check the admin token in localStorage (peggle_admin_token).';
+      }
+      if (!ok) {
+        alert('Failed to push character registry to server. If you are an admin, set localStorage.peggle_admin_token first.');
+      }
+    } catch (error) {
+      console.warn('[characters] push failed', error);
+      if (button) button.textContent = 'Push failed';
+      alert('Failed to push character registry: ' + (error?.message || error));
+    } finally {
+      if (button) {
+        setTimeout(() => {
+          button.disabled = false;
+          button.textContent = originalLabel || 'Push to Server';
+        }, 1400);
+      }
+    }
+  }
+
+  async _pullCharacterRegistryFromServer(button = null, { silent = false } = {}) {
+    let originalLabel = '';
+    if (button) {
+      originalLabel = button.textContent;
+      button.disabled = true;
+      button.textContent = 'Pulling...';
+    }
+    try {
+      const remote = await api.getCharacterRegistry();
+      if (!remote) {
+        if (button) button.textContent = 'Nothing on server';
+        if (!silent) alert('No character registry stored on the server yet. Push from a populated localhost first.');
+        return false;
+      }
+      if (!silent) {
+        const local = normalizeCharacterRegistry(this.characterRegistry);
+        const localCount = Object.keys(local.characters || {}).length;
+        const localHasUserData = this._characterRegistryHasUserData(local);
+        if (localHasUserData) {
+          const remoteCount = Object.keys(remote.characters || {}).length;
+          const ok = confirm(
+            `Replace local characters with the server version?\n\n`
+            + `Local: ${localCount} character(s)${localHasUserData ? ' with custom data' : ''}\n`
+            + `Server: ${remoteCount} character(s)\n\n`
+            + `This will overwrite all local character data.`
+          );
+          if (!ok) return false;
+        }
+      }
+      const normalized = normalizeCharacterRegistry(remote);
+      this._saveCharacterRegistry(normalized);
+      this._selectedCharacterEditorId = normalized.selectedId;
+      this._renderCharacterEditor();
+      if (button) button.textContent = 'Pulled ✓';
+      return true;
+    } catch (error) {
+      console.warn('[characters] pull failed', error);
+      if (button) button.textContent = 'Pull failed';
+      if (!silent) alert('Failed to pull character registry: ' + (error?.message || error));
+      return false;
+    } finally {
+      if (button) {
+        setTimeout(() => {
+          button.disabled = false;
+          button.textContent = originalLabel || 'Pull from Server';
+        }, 1400);
+      }
+    }
+  }
+
+  // True iff the registry holds any character beyond a pristine default.
+  _characterRegistryHasUserData(registry) {
+    if (!registry || !registry.characters) return false;
+    const ids = Object.keys(registry.characters);
+    if (ids.length === 0) return false;
+    if (ids.length > 1) return true;
+    if (ids[0] !== DEFAULT_CHARACTER_ID) return true;
+    const defaultCharacter = registry.characters[DEFAULT_CHARACTER_ID];
+    if (!defaultCharacter) return false;
+    if (defaultCharacter.name && defaultCharacter.name !== 'Lu' && defaultCharacter.name !== DEFAULT_CHARACTER_ID) return true;
+    const slots = defaultCharacter.slots || {};
+    for (const [slotName, value] of Object.entries(slots)) {
+      if (slotName === 'idle') continue;
+      if (Array.isArray(value)) {
+        if (value.some(v => typeof v === 'string' && v.trim())) return true;
+      } else if (typeof value === 'string' && value.trim()) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   _updateCurrentLevelCharacter(mutator, options = {}) {
     const level = this.levelManager.getCurrentLevel();
     if (!level) return null;
@@ -3225,6 +3328,16 @@ class PeggleApp {
     this._renderCharacterEditor();
     document.getElementById('characterOverlay')?.classList.add('visible');
     this._positionEditorSideSheets();
+
+    // Auto-pull on first open of this session if local has nothing custom yet.
+    // Avoids losing the localhost-built character when first opening the editor
+    // on production, but never overwrites user-entered local data.
+    if (!this._characterRegistryAutoPulled) {
+      this._characterRegistryAutoPulled = true;
+      if (!this._characterRegistryHasUserData(this.characterRegistry)) {
+        this._pullCharacterRegistryFromServer(null, { silent: true });
+      }
+    }
   }
 
   closeCharacterEditor() {
@@ -3697,10 +3810,12 @@ class PeggleApp {
       <div class="dialogue-editor-toolbar">
         <button class="dialogue-chip-btn" type="button" data-character-new>+ Character</button>
         <button class="dialogue-preview-btn" type="button" data-character-export-trace>Export Trace CSV</button>
+        <button class="dialogue-preview-btn" type="button" data-character-pull-server title="Replace local characters with the version stored on the server">Pull from Server</button>
+        <button class="dialogue-chip-btn" type="button" data-character-push-server title="Upload local characters (with all images) to the server so production sees them">Push to Server</button>
         <div class="dialogue-toolbar-spacer"></div>
         <button class="dialogue-chip-btn" type="button" data-character-assign-current>Assign to Level</button>
       </div>
-      <div class="dialogue-editor-note">Characters save automatically. Any level assigned to this character ID uses the latest version; import/export is only backup.</div>
+      <div class="dialogue-editor-note">Characters save locally. Use Push/Pull to share between localhost and production — character + emotion images live in the server registry once pushed.</div>
 
       <div class="dialogue-card-block character-panel-block">
         <div class="dialogue-block-title">Expressions</div>
@@ -3754,6 +3869,12 @@ class PeggleApp {
     body.querySelector('[data-character-new]')?.addEventListener('click', () => this._addCharacter());
     body.querySelector('[data-character-export-trace]')?.addEventListener('click', () => {
       this.portraitReactionController.downloadTraceCsv();
+    });
+    body.querySelector('[data-character-push-server]')?.addEventListener('click', (event) => {
+      this._pushCharacterRegistryToServer(event.currentTarget);
+    });
+    body.querySelector('[data-character-pull-server]')?.addEventListener('click', (event) => {
+      this._pullCharacterRegistryFromServer(event.currentTarget);
     });
     body.querySelector('[data-character-assign-current]')?.addEventListener('click', () => {
       this._updateCurrentLevelCharacter((next) => {
@@ -5107,6 +5228,10 @@ class PeggleApp {
     document.getElementById('nodeBranchBtn').onclick = () => this._graphBranchAtSelected(campaignId);
     document.getElementById('nodeSecretBtn').onclick = () => this._graphToggleSecret(campaignId);
     document.getElementById('nodeRemoveBtn').onclick = () => this._graphRemoveSelected(campaignId);
+    document.getElementById('nodeMoveUpBtn').onclick = () => this._graphMoveSelected(campaignId, 'up');
+    document.getElementById('nodeMoveDownBtn').onclick = () => this._graphMoveSelected(campaignId, 'down');
+    document.getElementById('nodeBranchLeftBtn').onclick = () => this._graphMoveSelected(campaignId, 'left');
+    document.getElementById('nodeBranchRightBtn').onclick = () => this._graphMoveSelected(campaignId, 'right');
 
     this._refreshCampaignEditor(campaignId);
 
@@ -5253,6 +5378,36 @@ class PeggleApp {
       editBtn.disabled = !node.levelName;
       editBtn.title = node.levelName ? 'Edit this level in editor' : 'Node has no level';
     }
+
+    const upBtn = document.getElementById('nodeMoveUpBtn');
+    const downBtn = document.getElementById('nodeMoveDownBtn');
+    const leftBtn = document.getElementById('nodeBranchLeftBtn');
+    const rightBtn = document.getElementById('nodeBranchRightBtn');
+    const canUp = this.campaignManager.canMoveGraphNodeUp(campaignId, node.id);
+    const canDown = this.campaignManager.canMoveGraphNodeDown(campaignId, node.id);
+    const canLeft = this.campaignManager.canMoveGraphBranchSibling(campaignId, node.id, -1);
+    const canRight = this.campaignManager.canMoveGraphBranchSibling(campaignId, node.id, 1);
+    if (upBtn) upBtn.disabled = !canUp;
+    if (downBtn) downBtn.disabled = !canDown;
+    if (leftBtn) {
+      leftBtn.disabled = !canLeft;
+      leftBtn.style.display = (canLeft || canRight) ? '' : 'none';
+    }
+    if (rightBtn) {
+      rightBtn.disabled = !canRight;
+      rightBtn.style.display = (canLeft || canRight) ? '' : 'none';
+    }
+  }
+
+  _graphMoveSelected(campaignId, direction) {
+    if (this._selectedGraphNode === null) return;
+    const nodeId = this._selectedGraphNode;
+    let ok = false;
+    if (direction === 'up') ok = this.campaignManager.moveGraphNodeUp(campaignId, nodeId);
+    else if (direction === 'down') ok = this.campaignManager.moveGraphNodeDown(campaignId, nodeId);
+    else if (direction === 'left') ok = this.campaignManager.moveGraphBranchSibling(campaignId, nodeId, -1);
+    else if (direction === 'right') ok = this.campaignManager.moveGraphBranchSibling(campaignId, nodeId, 1);
+    if (ok) this._refreshCampaignEditor(campaignId);
   }
 
   // ─── Graph editing actions ───────────────────────────────
