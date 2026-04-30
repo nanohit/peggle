@@ -34,6 +34,28 @@ async function kvDel(key) {
 const INDEX_KEY = 'campaign:__index';
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 
+function cloneJson(value) {
+  if (value == null) return value;
+  return JSON.parse(JSON.stringify(value));
+}
+
+function sanitizeLevelForPlayer(level) {
+  const next = cloneJson(level);
+  const snapshot = next?.character?.snapshot;
+  if (snapshot && typeof snapshot === 'object') {
+    // Runtime normalizes old full snapshots into reference snapshots anyway.
+    // Strip duplicated base64 emotion images before they cross the network.
+    delete snapshot.slots;
+    delete snapshot.emotions;
+  }
+  return next;
+}
+
+function sendCacheableCampaign(res, payload) {
+  res.setHeader('Cache-Control', 'public, max-age=0, s-maxage=30, stale-while-revalidate=300');
+  return res.json(payload);
+}
+
 function checkAdmin(req) {
   if (!ADMIN_TOKEN) return true;
   const auth = req.headers.authorization;
@@ -43,8 +65,9 @@ function checkAdmin(req) {
 export default async function handler(req, res) {
   try {
     if (req.method === 'GET') {
-      const { resolve, primary } = req.query;
+      const { resolve, primary, initial } = req.query;
       let { name } = req.query;
+      const initialOnly = resolve === 'initial' || initial === 'true';
 
       if (!name && primary === 'true') {
         const primaryName = await kvGet('config:primaryCampaign');
@@ -57,7 +80,7 @@ export default async function handler(req, res) {
 
       if (!name) {
         const names = (await kvGet(INDEX_KEY)) || [];
-        if (names.length === 0) return res.json({ campaigns: [] });
+        if (names.length === 0) return sendCacheableCampaign(res, { campaigns: [] });
         const rawCampaigns = await kvMGet(names.map(n => `campaign:${n}`));
         const campaigns = [];
         for (let i = 0; i < names.length; i++) {
@@ -70,13 +93,13 @@ export default async function handler(req, res) {
             campaigns.push({ name: n, levelCount });
           }
         }
-        return res.json({ campaigns });
+        return sendCacheableCampaign(res, { campaigns });
       }
 
       const campaign = await kvGet(`campaign:${name}`);
       if (!campaign) return res.status(404).json({ error: 'Not found' });
 
-      if (resolve === 'true') {
+      if (resolve === 'true' || initialOnly) {
         const levelNames = Array.isArray(campaign.levelNames) ? campaign.levelNames : [];
         const graph = campaign.graph;
 
@@ -92,6 +115,29 @@ export default async function handler(req, res) {
             const ln = resolveNodeLevelName(node, resolvedLevelNames);
             if (!ln) continue;
             orderedNodeLevels.push({ nodeId: nid, levelName: ln });
+          }
+
+          if (initialOnly) {
+            for (const item of orderedNodeLevels) {
+              const levelData = await kvGet(`level:${item.levelName}`);
+              if (!levelData) continue;
+              const node = nodeMap.get(item.nodeId);
+              return sendCacheableCampaign(res, {
+                name: campaign.name || name,
+                partial: true,
+                initialNodeId: item.nodeId,
+                levels: [sanitizeLevelForPlayer(levelData)],
+                graph: {
+                  nodes: [{
+                    id: item.nodeId,
+                    levelIndex: 0,
+                    children: [],
+                    type: node?.type || 'normal'
+                  }]
+                }
+              });
+            }
+            return res.status(404).json({ error: 'No playable levels found' });
           }
 
           const uniqueLevelNames = [...new Set(orderedNodeLevels.map(item => item.levelName))];
@@ -110,7 +156,7 @@ export default async function handler(req, res) {
             if (!levelData) continue;
             if (!levelNameToIndex.has(item.levelName)) {
               levelNameToIndex.set(item.levelName, levels.length);
-              levels.push(levelData);
+              levels.push(sanitizeLevelForPlayer(levelData));
             }
             nodeToIndex.set(item.nodeId, levelNameToIndex.get(item.levelName));
           }
@@ -124,7 +170,7 @@ export default async function handler(req, res) {
               type: n.type || 'normal'
             }));
 
-          return res.json({
+          return sendCacheableCampaign(res, {
             name: campaign.name || name,
             levels,
             graph: { nodes: exportedNodes }
@@ -133,6 +179,21 @@ export default async function handler(req, res) {
 
         // Fallback for legacy campaigns without graph.
         const uniqueLevelNames = [...new Set(levelNames)];
+        if (initialOnly) {
+          for (const ln of uniqueLevelNames) {
+            const levelData = await kvGet(`level:${ln}`);
+            if (levelData) {
+              return sendCacheableCampaign(res, {
+                name: campaign.name || name,
+                partial: true,
+                initialNodeId: 0,
+                levels: [sanitizeLevelForPlayer(levelData)],
+                graph: { nodes: [{ id: 0, levelIndex: 0, children: [], type: 'normal' }] }
+              });
+            }
+          }
+          return res.status(404).json({ error: 'No playable levels found' });
+        }
         const resolvedLevels = await kvMGet(uniqueLevelNames.map(ln => `level:${ln}`));
         const levelCache = new Map();
         for (let i = 0; i < uniqueLevelNames.length; i++) {
@@ -141,12 +202,12 @@ export default async function handler(req, res) {
         const levels = [];
         for (const ln of levelNames) {
           const levelData = levelCache.get(ln);
-          if (levelData) levels.push(levelData);
+          if (levelData) levels.push(sanitizeLevelForPlayer(levelData));
         }
-        return res.json({ name: campaign.name || name, levels });
+        return sendCacheableCampaign(res, { name: campaign.name || name, levels });
       }
 
-      return res.json(campaign);
+      return sendCacheableCampaign(res, campaign);
     }
 
     if (req.method === 'POST') {

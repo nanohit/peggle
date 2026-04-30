@@ -23,6 +23,21 @@ async function kvDel(key) {
 const INDEX_KEY = 'level:__index';
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 
+function cloneJson(value) {
+  if (value == null) return value;
+  return JSON.parse(JSON.stringify(value));
+}
+
+function sanitizeLevelForPlayer(level) {
+  const next = cloneJson(level);
+  const snapshot = next?.character?.snapshot;
+  if (snapshot && typeof snapshot === 'object') {
+    delete snapshot.slots;
+    delete snapshot.emotions;
+  }
+  return next;
+}
+
 function checkAdmin(req) {
   if (!ADMIN_TOKEN) return true;
   const auth = req.headers.authorization;
@@ -39,7 +54,7 @@ export default async function handler(req, res) {
       }
       const data = await kvGet(`level:${name}`);
       if (!data) return res.status(404).json({ error: 'Not found' });
-      return res.json(data);
+      return res.json(sanitizeLevelForPlayer(data));
     }
 
     if (req.method === 'POST') {
@@ -47,7 +62,7 @@ export default async function handler(req, res) {
       const { name, data } = req.body;
       if (!name || !data) return res.status(400).json({ error: 'name and data required' });
 
-      await kvSet(`level:${name}`, data);
+      await kvSet(`level:${name}`, sanitizeLevelForPlayer(data));
 
       const names = (await kvGet(INDEX_KEY)) || [];
       if (!names.includes(name)) {

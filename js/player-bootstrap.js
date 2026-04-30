@@ -94,21 +94,26 @@ function loadBakedLevel(name) {
   return null;
 }
 
-// Fetch from server (API first, then static file fallback)
+function staticJson(path) {
+  return fetch(path, { credentials: 'same-origin' })
+    .then(res => res.ok ? res.json() : null)
+    .catch(() => null);
+}
+
+function staticNamePath(name) {
+  return encodeURIComponent(name);
+}
+
+// Fetch from static player data. Production player does not hit /api.
 async function fetchLevel(name) {
-  try {
-    const res = await fetch('/api/levels?name=' + encodeURIComponent(name));
-    if (res.ok) return normalizeLevelData(await res.json());
-  } catch { /* fall through */ }
-  try {
-    const res = await fetch('/levels/' + encodeURIComponent(name) + '.json');
-    if (res.ok) return normalizeLevelData(await res.json());
-  } catch { /* fall through */ }
+  const data = await staticJson('/data/player/levels/' + staticNamePath(name) + '.json')
+    || await staticJson('/levels/' + staticNamePath(name) + '.json');
+  if (data) return normalizeLevelData(data);
   return null;
 }
 
-// Load campaign by name: localStorage cache (if fresh) → API → static file
-// Cache TTL: 60 seconds. After that, re-fetch from API to pick up editor changes.
+// Load campaign by name: localStorage cache (if fresh) → static file.
+// Editor/dev can still use API modules, but the shipped player is static-only.
 const CAMPAIGN_CACHE_TTL = 60 * 1000; // 60 seconds
 const inflightCampaignLoads = new Map();
 function hasCampaignLevels(data) {
@@ -131,21 +136,24 @@ async function loadCampaign(name) {
       } catch { /* fall through */ }
     }
 
-    // Fetch from API (resolves campaign + all level data from Redis)
-    try {
-      const res = await fetch('/api/campaigns?name=' + encodeURIComponent(name) + '&resolve=true');
-      if (res.ok) {
-        const data = await res.json();
-        if (hasCampaignLevels(data)) {
-          // Cache for next visit
-          try {
-            localStorage.setItem(cacheKey, JSON.stringify(data));
-            localStorage.setItem(cacheTimeKey, String(Date.now()));
-          } catch { /* storage full, no big deal */ }
-          return data;
-        }
-      }
-    } catch { /* fall through */ }
+    const data = await staticJson('/data/player/campaigns/' + staticNamePath(name) + '.json')
+      || await staticJson('/campaigns/' + staticNamePath(name) + '.json');
+    if (hasCampaignLevels(data)) {
+      try {
+        localStorage.setItem(cacheKey, JSON.stringify(data));
+        localStorage.setItem(cacheTimeKey, String(Date.now()));
+      } catch { /* storage full, no big deal */ }
+      return data;
+    }
+
+    const partial = await staticJson('/data/player/campaigns/' + staticNamePath(name) + '.initial.json');
+    if (hasCampaignLevels(partial)) {
+      try {
+        localStorage.setItem('config:primaryCampaign', partial.name || name);
+        localStorage.setItem('config_ts:primaryCampaign', String(Date.now()));
+      } catch { /* storage full */ }
+      return partial;
+    }
 
     // Stale localStorage cache (better than nothing)
     if (stored) {
@@ -154,15 +162,6 @@ async function loadCampaign(name) {
         if (hasCampaignLevels(data)) return data;
       } catch { /* fall through */ }
     }
-
-    // Fallback: static file
-    try {
-      const res = await fetch('/campaigns/' + encodeURIComponent(name) + '.json');
-      if (res.ok) {
-        const data = await res.json();
-        if (hasCampaignLevels(data)) return data;
-      }
-    } catch { /* fall through */ }
     return null;
   })();
   inflightCampaignLoads.set(name, task);
@@ -173,8 +172,38 @@ async function loadCampaign(name) {
   }
 }
 
+async function loadPrimaryCampaignName() {
+  try {
+    const config = await staticJson('/data/player/config.json');
+    const value = config?.primaryCampaign || config?.primary;
+    if (typeof value === 'string' && value) return value;
+  } catch { /* fall through */ }
+  return null;
+}
+
+async function loadPrimaryInitialCampaign() {
+  const data = await staticJson('/data/player/primary.initial.json');
+  if (hasCampaignLevels(data)) return data;
+  return null;
+}
+
+async function loadPrimaryFullCampaign() {
+  const data = await staticJson('/data/player/primary.json');
+  if (hasCampaignLevels(data)) return data;
+  const name = await loadPrimaryCampaignName();
+  if (!name) return null;
+  return await loadCampaign(name);
+}
+
+async function loadStaticCharacterRegistry() {
+  const remote = await staticJson('/data/player/characters.json')
+    || await staticJson('/characters/registry.json');
+  if (!remote || typeof remote !== 'object') return null;
+  return normalizeCharacterRegistry(remote);
+}
+
 // Load primary campaign (for player domains with no URL params)
-// Caches the primary campaign name locally to avoid extra API call on repeat visits.
+// Caches the primary campaign name locally to avoid extra static config fetch on repeat visits.
 async function loadPrimaryCampaign() {
   const cacheKey = 'config:primaryCampaign';
   const cacheTimeKey = 'config_ts:primaryCampaign';
@@ -187,81 +216,70 @@ async function loadPrimaryCampaign() {
     try {
       localStorage.setItem(cacheKey, data.name);
       localStorage.setItem(cacheTimeKey, String(Date.now()));
-      localStorage.setItem('campaign:' + data.name, JSON.stringify(data));
-      localStorage.setItem('campaign_ts:' + data.name, String(Date.now()));
+      if (!data.partial && hasCampaignLevels(data)) {
+        localStorage.setItem('campaign:' + data.name, JSON.stringify(data));
+        localStorage.setItem('campaign_ts:' + data.name, String(Date.now()));
+      }
     } catch { /* storage full */ }
   };
 
-  // Single-request fast path: server resolves configured primary campaign directly.
-  if (!cacheFresh) {
-    const preloaded = typeof window !== 'undefined' ? window.__PEGGLE_PRIMARY_CAMPAIGN_PRELOAD__ : null;
-    if (preloaded && typeof preloaded.then === 'function') {
-      try {
-        const data = await preloaded;
-        if (hasCampaignLevels(data)) {
-          storeResolvedPrimary(data);
-          return data;
-        }
-      } catch { /* fall through */ }
-    }
+  if (cacheFresh) {
+    const cachedCampaign = await loadCampaign(cached);
+    if (cachedCampaign) return cachedCampaign;
+  }
 
+  const preloaded = typeof window !== 'undefined' ? window.__PEGGLE_PRIMARY_CAMPAIGN_PRELOAD__ : null;
+  if (preloaded && typeof preloaded.then === 'function') {
     try {
-      const res = await fetch('/api/campaigns?primary=true&resolve=true');
-      if (res.ok) {
-        const data = await res.json();
-        if (hasCampaignLevels(data)) {
-          storeResolvedPrimary(data);
-          return data;
-        }
+      const data = await preloaded;
+      if (hasCampaignLevels(data)) {
+        storeResolvedPrimary(data);
+        return data;
       }
     } catch { /* fall through */ }
   }
 
-  let primaryName = cacheFresh ? cached : null;
-  if (!primaryName) {
-    try {
-      const res = await fetch('/api/config?key=primaryCampaign');
-      if (res.ok) {
-        const { value } = await res.json();
-        primaryName = value || null;
-        if (primaryName) {
-          localStorage.setItem(cacheKey, primaryName);
-          localStorage.setItem(cacheTimeKey, String(Date.now()));
-        }
-      }
-    } catch { /* fall through */ }
-    if (!primaryName && cached) primaryName = cached;
+  const initial = await loadPrimaryInitialCampaign();
+  if (initial) {
+    storeResolvedPrimary(initial);
+    return initial;
   }
 
+  const full = await loadPrimaryFullCampaign();
+  if (full) {
+    storeResolvedPrimary(full);
+    return full;
+  }
+
+  const primaryName = cached || await loadPrimaryCampaignName();
   if (!primaryName) return null;
+  try {
+    localStorage.setItem(cacheKey, primaryName);
+    localStorage.setItem(cacheTimeKey, String(Date.now()));
+  } catch { /* storage full */ }
   return await loadCampaign(primaryName);
 }
 
-function getQueryParam(key) {
-  return new URLSearchParams(window.location.search).get(key);
+async function fetchCharacterRegistryWithFallback() {
+  const localFallback = () => loadCharacterRegistry();
+  const registry = await loadStaticCharacterRegistry();
+  if (!registry) return localFallback();
+  try {
+    saveCharacterRegistry(registry);
+  } catch (e) {
+    console.warn('[player] character registry cache write failed', e);
+  }
+  return registry;
 }
 
-async function fetchCharacterRegistryWithFallback(timeoutMs = 2000) {
-  const localFallback = () => loadCharacterRegistry();
-  if (typeof fetch !== 'function') return localFallback();
-  try {
-    const ctrl = (typeof AbortController === 'function') ? new AbortController() : null;
-    const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
-    const res = await fetch('/api/characters', ctrl ? { signal: ctrl.signal } : undefined);
-    if (timer) clearTimeout(timer);
-    if (!res.ok) return localFallback();
-    const remote = await res.json();
-    if (!remote || typeof remote !== 'object') return localFallback();
-    const normalized = normalizeCharacterRegistry(remote);
-    try {
-      saveCharacterRegistry(normalized);
-    } catch (e) {
-      console.warn('[player] character registry cache write failed', e);
-    }
-    return normalized;
-  } catch (e) {
-    return localFallback();
-  }
+/*
+ * Legacy API-backed loaders intentionally removed from the player path.
+ * The production player must remain CDN/static-host friendly: HTML, JS, CSS,
+ * images, and JSON only. Editor/admin modules can still use js/api.js.
+ */
+
+function getQueryParam(key) {
+  return new URLSearchParams(window.location.search).get(key);
 }
 
 function getRequestedNames() {
@@ -273,6 +291,20 @@ function getRequestedNames() {
 function showError(msg) {
   document.body.style.cssText = 'display:flex;justify-content:center;align-items:center;color:#fff;font:18px sans-serif;text-align:center;padding:20px;';
   document.body.textContent = msg;
+}
+
+function markPlayerReady() {
+  document.documentElement.classList.add('player-ready');
+  const startedAt = window.__PEGGLE_BOOT_STARTED_AT__;
+  if (Number.isFinite(startedAt)) {
+    console.log(`[BOOT] player-ready ${(performance.now() - startedAt).toFixed(1)}ms`);
+  }
+  const cover = document.getElementById('bootCover');
+  if (!cover || cover.dataset.removing === '1') return;
+  cover.dataset.removing = '1';
+  window.setTimeout(() => {
+    if (cover.parentNode) cover.parentNode.removeChild(cover);
+  }, 260);
 }
 
 // --- Mirror level data horizontally ---
@@ -463,16 +495,40 @@ async function bootWithLevels(levels, campaignName, campaignData) {
   visualLayout.mount();
   visualLayout.setEditMode(false);
   const dialogueController = new DialogueController({ visualLayout, persistSeen: true });
-  // Pull the latest character registry from the server (best-effort, bounded
-  // 2s timeout). Falls back to whatever's in localStorage on failure. Per-
-  // level snapshots no longer carry slot images, so the registry is the only
-  // source of emotion assets at runtime.
-  const characterRegistry = await fetchCharacterRegistryWithFallback();
   const portraitReactionController = new PortraitReactionController({ visualLayout });
   dialogueController.setPortraitReactionController(portraitReactionController);
   dialogueController.mount();
   let currentLanguage = getStoredLanguage();
   dialogueController.setLanguage(currentLanguage);
+  let game = null;
+  let gambleSystem = null;
+  let activeLevelData = null;
+  let characterRegistry = loadCharacterRegistry();
+
+  function refreshPortraitRegistry(nextRegistry) {
+    if (!nextRegistry) return;
+    characterRegistry = nextRegistry;
+    if (!game || !activeLevelData) return;
+    portraitReactionController.setContext({
+      level: activeLevelData,
+      registry: characterRegistry,
+      game,
+      gambleSystem,
+      scopeKey: campaignName ? `campaign:${campaignName}` : 'single',
+      paused
+    });
+  }
+
+  let characterRegistryWarmupPromise = null;
+  function startCharacterRegistryWarmup() {
+    if (characterRegistryWarmupPromise) return characterRegistryWarmupPromise;
+    // Pull character images after the first frame. This used to block first play
+    // for up to the network timeout, which is especially painful on a clean device.
+    characterRegistryWarmupPromise = fetchCharacterRegistryWithFallback()
+      .then(refreshPortraitRegistry)
+      .catch(() => null);
+    return characterRegistryWarmupPromise;
+  }
 
   // Create and attach pause overlay (inside the visual frame so it covers the game area)
   const pauseOverlay = createPauseOverlay();
@@ -589,18 +645,42 @@ async function bootWithLevels(levels, campaignName, campaignData) {
   }
 
   // --- Graph setup ---
-  const campaignGraph = (typeof campaignData?.graph === 'object' && campaignData.graph.nodes)
-    ? campaignData.graph
-    : graphFromLevels(levels);
+  let campaignGraph = null;
+  let nodeMap = new Map();
+  let graphParentMap = new Map();
+  let nodeIdToLevelIndex = new Map();
+  let playOrder = [];
+  let playableOrder = [];
 
-  validateGraph(campaignGraph);
-  const nodeMap = buildNodeMap(campaignGraph);
-  const graphParentMap = buildParentMap(campaignGraph);
-  const nodeIdToLevelIndex = buildLevelIndexMap(campaignGraph, levels);
-  const playOrder = topoOrder(campaignGraph, true);
-  const playableOrder = playOrder.filter(nid => nodeIdToLevelIndex.has(nid));
+  function applyCampaignGraphState(nextLevels, nextCampaignData) {
+    const nextGraph = (typeof nextCampaignData?.graph === 'object' && nextCampaignData.graph.nodes)
+      ? nextCampaignData.graph
+      : graphFromLevels(nextLevels);
 
-  if (playableOrder.length === 0) {
+    validateGraph(nextGraph);
+    const nextNodeMap = buildNodeMap(nextGraph);
+    const nextParentMap = buildParentMap(nextGraph);
+    const nextLevelIndexMap = buildLevelIndexMap(nextGraph, nextLevels);
+    const nextPlayOrder = topoOrder(nextGraph, true);
+    const nextPlayableOrder = nextPlayOrder.filter(nid => nextLevelIndexMap.has(nid));
+
+    if (nextPlayableOrder.length === 0) return false;
+    levels = nextLevels;
+    originalLevels = nextLevels;
+    campaignData = nextCampaignData;
+    campaignGraph = nextGraph;
+    nodeMap = nextNodeMap;
+    graphParentMap = nextParentMap;
+    nodeIdToLevelIndex = nextLevelIndexMap;
+    playOrder = nextPlayOrder;
+    playableOrder = nextPlayableOrder;
+    return true;
+  }
+
+  // Keep the campaign payload pristine; clone only the level that is about to run.
+  let originalLevels = levels;
+
+  if (!applyCampaignGraphState(levels, campaignData)) {
     showError('Campaign graph is empty or malformed — no playable levels found.');
     return;
   }
@@ -628,12 +708,8 @@ async function bootWithLevels(levels, campaignName, campaignData) {
     }
   }
 
-  let game = null;
-  let gambleSystem = null;
   let unsubUiState = null;
   let mirrorState = false; // alternates on defeat
-  // Keep the campaign payload pristine; clone only the level that is about to run.
-  const originalLevels = levels;
 
   function saveProgress() {
     if (!progressKey) return;
@@ -648,9 +724,38 @@ async function bootWithLevels(levels, campaignName, campaignData) {
     return new Set([...completedNodes, ...achievedNodes]);
   }
 
+  let campaignHydrationPromise = null;
+  function startCampaignHydration() {
+    if (!campaignData?.partial || !campaignName) return Promise.resolve(campaignData || null);
+    if (campaignHydrationPromise) return campaignHydrationPromise;
+    campaignHydrationPromise = loadCampaign(campaignName)
+      .then(fullCampaign => {
+        if (!fullCampaign || fullCampaign.partial || !hasCampaignLevels(fullCampaign)) return null;
+        const previousCurrentNodeId = currentNodeId;
+        if (!applyCampaignGraphState(fullCampaign.levels, fullCampaign)) return null;
+        completedNodes = new Set([...completedNodes].filter(nid => nodeMap.has(nid)));
+        achievedNodes = new Set([...achievedNodes].filter(nid => nodeMap.has(nid)));
+        for (const nid of completedNodes) achievedNodes.add(nid);
+        currentNodeId = nodeIdToLevelIndex.has(previousCurrentNodeId)
+          ? previousCurrentNodeId
+          : (findNextNode(playableOrder, graphParentMap, completedNodes) ?? playableOrder[0]);
+        saveProgress();
+        return fullCampaign;
+      })
+      .catch(error => {
+        console.warn('[player] Full campaign hydration failed', error);
+        return null;
+      });
+    return campaignHydrationPromise;
+  }
+
+  async function ensureFullCampaignReady() {
+    if (!campaignData?.partial) return campaignData || null;
+    return await startCampaignHydration();
+  }
+
   resize();
   window.addEventListener('resize', resize);
-
   let levelMapPrewarmHandle = null;
   let levelMapPrewarmHandleType = '';
   let levelMapShellPrewarmStarted = false;
@@ -861,9 +966,10 @@ async function bootWithLevels(levels, campaignName, campaignData) {
 
   async function showLevelMap(onSelectOverride, options = {}) {
     if (activeLevelMap || levelMapOpening) return;
-    scheduleLevelMapPrewarm({ immediate: true, includePortraits: true });
     levelMapOpening = true;
     try {
+      await ensureFullCampaignReady();
+      scheduleLevelMapPrewarm({ immediate: true, includePortraits: true });
       await openLevelMap(onSelectOverride, options);
     } finally {
       levelMapOpening = false;
@@ -1224,6 +1330,7 @@ async function bootWithLevels(levels, campaignName, campaignData) {
     if (!original) return false;
     currentNodeId = nodeId;
     const levelData = mirrorState ? mirrorLevel(original) : cloneLevelData(original);
+    activeLevelData = levelData;
 
     // Cleanup previous
     if (unsubUiState) { unsubUiState(); unsubUiState = null; }
@@ -1290,7 +1397,7 @@ async function bootWithLevels(levels, campaignName, campaignData) {
     game.onGameEnd = (result, score) => {
       const endedGame = game;
       const bindDelayMs = endedGame?.getEndOverlayInteractDelayMs?.() ?? 1000;
-      setTimeout(() => {
+      setTimeout(async () => {
         if (!endedGame || game !== endedGame) return;
         // Guard: only fire once (touchstart + click can both trigger on mobile)
         let fired = false;
@@ -1313,6 +1420,13 @@ async function bootWithLevels(levels, campaignName, campaignData) {
         };
 
         if (result === 'won') {
+          await ensureFullCampaignReady();
+          if (!endedGame || game !== endedGame) return;
+          if (campaignData?.partial) {
+            console.warn('[player] Full campaign still unavailable after win; replaying current level.');
+            onceAction(() => startLevel(currentNodeId, { suppressInputMs: 650 }));
+            return;
+          }
           mirrorState = false;
           completedNodes.add(currentNodeId);
           achievedNodes.add(currentNodeId);
@@ -1384,6 +1498,11 @@ async function bootWithLevels(levels, campaignName, campaignData) {
 
     resize();
     game.start();
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      markPlayerReady();
+      startCharacterRegistryWarmup();
+      startCampaignHydration();
+    }));
     return true;
   }
 
