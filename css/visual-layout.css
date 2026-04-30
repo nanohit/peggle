@@ -789,6 +789,16 @@
   cursor: pointer;
 }
 
+.visual-slot--input-shield {
+  pointer-events: auto !important;
+  cursor: default;
+}
+
+.visual-slot--decorative-inert {
+  pointer-events: none !important;
+  cursor: default;
+}
+
 /* ─── Pause menu overlay ─── */
 
 .pause-overlay {
@@ -1029,50 +1039,6 @@
 
 .pause-check input:checked ~ .pause-check__on {
   display: block;
-}
-
-.pause-lang {
-  width: 82%;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 6px 10px;
-  border-radius: 10px;
-  background: rgba(5, 8, 14, 0.42);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.pause-lang__label {
-  font-family: 'Noto Serif', serif;
-  font-size: clamp(9px, 2.4vw, 13px);
-  color: #aab0bf;
-}
-
-.pause-lang__switch {
-  display: inline-flex;
-  padding: 2px;
-  gap: 2px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.pause-lang__btn {
-  min-width: 42px;
-  padding: 5px 10px;
-  border: none;
-  border-radius: 999px;
-  background: transparent;
-  color: #c6ccdc;
-  font-family: 'Noto Serif', serif;
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.pause-lang__btn.active {
-  background: rgba(255, 255, 255, 0.18);
-  color: #ffffff;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
 }
 
 .dialogue-layer {

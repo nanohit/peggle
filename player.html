@@ -35,6 +35,7 @@
   <link rel="preload" href="visuals/assets_webtp/character.webp" as="image">
   <link rel="preload" href="visuals/assets_webtp/top.webp" as="image">
   <link rel="preload" href="visuals/bucket.webp" as="image">
+  <link rel="preload" href="visuals/loadscreen_logo.webp" as="image">
   <link rel="stylesheet" href="css/styles.css">
   <link rel="stylesheet" href="css/visual-layout.css">
   <style>
@@ -50,40 +51,70 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      flex-direction: column;
-      gap: 14px;
       background: #05070d;
-      color: #f7fbff;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       transition: opacity 180ms ease;
     }
-    .boot-mark {
-      width: 42px;
-      height: 42px;
-      border-radius: 50%;
-      border: 3px solid rgba(255, 255, 255, 0.18);
-      border-top-color: #ffb347;
-      animation: bootSpin 0.8s linear infinite;
+    .boot-loader {
+      position: relative;
+      width: 76px;
+      height: 76px;
     }
-    .boot-title {
-      font-size: 15px;
-      font-weight: 700;
-      letter-spacing: 0;
-      opacity: 0.88;
+    .boot-logo {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 54px;
+      height: auto;
+      transform: translate(-50%, -50%);
+      opacity: 0.96;
+      filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.55));
+    }
+    .boot-orbit {
+      position: absolute;
+      inset: 0;
+      animation: bootOrbit 1.08s linear infinite;
+    }
+    .boot-ball {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 0 5px rgba(255, 255, 255, 0.52);
+      transform:
+        translate(-50%, -50%)
+        rotate(calc(var(--i) * 36deg))
+        translateY(-34px);
+      opacity: var(--o, 0.88);
     }
     html.player-ready #bootCover {
       opacity: 0;
       pointer-events: none;
     }
-    @keyframes bootSpin {
+    @keyframes bootOrbit {
       to { transform: rotate(360deg); }
     }
   </style>
 </head>
 <body>
   <div id="bootCover" aria-live="polite" aria-label="Loading Peggle">
-    <div class="boot-mark" aria-hidden="true"></div>
-    <div class="boot-title">Peggle</div>
+    <div class="boot-loader" aria-hidden="true">
+      <img class="boot-logo" src="visuals/loadscreen_logo.webp" alt="" draggable="false">
+      <div class="boot-orbit">
+        <span class="boot-ball" style="--i: 0; --o: 0.42"></span>
+        <span class="boot-ball" style="--i: 1; --o: 0.48"></span>
+        <span class="boot-ball" style="--i: 2; --o: 0.54"></span>
+        <span class="boot-ball" style="--i: 3; --o: 0.60"></span>
+        <span class="boot-ball" style="--i: 4; --o: 0.66"></span>
+        <span class="boot-ball" style="--i: 5; --o: 0.72"></span>
+        <span class="boot-ball" style="--i: 6; --o: 0.78"></span>
+        <span class="boot-ball" style="--i: 7; --o: 0.84"></span>
+        <span class="boot-ball" style="--i: 8; --o: 0.90"></span>
+        <span class="boot-ball" style="--i: 9; --o: 0.96"></span>
+      </div>
+    </div>
   </div>
   <div id="canvasContainer" class="canvas-container">
     <canvas id="gameCanvas"></canvas>

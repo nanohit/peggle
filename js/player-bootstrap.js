@@ -404,13 +404,6 @@ function createPauseOverlay() {
             <img class="pause-check__on" data-src="${BASE}check_checked.webp" alt="" draggable="false">
           </label>
         </div>
-        <div class="pause-lang">
-          <span class="pause-lang__label" id="pauseLanguageLabel">Язык</span>
-          <div class="pause-lang__switch">
-            <button type="button" class="pause-lang__btn" data-lang="ru">RU</button>
-            <button type="button" class="pause-lang__btn" data-lang="en">EN</button>
-          </div>
-        </div>
         <button class="pause-img-btn" id="pauseLevelBtn">
           <img class="pause-img-btn__normal" data-src="${BASE}level.webp" alt="Уровни" draggable="false">
           <img class="pause-img-btn__pressed" data-src="${BASE}level_pressed.webp" alt="" draggable="false">
@@ -559,20 +552,9 @@ async function bootWithLevels(levels, campaignName, campaignData) {
     const copy = getPauseCopy(currentLanguage);
     const titleEl = pauseOverlay.querySelector('#pauseTitleText');
     const hintEl = pauseOverlay.querySelector('#pauseHintText');
-    const labelEl = pauseOverlay.querySelector('#pauseLanguageLabel');
     if (titleEl) titleEl.textContent = copy.pauseTitle;
     if (hintEl) hintEl.innerHTML = copy.confirmShootHint.replace(/\n/g, '<br>');
-    if (labelEl) labelEl.textContent = copy.languageLabel;
-    for (const button of pauseOverlay.querySelectorAll('.pause-lang__btn')) {
-      button.classList.toggle('active', button.dataset.lang === currentLanguage);
-    }
     dialogueController.setLanguage(currentLanguage);
-  }
-
-  for (const button of pauseOverlay.querySelectorAll('.pause-lang__btn')) {
-    button.addEventListener('click', () => {
-      applyLanguage(setStoredLanguage(button.dataset.lang));
-    });
   }
   applyLanguage(currentLanguage);
 
@@ -1145,6 +1127,25 @@ async function bootWithLevels(levels, campaignName, campaignData) {
 
   // Make topLeft and leftCircle slots trigger pause in play mode
   function setupPauseTriggers() {
+    const blockFrameInput = (event) => {
+      event.stopPropagation();
+      if (event.cancelable) event.preventDefault();
+    };
+    for (const slotId of ['top', 'topRight']) {
+      const el = visualLayout.slotElements[slotId];
+      if (!el) continue;
+      el.classList.remove('visual-slot--pause-trigger');
+      el.classList.add('visual-slot--input-shield');
+      for (const type of ['pointerdown', 'pointerup', 'click', 'touchstart', 'touchend']) {
+        el.addEventListener(type, blockFrameInput, { passive: false });
+      }
+    }
+    const rightCircle = visualLayout.slotElements.rightCircle;
+    if (rightCircle) {
+      rightCircle.classList.remove('visual-slot--pause-trigger', 'visual-slot--input-shield');
+      rightCircle.classList.add('visual-slot--decorative-inert');
+    }
+
     for (const slotId of ['topLeft', 'leftCircle']) {
       const el = visualLayout.slotElements[slotId];
       if (!el) continue;
@@ -1166,19 +1167,6 @@ async function bootWithLevels(levels, campaignName, campaignData) {
         }
         showPause();
       });
-    }
-
-    const topRight = visualLayout.slotElements.topRight;
-    if (topRight) {
-      topRight.classList.add('visual-slot--pause-trigger');
-      const onMenu = (e) => {
-        if (activeLevelMap) return;
-        e.stopPropagation();
-        e.preventDefault();
-        goToMenu();
-      };
-      topRight.addEventListener('click', onMenu);
-      topRight.addEventListener('touchend', onMenu);
     }
   }
   setupPauseTriggers();
