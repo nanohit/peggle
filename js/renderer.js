@@ -215,7 +215,7 @@ const END_MESSAGE_DELAY_MS = 160;
 const END_MESSAGE_FADE_IN_MS = 260;
 const END_MESSAGE_FADE_OUT_MS = 190;
 const END_MESSAGE_LIFT_PX = 18;
-const PEG_EXIT_SHRINK_MS = 220;
+const PEG_EXIT_SHRINK_MS = 180;
 
 export class Renderer {
   constructor(canvas) {
@@ -1983,8 +1983,8 @@ export class Renderer {
       ctx.stroke();
       ctx.setLineDash([]);
 
-      // Draw end dot only at full aim length (hit indicator)
-      if (aimLength >= 300 && points.length > 1) {
+      // Draw the endpoint marker for both default and editor-shortened aim.
+      if (points.length > 1) {
         const endPoint = points[points.length - 1];
         ctx.fillStyle = COLORS.trajectoryDot;
         ctx.beginPath();

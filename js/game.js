@@ -1090,8 +1090,9 @@ export class Game {
 
   updateTrajectory() {
     const showFull = this.shouldShowFullTrajectory();
-    const steps = showFull ? 1000 : this.aimLength;
-    const stopAtHit = showFull ? false : (this.aimLength >= 300);
+    const aimSteps = Math.max(0, Math.round(this.aimLength || 0));
+    const steps = showFull ? 1000 : (aimSteps > 0 ? Math.max(2, aimSteps) : 0);
+    const stopAtHit = !showFull;
     this.trajectory = this.physics.predictTrajectory(
       this.launchX,
       this.launchY,
