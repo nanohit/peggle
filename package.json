@@ -1,5 +1,6 @@
 {
   "private": true,
+  "type": "module",
   "scripts": {
     "build": "rm -rf dist public && esbuild js/player-bootstrap.js --bundle --format=esm --splitting --outdir=dist --minify && mkdir -p public && cp player.html editor.html public/ && cp -R dist css js visuals fonts data public/"
   },
