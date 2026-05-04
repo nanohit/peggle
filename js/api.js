@@ -1,17 +1,30 @@
-// API client for Vercel KV backend
-// All methods return null on failure — callers fall back to localStorage.
+// API client for the shared Vercel Redis backend.
+// All methods return null/false on failure so callers can fall back to local
+// caches or static player data without forking state by browser.
 
-const API_BASE = '/api';
+const REMOTE_API_ORIGIN = 'https://peggle.vercel.app';
 
-function getAdminToken() {
-  return localStorage.getItem('peggle_admin_token') || '';
+function isLocalHost(hostname) {
+  return hostname === 'localhost'
+    || hostname === '127.0.0.1'
+    || hostname === '::1'
+    || hostname === '[::1]';
 }
 
-function adminHeaders() {
-  const h = { 'Content-Type': 'application/json' };
-  const token = getAdminToken();
-  if (token) h['Authorization'] = `Bearer ${token}`;
-  return h;
+function resolveApiBase() {
+  if (typeof window !== 'undefined' && typeof window.__PEGGLE_API_BASE__ === 'string') {
+    return window.__PEGGLE_API_BASE__.replace(/\/$/, '');
+  }
+  if (typeof location !== 'undefined' && (location.protocol === 'file:' || isLocalHost(location.hostname))) {
+    return `${REMOTE_API_ORIGIN}/api`;
+  }
+  return '/api';
+}
+
+const API_BASE = resolveApiBase();
+
+function jsonHeaders() {
+  return { 'Content-Type': 'application/json' };
 }
 
 export const api = {
@@ -44,7 +57,7 @@ export const api = {
     try {
       const res = await fetch(`${API_BASE}/levels`, {
         method: 'POST',
-        headers: adminHeaders(),
+        headers: jsonHeaders(),
         body: JSON.stringify({ name, data })
       });
       return res.ok;
@@ -58,7 +71,7 @@ export const api = {
     try {
       const res = await fetch(`${API_BASE}/levels?name=${encodeURIComponent(name)}`, {
         method: 'DELETE',
-        headers: adminHeaders()
+        headers: jsonHeaders()
       });
       return res.ok;
     } catch (e) {
@@ -106,11 +119,26 @@ export const api = {
     }
   },
 
+  async getPrimaryCampaign({ initial = false } = {}) {
+    try {
+      const params = new URLSearchParams({ primary: 'true' });
+      params.set(initial ? 'initial' : 'resolve', 'true');
+      const res = await fetch(`${API_BASE}/campaigns?${params.toString()}`);
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (data && Array.isArray(data.levels) && data.levels.length > 0) return data;
+      return null;
+    } catch (e) {
+      console.warn('[api] getPrimaryCampaign failed:', e);
+      return null;
+    }
+  },
+
   async saveCampaign(name, data) {
     try {
       const res = await fetch(`${API_BASE}/campaigns`, {
         method: 'POST',
-        headers: adminHeaders(),
+        headers: jsonHeaders(),
         body: JSON.stringify({ name, data })
       });
       return res.ok;
@@ -124,7 +152,7 @@ export const api = {
     try {
       const res = await fetch(`${API_BASE}/campaigns?name=${encodeURIComponent(name)}`, {
         method: 'DELETE',
-        headers: adminHeaders()
+        headers: jsonHeaders()
       });
       return res.ok;
     } catch (e) {
@@ -151,7 +179,7 @@ export const api = {
     try {
       const res = await fetch(`${API_BASE}/config`, {
         method: 'POST',
-        headers: adminHeaders(),
+        headers: jsonHeaders(),
         body: JSON.stringify({ key, value })
       });
       return res.ok;
@@ -178,7 +206,7 @@ export const api = {
     try {
       const res = await fetch(`${API_BASE}/characters`, {
         method: 'POST',
-        headers: adminHeaders(),
+        headers: jsonHeaders(),
         body: JSON.stringify({ data })
       });
       return res.ok;

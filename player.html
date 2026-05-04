@@ -14,19 +14,20 @@
         const params = new URLSearchParams(location.search);
         if (location.hash || params.get('campaign') || params.get('level') || params.get('levels')) return;
 
-        const ttl = 60 * 1000;
-        const now = Date.now();
-        const primaryName = localStorage.getItem('config:primaryCampaign');
-        const primaryTs = parseInt(localStorage.getItem('config_ts:primaryCampaign') || '0', 10);
-        const primaryFresh = !!(primaryName && (now - primaryTs) < ttl);
-        const campaignFresh = primaryFresh
-          && !!localStorage.getItem('campaign:' + primaryName)
-          && (now - parseInt(localStorage.getItem('campaign_ts:' + primaryName) || '0', 10)) < ttl;
-        if (campaignFresh) return;
+        const isLocalHost = host => host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
+        const apiBase = (location.protocol === 'file:' || isLocalHost(location.hostname))
+          ? 'https://peggle.vercel.app/api'
+          : '/api';
 
-        window.__PEGGLE_PRIMARY_CAMPAIGN_PRELOAD__ = fetch('/data/player/primary.initial.json', {
+        window.__PEGGLE_PRIMARY_CAMPAIGN_PRELOAD__ = fetch(apiBase + '/campaigns?primary=true&initial=true', {
           credentials: 'same-origin'
-        }).then(res => res.ok ? res.json() : null).catch(() => null);
+        }).then(res => res.ok ? res.json() : null)
+          .then(data => data || fetch('/data/player/primary.initial.json', { credentials: 'same-origin' })
+            .then(res => res.ok ? res.json() : null)
+            .catch(() => null))
+          .catch(() => fetch('/data/player/primary.initial.json', { credentials: 'same-origin' })
+            .then(res => res.ok ? res.json() : null)
+            .catch(() => null));
       } catch (_) {}
     })();
   </script>

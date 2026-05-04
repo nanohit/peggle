@@ -15,6 +15,7 @@ import { getStoredLanguage, getPauseCopy, normalizeLanguage, setStoredLanguage }
 import { topoOrder, buildNodeMap, buildParentMap, buildLevelIndexMap, graphFromLevels } from './graph/core.js';
 import { validateGraph } from './graph/validate.js';
 import { resolveWin, findNextNode, migrateProgress, isUnlocked } from './graph/progression.js';
+import { api } from './api.js';
 
 const ASPECT_RATIO = 3 / 4.5;
 const FRAME_RATIO = 9 / 17;
@@ -104,17 +105,18 @@ function staticNamePath(name) {
   return encodeURIComponent(name);
 }
 
-// Fetch from static player data. Production player does not hit /api.
+// Fetch a level from the shared backend first; static files remain a deploy
+// seed/offline fallback.
 async function fetchLevel(name) {
-  const data = await staticJson('/data/player/levels/' + staticNamePath(name) + '.json')
+  const remote = await api.getLevel(name);
+  const data = remote
+    || await staticJson('/data/player/levels/' + staticNamePath(name) + '.json')
     || await staticJson('/levels/' + staticNamePath(name) + '.json');
   if (data) return normalizeLevelData(data);
   return null;
 }
 
-// Load campaign by name: localStorage cache (if fresh) → static file.
-// Editor/dev can still use API modules, but the shipped player is static-only.
-const CAMPAIGN_CACHE_TTL = 60 * 1000; // 60 seconds
+// Load campaign by name: shared backend → static file → local cache fallback.
 const inflightCampaignLoads = new Map();
 function hasCampaignLevels(data) {
   return !!(data && Array.isArray(data.levels) && data.levels.length > 0);
@@ -125,15 +127,15 @@ async function loadCampaign(name) {
   const task = (async () => {
     const cacheKey = 'campaign:' + name;
     const cacheTimeKey = 'campaign_ts:' + name;
-
-    // Try localStorage cache first (if fresh enough)
     const stored = localStorage.getItem(cacheKey);
-    const cachedAt = parseInt(localStorage.getItem(cacheTimeKey) || '0', 10);
-    if (stored && (Date.now() - cachedAt) < CAMPAIGN_CACHE_TTL) {
+
+    const remote = await api.getResolvedCampaign(name);
+    if (hasCampaignLevels(remote)) {
       try {
-        const data = JSON.parse(stored);
-        if (hasCampaignLevels(data)) return data;
-      } catch { /* fall through */ }
+        localStorage.setItem(cacheKey, JSON.stringify(remote));
+        localStorage.setItem(cacheTimeKey, String(Date.now()));
+      } catch { /* storage full, no big deal */ }
+      return remote;
     }
 
     const data = await staticJson('/data/player/campaigns/' + staticNamePath(name) + '.json')
@@ -155,7 +157,8 @@ async function loadCampaign(name) {
       return partial;
     }
 
-    // Stale localStorage cache (better than nothing)
+    // Local cache is deliberately last so old browser-local campaigns do not
+    // shadow the shared campaign after another device edits it.
     if (stored) {
       try {
         const data = JSON.parse(stored);
@@ -173,6 +176,8 @@ async function loadCampaign(name) {
 }
 
 async function loadPrimaryCampaignName() {
+  const remote = await api.getConfig('primaryCampaign');
+  if (typeof remote === 'string' && remote) return remote;
   try {
     const config = await staticJson('/data/player/config.json');
     const value = config?.primaryCampaign || config?.primary;
@@ -182,12 +187,16 @@ async function loadPrimaryCampaignName() {
 }
 
 async function loadPrimaryInitialCampaign() {
+  const remote = await api.getPrimaryCampaign({ initial: true });
+  if (hasCampaignLevels(remote)) return remote;
   const data = await staticJson('/data/player/primary.initial.json');
   if (hasCampaignLevels(data)) return data;
   return null;
 }
 
 async function loadPrimaryFullCampaign() {
+  const remote = await api.getPrimaryCampaign({ initial: false });
+  if (hasCampaignLevels(remote)) return remote;
   const data = await staticJson('/data/player/primary.json');
   if (hasCampaignLevels(data)) return data;
   const name = await loadPrimaryCampaignName();
@@ -202,14 +211,12 @@ async function loadStaticCharacterRegistry() {
   return normalizeCharacterRegistry(remote);
 }
 
-// Load primary campaign (for player domains with no URL params)
-// Caches the primary campaign name locally to avoid extra static config fetch on repeat visits.
+// Load primary campaign (for player domains with no URL params).
+// The shared backend wins; localStorage is only a last-resort fallback.
 async function loadPrimaryCampaign() {
   const cacheKey = 'config:primaryCampaign';
   const cacheTimeKey = 'config_ts:primaryCampaign';
-  const cachedAt = parseInt(localStorage.getItem(cacheTimeKey) || '0', 10);
   const cached = localStorage.getItem(cacheKey);
-  const cacheFresh = !!(cached && (Date.now() - cachedAt) < CAMPAIGN_CACHE_TTL);
 
   const storeResolvedPrimary = (data) => {
     if (!data?.name) return;
@@ -222,11 +229,6 @@ async function loadPrimaryCampaign() {
       }
     } catch { /* storage full */ }
   };
-
-  if (cacheFresh) {
-    const cachedCampaign = await loadCampaign(cached);
-    if (cachedCampaign) return cachedCampaign;
-  }
 
   const preloaded = typeof window !== 'undefined' ? window.__PEGGLE_PRIMARY_CAMPAIGN_PRELOAD__ : null;
   if (preloaded && typeof preloaded.then === 'function') {
@@ -251,7 +253,7 @@ async function loadPrimaryCampaign() {
     return full;
   }
 
-  const primaryName = cached || await loadPrimaryCampaignName();
+  const primaryName = await loadPrimaryCampaignName() || cached;
   if (!primaryName) return null;
   try {
     localStorage.setItem(cacheKey, primaryName);
@@ -262,7 +264,8 @@ async function loadPrimaryCampaign() {
 
 async function fetchCharacterRegistryWithFallback() {
   const localFallback = () => loadCharacterRegistry();
-  const registry = await loadStaticCharacterRegistry();
+  const remote = await api.getCharacterRegistry();
+  const registry = remote ? normalizeCharacterRegistry(remote) : await loadStaticCharacterRegistry();
   if (!registry) return localFallback();
   try {
     saveCharacterRegistry(registry);
@@ -273,9 +276,9 @@ async function fetchCharacterRegistryWithFallback() {
 }
 
 /*
- * Legacy API-backed loaders intentionally removed from the player path.
- * The production player must remain CDN/static-host friendly: HTML, JS, CSS,
- * images, and JSON only. Editor/admin modules can still use js/api.js.
+ * Player data uses the same shared API as the editor, with static JSON as a
+ * seed/fallback. That keeps peggle.vercel.app editing and al3a.vercel.app play
+ * pointed at one campaign source instead of each browser's local cache.
  */
 
 function getQueryParam(key) {

@@ -280,6 +280,8 @@ class PeggleApp {
     this._campaignAvailableLevelsRequest = 0;
     this._pendingRemoteLevelSaves = new Map();
     this._remoteLevelSyncFailures = new Map();
+    this._characterRegistrySyncTimer = null;
+    this._pendingCharacterRegistrySync = null;
     this._editorSideSheetLayer = null;
     this._editorSideSheetIds = ['levelListOverlay', 'campaignOverlay', 'campaignEditOverlay', 'dialogueOverlay', 'characterOverlay'];
     this._dialogueSelectedEntryId = null;
@@ -3180,12 +3182,24 @@ class PeggleApp {
     });
   }
 
-  _saveCharacterRegistry(registry = this.characterRegistry) {
+  _saveCharacterRegistry(registry = this.characterRegistry, { syncRemote = true } = {}) {
     this.characterRegistry = saveCharacterRegistry(registry);
+    if (syncRemote) this._scheduleCharacterRegistryRemoteSync();
     return this.characterRegistry;
   }
 
-  async _pushCharacterRegistryToServer(button = null) {
+  _scheduleCharacterRegistryRemoteSync() {
+    if (this._characterRegistrySyncTimer) clearTimeout(this._characterRegistrySyncTimer);
+    this._characterRegistrySyncTimer = setTimeout(() => {
+      this._characterRegistrySyncTimer = null;
+      this._pendingCharacterRegistrySync = this._pushCharacterRegistryToServer(null, { silent: true })
+        .finally(() => {
+          this._pendingCharacterRegistrySync = null;
+        });
+    }, 1500);
+  }
+
+  async _pushCharacterRegistryToServer(button = null, { silent = false } = {}) {
     const registry = normalizeCharacterRegistry(this.characterRegistry);
     let originalLabel = '';
     if (button) {
@@ -3197,15 +3211,18 @@ class PeggleApp {
       const ok = await api.saveCharacterRegistry(registry);
       if (button) {
         button.textContent = ok ? 'Pushed ✓' : 'Push failed';
-        if (!ok) button.title = 'Server rejected the push — check the admin token in localStorage (peggle_admin_token).';
+        if (!ok) button.title = 'Server rejected the push or the network is unavailable.';
       }
       if (!ok) {
-        alert('Failed to push character registry to server. If you are an admin, set localStorage.peggle_admin_token first.');
+        if (!silent) alert('Failed to push character registry to server.');
+        return false;
       }
+      return true;
     } catch (error) {
       console.warn('[characters] push failed', error);
       if (button) button.textContent = 'Push failed';
-      alert('Failed to push character registry: ' + (error?.message || error));
+      if (!silent) alert('Failed to push character registry: ' + (error?.message || error));
+      return false;
     } finally {
       if (button) {
         setTimeout(() => {
@@ -3246,7 +3263,7 @@ class PeggleApp {
         }
       }
       const normalized = normalizeCharacterRegistry(remote);
-      this._saveCharacterRegistry(normalized);
+      this._saveCharacterRegistry(normalized, { syncRemote: false });
       this._selectedCharacterEditorId = normalized.selectedId;
       this._renderCharacterEditor();
       if (button) button.textContent = 'Pulled ✓';
@@ -3835,7 +3852,7 @@ class PeggleApp {
         <div class="dialogue-toolbar-spacer"></div>
         <button class="dialogue-chip-btn" type="button" data-character-assign-current>Assign to Level</button>
       </div>
-      <div class="dialogue-editor-note">Characters save locally. Use Push/Pull to share between localhost and production — character + emotion images live in the server registry once pushed.</div>
+      <div class="dialogue-editor-note">Characters auto-sync through the shared server registry. Push/Pull is only for forcing a refresh.</div>
 
       <div class="dialogue-card-block character-panel-block">
         <div class="dialogue-block-title">Expressions</div>
@@ -5166,8 +5183,19 @@ class PeggleApp {
     if (this._primaryCampaignName !== undefined) return Promise.resolve(this._primaryCampaignName);
 
     this._primaryCampaignPromise = api.getConfig('primaryCampaign')
-      .then((primaryName) => {
-        this._primaryCampaignName = typeof primaryName === 'string' && primaryName ? primaryName : null;
+      .then(async (primaryName) => {
+        let next = typeof primaryName === 'string' && primaryName ? primaryName : null;
+        if (!next) {
+          try {
+            const res = await fetch('/data/player/config.json');
+            if (res.ok) {
+              const config = await res.json();
+              const value = config?.primaryCampaign || config?.primary;
+              if (typeof value === 'string' && value) next = value;
+            }
+          } catch { /* static fallback unavailable */ }
+        }
+        this._primaryCampaignName = next;
         return this._primaryCampaignName;
       })
       .finally(() => {
