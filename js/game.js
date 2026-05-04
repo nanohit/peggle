@@ -1812,6 +1812,7 @@ export class Game {
     this._gameEndEmitted = false;
     this._levelClearEmitted = false;
     this._frozenSurvivalTrackerState = null;
+    this.renderer.clearPegExitAnimations?.();
 
     this.updateLaunchPosition();
     this.clearDynamicYoyoAnchors();
@@ -2082,6 +2083,7 @@ export class Game {
     if (dueIds.size === 0) return false;
 
     let removed = false;
+    const removedPegs = [];
     this.pegs = this.pegs.filter(peg => {
       if (!dueIds.has(peg.id)) return true;
       this.pendingHitPegClears.delete(peg.id);
@@ -2089,6 +2091,7 @@ export class Game {
       if (this.isOrangePeg(peg)) {
         this.removedOrangePegs++;
       }
+      removedPegs.push(peg);
       removed = true;
       return false;
     });
@@ -2098,6 +2101,7 @@ export class Game {
     }
     if (!removed) return false;
 
+    this.renderer.queuePegExitAnimations?.(removedPegs);
     this.physics.setPegs(this.pegs);
     this.syncPhysicsHitPegState();
     this.emitUiStateIfChanged(true, 'timed-hit-peg-clear');
@@ -2238,12 +2242,16 @@ export class Game {
 
     // Remove hit pegs from pegs array (they're gone)
     // Obstacles and permanent bumpers stay
+    const removedPegs = [];
     this.pegs = this.pegs.filter(p => {
       if (p.type === 'obstacle') return true;
       if (this.isPortalPeg(p)) return true;
       if (p.type === 'bumper' && !p.bumperDisappear && !p.bumperOrange) return true;
-      return !hitSet.has(p.id);
+      if (!hitSet.has(p.id)) return true;
+      removedPegs.push(p);
+      return false;
     });
+    this.renderer.queuePegExitAnimations?.(removedPegs);
     this.physics.setPegs(this.pegs);
     this.syncPhysicsHitPegState();
 
@@ -2612,6 +2620,7 @@ export class Game {
     if (this.isOrangePeg(lowestPeg)) this.removedOrangePegs++;
 
     // Remove the peg from play immediately so the ball can escape
+    this.renderer.queuePegExitAnimations?.([lowestPeg]);
     this.pegs = this.pegs.filter(p => p.id !== lowestPeg.id);
     this.physics.setPegs(this.pegs);
     this.syncPhysicsHitPegState();

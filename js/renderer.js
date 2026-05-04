@@ -215,6 +215,7 @@ const END_MESSAGE_DELAY_MS = 160;
 const END_MESSAGE_FADE_IN_MS = 260;
 const END_MESSAGE_FADE_OUT_MS = 190;
 const END_MESSAGE_LIFT_PX = 18;
+const PEG_EXIT_SHRINK_MS = 220;
 
 export class Renderer {
   constructor(canvas) {
@@ -273,6 +274,7 @@ export class Renderer {
     this.performanceProfile = 'balanced';
     this._survivalBgImage = null;
     this._survivalBgImageSrc = '';
+    this._pegExitAnimations = new Map();
     this.onVerticalProgress = null;
     this._endMessage = {
       key: '',
@@ -1711,6 +1713,75 @@ export class Renderer {
     ctx.restore();
   }
 
+  _clonePegForExitAnimation(peg) {
+    const snapshot = { ...peg };
+    if (peg.curveSlices) {
+      snapshot.curveSlices = peg.curveSlices.map(slice => ({ ...slice }));
+    }
+    snapshot._wrapCopies = null;
+    snapshot._wrapHideMain = false;
+    return snapshot;
+  }
+
+  queuePegExitAnimations(pegs) {
+    const list = Array.isArray(pegs) ? pegs : [pegs];
+    if (!list.length) return;
+    const nowMs = typeof performance !== 'undefined'
+      ? performance.now()
+      : (this._renderTimeSeconds || 0) * 1000;
+
+    for (const peg of list) {
+      if (!peg || !peg.id) continue;
+      this._pegExitAnimations.set(peg.id, {
+        peg: this._clonePegForExitAnimation(peg),
+        startMs: nowMs
+      });
+    }
+  }
+
+  clearPegExitAnimations() {
+    this._pegExitAnimations.clear();
+  }
+
+  drawPegScaled(peg, isHit = false, isSelected = false, scale = 1, alpha = 1) {
+    if (!peg || scale <= 0.001 || alpha <= 0.001) return;
+    if (Math.abs(scale - 1) < 0.001 && alpha >= 0.999) {
+      this.drawPeg(peg, isHit, isSelected);
+      return;
+    }
+
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.globalAlpha *= alpha;
+    ctx.translate(peg.x, peg.y);
+    ctx.scale(scale, scale);
+    ctx.translate(-peg.x, -peg.y);
+    this.drawPeg(peg, isHit, isSelected);
+    ctx.restore();
+  }
+
+  drawPegExitAnimations() {
+    if (!this._pegExitAnimations || this._pegExitAnimations.size === 0) return;
+    const nowMs = typeof performance !== 'undefined'
+      ? performance.now()
+      : (this._renderTimeSeconds || 0) * 1000;
+
+    for (const [pegId, anim] of this._pegExitAnimations) {
+      const elapsed = Math.max(0, nowMs - anim.startMs);
+      const t = Math.max(0, Math.min(1, elapsed / PEG_EXIT_SHRINK_MS));
+      if (t >= 1) {
+        this._pegExitAnimations.delete(pegId);
+        continue;
+      }
+
+      const shrink = Math.pow(1 - t, 2.25);
+      const pop = t < 0.16 ? 1 + Math.sin((t / 0.16) * Math.PI) * 0.045 : 1;
+      const scale = shrink * pop;
+      const alpha = t < 0.68 ? 1 : Math.max(0, (1 - t) / 0.32);
+      this.drawPegScaled(anim.peg, true, false, scale, alpha);
+    }
+  }
+
   getWrapCopyOffsets(peg) {
     // Proximity-based: show copies when the peg is near any screen edge
     // so that wrapping looks smooth instead of jumping.
@@ -1776,6 +1847,8 @@ export class Renderer {
         }
       }
     }
+
+    this.drawPegExitAnimations();
   }
 
   drawBall(ball) {
