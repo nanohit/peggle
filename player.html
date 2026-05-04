@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="theme-color" content="#0d1117">
+  <meta name="theme-color" content="#000000">
   <title>Peggle</title>
   <script>
     (() => {
@@ -40,8 +40,9 @@
   <link rel="stylesheet" href="css/visual-layout.css">
   <style>
     /* Player overrides — body is the sole layout root (no .app wrapper) */
+    html, body { background: #000; }
     body { display: flex; justify-content: center; align-items: center; width: 100%; height: 100%; }
-    .visual-viewport { width: 100%; height: 100%; }
+    .visual-viewport { width: 100%; height: 100%; background: #000; }
     .canvas-container { position: relative; }
     canvas { display: block; }
     #bootCover {
@@ -51,13 +52,13 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      background: #05070d;
+      background: #000;
       transition: opacity 180ms ease;
     }
     .boot-loader {
       position: relative;
-      width: 76px;
-      height: 76px;
+      width: 108px;
+      height: 108px;
     }
     .boot-logo {
       position: absolute;
@@ -86,7 +87,7 @@
       transform:
         translate(-50%, -50%)
         rotate(calc(var(--i) * 36deg))
-        translateY(-34px);
+        translateY(-48px);
       opacity: var(--o, 0.88);
     }
     html.player-ready #bootCover {
