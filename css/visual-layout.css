@@ -111,6 +111,64 @@
   will-change: opacity;
 }
 
+.pvp-target-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 11;
+}
+
+.pvp-target-slot {
+  position: absolute;
+  aspect-ratio: 1;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  transition:
+    left 0.24s ease,
+    top 0.24s ease,
+    width 0.24s ease,
+    height 0.24s ease,
+    opacity 0.2s ease,
+    filter 0.24s ease;
+}
+
+.pvp-target-slot--healthCircle { z-index: 1; }
+.pvp-target-slot--characterCircle { z-index: 2; }
+.pvp-target-slot--healthCharCircle { z-index: 3; }
+
+.pvp-aim-timer-ring {
+  position: absolute;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.16s ease, left 0.24s ease, top 0.24s ease, width 0.24s ease, height 0.24s ease;
+  filter: drop-shadow(0 0 5px rgba(235, 255, 235, 0.55));
+  z-index: 12;
+}
+
+.pvp-aim-timer-ring::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  padding: 4px;
+  background:
+    conic-gradient(from -90deg, rgba(235, 255, 235, 0.98) calc(var(--pvp-timer-ratio, 0) * 1turn), rgba(235, 255, 235, 0.16) 0);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
+
+.visual-frame--pvp .visual-slot[data-slot-id="itemCircle"],
+.visual-frame--pvp .visual-slot[data-slot-id="arrow"] {
+  opacity: 0;
+  pointer-events: none;
+}
+
 .survival-column-progress-marker {
   position: absolute;
   width: clamp(13px, 3.7%, 21px);
@@ -616,6 +674,12 @@
 }
 
 .visual-frame > .survival-panel {
+  left: auto;
+  right: calc(100% + 6px);
+  top: 8px;
+}
+
+.visual-frame > .mode-panel-stack {
   left: auto;
   right: calc(100% + 6px);
   top: 8px;

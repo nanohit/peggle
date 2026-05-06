@@ -100,6 +100,10 @@ export class VisualLayout {
     this._previewFinalProgression = false;
     this._previewBallTrail = false;
     this._previewShockwave = false;
+    this._pvpOpponentTargetState = null;
+    this._pvpTargetLayer = null;
+    this._pvpAimTimerState = null;
+    this._pvpAimTimerRing = null;
 
     /** @type {function(object):void|null} */
     this.onConfigChange = null;
@@ -138,7 +142,7 @@ export class VisualLayout {
     // Frame has overflow:visible so they can pop out, and they position
     // relative to the frame (same dimensions as old canvas-container).
     this._reparentedPanels = [];
-    const panelIds = ['animPanel', 'bumperPanel', 'flipperPanel', 'portalPanel', 'multiballPanel', 'survivalPanel', 'aimLengthPanel'];
+    const panelIds = ['animPanel', 'bumperPanel', 'flipperPanel', 'portalPanel', 'multiballPanel', 'modePanelStack', 'aimLengthPanel'];
     for (const pid of panelIds) {
       const panelEl = document.getElementById(pid);
       if (panelEl && container.contains(panelEl)) {
@@ -208,6 +212,10 @@ export class VisualLayout {
     this.panel = null;
     this._slotClip = null;
     this._slotBg = null;
+    this._pvpTargetLayer = null;
+    this._pvpOpponentTargetState = null;
+    this._pvpAimTimerState = null;
+    this._pvpAimTimerRing = null;
     this.slotElements = {};
     this._survivalProgressIndicator = null;
     this._survivalProgressState = null;
@@ -306,6 +314,14 @@ export class VisualLayout {
       this.setGambleOverlayState({ open: false });
     } else {
       this._applyGambleOverlayState();
+    }
+  }
+
+  setPvpMode(active) {
+    if (this.frame) this.frame.classList.toggle('visual-frame--pvp', !!active);
+    if (!active) {
+      this.setPvpOpponentTarget(null);
+      this.setPvpAimTimer(null);
     }
   }
 
@@ -2097,6 +2113,8 @@ export class VisualLayout {
       this._positionSlot(def.id);
     }
     this.updateSurvivalProgressIndicator(this._survivalProgressState);
+    this._renderPvpOpponentTarget();
+    this._renderPvpAimTimer();
   }
 
   _getAdjustedSlotY(slotId, rawY) {
@@ -2134,6 +2152,8 @@ export class VisualLayout {
       if (def.id === 'character' && this._characterPortraitRuntime) return;
       el.style.backgroundImage = `url('${slotCfg.customSrc}')`;
       this._resolvedAssets[def.id] = slotCfg.customSrc;
+      this._renderPvpOpponentTarget();
+      this._renderPvpAimTimer();
       return;
     }
 
@@ -2141,6 +2161,8 @@ export class VisualLayout {
     if (this._resolvedAssets[def.id]) {
       if (def.id === 'character' && this._characterPortraitRuntime) return;
       el.style.backgroundImage = `url('${this._resolvedAssets[def.id]}')`;
+      this._renderPvpOpponentTarget();
+      this._renderPvpAimTimer();
       return;
     }
 
@@ -2150,6 +2172,8 @@ export class VisualLayout {
       if (el.dataset.slotId === def.id && !(def.id === 'character' && this._characterPortraitRuntime)) {
         el.style.backgroundImage = `url('${url}')`;
       }
+      this._renderPvpOpponentTarget();
+      this._renderPvpAimTimer();
     }
   }
 
@@ -2334,6 +2358,7 @@ export class VisualLayout {
   updateHealthBar(orangeLeft, totalOrange) {
     this._updateHealthCircle(orangeLeft, totalOrange);
     this._updateHealthCharCircle(orangeLeft, totalOrange);
+    this._renderPvpOpponentTarget();
   }
 
   _updateHealthCircle(orangeLeft, totalOrange) {
@@ -2373,6 +2398,182 @@ export class VisualLayout {
 
   _updateHealthCharCircle() {
     // Static copy of characterCircle — no glow, no scaling
+  }
+
+  setPvpOpponentTarget(state = null) {
+    if (!state || state.visible === false) {
+      this._pvpOpponentTargetState = null;
+      if (this._pvpTargetLayer) {
+        this._pvpTargetLayer.remove();
+        this._pvpTargetLayer = null;
+      }
+      return;
+    }
+    this._pvpOpponentTargetState = {
+      hp: Math.max(0, Number.isFinite(state.hp) ? state.hp : 3),
+      maxHp: Math.max(1, Number.isFinite(state.maxHp) ? state.maxHp : 3)
+    };
+    this._renderPvpOpponentTarget();
+  }
+
+  getCanvasSlotCircle(slotId = 'characterCircle', canvas = null) {
+    const slot = this.slotElements?.[slotId];
+    const targetCanvas = canvas || document.getElementById('gameCanvas');
+    if (!slot || !targetCanvas || slot.style.display === 'none') return null;
+    const slotRect = slot.getBoundingClientRect();
+    const canvasRect = targetCanvas.getBoundingClientRect();
+    if (!slotRect.width || !slotRect.height || !canvasRect.width || !canvasRect.height) return null;
+    return {
+      x: ((slotRect.left + slotRect.width / 2) - canvasRect.left) * (targetCanvas.width / canvasRect.width),
+      y: ((slotRect.top + slotRect.height / 2) - canvasRect.top) * (targetCanvas.height / canvasRect.height),
+      radius: Math.max(
+        slotRect.width * (targetCanvas.width / canvasRect.width),
+        slotRect.height * (targetCanvas.height / canvasRect.height)
+      ) / 2
+    };
+  }
+
+  _ensurePvpTargetLayer() {
+    if (this._pvpTargetLayer || !this._slotClip) return this._pvpTargetLayer;
+    const layer = document.createElement('div');
+    layer.className = 'pvp-target-layer';
+    this._slotClip.appendChild(layer);
+    this._pvpTargetLayer = layer;
+    return layer;
+  }
+
+  _getPvpTargetSlot(slotId) {
+    const layer = this._ensurePvpTargetLayer();
+    if (!layer) return null;
+    let el = layer.querySelector(`[data-pvp-slot-id="${slotId}"]`);
+    if (!el) {
+      el = document.createElement('div');
+      el.className = `pvp-target-slot pvp-target-slot--${slotId}`;
+      el.dataset.pvpSlotId = slotId;
+      layer.appendChild(el);
+    }
+    return el;
+  }
+
+  _renderPvpOpponentTarget() {
+    const state = this._pvpOpponentTargetState;
+    if (!state || !this.frame) return;
+    const layer = this._ensurePvpTargetLayer();
+    const canvas = document.getElementById('gameCanvas');
+    const frameRect = this.frame.getBoundingClientRect();
+    const canvasRect = canvas?.getBoundingClientRect?.();
+    if (!layer || !canvasRect || !canvasRect.width || !canvasRect.height) return;
+
+    const ratio = Math.max(0, Math.min(1, state.hp / state.maxHp));
+    const slotIds = ['characterCircle', 'healthCircle', 'healthCharCircle'];
+    const visibleSlotIds = new Set();
+
+    for (const slotId of slotIds) {
+      const source = this.slotElements?.[slotId];
+      if (!source || source.style.display === 'none') continue;
+      const sourceRect = source.getBoundingClientRect();
+      if (!sourceRect.width || !sourceRect.height) continue;
+
+      const centerX = sourceRect.left + sourceRect.width / 2;
+      const centerY = sourceRect.top + sourceRect.height / 2;
+      const relativeCanvasY = centerY - canvasRect.top;
+      const mirroredY = canvasRect.top + (canvasRect.height - relativeCanvasY);
+
+      const clone = this._getPvpTargetSlot(slotId);
+      if (!clone) continue;
+      visibleSlotIds.add(slotId);
+      clone.style.display = '';
+      clone.style.left = `${centerX - frameRect.left}px`;
+      clone.style.top = `${mirroredY - frameRect.top}px`;
+      clone.style.width = `${sourceRect.width}px`;
+      clone.style.height = `${sourceRect.height}px`;
+      clone.style.opacity = source.style.opacity || '';
+      clone.style.filter = source.style.filter || '';
+
+      if (slotId === 'healthCircle') {
+        const slotCfg = this.config?.slots?.healthCircle;
+        const color = slotCfg?.color || '#00e5ff';
+        clone.style.backgroundImage = 'none';
+        if (!clone.querySelector('.health-clip')) {
+          clone.innerHTML = '';
+          const clip = document.createElement('div');
+          clip.className = 'health-clip';
+          const fill = document.createElement('div');
+          fill.className = 'health-fill';
+          clip.appendChild(fill);
+          clone.appendChild(clip);
+        }
+        const clip = clone.querySelector('.health-clip');
+        const fill = clone.querySelector('.health-fill');
+        fill.style.background = color;
+        fill.style.clipPath = `inset(${(1 - ratio) * 100}% 0 0 0)`;
+        clip.style.filter = ratio > 0 ? `drop-shadow(0 0 ${Math.round(4 * ratio + 2)}px ${color})` : 'none';
+      } else {
+        clone.innerHTML = '';
+        const computedBg = getComputedStyle(source).backgroundImage;
+        clone.style.backgroundImage = computedBg && computedBg !== 'none'
+          ? computedBg
+          : source.style.backgroundImage;
+      }
+    }
+
+    for (const el of layer.querySelectorAll('.pvp-target-slot')) {
+      if (!visibleSlotIds.has(el.dataset.pvpSlotId)) {
+        el.style.display = 'none';
+      }
+    }
+  }
+
+  setPvpAimTimer(state = null) {
+    if (!state || state.visible === false || !Number.isFinite(state.ratio)) {
+      this._pvpAimTimerState = null;
+      if (this._pvpAimTimerRing) this._pvpAimTimerRing.style.opacity = '0';
+      return;
+    }
+    this._pvpAimTimerState = {
+      ratio: Math.max(0, Math.min(1, state.ratio))
+    };
+    this._renderPvpAimTimer();
+  }
+
+  _ensurePvpAimTimerRing() {
+    if (this._pvpAimTimerRing || !this._slotClip) return this._pvpAimTimerRing;
+    const ring = document.createElement('div');
+    ring.className = 'pvp-aim-timer-ring';
+    this._slotClip.appendChild(ring);
+    this._pvpAimTimerRing = ring;
+    return ring;
+  }
+
+  _renderPvpAimTimer() {
+    const state = this._pvpAimTimerState;
+    const ring = this._ensurePvpAimTimerRing();
+    if (!ring) return;
+    if (!state || !this.frame) {
+      ring.style.opacity = '0';
+      return;
+    }
+    const frameRect = this.frame.getBoundingClientRect();
+    const sourceRects = ['characterCircle', 'healthCircle', 'healthCharCircle']
+      .map(slotId => this.slotElements?.[slotId])
+      .filter(el => el && el.style.display !== 'none')
+      .map(el => el.getBoundingClientRect())
+      .filter(rect => rect.width && rect.height);
+    if (sourceRects.length === 0) {
+      ring.style.opacity = '0';
+      return;
+    }
+    const widest = sourceRects.reduce((best, rect) => (
+      Math.max(rect.width, rect.height) > Math.max(best.width, best.height) ? rect : best
+    ), sourceRects[0]);
+    const characterRect = this.slotElements?.characterCircle?.getBoundingClientRect?.() || widest;
+    const size = Math.max(widest.width, widest.height) + 14;
+    ring.style.left = `${characterRect.left + characterRect.width / 2 - frameRect.left}px`;
+    ring.style.top = `${characterRect.top + characterRect.height / 2 - frameRect.top}px`;
+    ring.style.width = `${size}px`;
+    ring.style.height = `${size}px`;
+    ring.style.setProperty('--pvp-timer-ratio', state.ratio.toFixed(4));
+    ring.style.opacity = '1';
   }
 
   hideHealthBar() {

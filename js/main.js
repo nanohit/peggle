@@ -19,6 +19,12 @@ import {
   SURVIVAL_GAMBLE_KNOCKBACK_SMOOTH_MIN_MS,
   SURVIVAL_SPEED_CURVE_PRESETS
 } from './survival-mode.js';
+import {
+  ensureLevelPvp,
+  normalizePvpAuthoredPegs,
+  normalizePvpSettings
+} from './pvp-mode.js';
+import { PvpRuntime } from './pvp-runtime.js';
 import { GambleSystem } from './gamble-system.js';
 import { normalizeYoyoSettings } from './yoyo-thread.js';
 import {
@@ -683,6 +689,7 @@ class PeggleApp {
       }
       if (this.editor) {
         this.editor.setSurvivalSettings(normalized);
+        this.editor.setPvpSettings(ensureLevelPvp(level));
       }
       this.updateLevelSettings();
     }
@@ -1082,6 +1089,7 @@ class PeggleApp {
 
     // Survival mode panel
     this.setupSurvivalPanel();
+    this.setupPvpPanel();
     this.setupAimLengthPanel();
 
     // Keyboard shortcuts
@@ -1856,7 +1864,11 @@ class PeggleApp {
 
     toggle.addEventListener('change', () => {
       this.updateLevelSurvivalSettings({ enabled: toggle.checked });
+      if (toggle.checked) {
+        this.updateLevelPvpSettings({ enabled: false }, { refreshUi: false });
+      }
       this._setSurvivalSettingsVisible(toggle.checked);
+      this.updateLevelSettings();
     });
 
     const applyWorldHeight = (rawValue) => {
@@ -2041,6 +2053,59 @@ class PeggleApp {
     }
   }
 
+  setupPvpPanel() {
+    const panel = document.getElementById('pvpPanel');
+    const toggle = document.getElementById('pvpModeToggle');
+    const controls = document.getElementById('pvpControls');
+    const symmetryToggle = document.getElementById('pvpSymmetryToggle');
+    const cpuToggle = document.getElementById('pvpCpuToggle');
+    const timerSlider = document.getElementById('pvpAimTimerSlider');
+    const timerInput = document.getElementById('pvpAimTimerInput');
+    const difficultySelect = document.getElementById('pvpDifficultySelect');
+    if (!panel || !toggle || !controls || !symmetryToggle || !cpuToggle || !timerSlider || !timerInput || !difficultySelect) {
+      return;
+    }
+
+    const formatSeconds = (ms) => (Math.round(ms) / 1000).toFixed(2).replace(/\.00$/, '');
+
+    const applyTimer = (rawValue, fromSeconds = false) => {
+      const rawMs = fromSeconds
+        ? (parseFloat(rawValue) || 5) * 1000
+        : parseFloat(rawValue) || 5000;
+      const value = Math.max(1000, Math.min(30000, Math.round(rawMs / 250) * 250));
+      timerSlider.value = value;
+      timerInput.value = formatSeconds(value);
+      this.updateLevelPvpSettings({ aimTimerMs: value });
+    };
+
+    toggle.addEventListener('change', () => {
+      this.updateLevelPvpSettings({ enabled: toggle.checked });
+      if (toggle.checked) {
+        this.updateLevelSurvivalSettings({ enabled: false }, { refreshUi: false });
+      }
+      this._setPvpSettingsVisible(toggle.checked);
+      this.updateLevelSettings();
+    });
+
+    symmetryToggle.addEventListener('change', () => {
+      this.updateLevelPvpSettings({ symmetryEnabled: symmetryToggle.checked });
+    });
+
+    cpuToggle.addEventListener('change', () => {
+      this.updateLevelPvpSettings({ cpuEnabled: cpuToggle.checked });
+    });
+
+    timerSlider.addEventListener('input', () => {
+      timerInput.value = formatSeconds(parseFloat(timerSlider.value) || 5000);
+    });
+    timerSlider.addEventListener('change', () => applyTimer(timerSlider.value));
+    timerInput.addEventListener('change', () => applyTimer(timerInput.value, true));
+
+    difficultySelect.addEventListener('change', () => {
+      this.updateLevelPvpSettings({ cpuDifficulty: difficultySelect.value });
+    });
+  }
+
   _getSurvivalCurveMetrics(canvas) {
     const width = canvas?.width || 154;
     const height = canvas?.height || 86;
@@ -2197,8 +2262,20 @@ class PeggleApp {
     container.classList.toggle('hidden', !visible);
   }
 
+  _setPvpSettingsVisible(visible) {
+    const container = document.getElementById('pvpControls');
+    if (!container) return;
+    container.classList.toggle('hidden', !visible);
+  }
+
   setSurvivalPanelVisible(visible) {
     const panel = document.getElementById('survivalPanel');
+    if (!panel) return;
+    panel.classList.toggle('visible', !!visible);
+  }
+
+  setPvpPanelVisible(visible) {
+    const panel = document.getElementById('pvpPanel');
     if (!panel) return;
     panel.classList.toggle('visible', !!visible);
   }
@@ -2296,12 +2373,43 @@ class PeggleApp {
       nextRaw,
       this.canvas.height
     );
+    if (level.survival.enabled) {
+      level.pvp = normalizePvpSettings({ ...(level.pvp || {}), enabled: false });
+    }
     if (options.save !== false) {
       this.levelManager.save();
     }
     this.applySurvivalSettingsToEditor();
     if (options.refreshUi !== false) {
       this.updateLevelSettings();
+    }
+  }
+
+  updateLevelPvpSettings(partialSettings, options = {}) {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level) return;
+
+    const current = ensureLevelPvp(level);
+    level.pvp = normalizePvpSettings({ ...current, ...(partialSettings || {}) });
+    if (level.pvp.enabled) {
+      level.survival = normalizeSurvivalSettings({
+        ...ensureLevelSurvival(level, this.canvas.height),
+        enabled: false
+      }, this.canvas.height);
+      if (level.pvp.symmetryEnabled) {
+        normalizePvpAuthoredPegs(level, this.canvas.height);
+      }
+    }
+
+    if (options.save !== false) {
+      this.levelManager.save();
+    }
+    this.applyPvpSettingsToEditor();
+    if (options.refreshUi !== false) {
+      this.updateLevelSettings();
+    }
+    if (this.editor && this.editor.onPegCountChange) {
+      this.editor.onPegCountChange(level.pegs.length);
     }
   }
 
@@ -2322,6 +2430,13 @@ class PeggleApp {
     const level = this.levelManager.getCurrentLevel();
     if (!level) return;
     this.editor.setSurvivalSettings(ensureLevelSurvival(level, this.canvas.height));
+  }
+
+  applyPvpSettingsToEditor() {
+    if (!this.editor) return;
+    const level = this.levelManager.getCurrentLevel();
+    if (!level) return;
+    this.editor.setPvpSettings(ensureLevelPvp(level));
   }
 
   _setFlipperProp(prop, value) {
@@ -2597,6 +2712,8 @@ class PeggleApp {
     }
     this.visualLayout.hideBallCounter();
     this.visualLayout.hideHealthBar();
+    this.visualLayout.setPvpOpponentTarget?.(null);
+    this.visualLayout.setPvpMode?.(false);
 
     if (this.game) {
       this.game.stop();
@@ -2687,6 +2804,7 @@ class PeggleApp {
     document.getElementById('playBtn').title = 'Play Level';
     document.querySelector('.toolbar').style.display = 'flex';
     this.setSurvivalPanelVisible(true);
+    this.setPvpPanelVisible(true);
     this.setAimLengthPanelVisible(true);
 
     // Sync tool button states
@@ -2704,6 +2822,7 @@ class PeggleApp {
 
     // Keep side-panel settings in sync when switching/returning to editor.
     this.updateLevelSettings();
+    this.applyPvpSettingsToEditor();
     this._applyLevelVisuals();
     this.visualLayout.setSpinMode(false);
     this.visualLayout.setEditMode(false);
@@ -2733,9 +2852,15 @@ class PeggleApp {
     }
 
     const level = this.levelManager.getCurrentLevel();
-    if (!level || level.pegs.length === 0) {
+    const pvp = ensureLevelPvp(level);
+    if (!level || (!pvp.enabled && level.pegs.length === 0)) {
       alert('Add some pegs first!');
       this.startEditor();
+      return;
+    }
+
+    if (pvp.enabled) {
+      this.startPvpGame(level, pvp);
       return;
     }
 
@@ -2752,6 +2877,8 @@ class PeggleApp {
 
     this.mode = 'play';
     this.game = new Game(this.canvas);
+    this.visualLayout.setPvpOpponentTarget?.(null);
+    this.visualLayout.setPvpMode?.(false);
     this.game.showPerfOverlay = true; // editor play mode shows debug info
     this.game.renderer.onVerticalProgress = (progress) => {
       this.visualLayout.updateSurvivalProgressIndicator(progress);
@@ -2825,6 +2952,7 @@ class PeggleApp {
     document.getElementById('playBtn').title = 'Back to Editor';
     document.querySelector('.toolbar').style.display = 'none';
     this.setSurvivalPanelVisible(false);
+    this.setPvpPanelVisible(false);
     this.setAimLengthPanelVisible(false);
     this._applyLevelVisuals();
     this.visualLayout.setEditMode(false);
@@ -2832,6 +2960,105 @@ class PeggleApp {
     if (this.adminPanel) this.adminPanel.classList.add('hidden');
     this.resizeCanvas(); // re-fit frame without panel
     this.mountGambleSystem();
+    this._setPortraitControllerContextForCurrentLevel({ live: true });
+    this._setDialogueControllerContextForCurrentLevel({ live: true, refreshPreview: false });
+  }
+
+  startPvpGame(level, pvpSettings) {
+    normalizePvpAuthoredPegs(level, this.canvas.height);
+    this.levelManager.save();
+
+    this.mode = 'play';
+    document.getElementById('playBtn').innerHTML = '✏️';
+    document.getElementById('playBtn').title = 'Back to Editor';
+    document.querySelector('.toolbar').style.display = 'none';
+    this.setSurvivalPanelVisible(false);
+    this.setPvpPanelVisible(false);
+    this.setAimLengthPanelVisible(false);
+    this.visualLayout.setPvpMode?.(true);
+    this.visualLayout.setEditMode(false);
+    this.visualLayout.setPanelVisible(false);
+    if (this.adminPanel) this.adminPanel.classList.add('hidden');
+    this._applyLevelVisuals();
+    this.resizeCanvas();
+
+    this.game = new PvpRuntime(this.canvas, {
+      settings: pvpSettings,
+      getTargetCircle: () => this.visualLayout.getCanvasSlotCircle?.('characterCircle', this.canvas),
+      onVisualState: (state) => {
+        if (!state) return;
+        this.visualLayout.setPvpOpponentTarget?.({
+          visible: true,
+          hp: state.cpuHp,
+          maxHp: state.maxHp || 3
+        });
+        this.visualLayout.setPvpAimTimer?.(
+          state.timerVisible
+            ? { visible: true, ratio: state.timerRatio }
+            : null
+        );
+      },
+      onGameEnd: (result, score) => {
+        const endedGame = this.game;
+        const bindDelayMs = endedGame?.getEndOverlayInteractDelayMs?.() ?? 650;
+        setTimeout(() => {
+          if (!endedGame || this.game !== endedGame) return;
+          level.metadata.playCount = (level.metadata.playCount || 0) + 1;
+          this.levelManager.save();
+
+          let fired = false;
+          const guardedRestart = (event) => {
+            if (fired) return;
+            fired = true;
+            if (event?.cancelable) event.preventDefault();
+            if (typeof event?.stopPropagation === 'function') event.stopPropagation();
+            this.canvas.removeEventListener('click', guardedRestart);
+            this.canvas.removeEventListener('touchstart', guardedRestart);
+            if (endedGame?.dismissEndOverlay) {
+              endedGame.dismissEndOverlay(() => {
+                if (this.game === endedGame && endedGame.handleRestart()) {
+                  this.startEditor();
+                }
+              });
+              return;
+            }
+            if (this.game === endedGame && endedGame.handleRestart()) {
+              this.startEditor();
+            }
+          };
+
+          this.canvas.addEventListener('click', guardedRestart, { once: true });
+          this.canvas.addEventListener('touchstart', guardedRestart, { once: true, passive: false });
+        }, bindDelayMs);
+      }
+    });
+    this.game.showPerfOverlay = true;
+    this.game.renderer.onVerticalProgress = (progress) => {
+      this.visualLayout.updateSurvivalProgressIndicator(progress);
+    };
+
+    const trajectoryToggle = document.getElementById('trajectoryToggle');
+    this.game.setShowFullTrajectory?.(trajectoryToggle?.checked);
+    this.resizeCanvas();
+
+    const visuals = normalizeVisuals(level?.visuals);
+    this.game.renderer.setBackground(visuals.background);
+    this.game.renderer.setBallTrail(visuals.ballTrail);
+    this.game.renderer.setShockwave(visuals.shockwave);
+    this.game.loadLevel(level);
+    this.game.setAimLength(typeof level.aimLength === 'number' ? level.aimLength : 300);
+    this.game.start();
+
+    this._unsubBallCounter = this.game.subscribeUiState((snapshot) => {
+      if (snapshot.ballsLeft != null) {
+        this.visualLayout.updateBallCounter(snapshot.ballsLeft, snapshot.initialBallCount);
+      }
+      if (Number.isFinite(snapshot.orangePegsLeft)) {
+        this.visualLayout.updateHealthBar(snapshot.orangePegsLeft, snapshot.totalOrangePegs);
+      }
+    });
+
+    this.resizeCanvas();
     this._setPortraitControllerContextForCurrentLevel({ live: true });
     this._setDialogueControllerContextForCurrentLevel({ live: true, refreshPreview: false });
   }
@@ -3043,6 +3270,21 @@ class PeggleApp {
     this._drawSurvivalSpeedCurveEditor(survival.speedCurve);
     this._updateSurvivalBackgroundStatus(survival);
     this._setSurvivalSettingsVisible(!!survival.enabled);
+
+    const pvp = ensureLevelPvp(level);
+    const pvpToggle = document.getElementById('pvpModeToggle');
+    const pvpSymmetryToggle = document.getElementById('pvpSymmetryToggle');
+    const pvpCpuToggle = document.getElementById('pvpCpuToggle');
+    const pvpTimerSlider = document.getElementById('pvpAimTimerSlider');
+    const pvpTimerInput = document.getElementById('pvpAimTimerInput');
+    const pvpDifficultySelect = document.getElementById('pvpDifficultySelect');
+    if (pvpToggle) pvpToggle.checked = !!pvp.enabled;
+    if (pvpSymmetryToggle) pvpSymmetryToggle.checked = !!pvp.symmetryEnabled;
+    if (pvpCpuToggle) pvpCpuToggle.checked = !!pvp.cpuEnabled;
+    if (pvpTimerSlider) pvpTimerSlider.value = Math.round(pvp.aimTimerMs);
+    if (pvpTimerInput) pvpTimerInput.value = (Math.round(pvp.aimTimerMs) / 1000).toFixed(2).replace(/\.00$/, '');
+    if (pvpDifficultySelect) pvpDifficultySelect.value = pvp.cpuDifficulty;
+    this._setPvpSettingsVisible(!!pvp.enabled);
     
     const isInTraining = this.levelManager.isInTraining(level.id);
     document.getElementById('addToTrainingBtn').textContent = isInTraining ? 'Remove from Training' : 'Add to Training';
@@ -3062,6 +3304,7 @@ class PeggleApp {
     this.updateLevelTitle();
     this.updateLevelSettings();
     this.applySurvivalSettingsToEditor();
+    this.applyPvpSettingsToEditor();
     
     if (this.mode === 'editor' && this.editor) {
       this.editor.selectedPegIds.clear();

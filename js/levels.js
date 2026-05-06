@@ -7,6 +7,7 @@ import {
   normalizeSurvivalGamblePegProperties,
   normalizeSurvivalSettings
 } from './survival-mode.js';
+import { ensureLevelPvp, normalizePvpSettings } from './pvp-mode.js';
 import { normalizeYoyoSettings } from './yoyo-thread.js';
 import { normalizeMultiballSpawnCount } from './multiball-settings.js';
 import { normalizeVisuals } from './visual-config.js';
@@ -47,6 +48,10 @@ export function normalizeLevelData(level) {
   level.aimLength = Math.max(0, Math.min(300, Math.round(level.aimLength)));
   normalizeLevelHitPegClearSettings(level);
   const survival = ensureLevelSurvival(level, 600);
+  const pvp = ensureLevelPvp(level);
+  if (pvp.enabled && survival.enabled) {
+    survival.enabled = false;
+  }
   for (const peg of level.pegs) {
     if (peg && peg.groupId != null && !validGroupIds.has(peg.groupId)) {
       peg.groupId = null;
@@ -123,6 +128,7 @@ export class LevelManager {
       hitPegTimedClearEnabled: hitPegClear.enabled,
       hitPegClearDelayMs: hitPegClear.delayMs,
       survival: ensureLevelSurvival({}, 600),
+      pvp: normalizePvpSettings(null),
       visuals: normalizeVisuals(null),
       character: normalizeLevelCharacterAssignment(null),
       dialogue: normalizeDialogueConfig(null),
@@ -175,6 +181,14 @@ export class LevelManager {
       level.survival = normalizeSurvivalSettings(level.survival, 600);
     } else {
       ensureLevelSurvival(level, 600);
+    }
+    if (Object.prototype.hasOwnProperty.call(updates || {}, 'pvp')) {
+      level.pvp = normalizePvpSettings(level.pvp);
+    } else {
+      ensureLevelPvp(level);
+    }
+    if (level.pvp.enabled && level.survival.enabled) {
+      level.survival.enabled = false;
     }
     level.yoyo = normalizeYoyoSettings(level.yoyo);
     normalizeLevelHitPegClearSettings(level);

@@ -8,6 +8,14 @@ import { normalizeFlipperConfig } from './flipper-defaults.js';
 import { SurvivalRuntime } from './survival-runtime.js';
 import { ensureLevelSurvival, normalizeSurvivalGamblePegProperties } from './survival-mode.js';
 import {
+  filterPvpAuthoredPegs,
+  getPvpMidline,
+  getPvpRuntimePegs,
+  isPvpAuthoredPeg,
+  isPvpSymmetryEnabled,
+  normalizePvpSettings
+} from './pvp-mode.js';
+import {
   MULTIBALL_DEFAULT_SPAWN_COUNT,
   normalizeMultiballSpawnCount
 } from './multiball-settings.js';
@@ -122,6 +130,7 @@ export class Editor {
     if (level) {
       this.survivalRuntime.configure(ensureLevelSurvival(level, canvas.height));
     }
+    this.pvpSettings = normalizePvpSettings(level?.pvp);
 
     this.setupInput();
   }
@@ -725,12 +734,50 @@ export class Editor {
     return normalized;
   }
 
+  setPvpSettings(settings) {
+    this.pvpSettings = normalizePvpSettings(settings);
+    if (this.pvpSettings.enabled) {
+      this.survivalRuntime.setCameraY(0);
+    }
+    this.selectedPegIds = new Set(
+      Array.from(this.selectedPegIds).filter(id => {
+        const level = this.levelManager.getCurrentLevel();
+        const peg = level?.pegs?.find(p => p.id === id);
+        return peg && this.isPvpEditablePeg(peg);
+      })
+    );
+    this.notifySelectionChange();
+    return this.pvpSettings;
+  }
+
+  isPvpMode() {
+    return !!this.pvpSettings?.enabled;
+  }
+
+  isPvpSymmetryMode() {
+    return this.isPvpMode() && this.pvpSettings.symmetryEnabled !== false;
+  }
+
+  isPvpEditablePeg(peg) {
+    return !peg?.pvpMirrored;
+  }
+
+  getPvpEditablePegs(level) {
+    const pegs = Array.isArray(level?.pegs) ? level.pegs : [];
+    return this.isPvpSymmetryMode() ? filterPvpAuthoredPegs(pegs, this.canvas.height) : pegs;
+  }
+
+  clampPvpAuthoredPosition(x, y) {
+    return { x, y };
+  }
+
   getPegAtPosition(x, y) {
     const level = this.levelManager.getCurrentLevel();
     if (!level) return null;
     
     for (let i = level.pegs.length - 1; i >= 0; i--) {
       const peg = level.pegs[i];
+      if (!this.isPvpEditablePeg(peg)) continue;
       
       if (peg.shape === 'brick') {
         const w = peg.width || this.getBrickWidth();
@@ -809,10 +856,11 @@ export class Editor {
 
   clampPegPositionToVisibilityBounds(pegLike, x, y, angle = pegLike.angle || 0, slices = pegLike.curveSlices) {
     const b = this.getPegVisibilityBounds(pegLike, x, y, angle, slices);
-    return {
+    const clamped = {
       x: Utils.clamp(x, b.minX, b.maxX),
       y: Utils.clamp(y, b.minY, b.maxY)
     };
+    return this.clampPvpAuthoredPosition(clamped.x, clamped.y);
   }
 
   isPegPositionAllowed(pegLike, x, y, angle = pegLike.angle || 0, slices = pegLike.curveSlices) {
@@ -1699,13 +1747,15 @@ export class Editor {
       x = Utils.snapToGrid(x, this.gridSize);
       y = Utils.snapToGrid(y, this.gridSize);
     }
-    
     const level = this.levelManager.getCurrentLevel();
     if (!level) return null;
     
     // Check minimum distance from other pegs
     const minDist = PHYSICS_CONFIG.pegRadius * 2;
-    for (const peg of level.pegs) {
+    const distancePegs = this.isPvpSymmetryMode()
+      ? getPvpRuntimePegs(level, this.canvas.height)
+      : this.getPvpEditablePegs(level);
+    for (const peg of distancePegs) {
       if (Utils.distance(x, y, peg.x, peg.y) < minDist) {
         return null;
       }
@@ -1872,7 +1922,7 @@ export class Editor {
     const minY = Math.min(box.startY, box.endY);
     const maxY = Math.max(box.startY, box.endY);
     
-    for (const peg of level.pegs) {
+    for (const peg of this.getPvpEditablePegs(level)) {
       if (peg.x >= minX && peg.x <= maxX && peg.y >= minY && peg.y <= maxY) {
         this.selectedPegIds.add(peg.id);
       }
@@ -1886,7 +1936,7 @@ export class Editor {
     if (!level) return;
     
     this.selectedPegIds.clear();
-    for (const peg of level.pegs) {
+    for (const peg of this.getPvpEditablePegs(level)) {
       this.selectedPegIds.add(peg.id);
     }
     
@@ -2329,9 +2379,12 @@ export class Editor {
   render() {
     const level = this.levelManager.getCurrentLevel();
     const survivalOn = this.isSurvivalMode();
-    const renderPegs = (level && this.mode === 'draw' && this.drawShapeMode === 'bezier' && this.bezierDraft && this.activeBezierGroupId)
+    const baseRenderPegs = (level && this.mode === 'draw' && this.drawShapeMode === 'bezier' && this.bezierDraft && this.activeBezierGroupId)
       ? level.pegs.filter(p => p.bezierGroupId !== this.activeBezierGroupId)
       : (level ? level.pegs : []);
+    const renderPegs = (level && this.isPvpSymmetryMode())
+      ? getPvpRuntimePegs({ ...level, pegs: baseRenderPegs }, this.canvas.height)
+      : baseRenderPegs;
     const wrapCopyPegIds = (this.animationPreview && this.animationPreviewAnimator)
       ? this.animationPreviewAnimator.getAnimatedPegIds()
       : null;
@@ -2404,6 +2457,9 @@ export class Editor {
       verticalProgress: survivalOn ? this.survivalRuntime.getTrackerState() : null,
       ballTrailPreview: this.ballTrailPreview,
       shockwavePreview: this.shockwavePreview
+      ,
+      pvpMidline: this.isPvpSymmetryMode() ? getPvpMidline(this.canvas.height) : null,
+      pvpSymmetryPreview: this.isPvpSymmetryMode()
     });
   }
 

@@ -3,10 +3,12 @@
 // On defeat: level mirrors horizontally and replays. Second defeat restores original.
 
 import { Game } from './game.js';
+import { PvpRuntime } from './pvp-runtime.js';
 import { isMuted, setMuted } from './haptics.js';
 import { VisualLayout } from './visual-layout.js';
 import { normalizeVisuals } from './visual-config.js';
 import { normalizeLevelData } from './levels.js';
+import { ensureLevelPvp } from './pvp-mode.js';
 import { DialogueController } from './dialogue-controller.js';
 import { GambleSystem } from './gamble-system.js';
 import { loadCharacterRegistry, normalizeCharacterRegistry, saveCharacterRegistry, CHARACTER_REGISTRY_STORAGE_KEY } from './character-config.js';
@@ -1334,12 +1336,35 @@ async function bootWithLevels(levels, campaignName, campaignData) {
     pauseOverlay.classList.remove('pause-overlay--instant');
     pauseOverlay.classList.remove('visible');
     visualLayout.frame.classList.remove('visual-frame--paused');
+    visualLayout.setPvpOpponentTarget?.(null);
 
-    game = new Game(canvas);
+    const pvp = ensureLevelPvp(levelData);
+    visualLayout.setPvpMode?.(pvp.enabled);
+    game = pvp.enabled
+      ? new PvpRuntime(canvas, {
+        settings: pvp,
+        getTargetCircle: () => visualLayout.getCanvasSlotCircle?.('characterCircle', canvas),
+        onVisualState: (state) => {
+          if (!state) return;
+          visualLayout.setPvpOpponentTarget?.({
+            visible: true,
+            hp: state.cpuHp,
+            maxHp: state.maxHp || 3
+          });
+          visualLayout.setPvpAimTimer?.(
+            state.timerVisible
+              ? { visible: true, ratio: state.timerRatio }
+              : null
+          );
+        }
+      })
+      : new Game(canvas);
     if (Number.isFinite(options.suppressInputMs) && options.suppressInputMs > 0) {
-      game.suppressInputFor(options.suppressInputMs);
+      game.suppressInputFor?.(options.suppressInputMs);
     }
-    game.confirmShoot = !!localStorage.getItem('peggle_confirmShoot');
+    if (!pvp.enabled) {
+      game.confirmShoot = !!localStorage.getItem('peggle_confirmShoot');
+    }
 
     // Apply visuals (background + frame + slots)
     const visuals = normalizeVisuals(levelData.visuals);
@@ -1350,10 +1375,19 @@ async function bootWithLevels(levels, campaignName, campaignData) {
     game.renderer.onVerticalProgress = (progress) => {
       visualLayout.updateSurvivalProgressIndicator(progress);
     };
-    game.setEndSequenceConfig(visuals.endSequence);
+    game.setEndSequenceConfig?.(visuals.endSequence);
 
     game.loadLevel(levelData);
-    bindGambleSystem(game);
+    if (pvp.enabled) {
+      if (gambleSystem) {
+        gambleSystem.dispose?.();
+        gambleSystem = null;
+      }
+      dialogueController.setGambleSystem(null);
+      portraitReactionController.setGambleSystem(null);
+    } else {
+      bindGambleSystem(game);
+    }
     portraitReactionController.setContext({
       level: levelData,
       registry: characterRegistry,
@@ -1382,6 +1416,9 @@ async function bootWithLevels(levels, campaignName, campaignData) {
       }
       if (Number.isFinite(snapshot.orangePegsLeft)) {
         visualLayout.updateHealthBar(snapshot.orangePegsLeft, snapshot.totalOrangePegs);
+      }
+      if (!pvp.enabled) {
+        visualLayout.setPvpOpponentTarget?.(null);
       }
     });
 
@@ -1479,6 +1516,8 @@ async function bootWithLevels(levels, campaignName, campaignData) {
               transitionToLevel(currentNodeId);
             });
           }
+        } else if (pvp.enabled) {
+          onceAction(() => startLevel(currentNodeId, { suppressInputMs: 650 }));
         } else {
           // Defeat — toggle mirror and restart same level
           mirrorState = !mirrorState;

@@ -2943,6 +2943,90 @@ export class Renderer {
     }
   }
 
+  drawPvpMidline(y) {
+    if (!Number.isFinite(y)) return;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.28)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([7, 7]);
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(this.width, y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+
+  drawPvpCannons(cannons = []) {
+    const ctx = this.ctx;
+    for (const cannon of cannons) {
+      const radius = cannon.radius || 26;
+      const hp = Math.max(0, Math.min(cannon.maxHp || 3, cannon.hp ?? 3));
+      const maxHp = Math.max(1, cannon.maxHp || 3);
+      const ratio = hp / maxHp;
+      const x = cannon.x;
+      const y = cannon.y;
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+
+      ctx.save();
+      ctx.translate(x, y);
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(0, 0, radius, 0, Math.PI * 2);
+      ctx.clip();
+      ctx.fillStyle = 'rgba(17, 24, 39, 0.86)';
+      ctx.fillRect(-radius, -radius, radius * 2, radius * 2);
+      ctx.fillStyle = cannon.side === 'cpu' ? 'rgba(255, 95, 115, 0.78)' : 'rgba(94, 210, 255, 0.78)';
+      ctx.fillRect(-radius, radius - radius * 2 * ratio, radius * 2, radius * 2 * ratio);
+      ctx.restore();
+
+      const grad = ctx.createRadialGradient(-radius * 0.35, -radius * 0.45, radius * 0.2, 0, 0, radius);
+      grad.addColorStop(0, 'rgba(255, 255, 255, 0.34)');
+      grad.addColorStop(0.62, 'rgba(255, 255, 255, 0.04)');
+      grad.addColorStop(1, 'rgba(0, 0, 0, 0.18)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(0, 0, radius, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.strokeStyle = cannon.side === 'cpu' ? 'rgba(255, 149, 165, 0.92)' : 'rgba(132, 226, 255, 0.92)';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(0, 0, radius + 2, 0, Math.PI * 2);
+      ctx.stroke();
+
+      if (Number.isFinite(cannon.timerRatio)) {
+        const timerRatio = Math.max(0, Math.min(1, cannon.timerRatio));
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.82)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, 0, radius + 7, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * timerRatio);
+        ctx.stroke();
+      }
+
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.62)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(0, 0, radius - 7, 0, Math.PI * 2);
+      ctx.stroke();
+
+      if (Number.isFinite(cannon.aimAngle)) {
+        ctx.rotate(cannon.aimAngle);
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+        ctx.lineWidth = 4;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(radius * 0.55, 0);
+        ctx.lineTo(radius * 1.35, 0);
+        ctx.stroke();
+      }
+
+      ctx.restore();
+    }
+  }
+
   // Render full game frame
   renderGame(state) {
     const baseCtx = this.baseCtx || this.canvas.getContext('2d', { alpha: false });
@@ -2976,6 +3060,10 @@ export class Renderer {
       this.ctx.translate(0, -cameraY);
     }
 
+    if (Number.isFinite(state.pvpMidline)) {
+      this.drawPvpMidline(state.pvpMidline);
+    }
+
     this.drawPegs(
       state.pegs,
       state.hitPegIds,
@@ -3000,6 +3088,10 @@ export class Renderer {
 
     if (state.yoyoThreads) {
       this.drawYoyoThreads(state.yoyoThreads);
+    }
+
+    if (state.pvpCannons) {
+      this.drawPvpCannons(state.pvpCannons);
     }
 
     if (useCamera) {
@@ -3069,6 +3161,18 @@ export class Renderer {
 
     if (state.showLauncher) {
       this.drawLauncher(state.launchX, state.launchY, state.aimAngle, state.showAim, state.launcherBallScale);
+    }
+
+    if (Array.isArray(state.secondaryLaunchers)) {
+      for (const launcher of state.secondaryLaunchers) {
+        this.drawLauncher(
+          launcher.x,
+          launcher.y,
+          launcher.angle || Math.PI / 2,
+          !!launcher.showAim,
+          launcher.ballScale
+        );
+      }
     }
 
     if (state.selectionBox) {
