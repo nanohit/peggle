@@ -2192,6 +2192,48 @@ export class Editor {
     this.levelManager.save();
   }
 
+  cloneCurveSlicesForOffset(curveSlices, offsetX = 0, offsetY = 0) {
+    if (!Array.isArray(curveSlices)) return null;
+    return curveSlices.map(slice => ({
+      ...slice,
+      x: Number.isFinite(slice?.x) ? slice.x + offsetX : slice?.x,
+      y: Number.isFinite(slice?.y) ? slice.y + offsetY : slice?.y
+    }));
+  }
+
+  buildDuplicatePegData(peg, offsetX = 0, offsetY = 0) {
+    const pegData = {
+      x: peg.x + offsetX,
+      y: peg.y + offsetY,
+      type: peg.type,
+      shape: peg.shape,
+      angle: peg.angle,
+      width: peg.width,
+      height: peg.height
+    };
+    const curveSlices = this.cloneCurveSlicesForOffset(peg.curveSlices, offsetX, offsetY);
+    if (curveSlices) pegData.curveSlices = curveSlices;
+    if (peg.color) pegData.color = peg.color;
+    if (peg.type === 'bumper') {
+      pegData.bumperBounce = peg.bumperBounce;
+      pegData.bumperScale = peg.bumperScale;
+      pegData.bumperDisappear = peg.bumperDisappear;
+      pegData.bumperOrange = peg.bumperOrange;
+    }
+    if (isPortalType(peg.type)) {
+      pegData.portalScale = normalizePortalScale(peg.portalScale);
+      pegData.portalOneWay = !!peg.portalOneWay;
+      pegData.portalOneWayFlip = !!peg.portalOneWayFlip;
+    }
+    if (peg.type === 'multi') {
+      pegData.multiballSpawnCount = normalizeMultiballSpawnCount(peg.multiballSpawnCount);
+    }
+    if (peg.type === 'gamble') {
+      Object.assign(pegData, normalizeSurvivalGamblePegProperties(peg));
+    }
+    return pegData;
+  }
+
   duplicateSelectedPegs(offsetX = 20, offsetY = 20) {
     const level = this.levelManager.getCurrentLevel();
     if (!level || this.selectedPegIds.size === 0) return;
@@ -2202,33 +2244,7 @@ export class Editor {
     for (const pegId of this.selectedPegIds) {
       const peg = level.pegs.find(p => p.id === pegId);
       if (peg) {
-        const pegData = {
-          x: peg.x + offsetX,
-          y: peg.y + offsetY,
-          type: peg.type,
-          shape: peg.shape,
-          angle: peg.angle,
-          width: peg.width,
-          height: peg.height
-        };
-        if (peg.color) pegData.color = peg.color;
-        if (peg.type === 'bumper') {
-          pegData.bumperBounce = peg.bumperBounce;
-          pegData.bumperScale = peg.bumperScale;
-          pegData.bumperDisappear = peg.bumperDisappear;
-          pegData.bumperOrange = peg.bumperOrange;
-        }
-        if (isPortalType(peg.type)) {
-          pegData.portalScale = normalizePortalScale(peg.portalScale);
-          pegData.portalOneWay = !!peg.portalOneWay;
-          pegData.portalOneWayFlip = !!peg.portalOneWayFlip;
-        }
-        if (peg.type === 'multi') {
-          pegData.multiballSpawnCount = normalizeMultiballSpawnCount(peg.multiballSpawnCount);
-        }
-        if (peg.type === 'gamble') {
-          Object.assign(pegData, normalizeSurvivalGamblePegProperties(peg));
-        }
+        const pegData = this.buildDuplicatePegData(peg, offsetX, offsetY);
         const newPeg = this.levelManager.addPeg(pegData);
         if (newPeg) {
           newPegIds.add(newPeg.id);
@@ -2254,33 +2270,7 @@ export class Editor {
     for (const pegId of this.selectedPegIds) {
       const peg = level.pegs.find(p => p.id === pegId);
       if (peg) {
-        const pegData = {
-          x: peg.x,
-          y: peg.y,
-          type: peg.type,
-          shape: peg.shape,
-          angle: peg.angle,
-          width: peg.width,
-          height: peg.height
-        };
-        if (peg.color) pegData.color = peg.color;
-        if (peg.type === 'bumper') {
-          pegData.bumperBounce = peg.bumperBounce;
-          pegData.bumperScale = peg.bumperScale;
-          pegData.bumperDisappear = peg.bumperDisappear;
-          pegData.bumperOrange = peg.bumperOrange;
-        }
-        if (isPortalType(peg.type)) {
-          pegData.portalScale = normalizePortalScale(peg.portalScale);
-          pegData.portalOneWay = !!peg.portalOneWay;
-          pegData.portalOneWayFlip = !!peg.portalOneWayFlip;
-        }
-        if (peg.type === 'multi') {
-          pegData.multiballSpawnCount = normalizeMultiballSpawnCount(peg.multiballSpawnCount);
-        }
-        if (peg.type === 'gamble') {
-          Object.assign(pegData, normalizeSurvivalGamblePegProperties(peg));
-        }
+        const pegData = this.buildDuplicatePegData(peg);
         const newPeg = this.levelManager.addPeg(pegData);
         if (newPeg) {
           newPegIds.add(newPeg.id);

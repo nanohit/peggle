@@ -229,7 +229,9 @@ export class LevelManager {
     if (peg.shape === 'brick') {
       newPeg.width = peg.width || 40;
       newPeg.height = peg.height || 12;
-      if (peg.curveSlices) newPeg.curveSlices = peg.curveSlices;
+      if (Array.isArray(peg.curveSlices)) {
+        newPeg.curveSlices = peg.curveSlices.map(slice => ({ ...slice }));
+      }
     }
     if (typeof peg.color === 'string' && peg.color) {
       newPeg.color = peg.color;
