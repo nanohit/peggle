@@ -129,6 +129,8 @@ export class Game {
     this.ballsLeft = 10;
     this.hitPegIds = [];
     this.turnHitPegIds = [];
+    this._turnHitPegIdSet = null;
+    this._turnHitPegIdSetSize = -1;
     this.shotsFired = 0;
     this._turnBucketCatchCount = 0;
     this.totalSurvivalTargets = 0;
@@ -434,8 +436,13 @@ export class Game {
   getUiStateSnapshot() {
     const survivalMode = this.isSurvivalMode();
     // Orange pegs left across the whole level: initial minus removed minus currently-hit-this-turn
-    const currentTurnOrangeHits = survivalMode ? 0
-      : this.turnHitPegIds.filter(id => this.pegs.find(p => p.id === id && this.isOrangePeg(p))).length;
+    let currentTurnOrangeHits = 0;
+    if (!survivalMode && this.turnHitPegIds.length > 0) {
+      const turnHitSet = this.getTurnHitPegIdSet();
+      for (const peg of this.pegs) {
+        if (turnHitSet.has(peg.id) && this.isOrangePeg(peg)) currentTurnOrangeHits++;
+      }
+    }
     const orangeLeft = survivalMode
       ? this.getSurvivalTargetsLeft(true)
       : Math.max(0, this.initialOrangePegs - this.removedOrangePegs - currentTurnOrangeHits);
@@ -2058,7 +2065,7 @@ export class Game {
 
   hasPegBeenActivated(pegId) {
     if (!pegId) return false;
-    return this.turnHitPegIds.includes(pegId) || this.hitPegIds.includes(pegId);
+    return this.getTurnHitPegIdSet().has(pegId) || this.hitPegIds.includes(pegId);
   }
 
   scheduleHitPegClear(peg) {
@@ -2501,8 +2508,10 @@ export class Game {
       // Notify animator for hit-triggered animations
       this.animator.notifyHit(peg.id);
     }
-    for (const contact of result.contactEvents || []) {
-      this.noteBallPegContact(contact.ball, contact.peg);
+    if (result.ballsRemaining > 0 && this.turnHitPegIds.length > 0) {
+      for (const contact of result.contactEvents || []) {
+        this.noteBallPegContact(contact.ball, contact.peg);
+      }
     }
     if (bombContact) {
       this.detonateBombShockwave(bombContact.ball, bombContact.peg);
@@ -2532,7 +2541,9 @@ export class Game {
     }
 
     // Check for stuck balls trapped inside structures
-    this.checkStuckBalls();
+    if (result.ballsRemaining > 0) {
+      this.checkStuckBalls();
+    }
     this.processTimedHitPegClears();
 
     if (this.checkSurvivalEndConditions()) {
@@ -2625,7 +2636,7 @@ export class Game {
 
   noteBallPegContact(ball, peg) {
     if (!ball?.id || !peg?.id) return;
-    if (!this.turnHitPegIds.includes(peg.id)) return;
+    if (!this.getTurnHitPegIdSet().has(peg.id)) return;
     this.ensureStuckBallTrackingStores();
     let pegIds = this.ballContactPegIds.get(ball.id);
     if (!pegIds) {
@@ -2633,6 +2644,14 @@ export class Game {
       this.ballContactPegIds.set(ball.id, pegIds);
     }
     pegIds.add(peg.id);
+  }
+
+  getTurnHitPegIdSet() {
+    if (!(this._turnHitPegIdSet instanceof Set) || this._turnHitPegIdSetSize !== this.turnHitPegIds.length) {
+      this._turnHitPegIdSet = new Set(this.turnHitPegIds);
+      this._turnHitPegIdSetSize = this.turnHitPegIds.length;
+    }
+    return this._turnHitPegIdSet;
   }
 
   getStuckBallHistoryBounds(history, ball = null) {
