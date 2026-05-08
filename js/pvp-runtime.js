@@ -40,45 +40,9 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-function mirrorPegForLocalPhysics(peg, height) {
-  const mirrored = clone(peg);
-  mirrored.y = height - Number(peg.y || 0);
-  mirrored.angle = -Number(peg.angle || 0);
-  if (Array.isArray(mirrored.curveSlices)) {
-    mirrored.curveSlices = mirrored.curveSlices.map(slice => ({
-      ...slice,
-      y: Number.isFinite(slice.y) ? height - slice.y : slice.y,
-      ny: Number.isFinite(slice.ny) ? -slice.ny : slice.ny
-    })).reverse();
-  }
-  if (mirrored.animation && typeof mirrored.animation === 'object') {
-    if (Number.isFinite(mirrored.animation.dy)) mirrored.animation.dy = -mirrored.animation.dy;
-    if (Number.isFinite(mirrored.animation.rotation)) mirrored.animation.rotation = -mirrored.animation.rotation;
-  }
-  return mirrored;
-}
-
 function angleDistance(a, b) {
   if (!Number.isFinite(a) || !Number.isFinite(b)) return Infinity;
   return Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
-}
-
-function writeCpuBallToWorld(ball, height, out) {
-  if (!ball || !out) return null;
-  out.id = ball.id;
-  out.x = ball.x;
-  out.y = height - ball.y;
-  out.vx = ball.vx;
-  out.vy = -ball.vy;
-  out.radius = ball.radius;
-  out.active = ball.active;
-  out.stuck = ball.stuck;
-  out.stuckFrames = ball.stuckFrames;
-  out.speedCapBoost = ball.speedCapBoost;
-  out.portalCooldown = ball.portalCooldown;
-  out.launcherSpawnAnim = ball.launcherSpawnAnim;
-  out.ultraAimStuck = ball.ultraAimStuck;
-  return out;
 }
 
 function isRemovablePvpPeg(peg) {
@@ -86,50 +50,6 @@ function isRemovablePvpPeg(peg) {
   if (peg.type === 'obstacle') return false;
   if (peg.type === 'bumper') return !!(peg.bumperDisappear || peg.bumperOrange);
   return true;
-}
-
-function resolveWorldBallCollision(humanBall, cpuBallLocal, height) {
-  if (!humanBall?.active || !cpuBallLocal?.active) return;
-  const rA = humanBall.radius || getBallRadius();
-  const rB = cpuBallLocal.radius || getBallRadius();
-  let cpuWorldX = cpuBallLocal.x;
-  let cpuWorldY = height - cpuBallLocal.y;
-  let cpuWorldVx = cpuBallLocal.vx;
-  let cpuWorldVy = -cpuBallLocal.vy;
-  let dx = humanBall.x - cpuWorldX;
-  let dy = humanBall.y - cpuWorldY;
-  let dist = Math.hypot(dx, dy);
-  const minDist = rA + rB;
-  if (dist >= minDist) return;
-  if (dist < 1e-6) {
-    dx = 0;
-    dy = -1;
-    dist = 1;
-  }
-
-  const nx = dx / dist;
-  const ny = dy / dist;
-  const depth = minDist - dist;
-  humanBall.x += nx * depth * 0.5;
-  humanBall.y += ny * depth * 0.5;
-  cpuWorldX -= nx * depth * 0.5;
-  cpuWorldY -= ny * depth * 0.5;
-
-  const relVx = humanBall.vx - cpuWorldVx;
-  const relVy = humanBall.vy - cpuWorldVy;
-  const relN = relVx * nx + relVy * ny;
-  if (relN <= 0) {
-    const impulse = -(1 + PHYSICS_CONFIG.bounce) * relN / 2;
-    humanBall.vx += impulse * nx;
-    humanBall.vy += impulse * ny;
-    cpuWorldVx -= impulse * nx;
-    cpuWorldVy -= impulse * ny;
-  }
-
-  cpuBallLocal.x = cpuWorldX;
-  cpuBallLocal.y = height - cpuWorldY;
-  cpuBallLocal.vx = cpuWorldVx;
-  cpuBallLocal.vy = -cpuWorldVy;
 }
 
 export class PvpOpponentController {
@@ -159,20 +79,20 @@ export class PvpRuntime {
     this.onVisualState = typeof options.onVisualState === 'function' ? options.onVisualState : null;
     this.showPerfOverlay = false;
 
-    this.humanPhysics = new PhysicsEngine(canvas.width, canvas.height);
-    this.cpuPhysics = new PhysicsEngine(canvas.width, canvas.height);
-    this.humanPhysics.setBucketEnabled(false);
-    this.cpuPhysics.setBucketEnabled(false);
+    this.physics = new PhysicsEngine(canvas.width, canvas.height);
+    this.physics.setBucketEnabled(false);
 
     this.level = null;
     this.pegs = [];
     this.pegById = new Map();
     this.pegVersion = 0;
-    this.cpuLocalPegs = [];
     this.humanBall = new Ball(canvas.width / 2, 40);
-    this.cpuBall = new Ball(canvas.width / 2, 40);
-    this.humanPhysics.setBalls([]);
-    this.cpuPhysics.setBalls([]);
+    this.cpuBall = new Ball(canvas.width / 2, canvas.height - 40);
+    this.humanGravityVector = { x: 0, y: PHYSICS_CONFIG.gravity };
+    this.cpuGravityVector = { x: 0, y: -PHYSICS_CONFIG.gravity };
+    this.lossBoundsExtra = FALLBACK_TARGET_RADIUS + 50;
+    this.configurePvpBalls();
+    this.physics.setBalls([]);
 
     this.state = 'idle';
     this.round = 0;
@@ -182,7 +102,7 @@ export class PvpRuntime {
     this.hitPegIds = new Set();
     this.roundHitPegIds = new Set();
     this.humanAimAngle = Math.PI / 2;
-    this.cpuAimAngle = Math.PI / 2;
+    this.cpuAimAngle = -Math.PI / 2;
     this.trajectory = null;
     this._pendingAimPosition = null;
     this._aimInputDirty = false;
@@ -196,7 +116,7 @@ export class PvpRuntime {
     this.launchX = canvas.width / 2;
     this.launchY = 40;
     this.cpuLaunchX = canvas.width / 2;
-    this.cpuLaunchY = 40;
+    this.cpuLaunchY = canvas.height - 40;
     this.simTimeMs = 0;
     this.aimStartedSimMs = 0;
     this.aimDeadlineSimMs = 0;
@@ -223,8 +143,6 @@ export class PvpRuntime {
     this._pausedAt = 0;
     this.humanBallPositionHistory = [];
     this.cpuBallPositionHistory = [];
-    this._cpuWorldBall = {};
-    this._cpuRenderBall = {};
     this._renderBalls = [];
     this._renderHitPegIds = [];
     this._renderSecondaryLaunchers = [];
@@ -318,14 +236,52 @@ export class PvpRuntime {
     this._trajectoryDirty = true;
   }
 
+  configurePvpBalls() {
+    const g = Number.isFinite(PHYSICS_CONFIG.gravity) ? PHYSICS_CONFIG.gravity : 0.12;
+    this.humanGravityVector.x = 0;
+    this.humanGravityVector.y = g;
+    this.cpuGravityVector.x = 0;
+    this.cpuGravityVector.y = -g;
+
+    const lossExtra = Number.isFinite(this.lossBoundsExtra)
+      ? Math.max(FALLBACK_TARGET_RADIUS, this.lossBoundsExtra)
+      : FALLBACK_TARGET_RADIUS + 50;
+    const lossYMin = -lossExtra;
+    const lossYMax = this.canvas.height + lossExtra;
+
+    this.humanBall.side = 'human';
+    this.humanBall.gravityVector = this.humanGravityVector;
+    this.humanBall.lossYMin = null;
+    this.humanBall.lossYMax = lossYMax;
+    this.humanBall.disableCollisionJitter = true;
+
+    this.cpuBall.side = 'cpu';
+    this.cpuBall.gravityVector = this.cpuGravityVector;
+    this.cpuBall.lossYMin = lossYMin;
+    this.cpuBall.lossYMax = lossYMax;
+    this.cpuBall.disableCollisionJitter = true;
+  }
+
+  syncActiveBalls() {
+    const balls = [];
+    if (this.humanBall.active) balls.push(this.humanBall);
+    if (this.cpuBall.active) balls.push(this.cpuBall);
+    this.physics.setBalls(balls);
+  }
+
+  syncBallActivityFromPhysics() {
+    const balls = this.physics.balls || [];
+    if (this.humanBall.active && !balls.includes(this.humanBall)) this.humanBall.active = false;
+    if (this.cpuBall.active && !balls.includes(this.cpuBall)) this.cpuBall.active = false;
+  }
+
   resize(width, height) {
     this.renderer.resize(width, height);
-    this.humanPhysics.resize(width, height);
-    this.cpuPhysics.resize(width, height);
+    this.physics.resize(width, height);
     this.launchX = width / 2;
     this.launchY = 40;
     this.cpuLaunchX = width / 2;
-    this.cpuLaunchY = 40;
+    this.cpuLaunchY = height - 40;
     this.syncTargetLossBounds();
     this.resetBallPositions();
     this.syncPhysicsPegs();
@@ -334,10 +290,10 @@ export class PvpRuntime {
   syncTargetLossBounds() {
     const target = this.getTargetCircles().opponent;
     const extra = Math.max(FALLBACK_TARGET_RADIUS, target.radius || FALLBACK_TARGET_RADIUS) + 50;
-    this.humanPhysics.setBallLossY(this.canvas.height + extra);
-    this.cpuPhysics.setBallLossY(this.canvas.height + extra);
-    this.humanPhysics.setBallTopY(-extra);
-    this.cpuPhysics.setBallTopY(-extra);
+    this.lossBoundsExtra = extra;
+    this.physics.setBallLossY(this.canvas.height + extra);
+    this.physics.setBallTopY(-extra - getBallRadius() - 2);
+    this.configurePvpBalls();
   }
 
   loadLevel(level) {
@@ -358,9 +314,7 @@ export class PvpRuntime {
       if (peg?.id != null) this.pegById.set(peg.id, peg);
     }
     this.pegVersion += 1;
-    this.cpuLocalPegs = this.pegs.map(peg => mirrorPegForLocalPhysics(peg, this.canvas.height));
-    this.humanPhysics.setPegs(this.pegs);
-    this.cpuPhysics.setPegs(this.cpuLocalPegs);
+    this.physics.setPegs(this.pegs);
     this.invalidateTrajectory();
   }
 
@@ -394,13 +348,12 @@ export class PvpRuntime {
     this.roundHitPegIds.clear();
     this.humanBallPositionHistory = [];
     this.cpuBallPositionHistory = [];
-    this.humanPhysics.setBalls([]);
-    this.cpuPhysics.setBalls([]);
+    this.physics.setBalls([]);
     this.resetBallPositions();
     this.humanAimAngle = Math.PI / 2;
     this.roundSeed = hashString(`${this.matchSeed}:${this.round}`) || this.round;
     this._rng = mulberry32(this.roundSeed);
-    this.cpuAimAngle = this.settings.cpuEnabled ? this.opponentController.chooseAngle() : Math.PI / 2;
+    this.cpuAimAngle = this.settings.cpuEnabled ? this.opponentController.chooseAngle() : -Math.PI / 2;
     this.aimStartedSimMs = this.simTimeMs;
     this.aimDeadlineSimMs = this.simTimeMs + this.settings.aimTimerMs;
     this._pendingAimPosition = null;
@@ -499,13 +452,14 @@ export class PvpRuntime {
     const maxSteps = Number.isFinite(steps)
       ? steps
       : (this.showFullTrajectory ? 1000 : (this.aimLength > 0 ? Math.max(2, Math.round(this.aimLength)) : 0));
-    this.trajectory = this.humanPhysics.predictTrajectory(
+    this.trajectory = this.physics.predictTrajectory(
       this.launchX,
       this.launchY,
       this.humanAimAngle,
       PHYSICS_CONFIG.launchPower,
       maxSteps,
-      !this.showFullTrajectory
+      !this.showFullTrajectory,
+      { gravityVector: this.humanGravityVector }
     );
     this._trajectoryDirty = false;
     this._lastTrajectoryAngle = this.humanAimAngle;
@@ -522,12 +476,12 @@ export class PvpRuntime {
       hard: { samples: 23, steps: 260, noise: 12, angleNoise: 0.025 }
     }[difficulty] || { samples: 15, steps: 220, noise: 44, angleNoise: 0.08 };
 
-    let bestAngle = Math.PI / 2;
+    let bestAngle = -Math.PI / 2;
     let bestScore = -Infinity;
     const spread = Math.PI * 0.78;
     for (let i = 0; i < config.samples; i++) {
       const t = config.samples === 1 ? 0.5 : i / (config.samples - 1);
-      const base = Math.PI / 2 + (t - 0.5) * spread;
+      const base = -Math.PI / 2 + (t - 0.5) * spread;
       const angle = base + (this._rng() - 0.5) * config.angleNoise;
       const score = this.scoreCpuAngle(angle, config.steps) + (this._rng() - 0.5) * config.noise;
       if (score > bestScore) {
@@ -539,25 +493,21 @@ export class PvpRuntime {
   }
 
   scoreCpuAngle(angle, steps = 220) {
-    const trajectory = this.cpuPhysics.predictTrajectory(
+    const trajectory = this.physics.predictTrajectory(
       this.cpuLaunchX,
       this.cpuLaunchY,
       angle,
       PHYSICS_CONFIG.launchPower,
       steps,
-      false
+      false,
+      { gravityVector: this.cpuGravityVector }
     );
     const target = this.getTargetCircles().player;
-    const localTarget = {
-      x: target.x,
-      y: this.canvas.height - target.y,
-      radius: target.radius
-    };
     let bestDist = Infinity;
     for (const point of trajectory.points || []) {
-      bestDist = Math.min(bestDist, Utils.distance(point.x, point.y, localTarget.x, localTarget.y));
+      bestDist = Math.min(bestDist, Utils.distance(point.x, point.y, target.x, target.y));
     }
-    const hitCannon = bestDist <= localTarget.radius + getBallRadius();
+    const hitCannon = bestDist <= target.radius + getBallRadius();
     const pegHits = Array.isArray(trajectory.hits) ? trajectory.hits.length : 0;
     return (hitCannon ? 1000 : 0) + Math.max(0, 220 - bestDist) * 2 + pegHits * 14;
   }
@@ -578,18 +528,14 @@ export class PvpRuntime {
 
     if (humanShot) {
       this.humanBall.launch(this.humanAimAngle, PHYSICS_CONFIG.launchPower);
-      this.humanPhysics.setBalls([this.humanBall]);
     } else {
       this.damagePlayer();
-      this.humanPhysics.setBalls([]);
     }
 
     if (this.settings.cpuEnabled) {
       this.cpuBall.launch(this.cpuAimAngle, PHYSICS_CONFIG.launchPower);
-      this.cpuPhysics.setBalls([this.cpuBall]);
-    } else {
-      this.cpuPhysics.setBalls([]);
     }
+    this.syncActiveBalls();
 
     this.trajectory = null;
     this.emitUiStateIfChanged();
@@ -621,8 +567,7 @@ export class PvpRuntime {
     this.roundEndReadySimMs = 0;
     this.humanBall.active = false;
     this.cpuBall.active = false;
-    this.humanPhysics.setBalls([]);
-    this.cpuPhysics.setBalls([]);
+    this.physics.setBalls([]);
     this.abortController.abort();
     this._listeners.clear();
     this.renderer?.dispose?.();
@@ -722,12 +667,10 @@ export class PvpRuntime {
     if (this.state !== 'playing') return;
     this.simTimeMs += dt * 1000;
 
-    const humanResult = this.humanPhysics.update(dt);
-    const cpuResult = this.cpuPhysics.update(dt);
-    resolveWorldBallCollision(this.humanBall, this.cpuBall, this.canvas.height);
+    const result = this.physics.update(dt);
+    this.syncBallActivityFromPhysics();
 
-    this.handlePhysicsResult(humanResult);
-    this.handlePhysicsResult(cpuResult);
+    this.handlePhysicsResult(result);
     this.checkCannonHits();
     this.checkStuckBalls();
 
@@ -737,13 +680,15 @@ export class PvpRuntime {
     }
 
     const roundAge = (this.simTimeMs - this.roundStartedSimMs) / 1000;
-    if ((humanResult.ballsRemaining === 0 && cpuResult.ballsRemaining === 0) || roundAge > MAX_ROUND_SECONDS) {
+    if (result.ballsRemaining === 0 || roundAge > MAX_ROUND_SECONDS) {
       this.finishRound();
     }
   }
 
   handlePhysicsResult(result) {
     for (const event of result.hitEvents || []) {
+      const ballSide = event.ballSide || event.ball?.side || null;
+      if (ballSide !== 'human' && ballSide !== 'cpu') continue;
       const peg = this.pegById.get(event.peg?.id);
       if (!peg) continue;
       this.hitPegIds.add(peg.id);
@@ -758,8 +703,7 @@ export class PvpRuntime {
   checkStuckBalls() {
     if (this.state !== 'playing' || this.roundHitPegIds.size === 0) return;
     this.checkStuckBallForSide('human', this.humanBall, this.humanBallPositionHistory);
-    const cpuWorld = writeCpuBallToWorld(this.cpuBall, this.canvas.height, this._cpuWorldBall);
-    this.checkStuckBallForSide('cpu', cpuWorld, this.cpuBallPositionHistory);
+    this.checkStuckBallForSide('cpu', this.cpuBall, this.cpuBallPositionHistory);
   }
 
   checkStuckBallForSide(side, ball, history) {
@@ -832,15 +776,14 @@ export class PvpRuntime {
     if (this.humanBall.active && Utils.distance(this.humanBall.x, this.humanBall.y, targets.opponent.x, targets.opponent.y) <= targets.opponent.radius + this.humanBall.radius) {
       this.damageCpu();
       this.humanBall.active = false;
-      this.humanPhysics.setBalls([]);
+      this.syncActiveBalls();
       this.emitUiStateIfChanged();
     }
 
-    const cpuWorld = writeCpuBallToWorld(this.cpuBall, this.canvas.height, this._cpuWorldBall);
-    if (this.cpuBall.active && Utils.distance(cpuWorld.x, cpuWorld.y, targets.player.x, targets.player.y) <= targets.player.radius + this.cpuBall.radius) {
+    if (this.cpuBall.active && Utils.distance(this.cpuBall.x, this.cpuBall.y, targets.player.x, targets.player.y) <= targets.player.radius + this.cpuBall.radius) {
       this.damagePlayer();
       this.cpuBall.active = false;
-      this.cpuPhysics.setBalls([]);
+      this.syncActiveBalls();
       this.emitUiStateIfChanged();
     }
   }
@@ -867,8 +810,9 @@ export class PvpRuntime {
     this.roundHitPegIds.clear();
     this.humanBallPositionHistory = [];
     this.cpuBallPositionHistory = [];
-    this.humanPhysics.setBalls([]);
-    this.cpuPhysics.setBalls([]);
+    this.humanBall.active = false;
+    this.cpuBall.active = false;
+    this.physics.setBalls([]);
     this.roundEndReadySimMs = this.simTimeMs + ROUND_END_DELAY_MS;
   }
 
@@ -879,8 +823,7 @@ export class PvpRuntime {
     this.roundEndReadySimMs = 0;
     this.humanBall.active = false;
     this.cpuBall.active = false;
-    this.humanPhysics.setBalls([]);
-    this.cpuPhysics.setBalls([]);
+    this.physics.setBalls([]);
     this.emitUiStateIfChanged();
     if (typeof this.onGameEnd === 'function') {
       this.onGameEnd(this.state, this.score);
@@ -920,21 +863,20 @@ export class PvpRuntime {
     const activeBalls = this._renderBalls;
     activeBalls.length = 0;
     if (this.humanBall.active) activeBalls.push(this.humanBall);
-    if (this.cpuBall.active) activeBalls.push(writeCpuBallToWorld(this.cpuBall, this.canvas.height, this._cpuRenderBall));
+    if (this.cpuBall.active) activeBalls.push(this.cpuBall);
 
     const hitPegIds = this._renderHitPegIds;
     hitPegIds.length = 0;
     for (const id of this.hitPegIds) hitPegIds.push(id);
 
-    const cpuWorldAngle = -this.cpuAimAngle;
     const showLaunchers = this.state === 'idle' || this.state === 'aiming';
     const secondaryLaunchers = this._renderSecondaryLaunchers;
     secondaryLaunchers.length = 0;
     if (showLaunchers) {
       const launcher = this._cpuLauncherState;
       launcher.x = this.cpuLaunchX;
-      launcher.y = this.canvas.height - this.cpuLaunchY;
-      launcher.angle = cpuWorldAngle;
+      launcher.y = this.cpuLaunchY;
+      launcher.angle = this.cpuAimAngle;
       launcher.showAim = false;
       launcher.ballScale = 1;
       secondaryLaunchers.push(launcher);

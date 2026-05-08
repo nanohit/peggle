@@ -168,6 +168,8 @@ export class Game {
 
     // Stuck ball detection
     this.ballPositionHistory = [];
+    this.ballPositionHistories = new Map();
+    this.ballContactPegIds = new Map();
 
     // Peg animation
     this.animator = new PegAnimator();
@@ -1877,6 +1879,7 @@ export class Game {
     this.turnHitPegIds = [];
     this.physics.clearHitPegs();
     this.syncPhysicsHitPegState();
+    this.resetStuckBallTracking();
   }
 
   queueBackgroundEvent(event) {
@@ -1986,7 +1989,7 @@ export class Game {
     }
     if (!hadActiveSurvivalBalls) {
       this.turnHitPegIds = [];
-      this.ballPositionHistory = [];
+      this.resetStuckBallTracking();
       this._turnBucketCatchCount = 0;
     }
     this.shotsFired += 1;
@@ -2125,6 +2128,7 @@ export class Game {
     const points = this.calculateScore(peg);
     this.score += points;
     this.turnHitPegIds.push(peg.id);
+    this.noteBallPegContact(sourceBall, peg);
     if (this.physics?.hitPegs && typeof this.physics.hitPegs.add === 'function') {
       this.physics.hitPegs.add(peg.id);
     }
@@ -2266,6 +2270,7 @@ export class Game {
       const preserveAim = this.isAimingState() && !!this.getLauncherBall();
       this.hitPegIds = [];
       this.turnHitPegIds = [];
+      this.resetStuckBallTracking();
       this.survivalShotCooldownRemainingMs = 0;
       if (preserveAim) {
         this.state = 'aiming';
@@ -2496,6 +2501,9 @@ export class Game {
       // Notify animator for hit-triggered animations
       this.animator.notifyHit(peg.id);
     }
+    for (const contact of result.contactEvents || []) {
+      this.noteBallPegContact(contact.ball, contact.peg);
+    }
     if (bombContact) {
       this.detonateBombShockwave(bombContact.ball, bombContact.peg);
     }
@@ -2556,66 +2564,177 @@ export class Game {
     if (this.balls.length === 0 || this.turnHitPegIds.length === 0) return;
     const activeBalls = this.balls.filter(ball => ball && ball.active);
     if (activeBalls.length === 0) return;
+    this.ensureStuckBallTrackingStores();
 
     const now = performance.now();
-
-    // Sample every ~150ms
-    const lastT = this.ballPositionHistory.length > 0
-      ? this.ballPositionHistory[this.ballPositionHistory.length - 1].t
-      : 0;
-    if (now - lastT < 150) return;
-
-    // Average position of all active balls
-    let avgX = 0, avgY = 0;
+    const activeBallIds = new Set();
     for (const ball of activeBalls) {
-      avgX += ball.x;
-      avgY += ball.y;
+      if (ball.id) activeBallIds.add(ball.id);
     }
-    avgX /= activeBalls.length;
-    avgY /= activeBalls.length;
-
-    this.ballPositionHistory.push({ x: avgX, y: avgY, t: now });
-
-    // Remove samples older than 3 seconds
-    const cutoff = now - 3000;
-    while (this.ballPositionHistory.length > 0 && this.ballPositionHistory[0].t < cutoff) {
-      this.ballPositionHistory.shift();
+    for (const ballId of [...this.ballPositionHistories.keys()]) {
+      if (!activeBallIds.has(ballId)) this.ballPositionHistories.delete(ballId);
+    }
+    for (const ballId of [...this.ballContactPegIds.keys()]) {
+      if (!activeBallIds.has(ballId)) this.ballContactPegIds.delete(ballId);
     }
 
-    // Need at least 2.5 seconds of data
-    if (this.ballPositionHistory.length < 2) return;
-    if (now - this.ballPositionHistory[0].t < 2500) return;
+    const releasedPegIds = new Set();
+    for (const ball of activeBalls) {
+      if (!ball.id) continue;
+      let history = this.ballPositionHistories.get(ball.id);
+      if (!history) {
+        history = [];
+        this.ballPositionHistories.set(ball.id, history);
+      }
 
-    // Check if balls are confined to a small area
+      // Sample every ~150ms per ball
+      const lastT = history.length > 0 ? history[history.length - 1].t : 0;
+      if (now - lastT < 150) continue;
+
+      history.push({ x: ball.x, y: ball.y, t: now });
+
+      // Remove samples older than 3 seconds
+      const cutoff = now - 3000;
+      while (history.length > 0 && history[0].t < cutoff) {
+        history.shift();
+      }
+
+      // Need at least 2.5 seconds of data
+      if (history.length < 2) continue;
+      if (now - history[0].t < 2500) continue;
+
+      const bounds = this.getStuckBallHistoryBounds(history, ball);
+      if (bounds && bounds.maxX - bounds.minX < 180 && bounds.maxY - bounds.minY < 180) {
+        const releasedPeg = this.releaseStuckBall(ball, history, releasedPegIds);
+        if (releasedPeg) releasedPegIds.add(releasedPeg.id);
+      }
+    }
+  }
+
+  ensureStuckBallTrackingStores() {
+    if (!(this.ballPositionHistories instanceof Map)) this.ballPositionHistories = new Map();
+    if (!(this.ballContactPegIds instanceof Map)) this.ballContactPegIds = new Map();
+    if (!Array.isArray(this.ballPositionHistory)) this.ballPositionHistory = [];
+  }
+
+  resetStuckBallTracking() {
+    this.ballPositionHistory = [];
+    this.ballPositionHistories = new Map();
+    this.ballContactPegIds = new Map();
+  }
+
+  noteBallPegContact(ball, peg) {
+    if (!ball?.id || !peg?.id) return;
+    if (!this.turnHitPegIds.includes(peg.id)) return;
+    this.ensureStuckBallTrackingStores();
+    let pegIds = this.ballContactPegIds.get(ball.id);
+    if (!pegIds) {
+      pegIds = new Set();
+      this.ballContactPegIds.set(ball.id, pegIds);
+    }
+    pegIds.add(peg.id);
+  }
+
+  getStuckBallHistoryBounds(history, ball = null) {
+    if (!Array.isArray(history) || history.length === 0) {
+      if (!ball || !Number.isFinite(ball.x) || !Number.isFinite(ball.y)) return null;
+      return {
+        minX: ball.x,
+        maxX: ball.x,
+        minY: ball.y,
+        maxY: ball.y,
+        centerX: ball.x,
+        centerY: ball.y
+      };
+    }
+
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    for (const pos of this.ballPositionHistory) {
+    for (const pos of history) {
       minX = Math.min(minX, pos.x);
       maxX = Math.max(maxX, pos.x);
       minY = Math.min(minY, pos.y);
       maxY = Math.max(maxY, pos.y);
     }
 
-    if (maxX - minX < 180 && maxY - minY < 180) {
-      this.releaseStuckBall();
-    }
+    return {
+      minX,
+      maxX,
+      minY,
+      maxY,
+      centerX: (minX + maxX) / 2,
+      centerY: (minY + maxY) / 2
+    };
   }
 
-  releaseStuckBall() {
-    // Find the lowest (highest canvas y) hit peg to create an exit
-    const hitSet = new Set(this.turnHitPegIds);
-    let lowestPeg = null;
-    let lowestY = -Infinity;
+  isPegNearStuckBallHistory(peg, bounds) {
+    if (!peg || !bounds) return false;
+    const marginX = 90;
+    const marginAbove = 90;
+    const marginBelow = 240;
+    return peg.x >= bounds.minX - marginX
+      && peg.x <= bounds.maxX + marginX
+      && peg.y >= bounds.minY - marginAbove
+      && peg.y <= bounds.maxY + marginBelow;
+  }
 
-    for (const peg of this.pegs) {
-      if (hitSet.has(peg.id) && peg.type !== 'obstacle') {
-        if (peg.y > lowestY) {
-          lowestY = peg.y;
-          lowestPeg = peg;
-        }
+  getStuckReleaseCandidates(ball = null, history = null, excludedPegIds = null) {
+    const hitSet = new Set(this.turnHitPegIds);
+    const excluded = excludedPegIds instanceof Set ? excludedPegIds : new Set();
+    const isEligible = peg => {
+      if (!peg || excluded.has(peg.id)) return false;
+      if (!hitSet.has(peg.id)) return false;
+      if (peg.type === 'obstacle' || this.isPortalPeg(peg) || this.isPermanentBumper(peg)) return false;
+      return true;
+    };
+
+    const ballId = ball?.id || null;
+    const touchedPegIds = ballId ? this.ballContactPegIds.get(ballId) : null;
+    const touchedGroupIds = new Set();
+    const touchedBezierGroupIds = new Set();
+    if (touchedPegIds && touchedPegIds.size > 0) {
+      for (const peg of this.pegs) {
+        if (!touchedPegIds.has(peg.id)) continue;
+        if (peg.groupId != null) touchedGroupIds.add(peg.groupId);
+        if (peg.bezierGroupId != null) touchedBezierGroupIds.add(peg.bezierGroupId);
       }
     }
 
-    if (!lowestPeg) return;
+    let candidates = [];
+    if (touchedPegIds && touchedPegIds.size > 0) {
+      candidates = this.pegs.filter(peg => {
+        if (!isEligible(peg)) return false;
+        if (touchedPegIds.has(peg.id)) return true;
+        if (peg.groupId != null && touchedGroupIds.has(peg.groupId)) return true;
+        if (peg.bezierGroupId != null && touchedBezierGroupIds.has(peg.bezierGroupId)) return true;
+        return false;
+      });
+    }
+
+    const bounds = this.getStuckBallHistoryBounds(history, ball);
+    if (candidates.length === 0 && bounds) {
+      candidates = this.pegs.filter(peg => isEligible(peg) && this.isPegNearStuckBallHistory(peg, bounds));
+    }
+
+    if (candidates.length === 0) {
+      candidates = this.pegs.filter(isEligible);
+    }
+    return candidates;
+  }
+
+  releaseStuckBall(ball = null, history = null, excludedPegIds = null) {
+    // Find the lowest (highest canvas y) hit peg for this stuck ball to create an exit
+    const candidates = this.getStuckReleaseCandidates(ball, history, excludedPegIds);
+    let lowestPeg = null;
+    let lowestY = -Infinity;
+
+    for (const peg of candidates) {
+      if (peg.y > lowestY) {
+        lowestY = peg.y;
+        lowestPeg = peg;
+      }
+    }
+
+    if (!lowestPeg) return null;
 
     // Track orange peg removal for health bar
     if (this.isOrangePeg(lowestPeg)) this.removedOrangePegs++;
@@ -2626,8 +2745,15 @@ export class Game {
     this.physics.setPegs(this.pegs);
     this.syncPhysicsHitPegState();
 
-    // Reset history — if still stuck, detection re-triggers after another 2.5s
+    // Reset this ball's history — if still stuck, detection re-triggers after another 2.5s
+    if (ball?.id) {
+      this.ballPositionHistories.delete(ball.id);
+      this.ballContactPegIds.delete(ball.id);
+    } else {
+      this.resetStuckBallTracking();
+    }
     this.ballPositionHistory = [];
+    return lowestPeg;
   }
 
   render() {

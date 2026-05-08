@@ -23,6 +23,16 @@ export function getBallRadius() {
   return PHYSICS_CONFIG.pegRadius;
 }
 
+function getGravityX(source) {
+  const vector = source?.gravityVector;
+  return vector && Number.isFinite(vector.x) ? vector.x : 0;
+}
+
+function getGravityY(source) {
+  const vector = source?.gravityVector;
+  return vector && Number.isFinite(vector.y) ? vector.y : PHYSICS_CONFIG.gravity;
+}
+
 let BALL_ID = 0;
 
 export class Ball {
@@ -39,6 +49,11 @@ export class Ball {
     this.speedCapBoost = 0;
     this.portalCooldown = 0;
     this.launcherSpawnAnim = 1;
+    this.side = null;
+    this.gravityVector = null;
+    this.lossYMin = null;
+    this.lossYMax = null;
+    this.disableCollisionJitter = false;
   }
 
   launch(angle, power = PHYSICS_CONFIG.launchPower) {
@@ -61,7 +76,8 @@ export class Ball {
 
     const timeScale = PHYSICS_CONFIG.timeScale;
 
-    this.vy += PHYSICS_CONFIG.gravity * timeScale;
+    this.vx += getGravityX(this) * timeScale;
+    this.vy += getGravityY(this) * timeScale;
 
     const frictionScale = Math.pow(PHYSICS_CONFIG.friction, timeScale);
     this.vx *= frictionScale;
@@ -870,9 +886,9 @@ export class PhysicsEngine {
         this.checkFlipperCollisions(ball, (step + 1) / numSteps, frac);
         const portalResult = this.tryPortalTeleport(ball, prevX, prevY);
         if (portalResult && portalResult.entry) {
-          hitEvents.push({ peg: portalResult.entry, ball, portalHit: true, portalExit: portalResult.exit || null });
+          hitEvents.push({ peg: portalResult.entry, ball, ballSide: ball.side || null, portalHit: true, portalExit: portalResult.exit || null });
           if (portalResult.exit) {
-            hitEvents.push({ peg: portalResult.exit, ball, portalHit: true });
+            hitEvents.push({ peg: portalResult.exit, ball, ballSide: ball.side || null, portalHit: true });
           }
         }
 
@@ -893,21 +909,21 @@ export class PhysicsEngine {
               const contactKey = `${ball.id}:${peg.id}`;
               if (!contactKeys.has(contactKey)) {
                 contactKeys.add(contactKey);
-                contactEvents.push({ peg, ball, impact });
+                contactEvents.push({ peg, ball, ballSide: ball.side || null, impact });
               }
 
               const isBumper = peg.type === 'bumper';
 
               if (isBumper) {
-                hitEvents.push({ peg, ball, impact, isBumper: true, bumperAnimOnly: true });
+                hitEvents.push({ peg, ball, ballSide: ball.side || null, impact, isBumper: true, bumperAnimOnly: true });
               } else if (peg.type === 'obstacle') {
-                hitEvents.push({ peg, ball, impact, obstacleHit: true });
+                hitEvents.push({ peg, ball, ballSide: ball.side || null, impact, obstacleHit: true });
               }
 
               const isPermanentBumper = isBumper && !peg.bumperDisappear && !peg.bumperOrange;
               if (peg.type !== 'obstacle' && !isPermanentBumper && !this.hitPegs.has(peg.id)) {
                 this.hitPegs.add(peg.id);
-                hitEvents.push({ peg, ball, impact });
+                hitEvents.push({ peg, ball, ballSide: ball.side || null, impact });
               }
             }
           }
@@ -924,21 +940,21 @@ export class PhysicsEngine {
               const contactKey = `${ball.id}:${peg.id}`;
               if (!contactKeys.has(contactKey)) {
                 contactKeys.add(contactKey);
-                contactEvents.push({ peg, ball, impact });
+                contactEvents.push({ peg, ball, ballSide: ball.side || null, impact });
               }
 
               const isBumper = peg.type === 'bumper';
 
               if (isBumper) {
-                hitEvents.push({ peg, ball, impact, isBumper: true, bumperAnimOnly: true });
+                hitEvents.push({ peg, ball, ballSide: ball.side || null, impact, isBumper: true, bumperAnimOnly: true });
               } else if (peg.type === 'obstacle') {
-                hitEvents.push({ peg, ball, impact, obstacleHit: true });
+                hitEvents.push({ peg, ball, ballSide: ball.side || null, impact, obstacleHit: true });
               }
 
               const isPermanentBumper = isBumper && !peg.bumperDisappear && !peg.bumperOrange;
               if (peg.type !== 'obstacle' && !isPermanentBumper && !this.hitPegs.has(peg.id)) {
                 this.hitPegs.add(peg.id);
-                hitEvents.push({ peg, ball, impact });
+                hitEvents.push({ peg, ball, ballSide: ball.side || null, impact });
               }
             }
           }
@@ -970,7 +986,9 @@ export class PhysicsEngine {
         bucketCatchCount++;
         continue;
       }
-      const ballLost = ball.y > this.ballLossY || ball.stuck;
+      const lossYMin = Number.isFinite(ball.lossYMin) ? ball.lossYMin : -Infinity;
+      const lossYMax = Number.isFinite(ball.lossYMax) ? ball.lossYMax : this.ballLossY;
+      const ballLost = ball.y < lossYMin || ball.y > lossYMax || ball.stuck;
       if (!ballLost) {
         remaining.push(ball);
         activeRemaining++;
@@ -1099,11 +1117,14 @@ export class PhysicsEngine {
         b.vx += ix;
         b.vy += iy;
 
-        // Small jitter to avoid sticking
-        a.vx += (Math.random() - 0.5) * 0.1;
-        a.vy += (Math.random() - 0.5) * 0.1;
-        b.vx += (Math.random() - 0.5) * 0.1;
-        b.vy += (Math.random() - 0.5) * 0.1;
+        // Small jitter to avoid sticking. PVP can opt out so replay keyframes
+        // are sourced from a cleaner simulator state.
+        if (!a.disableCollisionJitter && !b.disableCollisionJitter) {
+          a.vx += (Math.random() - 0.5) * 0.1;
+          a.vy += (Math.random() - 0.5) * 0.1;
+          b.vx += (Math.random() - 0.5) * 0.1;
+          b.vy += (Math.random() - 0.5) * 0.1;
+        }
         this.clampBallSpeed(a);
         this.clampBallSpeed(b);
       }
@@ -1298,7 +1319,7 @@ export class PhysicsEngine {
 
   // Trajectory prediction — uses current peg positions (already animated by the game loop).
   // Recalculated every frame during aiming, so it naturally tracks animated pegs.
-  predictTrajectory(startX, startY, angle, power, maxSteps = 500, stopAtFirstHit = true) {
+  predictTrajectory(startX, startY, angle, power, maxSteps = 500, stopAtFirstHit = true, options = null) {
     const points = [];
     const simulatedHits = [];
     const timeScale = PHYSICS_CONFIG.timeScale;
@@ -1315,7 +1336,8 @@ export class PhysicsEngine {
       vy: Math.sin(angle) * power,
       radius: getBallRadius(),
       portalCooldown: 0,
-      speedCapBoost: 0
+      speedCapBoost: 0,
+      gravityVector: options?.gravityVector || null
     };
 
     this._buildPegGrid();
@@ -1324,7 +1346,8 @@ export class PhysicsEngine {
       points.push({ x: simBall.x, y: simBall.y });
 
       // Phase 1: update velocity (gravity + friction + speed clamp) — matching Ball.updateVelocity()
-      simBall.vy += PHYSICS_CONFIG.gravity * timeScale;
+      simBall.vx += getGravityX(simBall) * timeScale;
+      simBall.vy += getGravityY(simBall) * timeScale;
       simBall.vx *= frictionScale;
       simBall.vy *= frictionScale;
 
