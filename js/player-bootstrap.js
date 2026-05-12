@@ -576,7 +576,7 @@ async function bootPvpDuelRoom(roomCode) {
     canvas.style.width = displayW + 'px';
     canvas.style.height = displayH + 'px';
     if (game) game.resize(WORLD_W, WORLD_H);
-    visualLayout.updateLayout();
+    visualLayout.resize(fw, fh);
   }
 
   function showPause() {
