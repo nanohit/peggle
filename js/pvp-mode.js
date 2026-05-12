@@ -1,7 +1,10 @@
+export const PVP_DEFAULT_AIM_LENGTH = 27;
+
 export const PVP_DEFAULTS = Object.freeze({
   enabled: false,
   symmetryEnabled: true,
   aimTimerMs: 5000,
+  aimLength: PVP_DEFAULT_AIM_LENGTH,
   cpuEnabled: true,
   cpuDifficulty: 'normal'
 });
@@ -11,12 +14,16 @@ const CPU_DIFFICULTIES = new Set(['easy', 'normal', 'hard']);
 export function normalizePvpSettings(settings = {}) {
   const source = settings && typeof settings === 'object' ? settings : {};
   const aimTimer = Number(source.aimTimerMs);
+  const aimLength = Number(source.aimLength);
   return {
     enabled: !!source.enabled,
     symmetryEnabled: source.symmetryEnabled !== false,
     aimTimerMs: Number.isFinite(aimTimer)
       ? Math.max(1000, Math.min(30000, Math.round(aimTimer)))
       : PVP_DEFAULTS.aimTimerMs,
+    aimLength: Number.isFinite(aimLength)
+      ? Math.max(0, Math.min(300, Math.round(aimLength)))
+      : PVP_DEFAULTS.aimLength,
     cpuEnabled: source.cpuEnabled !== false,
     cpuDifficulty: CPU_DIFFICULTIES.has(source.cpuDifficulty)
       ? source.cpuDifficulty

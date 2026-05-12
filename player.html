@@ -13,6 +13,7 @@
         window.__PEGGLE_BOOT_STARTED_AT__ = performance.now();
         const params = new URLSearchParams(location.search);
         if (location.hash || params.get('campaign') || params.get('level') || params.get('levels')) return;
+        if (/^\/\d{4}\/?$/.test(location.pathname || '') || /^\d{4}$/.test(params.get('room') || '')) return;
 
         const isLocalHost = host => host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
         const apiBase = (location.protocol === 'file:' || isLocalHost(location.hostname))

@@ -1869,6 +1869,18 @@ export class Renderer {
     ctx.fillStyle = COLORS.ball;
     ctx.fill();
 
+    if (ball.side === 'cpu') {
+      ctx.save();
+      ctx.shadowColor = 'rgba(255, 24, 48, 0.9)';
+      ctx.shadowBlur = Math.max(8, radius * 0.75);
+      ctx.strokeStyle = 'rgba(255, 36, 58, 0.96)';
+      ctx.lineWidth = Math.max(3, radius * 0.26);
+      ctx.beginPath();
+      ctx.arc(ball.x, ball.y, radius + ctx.lineWidth * 0.45, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
     // Highlight
     ctx.beginPath();
     ctx.arc(ball.x - radius * 0.25, ball.y - radius * 0.25, radius * 0.35, 0, Math.PI * 2);
@@ -1876,9 +1888,10 @@ export class Renderer {
     ctx.fill();
   }
 
-  drawLauncher(x, y, angle, showAim = true, ballScale = 1) {
+  drawLauncher(x, y, angle, showAim = true, ballScale = 1, options = null) {
     const ctx = this.ctx;
     const previewRadius = getBallRadius() * Math.max(0.2, Math.min(1, Number.isFinite(ballScale) ? ballScale : 1));
+    const isCpu = options?.side === 'cpu' || options?.enemy === true;
     
     // Launcher base
     ctx.fillStyle = COLORS.launcher;
@@ -1891,6 +1904,18 @@ export class Renderer {
     ctx.beginPath();
     ctx.arc(x, y, previewRadius, 0, Math.PI * 2);
     ctx.fill();
+
+    if (isCpu) {
+      ctx.save();
+      ctx.shadowColor = 'rgba(255, 24, 48, 0.9)';
+      ctx.shadowBlur = Math.max(8, previewRadius * 0.75);
+      ctx.strokeStyle = 'rgba(255, 36, 58, 0.96)';
+      ctx.lineWidth = Math.max(3, previewRadius * 0.26);
+      ctx.beginPath();
+      ctx.arc(x, y, previewRadius + ctx.lineWidth * 0.45, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
 
     // Direction indicator
     if (showAim) {
@@ -3170,7 +3195,8 @@ export class Renderer {
           launcher.y,
           launcher.angle || Math.PI / 2,
           !!launcher.showAim,
-          launcher.ballScale
+          launcher.ballScale,
+          launcher
         );
       }
     }

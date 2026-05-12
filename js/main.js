@@ -22,7 +22,8 @@ import {
 import {
   ensureLevelPvp,
   normalizePvpAuthoredPegs,
-  normalizePvpSettings
+  normalizePvpSettings,
+  PVP_DEFAULT_AIM_LENGTH
 } from './pvp-mode.js';
 import { PvpRuntime } from './pvp-runtime.js';
 import { GambleSystem } from './gamble-system.js';
@@ -82,6 +83,7 @@ import { decodeBakedLevelJsonFromText, extractBakedLevelHash } from './baked-lev
 // Fixed aspect ratio: 3:4.5 (width:height)
 const ASPECT_RATIO = 3 / 4.5;
 const MAX_WIDTH = 400;
+const PVP_DUEL_LEVELS_STORAGE_KEY = 'pvp:duel:levels';
 
 const CHARACTER_SLOT_LABELS = {
   idle: 'Composed',
@@ -285,12 +287,15 @@ class PeggleApp {
     this._primaryCampaignName = undefined;
     this._primaryCampaignPromise = null;
     this._campaignAvailableLevelsRequest = 0;
+    this._pvpDuelLevelNames = null;
+    this._pvpDuelLevelsPromise = null;
+    this._pvpAvailableLevelsRequest = 0;
     this._pendingRemoteLevelSaves = new Map();
     this._remoteLevelSyncFailures = new Map();
     this._characterRegistrySyncTimer = null;
     this._pendingCharacterRegistrySync = null;
     this._editorSideSheetLayer = null;
-    this._editorSideSheetIds = ['levelListOverlay', 'campaignOverlay', 'campaignEditOverlay', 'dialogueOverlay', 'characterOverlay'];
+    this._editorSideSheetIds = ['levelListOverlay', 'campaignOverlay', 'pvpLevelsOverlay', 'campaignEditOverlay', 'dialogueOverlay', 'characterOverlay'];
     this._dialogueSelectedEntryId = null;
     this._dialoguePreviewState = null;
     this.characterRegistry = loadCharacterRegistry();
@@ -358,6 +363,7 @@ class PeggleApp {
           <button id="newLevelBtn" class="admin-btn">+ New Level</button>
           <button id="levelListBtn" class="admin-btn">Level List</button>
           <button id="campaignBtn" class="admin-btn">Campaigns</button>
+          <button id="pvpLevelsBtn" class="admin-btn">PvP Duel Levels</button>
         </div>
         <div class="theme-section">
           <div class="theme-label">Settings</div>
@@ -933,6 +939,18 @@ class PeggleApp {
 
     document.getElementById('campaignBtn').addEventListener('click', () => {
       this.showCampaignList();
+    });
+
+    document.getElementById('pvpLevelsBtn').addEventListener('click', () => {
+      this.showPvpDuelLevels();
+    });
+    document.getElementById('closePvpLevels')?.addEventListener('click', () => {
+      this.closePvpDuelLevels();
+    });
+    document.getElementById('refreshPvpLevelsBtn')?.addEventListener('click', () => {
+      this._pvpDuelLevelNames = null;
+      this._pvpDuelLevelsPromise = null;
+      this.showPvpDuelLevels();
     });
 
     document.getElementById('clearBtn').addEventListener('click', () => {
@@ -2309,7 +2327,13 @@ class PeggleApp {
       numInput.value = value;
       const level = this.levelManager.getCurrentLevel();
       if (level) {
-        this.levelManager.updateCurrentLevel({ aimLength: value });
+        const pvp = ensureLevelPvp(level);
+        if (pvp.enabled) {
+          level.pvp = normalizePvpSettings({ ...pvp, aimLength: value });
+          this.levelManager.save();
+        } else {
+          this.levelManager.updateCurrentLevel({ aimLength: value });
+        }
       }
       if (this.game) this.game.setAimLength(value);
     };
@@ -2398,6 +2422,9 @@ class PeggleApp {
     const current = ensureLevelPvp(level);
     level.pvp = normalizePvpSettings({ ...current, ...(partialSettings || {}) });
     if (level.pvp.enabled) {
+      if (!Number.isFinite(level.pvp.aimLength)) {
+        level.pvp = normalizePvpSettings({ ...level.pvp, aimLength: PVP_DEFAULT_AIM_LENGTH });
+      }
       level.survival = normalizeSurvivalSettings({
         ...ensureLevelSurvival(level, this.canvas.height),
         enabled: false
@@ -3052,7 +3079,7 @@ class PeggleApp {
     this.game.renderer.setBallTrail(visuals.ballTrail);
     this.game.renderer.setShockwave(visuals.shockwave);
     this.game.loadLevel(level);
-    this.game.setAimLength(typeof level.aimLength === 'number' ? level.aimLength : 300);
+    this.game.setAimLength(pvpSettings.aimLength ?? PVP_DEFAULT_AIM_LENGTH);
     this.game.start();
 
     this._unsubBallCounter = this.game.subscribeUiState((snapshot) => {
@@ -3205,7 +3232,10 @@ class PeggleApp {
 
     document.getElementById('levelName').value = level.name;
     document.getElementById('levelDifficulty').value = level.difficulty || 1;
-    const aimVal = typeof level.aimLength === 'number' ? level.aimLength : 300;
+    const pvp = ensureLevelPvp(level);
+    const aimVal = pvp.enabled
+      ? (pvp.aimLength ?? PVP_DEFAULT_AIM_LENGTH)
+      : (typeof level.aimLength === 'number' ? level.aimLength : 300);
     const aimSlider = document.getElementById('aimLengthSlider');
     const aimInput = document.getElementById('aimLengthInput');
     if (aimSlider) aimSlider.value = aimVal;
@@ -3277,7 +3307,6 @@ class PeggleApp {
     this._updateSurvivalBackgroundStatus(survival);
     this._setSurvivalSettingsVisible(!!survival.enabled);
 
-    const pvp = ensureLevelPvp(level);
     const pvpToggle = document.getElementById('pvpModeToggle');
     const pvpSymmetryToggle = document.getElementById('pvpSymmetryToggle');
     const pvpCpuToggle = document.getElementById('pvpCpuToggle');
@@ -3290,6 +3319,8 @@ class PeggleApp {
     if (pvpTimerSlider) pvpTimerSlider.value = Math.round(pvp.aimTimerMs);
     if (pvpTimerInput) pvpTimerInput.value = (Math.round(pvp.aimTimerMs) / 1000).toFixed(2).replace(/\.00$/, '');
     if (pvpDifficultySelect) pvpDifficultySelect.value = pvp.cpuDifficulty;
+    if (aimSlider) aimSlider.value = aimVal;
+    if (aimInput) aimInput.value = aimVal;
     this._setPvpSettingsVisible(!!pvp.enabled);
     
     const isInTraining = this.levelManager.isInTraining(level.id);
@@ -5086,6 +5117,7 @@ class PeggleApp {
     this.closeLevelList();
     this.closeCampaignList();
     this.closeCampaignEditor();
+    this.closePvpDuelLevels();
     this.closePhysicsSettings();
 
     const config = this._getCurrentDialogueConfig();
@@ -5423,6 +5455,259 @@ class PeggleApp {
     return false;
   }
 
+  _normalizePvpDuelLevelNames(names) {
+    return [...new Set((Array.isArray(names) ? names : [])
+      .map(name => (typeof name === 'string' ? name.trim() : ''))
+      .filter(Boolean))];
+  }
+
+  _readLocalPvpDuelLevelNames() {
+    try {
+      return this._normalizePvpDuelLevelNames(JSON.parse(localStorage.getItem(PVP_DUEL_LEVELS_STORAGE_KEY) || '[]'));
+    } catch {
+      return [];
+    }
+  }
+
+  _writeLocalPvpDuelLevelNames(names) {
+    try {
+      localStorage.setItem(PVP_DUEL_LEVELS_STORAGE_KEY, JSON.stringify(this._normalizePvpDuelLevelNames(names)));
+    } catch { /* local cache unavailable */ }
+  }
+
+  _isPvpDuelSnapshot(snapshot) {
+    if (!snapshot || !Array.isArray(snapshot.pegs)) return false;
+    return !!normalizePvpSettings(snapshot.pvp).enabled;
+  }
+
+  async _ensurePvpDuelLevelNames() {
+    if (Array.isArray(this._pvpDuelLevelNames)) return this._pvpDuelLevelNames;
+    if (this._pvpDuelLevelsPromise) return this._pvpDuelLevelsPromise;
+
+    this._pvpDuelLevelsPromise = (async () => {
+      const remoteNames = this._normalizePvpDuelLevelNames(await api.listPvpDuelLevels());
+      const localNames = this._readLocalPvpDuelLevelNames();
+      const names = remoteNames.length > 0 ? remoteNames : localNames;
+      this._pvpDuelLevelNames = names;
+      if (remoteNames.length > 0) this._writeLocalPvpDuelLevelNames(remoteNames);
+      return names;
+    })().finally(() => {
+      this._pvpDuelLevelsPromise = null;
+      if (document.getElementById('pvpLevelsOverlay')?.classList.contains('visible')) {
+        this._renderPvpDuelLevels();
+      }
+    });
+
+    return this._pvpDuelLevelsPromise;
+  }
+
+  async _savePvpDuelLevelNames(names) {
+    const normalized = this._normalizePvpDuelLevelNames(names);
+    this._pvpDuelLevelNames = normalized;
+    this._writeLocalPvpDuelLevelNames(normalized);
+    this._renderPvpDuelLevels();
+    const ok = await api.savePvpDuelLevels(normalized);
+    if (!ok) {
+      alert('PvP Duel pool was saved locally, but failed to sync to remote. Rooms on production will not see this change yet.');
+      return false;
+    }
+    return true;
+  }
+
+  async _preparePvpDuelEntryLevel(entry, editorLevels) {
+    if (entry.source === 'editor') {
+      const editorLevel = this._findEditorLevelByBakedName(entry.name, editorLevels);
+      if (!editorLevel) {
+        alert('Editor level not found: ' + (entry.displayName || entry.name));
+        return false;
+      }
+      if (!normalizePvpSettings(editorLevel.pvp).enabled) {
+        alert('Only levels with PvP Mode enabled can be added to Duel.');
+        return false;
+      }
+      const snapshot = this._writeBakedLevelSnapshot(entry.name, editorLevel);
+      if (!snapshot) return false;
+      const ok = await this._saveBakedLevelRemote(entry.name, snapshot);
+      if (!ok) {
+        alert(`Failed to sync "${entry.displayName || entry.name}" to remote storage. Duel rooms need the baked PvP level on the server.`);
+        return false;
+      }
+      return true;
+    }
+
+    let snapshot = this._readBakedLevelSnapshot(entry.name);
+    let fromRemote = false;
+    if (!snapshot) {
+      snapshot = await this._cacheRemoteBakedLevel(entry.name);
+      fromRemote = !!snapshot;
+    }
+    if (!snapshot) {
+      alert('Failed to load baked PvP level data: ' + (entry.displayName || entry.name));
+      return false;
+    }
+    if (!this._isPvpDuelSnapshot(snapshot)) {
+      alert('Only baked levels with PvP Mode enabled can be added to Duel.');
+      return false;
+    }
+    if (!fromRemote) {
+      const ok = await this._saveBakedLevelRemote(entry.name, snapshot);
+      if (!ok) {
+        alert(`Failed to sync "${entry.displayName || entry.name}" to remote storage. Duel rooms need the baked PvP level on the server.`);
+        return false;
+      }
+    }
+    return true;
+  }
+
+  async _collectPvpDuelAvailableEntries(remoteNames = []) {
+    const editorLevels = this.levelManager.getAllLevels();
+    const entries = [];
+    const seen = new Set();
+
+    for (const level of editorLevels) {
+      if (!normalizePvpSettings(level.pvp).enabled) continue;
+      const safe = (level.name || 'untitled').replace(/[^a-zA-Z0-9_-]/g, '_');
+      seen.add(safe);
+      entries.push({
+        name: safe,
+        displayName: level.name || safe,
+        source: 'editor'
+      });
+    }
+
+    const localBaked = this.campaignManager.getBakedLevelNames();
+    for (const name of localBaked) {
+      if (seen.has(name)) continue;
+      const snapshot = this._readBakedLevelSnapshot(name);
+      if (!this._isPvpDuelSnapshot(snapshot)) continue;
+      seen.add(name);
+      entries.push({
+        name,
+        displayName: name,
+        source: 'baked'
+      });
+    }
+
+    const remoteOnly = [...new Set(remoteNames || [])]
+      .filter(name => typeof name === 'string' && name && !seen.has(name))
+      .sort();
+    for (const name of remoteOnly) {
+      const snapshot = this._readBakedLevelSnapshot(name) || await api.getLevel(name);
+      if (!this._isPvpDuelSnapshot(snapshot)) continue;
+      seen.add(name);
+      entries.push({
+        name,
+        displayName: name,
+        source: 'remote'
+      });
+    }
+
+    entries.sort((a, b) => String(a.displayName).localeCompare(String(b.displayName)));
+    return { editorLevels, entries };
+  }
+
+  _renderPvpDuelLevels() {
+    const selectedList = document.getElementById('pvpSelectedLevelItems');
+    const availableList = document.getElementById('pvpAvailableLevelItems');
+    if (!selectedList || !availableList) return;
+
+    const selectedNames = Array.isArray(this._pvpDuelLevelNames) ? this._pvpDuelLevelNames : null;
+    selectedList.innerHTML = '';
+    if (!selectedNames) {
+      selectedList.innerHTML = '<div class="campaign-empty-hint">Loading Duel pool...</div>';
+    } else if (selectedNames.length === 0) {
+      selectedList.innerHTML = '<div class="campaign-empty-hint">No Duel levels yet. Add baked levels with PvP Mode enabled.</div>';
+    } else {
+      for (const name of selectedNames) {
+        const item = document.createElement('div');
+        item.className = 'campaign-level-item';
+        item.innerHTML = `
+          <span class="campaign-level-name">${this._esc(name)}</span>
+          <div class="campaign-level-actions">
+            <button class="campaign-action-btn campaign-edit-level-btn" title="Edit in Editor">&#9998;</button>
+            <button class="campaign-action-btn campaign-remove-btn" title="Remove from Duel Pool">&times;</button>
+          </div>
+        `;
+        item.querySelector('.campaign-edit-level-btn')?.addEventListener('click', () => {
+          this.closePvpDuelLevels();
+          this._editCampaignLevel(name);
+        });
+        item.querySelector('.campaign-remove-btn')?.addEventListener('click', async () => {
+          await this._savePvpDuelLevelNames((this._pvpDuelLevelNames || []).filter(itemName => itemName !== name));
+        });
+        selectedList.appendChild(item);
+      }
+    }
+
+    const requestId = ++this._pvpAvailableLevelsRequest;
+    availableList.innerHTML = '<div class="campaign-empty-hint">Looking for baked PvP levels...</div>';
+
+    const renderAvailable = async () => {
+      let remoteNames = [];
+      try {
+        remoteNames = await api.listLevels();
+      } catch { /* handled by empty fallback */ }
+      const { editorLevels, entries } = await this._collectPvpDuelAvailableEntries(remoteNames || []);
+      if (requestId !== this._pvpAvailableLevelsRequest) return;
+
+      const selected = new Set(this._pvpDuelLevelNames || []);
+      const available = entries.filter(entry => !selected.has(entry.name));
+      availableList.innerHTML = '';
+      if (available.length === 0) {
+        availableList.innerHTML = '<div class="campaign-empty-hint">No available PvP levels. Enable PvP Mode on a level, then bake/sync it here.</div>';
+        return;
+      }
+
+      for (const entry of available) {
+        const item = document.createElement('div');
+        item.className = 'campaign-level-item campaign-available-item';
+        const sourceLabel = entry.source === 'editor'
+          ? 'Editor'
+          : (entry.source === 'remote' ? 'Remote' : 'Baked');
+        item.innerHTML = `
+          <span class="campaign-level-name">${this._esc(entry.displayName)}</span>
+          <span class="level-item-meta">${sourceLabel}</span>
+          <button class="campaign-action-btn campaign-add-btn" title="Add to Duel Pool">+</button>
+        `;
+
+        const addBtn = item.querySelector('.campaign-add-btn');
+        addBtn?.addEventListener('click', async () => {
+          addBtn.disabled = true;
+          addBtn.style.opacity = '0.4';
+          const ready = await this._preparePvpDuelEntryLevel(entry, editorLevels);
+          if (!ready) {
+            addBtn.disabled = false;
+            addBtn.style.opacity = '';
+            return;
+          }
+          const next = this._normalizePvpDuelLevelNames([...(this._pvpDuelLevelNames || []), entry.name]);
+          await this._savePvpDuelLevelNames(next);
+        });
+
+        availableList.appendChild(item);
+      }
+    };
+
+    renderAvailable();
+  }
+
+  async showPvpDuelLevels() {
+    this.closeLevelList();
+    this.closeCampaignList();
+    this.closeCampaignEditor();
+    this.closeDialogueEditor();
+    this.closePhysicsSettings();
+    this._positionEditorSideSheets();
+    this._renderPvpDuelLevels();
+    document.getElementById('pvpLevelsOverlay')?.classList.add('visible');
+    await this._ensurePvpDuelLevelNames();
+  }
+
+  closePvpDuelLevels() {
+    document.getElementById('pvpLevelsOverlay')?.classList.remove('visible');
+    this._pvpAvailableLevelsRequest += 1;
+  }
+
   async _ensureCampaignLevelsReadyForRemote(campaign) {
     const seen = new Set();
     for (const bakedName of campaign.levelNames) {
@@ -5590,6 +5875,7 @@ class PeggleApp {
 
   showCampaignList() {
     this.closeDialogueEditor();
+    this.closePvpDuelLevels();
     this._positionEditorSideSheets();
     this._ensurePrimaryCampaignName();
     this._ensureCampaignsSynced();
@@ -5612,6 +5898,7 @@ class PeggleApp {
     this.campaignManager.ensureGraph(campaignId);
 
     this.closeCampaignList();
+    this.closePvpDuelLevels();
 
     const nameInput = document.getElementById('campaignNameInput');
     nameInput.value = campaign.name;

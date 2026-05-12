@@ -2494,6 +2494,9 @@ export class VisualLayout {
         const slotCfg = this.config?.slots?.healthCircle;
         const color = slotCfg?.color || '#00e5ff';
         clone.style.backgroundImage = 'none';
+        clone.style.opacity = '1';
+        clone.style.setProperty('--pvp-health-color', color);
+        clone.style.setProperty('--pvp-health-ratio', ratio.toFixed(4));
         if (!clone.querySelector('.health-clip')) {
           clone.innerHTML = '';
           const clip = document.createElement('div');
@@ -2507,7 +2510,7 @@ export class VisualLayout {
         const fill = clone.querySelector('.health-fill');
         fill.style.background = color;
         fill.style.clipPath = `inset(${(1 - ratio) * 100}% 0 0 0)`;
-        clip.style.filter = ratio > 0 ? `drop-shadow(0 0 ${Math.round(4 * ratio + 2)}px ${color})` : 'none';
+        clip.style.filter = ratio > 0 ? `drop-shadow(0 0 ${Math.round(5 * ratio + 3)}px ${color})` : 'none';
       } else {
         clone.innerHTML = '';
         const computedBg = getComputedStyle(source).backgroundImage;
@@ -2540,6 +2543,14 @@ export class VisualLayout {
     if (this._pvpAimTimerRing || !this._slotClip) return this._pvpAimTimerRing;
     const ring = document.createElement('div');
     ring.className = 'pvp-aim-timer-ring';
+    ring.innerHTML = `
+      <svg class="pvp-aim-timer-svg" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
+        <path class="pvp-aim-timer-track" d="M 50 6 A 44 44 0 0 1 50 94"></path>
+        <path class="pvp-aim-timer-track" d="M 50 6 A 44 44 0 0 0 50 94"></path>
+        <path class="pvp-aim-timer-arc" d="M 50 6 A 44 44 0 0 1 50 94"></path>
+        <path class="pvp-aim-timer-arc" d="M 50 6 A 44 44 0 0 0 50 94"></path>
+      </svg>
+    `;
     this._slotClip.appendChild(ring);
     this._pvpAimTimerRing = ring;
     return ring;
@@ -2573,6 +2584,7 @@ export class VisualLayout {
     ring.style.width = `${size}px`;
     ring.style.height = `${size}px`;
     ring.style.setProperty('--pvp-timer-ratio', state.ratio.toFixed(4));
+    ring.style.setProperty('--pvp-timer-dash-offset', (138.5 * (1 - state.ratio)).toFixed(3));
     ring.style.opacity = '1';
   }
 

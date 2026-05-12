@@ -214,5 +214,100 @@ export const api = {
       console.warn('[api] saveCharacterRegistry failed:', e);
       return false;
     }
+  },
+
+  // ─── PvP Duel ────────────────────────────────
+
+  async listPvpDuelLevels() {
+    try {
+      const res = await fetch(`${API_BASE}/pvp-duel?levels=true`);
+      if (!res.ok) return [];
+      const { names } = await res.json();
+      return Array.isArray(names) ? names : [];
+    } catch (e) {
+      console.warn('[api] listPvpDuelLevels failed:', e);
+      return [];
+    }
+  },
+
+  async savePvpDuelLevels(names) {
+    try {
+      const res = await fetch(`${API_BASE}/pvp-duel`, {
+        method: 'POST',
+        headers: jsonHeaders(),
+        body: JSON.stringify({ action: 'setLevelList', names })
+      });
+      return res.ok;
+    } catch (e) {
+      console.warn('[api] savePvpDuelLevels failed:', e);
+      return false;
+    }
+  },
+
+  async joinPvpDuelRoom(room, client) {
+    try {
+      const res = await fetch(`${API_BASE}/pvp-duel`, {
+        method: 'POST',
+        headers: jsonHeaders(),
+        body: JSON.stringify({ action: 'join', room, client })
+      });
+      if (!res.ok) return null;
+      return await res.json();
+    } catch (e) {
+      console.warn('[api] joinPvpDuelRoom failed:', e);
+      return null;
+    }
+  },
+
+  async getPvpDuelRoom(room, client, pegStateVersion = null) {
+    try {
+      const params = new URLSearchParams({ room, client });
+      if (Number.isFinite(pegStateVersion)) {
+        params.set('pegStateVersion', String(Math.max(0, Math.floor(pegStateVersion))));
+      }
+      const res = await fetch(`${API_BASE}/pvp-duel?${params.toString()}`);
+      if (!res.ok) return null;
+      return await res.json();
+    } catch (e) {
+      console.warn('[api] getPvpDuelRoom failed:', e);
+      return null;
+    }
+  },
+
+  async submitPvpDuelAim(room, client, round, angle, shot = true, pegStateVersion = null) {
+    try {
+      const res = await fetch(`${API_BASE}/pvp-duel`, {
+        method: 'POST',
+        headers: jsonHeaders(),
+        body: JSON.stringify({ action: 'submitAim', room, client, round, angle, shot, pegStateVersion })
+      });
+      if (!res.ok) return null;
+      return await res.json();
+    } catch (e) {
+      console.warn('[api] submitPvpDuelAim failed:', e);
+      return null;
+    }
+  },
+
+  async publishPvpDuelRoundResult(room, client, round, result, pegStateVersion = null) {
+    try {
+      const res = await fetch(`${API_BASE}/pvp-duel`, {
+        method: 'POST',
+        headers: jsonHeaders(),
+        body: JSON.stringify({
+          action: 'roundResult',
+          room,
+          client,
+          pegStateVersion,
+          round,
+          ...(result || {})
+        })
+      });
+      if (!res.ok) return null;
+      return await res.json();
+    } catch (e) {
+      console.warn('[api] publishPvpDuelRoundResult failed:', e);
+      return null;
+    }
   }
 };

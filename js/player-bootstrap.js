@@ -8,7 +8,7 @@ import { isMuted, setMuted } from './haptics.js';
 import { VisualLayout } from './visual-layout.js';
 import { normalizeVisuals } from './visual-config.js';
 import { normalizeLevelData } from './levels.js';
-import { ensureLevelPvp } from './pvp-mode.js';
+import { ensureLevelPvp, PVP_DEFAULT_AIM_LENGTH } from './pvp-mode.js';
 import { DialogueController } from './dialogue-controller.js';
 import { GambleSystem } from './gamble-system.js';
 import { loadCharacterRegistry, normalizeCharacterRegistry, saveCharacterRegistry, CHARACTER_REGISTRY_STORAGE_KEY } from './character-config.js';
@@ -19,6 +19,12 @@ import { validateGraph } from './graph/validate.js';
 import { resolveWin, findNextNode, migrateProgress, isUnlocked } from './graph/progression.js';
 import { api } from './api.js';
 import { decodeBakedLevelJsonFromText } from './baked-level-codec.js';
+import {
+  createPvpDuelRoomUrl,
+  getOrCreatePvpDuelClientId,
+  getPvpDuelRoomCodeFromLocation,
+  PvpDuelRoomController
+} from './pvp-duel-client.js';
 
 const ASPECT_RATIO = 3 / 4.5;
 const FRAME_RATIO = 9 / 17;
@@ -404,6 +410,10 @@ function createPauseOverlay() {
           <img class="pause-img-btn__normal" data-src="${BASE}level.webp" alt="Уровни" draggable="false">
           <img class="pause-img-btn__pressed" data-src="${BASE}level_pressed.webp" alt="" draggable="false">
         </button>
+        <button class="pause-img-btn" id="pausePvpDuelBtn">
+          <img class="pause-img-btn__normal" data-src="${BASE}pvp_button.webp" alt="PvP Duel" draggable="false">
+          <img class="pause-img-btn__pressed" data-src="${BASE}pvp_button_pressed.webp" alt="" draggable="false">
+        </button>
       </div>
       <button class="pause-sound-btn" id="pauseSoundBtn">
         <img class="pause-sound-btn__on" data-src="visuals/pause_menu/sound_on.webp" alt="Звук вкл" draggable="false">
@@ -449,6 +459,11 @@ async function resolve() {
   // Priority 3: ?level=name1,name2 → individual baked levels
   const names = getRequestedNames();
   if (names.length === 0) {
+    const duelRoomCode = getPvpDuelRoomCodeFromLocation();
+    if (duelRoomCode) {
+      bootPvpDuelRoom(duelRoomCode);
+      return;
+    }
     // Priority 4: no params → load configured primary campaign
     const primaryCampaign = await loadPrimaryCampaign();
     if (primaryCampaign) {
@@ -469,6 +484,271 @@ async function resolve() {
   }
   const levels = fetched.map(entry => entry.data);
   bootWithLevels(levels);
+}
+
+async function bootPvpDuelRoom(roomCode) {
+  const canvas = document.getElementById('gameCanvas');
+  canvas.getContext('2d', { alpha: false });
+
+  const visualLayout = new VisualLayout({
+    includePanel: false,
+    enableEditorInteractions: false
+  });
+  visualLayout.mount();
+  visualLayout.setEditMode(false);
+  visualLayout.setPvpMode?.(true);
+
+  const roomOverlay = document.createElement('div');
+  roomOverlay.className = 'pvp-room-overlay visible';
+  roomOverlay.innerHTML = `
+    <div class="pvp-room-card">
+      <div class="pvp-room-title">PvP Duel</div>
+      <div class="pvp-room-code">${roomCode}</div>
+      <div class="pvp-room-status">Joining room...</div>
+      <button type="button" class="pvp-room-copy">Copy Link</button>
+    </div>
+  `;
+  visualLayout.frame.appendChild(roomOverlay);
+  const roomStatusEl = roomOverlay.querySelector('.pvp-room-status');
+  roomOverlay.querySelector('.pvp-room-copy')?.addEventListener('click', async () => {
+    const url = createPvpDuelRoomUrl(roomCode);
+    try {
+      await navigator.clipboard?.writeText?.(url);
+      roomStatusEl.textContent = 'Link copied. Waiting for opponent...';
+    } catch {
+      roomStatusEl.textContent = url;
+    }
+  });
+
+  const pauseOverlay = createPauseOverlay();
+  visualLayout.frame.appendChild(pauseOverlay);
+  loadDeferredImages(pauseOverlay);
+  pauseOverlay.querySelector('#pauseLevelBtn')?.remove();
+  pauseOverlay.querySelector('#pausePvpDuelBtn')?.addEventListener('click', () => {
+    window.location.href = createPvpDuelRoomUrl();
+  });
+  const confirmInput = pauseOverlay.querySelector('#pauseConfirmInput');
+  if (confirmInput) {
+    confirmInput.checked = !!localStorage.getItem('peggle_confirmShoot');
+  }
+
+  let game = null;
+  let controller = null;
+  let unsubUiState = null;
+  let paused = false;
+
+  function resize() {
+    const viewport = document.getElementById('visualViewport');
+    const frame = document.getElementById('visualFrame');
+    if (!viewport || !frame) return;
+
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    let fw = vw;
+    let fh = fw / FRAME_RATIO;
+    const isNarrow = vw <= 520;
+    let compact = false;
+    if (fh > vh) {
+      if (isNarrow) {
+        fh = vh;
+        compact = true;
+      } else {
+        fh = vh;
+        fw = fh * FRAME_RATIO;
+      }
+    }
+    fw = Math.floor(fw);
+    fh = Math.floor(fh);
+    const squeeze = compact ? Math.min(1, fh / (fw / FRAME_RATIO)) : 1;
+
+    frame.style.width = fw + 'px';
+    frame.style.height = fh + 'px';
+    frame.style.setProperty('--frame-scale', String(Math.min(1, fw / 444)));
+    frame.style.setProperty('--frame-squeeze', squeeze.toFixed(4));
+    frame.classList.toggle('visual-frame--compact', compact);
+
+    let displayW = Math.round(fw * 0.9);
+    let displayH = Math.round(displayW / ASPECT_RATIO);
+    if (displayH > fh) { displayH = fh; displayW = Math.round(displayH * ASPECT_RATIO); }
+
+    canvas.width = WORLD_W;
+    canvas.height = WORLD_H;
+    canvas.style.width = displayW + 'px';
+    canvas.style.height = displayH + 'px';
+    if (game) game.resize(WORLD_W, WORLD_H);
+    visualLayout.updateLayout();
+  }
+
+  function showPause() {
+    if (paused || !game) return;
+    paused = true;
+    game.pause();
+    pauseOverlay.classList.add('visible');
+    visualLayout.frame.classList.add('visual-frame--paused');
+  }
+
+  function hidePause() {
+    if (!paused) return;
+    paused = false;
+    pauseOverlay.classList.remove('visible');
+    visualLayout.frame.classList.remove('visual-frame--paused');
+    game?.resume?.();
+  }
+
+  pauseOverlay.querySelector('#pauseResumeBtn')?.addEventListener('click', hidePause);
+  pauseOverlay.querySelector('#pauseRestartBtn')?.addEventListener('click', () => {
+    window.location.reload();
+  });
+  pauseOverlay.addEventListener('click', (event) => {
+    if (event.target === pauseOverlay) hidePause();
+  });
+  confirmInput?.addEventListener('change', () => {
+    if (confirmInput.checked) localStorage.setItem('peggle_confirmShoot', '1');
+    else localStorage.removeItem('peggle_confirmShoot');
+    if (game) game.confirmShoot = confirmInput.checked;
+  });
+
+  function setupPauseTriggers() {
+    for (const slotId of ['topLeft', 'leftCircle']) {
+      const el = visualLayout.slotElements?.[slotId];
+      if (!el) continue;
+      el.classList.add('visual-slot--pause-trigger');
+      el.addEventListener('click', (event) => {
+        event.stopPropagation();
+        showPause();
+      });
+      el.addEventListener('touchend', (event) => {
+        event.stopPropagation();
+        event.preventDefault();
+        showPause();
+      });
+    }
+  }
+  setupPauseTriggers();
+
+  function updateRoomOverlay(room, meta = {}) {
+    if (!room) return;
+    if (meta.waitingForRoundResult) {
+      roomOverlay.classList.add('visible');
+      roomStatusEl.textContent = 'Round already in progress. Waiting for the next aim phase...';
+      return;
+    }
+    if (room.status === 'waiting') {
+      roomOverlay.classList.add('visible');
+      roomStatusEl.textContent = 'Waiting for opponent. Share this room code.';
+      return;
+    }
+    if (room.status === 'aiming') {
+      roomOverlay.classList.remove('visible');
+      return;
+    }
+    if (room.status === 'playing') {
+      roomOverlay.classList.remove('visible');
+      return;
+    }
+    if (room.status === 'finished') {
+      roomOverlay.classList.add('visible');
+      const won = room.winner && room.side && room.winner === room.side;
+      roomStatusEl.textContent = won ? 'Victory. Tap the board to play again.' : 'Defeat. Tap the board to play again.';
+    }
+  }
+
+  try {
+    const clientId = getOrCreatePvpDuelClientId();
+    const initialRoom = await api.joinPvpDuelRoom(roomCode, clientId);
+    if (!initialRoom) throw new Error('Could not join PvP Duel room.');
+    const levelData = await api.getLevel(initialRoom.levelName);
+    if (!levelData || !Array.isArray(levelData.pegs)) {
+      throw new Error(`PvP Duel level not found: ${initialRoom.levelName || 'unknown'}`);
+    }
+
+    const level = normalizeLevelData(levelData);
+    const pvp = ensureLevelPvp(level);
+    if (!pvp.enabled) throw new Error('The selected room level is not marked as PvP.');
+
+    const adapter = {
+      submitAim: (payload) => controller?.submitAim(payload),
+      publishRoundResult: (result) => controller?.publishRoundResult(result)
+    };
+
+    game = new PvpRuntime(canvas, {
+      settings: pvp,
+      localSide: initialRoom.side,
+      networkAdapter: adapter,
+      getTargetCircle: () => visualLayout.getCanvasSlotCircle?.('characterCircle', canvas),
+      onVisualState: (state) => {
+        if (!state) return;
+        visualLayout.setPvpOpponentTarget?.({
+          visible: true,
+          hp: state.cpuHp,
+          maxHp: state.maxHp || 3
+        });
+        visualLayout.setPvpAimTimer?.(
+          state.timerVisible
+            ? { visible: true, ratio: state.timerRatio }
+            : null
+        );
+      },
+      onGameEnd: () => {
+        const endedGame = game;
+        const bindDelayMs = endedGame?.getEndOverlayInteractDelayMs?.() ?? 650;
+        setTimeout(() => {
+          if (!endedGame || game !== endedGame) return;
+          let fired = false;
+          const restart = (event) => {
+            if (fired) return;
+            fired = true;
+            if (event?.cancelable) event.preventDefault();
+            canvas.removeEventListener('click', restart);
+            canvas.removeEventListener('touchstart', restart);
+            window.location.href = createPvpDuelRoomUrl();
+          };
+          canvas.addEventListener('click', restart, { once: true });
+          canvas.addEventListener('touchstart', restart, { once: true, passive: false });
+        }, bindDelayMs);
+      }
+    });
+
+    const visuals = normalizeVisuals(level.visuals);
+    visualLayout.setConfig(visuals);
+    game.renderer.setBackground(visuals.background);
+    game.renderer.setBallTrail(visuals.ballTrail);
+    game.renderer.setShockwave(visuals.shockwave);
+    game.loadLevel(level);
+    game.setAimLength?.(pvp.aimLength ?? PVP_DEFAULT_AIM_LENGTH);
+    game.confirmShoot = !!localStorage.getItem('peggle_confirmShoot');
+
+    unsubUiState = game.subscribeUiState((snapshot) => {
+      if (Number.isFinite(snapshot.orangePegsLeft)) {
+        visualLayout.updateHealthBar(snapshot.orangePegsLeft, snapshot.totalOrangePegs);
+      }
+    });
+
+    controller = new PvpDuelRoomController({
+      roomCode,
+      clientId,
+      runtime: game,
+      onState: updateRoomOverlay,
+      onError: (error) => {
+        roomOverlay.classList.add('visible');
+        roomStatusEl.textContent = error?.message || 'Room connection issue. Retrying...';
+      }
+    });
+    controller.handleRoomState(initialRoom);
+    controller.start();
+
+    window.addEventListener('resize', resize);
+    window.addEventListener('beforeunload', () => {
+      controller?.stop();
+      if (unsubUiState) unsubUiState();
+      game?.stop?.();
+    });
+    resize();
+    game.start();
+    requestAnimationFrame(() => requestAnimationFrame(markPlayerReady));
+  } catch (error) {
+    showError(error?.message || 'Could not start PvP Duel room.');
+  }
 }
 
 async function bootWithLevels(levels, campaignName, campaignData) {
@@ -1133,6 +1413,10 @@ async function bootWithLevels(levels, campaignName, campaignData) {
   pauseLevelBtn.addEventListener('pointerenter', () => scheduleLevelMapPrewarm({ immediate: true, includePortraits: true }));
   pauseLevelBtn.addEventListener('touchstart', () => scheduleLevelMapPrewarm({ immediate: true, includePortraits: true }), { passive: true });
   pauseLevelBtn.addEventListener('click', () => showLevelMap());
+  const pausePvpDuelBtn = pauseOverlay.querySelector('#pausePvpDuelBtn');
+  pausePvpDuelBtn?.addEventListener('click', () => {
+    window.location.href = createPvpDuelRoomUrl();
+  });
   // Confirm-shoot checkbox (second tap to fire)
   const confirmInput = pauseOverlay.querySelector('#pauseConfirmInput');
   confirmInput.checked = !!localStorage.getItem('peggle_confirmShoot');
@@ -1145,7 +1429,7 @@ async function bootWithLevels(levels, campaignName, campaignData) {
     if (game) {
       game.confirmShoot = confirmInput.checked;
       // Reset aiming state so the mode switch applies cleanly
-      if (game.isAimingState()) {
+      if (game.isAimingState?.()) {
         game.state = 'idle';
         game.trajectory = null;
       }
@@ -1388,9 +1672,7 @@ async function bootWithLevels(levels, campaignName, campaignData) {
     if (Number.isFinite(options.suppressInputMs) && options.suppressInputMs > 0) {
       game.suppressInputFor?.(options.suppressInputMs);
     }
-    if (!pvp.enabled) {
-      game.confirmShoot = !!localStorage.getItem('peggle_confirmShoot');
-    }
+    game.confirmShoot = !!localStorage.getItem('peggle_confirmShoot');
 
     // Apply visuals (background + frame + slots)
     const visuals = normalizeVisuals(levelData.visuals);
@@ -1422,9 +1704,9 @@ async function bootWithLevels(levels, campaignName, campaignData) {
       scopeKey: campaignName ? `campaign:${campaignName}` : 'single',
       paused: false
     });
-    if (typeof levelData.aimLength === 'number') {
-      game.setAimLength(levelData.aimLength);
-    }
+    game.setAimLength?.(typeof levelData.aimLength === 'number'
+      ? (pvp.enabled ? (pvp.aimLength ?? PVP_DEFAULT_AIM_LENGTH) : levelData.aimLength)
+      : (pvp.enabled ? (pvp.aimLength ?? PVP_DEFAULT_AIM_LENGTH) : 300));
     dialogueController.setContext({
       level: levelData,
       scopeKey: campaignName ? `campaign:${campaignName}` : 'single',

@@ -6,7 +6,8 @@ import {
   ensureLevelPvp,
   getPvpMidline,
   getPvpRuntimePegs,
-  normalizePvpSettings
+  normalizePvpSettings,
+  PVP_DEFAULT_AIM_LENGTH
 } from './pvp-mode.js';
 import { isPortalType } from './portal-defaults.js';
 
@@ -77,6 +78,9 @@ export class PvpRuntime {
     this.getTargetCircle = typeof options.getTargetCircle === 'function' ? options.getTargetCircle : null;
     this.onGameEnd = options.onGameEnd || null;
     this.onVisualState = typeof options.onVisualState === 'function' ? options.onVisualState : null;
+    this.localSide = options.localSide === 'cpu' ? 'cpu' : 'human';
+    this.networkAdapter = options.networkAdapter || null;
+    this._networkLaunchKey = null;
     this.showPerfOverlay = false;
 
     this.physics = new PhysicsEngine(canvas.width, canvas.height);
@@ -112,7 +116,8 @@ export class PvpRuntime {
     this._lastTrajectoryAimLength = null;
     this._lastTrajectoryPegVersion = -1;
     this.showFullTrajectory = false;
-    this.aimLength = 300;
+    this.aimLength = this.settings.aimLength ?? PVP_DEFAULT_AIM_LENGTH;
+    this.confirmShoot = false;
     this.launchX = canvas.width / 2;
     this.launchY = 40;
     this.cpuLaunchX = canvas.width / 2;
@@ -163,12 +168,69 @@ export class PvpRuntime {
     return Number.isFinite(this.inputSuppressedUntil) && performance.now() < this.inputSuppressedUntil;
   }
 
+  isNetworkMode() {
+    return !!this.networkAdapter;
+  }
+
+  setNetworkAdapter(adapter = null) {
+    this.networkAdapter = adapter || null;
+  }
+
+  setLocalSide(side = 'human') {
+    this.localSide = side === 'cpu' ? 'cpu' : 'human';
+    this.invalidateTrajectory();
+  }
+
+  getLocalAimAngle() {
+    return this.localSide === 'cpu' ? this.cpuAimAngle : this.humanAimAngle;
+  }
+
+  setLocalAimAngle(angle) {
+    if (this.localSide === 'cpu') this.cpuAimAngle = angle;
+    else this.humanAimAngle = angle;
+  }
+
+  getLocalLaunch() {
+    return this.localSide === 'cpu'
+      ? { x: this.cpuLaunchX, y: this.cpuLaunchY }
+      : { x: this.launchX, y: this.launchY };
+  }
+
+  getLocalGravityVector() {
+    return this.localSide === 'cpu' ? this.cpuGravityVector : this.humanGravityVector;
+  }
+
+  getLocalDefaultAimAngle() {
+    return this.localSide === 'cpu' ? -Math.PI / 2 : Math.PI / 2;
+  }
+
+  getLocalHp() {
+    return this.localSide === 'cpu' ? this.cpuHp : this.playerHp;
+  }
+
+  getRemoteHp() {
+    return this.localSide === 'cpu' ? this.playerHp : this.cpuHp;
+  }
+
+  getLocalMatchResult() {
+    if (this.playerHp > 0 && this.cpuHp > 0) return null;
+    if (this.localSide === 'cpu') {
+      return this.playerHp <= 0 ? 'won' : 'lost';
+    }
+    return this.cpuHp <= 0 ? 'won' : 'lost';
+  }
+
   setupInput() {
     const sig = { signal: this.abortController.signal };
     let touchDragged = false;
 
     this.canvas.addEventListener('touchstart', (event) => {
       if (this._isInputSuppressed()) return;
+      if (this.state === 'confirmAim') {
+        touchDragged = false;
+        event.preventDefault();
+        return;
+      }
       if (this.state !== 'idle' && this.state !== 'aiming') return;
       initAudio();
       touchDragged = false;
@@ -179,24 +241,54 @@ export class PvpRuntime {
 
     this.canvas.addEventListener('touchmove', (event) => {
       if (this._isInputSuppressed()) return;
-      if (this.state !== 'aiming') return;
       touchDragged = true;
+      if (this.state === 'confirmAim') {
+        event.preventDefault();
+        this.state = 'aiming';
+        this.updateAim(event);
+        return;
+      }
+      if (this.state !== 'aiming') return;
       event.preventDefault();
       this.updateAim(event);
     }, { passive: false, ...sig });
 
     this.canvas.addEventListener('touchend', (event) => {
       if (this._isInputSuppressed()) return;
+      if (this.state === 'confirmAim' && !touchDragged) {
+        event.preventDefault();
+        this.requestRoundLaunch({ shot: true });
+        return;
+      }
       if (this.state !== 'aiming') return;
       event.preventDefault();
       if (!touchDragged) this.updateAim(event);
-      this.launchRound({ humanShot: true });
+      if (this.confirmShoot) {
+        this.flushPendingAim();
+        this.ensureTrajectoryFresh();
+        this.state = 'confirmAim';
+      } else {
+        this.requestRoundLaunch({ shot: true });
+      }
     }, { passive: false, ...sig });
 
     this.canvas.addEventListener('mousedown', (event) => {
       if (this._isInputSuppressed()) return;
-      if (this.state !== 'idle' && this.state !== 'aiming') return;
       initAudio();
+      if (this.confirmShoot) {
+        if (this.isAimingState()) {
+          event.preventDefault();
+          this.requestRoundLaunch({ shot: true });
+          return;
+        }
+        if (this.state === 'idle') {
+          event.preventDefault();
+          this.state = 'aiming';
+          this.updateAim(event);
+        }
+        return;
+      }
+      if (this.state !== 'idle' && this.state !== 'aiming') return;
       event.preventDefault();
       this.state = 'aiming';
       this.updateAim(event);
@@ -204,16 +296,29 @@ export class PvpRuntime {
 
     this.canvas.addEventListener('mousemove', (event) => {
       if (this._isInputSuppressed()) return;
+      if (this.confirmShoot) {
+        if (this.state === 'idle') this.state = 'aiming';
+        if (this.isAimingState()) {
+          this.state = 'aiming';
+          this.updateAim(event);
+        }
+        return;
+      }
       if (this.state !== 'aiming') return;
       this.updateAim(event);
     }, sig);
 
     this.canvas.addEventListener('mouseup', (event) => {
       if (this._isInputSuppressed()) return;
+      if (this.confirmShoot) return;
       if (this.state !== 'aiming') return;
       event.preventDefault();
-      this.launchRound({ humanShot: true });
+      this.requestRoundLaunch({ shot: true });
     }, sig);
+  }
+
+  isAimingState() {
+    return this.state === 'aiming' || this.state === 'confirmAim';
   }
 
   setShowFullTrajectory(show) {
@@ -299,6 +404,7 @@ export class PvpRuntime {
   loadLevel(level) {
     this.level = clone(level || {});
     this.settings = ensureLevelPvp(this.level);
+    this.setAimLength(this.settings.aimLength ?? PVP_DEFAULT_AIM_LENGTH);
     this.pegs = clone(getPvpRuntimePegs(this.level, this.canvas.height));
     this.matchSeed = hashString(JSON.stringify({
       id: this.level.id || '',
@@ -335,6 +441,73 @@ export class PvpRuntime {
     this.emitUiStateIfChanged();
   }
 
+  applyNetworkAimDeadline(deadlineAt = null, aimRemainingMs = null) {
+    const remainingMs = Number.isFinite(aimRemainingMs)
+      ? Math.max(0, aimRemainingMs)
+      : (Number.isFinite(deadlineAt) ? Math.max(0, deadlineAt - Date.now()) : null);
+    if (!Number.isFinite(remainingMs)) return;
+    this.aimStartedSimMs = this.simTimeMs;
+    this.aimDeadlineSimMs = this.simTimeMs + remainingMs;
+  }
+
+  startNetworkAimRound(round, deadlineAt = null, aimRemainingMs = null) {
+    const nextRound = Math.max(1, Math.round(Number(round) || 1));
+    if (this.round === nextRound && (this.state === 'idle' || this.isAimingState())) {
+      this.applyNetworkAimDeadline(deadlineAt, aimRemainingMs);
+      return;
+    }
+    this.round = nextRound - 1;
+    this.startAimRound();
+    this.applyNetworkAimDeadline(deadlineAt, aimRemainingMs);
+  }
+
+  holdForNetworkRoom() {
+    if (this.state === 'playing') return;
+    this.state = 'roundWait';
+    this.trajectory = null;
+    this.physics.setBalls([]);
+    this.emitUiStateIfChanged();
+  }
+
+  getCanonicalDuelState(removedPegIds = []) {
+    return {
+      hp: {
+        human: this.playerHp,
+        cpu: this.cpuHp
+      },
+      removedPegIds: Array.isArray(removedPegIds)
+        ? removedPegIds.filter(id => typeof id === 'string')
+        : []
+    };
+  }
+
+  applyCanonicalDuelState(snapshot = {}) {
+    const hp = snapshot.hp || {};
+    if (Number.isFinite(hp.human)) this.playerHp = Math.max(0, Math.min(MATCH_HP, Math.round(hp.human)));
+    if (Number.isFinite(hp.cpu)) this.cpuHp = Math.max(0, Math.min(MATCH_HP, Math.round(hp.cpu)));
+
+    if (Array.isArray(snapshot.remainingPegIds)) {
+      const keep = new Set(snapshot.remainingPegIds);
+      const before = this.pegs.length;
+      this.pegs = this.pegs.filter(peg => keep.has(peg.id));
+      if (this.pegs.length !== before) this.syncPhysicsPegs();
+    } else if (Array.isArray(snapshot.removedPegIds)) {
+      const remove = new Set(snapshot.removedPegIds);
+      const before = this.pegs.length;
+      this.pegs = this.pegs.filter(peg => !remove.has(peg.id));
+      if (this.pegs.length !== before) this.syncPhysicsPegs();
+    } else if (Array.isArray(snapshot.removedPegIdsDelta) && snapshot.removedPegIdsDelta.length > 0) {
+      const remove = new Set(snapshot.removedPegIdsDelta);
+      const before = this.pegs.length;
+      this.pegs = this.pegs.filter(peg => !remove.has(peg.id));
+      if (this.pegs.length !== before) this.syncPhysicsPegs();
+    }
+
+    const result = this.getLocalMatchResult();
+    if (result) this.finishMatch(result);
+    else this.emitUiStateIfChanged();
+  }
+
   resetBallPositions() {
     this.humanBall.reset(this.launchX, this.launchY);
     this.cpuBall.reset(this.cpuLaunchX, this.cpuLaunchY);
@@ -351,9 +524,12 @@ export class PvpRuntime {
     this.physics.setBalls([]);
     this.resetBallPositions();
     this.humanAimAngle = Math.PI / 2;
+    this.cpuAimAngle = -Math.PI / 2;
     this.roundSeed = hashString(`${this.matchSeed}:${this.round}`) || this.round;
     this._rng = mulberry32(this.roundSeed);
-    this.cpuAimAngle = this.settings.cpuEnabled ? this.opponentController.chooseAngle() : -Math.PI / 2;
+    if (!this.isNetworkMode()) {
+      this.cpuAimAngle = this.settings.cpuEnabled ? this.opponentController.chooseAngle() : -Math.PI / 2;
+    }
     this.aimStartedSimMs = this.simTimeMs;
     this.aimDeadlineSimMs = this.simTimeMs + this.settings.aimTimerMs;
     this._pendingAimPosition = null;
@@ -394,29 +570,30 @@ export class PvpRuntime {
     if (!this._aimInputDirty || !this._pendingAimPosition) return false;
     this._aimInputDirty = false;
     const nextAngle = this.solveAimAngle(this._pendingAimPosition);
-    const changed = angleDistance(nextAngle, this.humanAimAngle) > 1e-9;
-    this.humanAimAngle = nextAngle;
+    const changed = angleDistance(nextAngle, this.getLocalAimAngle()) > 1e-9;
+    this.setLocalAimAngle(nextAngle);
     return changed;
   }
 
   solveAimAngle(pos) {
     const tx = pos.x;
     const ty = pos.y;
-    const dx = tx - this.launchX;
-    const dy = ty - this.launchY;
+    const launch = this.getLocalLaunch();
+    const dx = tx - launch.x;
+    const dy = ty - launch.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
 
     if (dist < 5) {
-      return Math.PI / 2;
+      return this.getLocalDefaultAimAngle();
     }
 
-    const g = PHYSICS_CONFIG.gravity;
+    const g = this.getLocalGravityVector().y;
     const v = PHYSICS_CONFIG.launchPower;
     const f = PHYSICS_CONFIG.friction;
     let cx = tx;
     let cy = ty;
     for (let pass = 0; pass < 2; pass++) {
-      const angle = Math.atan2(cy - this.launchY, cx - this.launchX);
+      const angle = Math.atan2(cy - launch.y, cx - launch.x);
       let bx = 0;
       let by = 0;
       let bvx = Math.cos(angle) * v;
@@ -429,10 +606,10 @@ export class PvpRuntime {
         by += bvy;
         if (bx * bx + by * by >= dist * dist) break;
       }
-      cx += (tx - this.launchX) - bx;
-      cy += (ty - this.launchY) - by;
+      cx += (tx - launch.x) - bx;
+      cy += (ty - launch.y) - by;
     }
-    return Math.atan2(cy - this.launchY, cx - this.launchX);
+    return Math.atan2(cy - launch.y, cx - launch.x);
   }
 
   ensureTrajectoryFresh() {
@@ -440,7 +617,7 @@ export class PvpRuntime {
       ? 1000
       : (this.aimLength > 0 ? Math.max(2, Math.round(this.aimLength)) : 0);
     const needsUpdate = this._trajectoryDirty
-      || angleDistance(this.humanAimAngle, this._lastTrajectoryAngle) > AIM_ANGLE_EPSILON
+      || angleDistance(this.getLocalAimAngle(), this._lastTrajectoryAngle) > AIM_ANGLE_EPSILON
       || this._lastTrajectoryFull !== this.showFullTrajectory
       || this._lastTrajectoryAimLength !== steps
       || this._lastTrajectoryPegVersion !== this.pegVersion;
@@ -452,17 +629,18 @@ export class PvpRuntime {
     const maxSteps = Number.isFinite(steps)
       ? steps
       : (this.showFullTrajectory ? 1000 : (this.aimLength > 0 ? Math.max(2, Math.round(this.aimLength)) : 0));
+    const launch = this.getLocalLaunch();
     this.trajectory = this.physics.predictTrajectory(
-      this.launchX,
-      this.launchY,
-      this.humanAimAngle,
+      launch.x,
+      launch.y,
+      this.getLocalAimAngle(),
       PHYSICS_CONFIG.launchPower,
       maxSteps,
       !this.showFullTrajectory,
-      { gravityVector: this.humanGravityVector }
+      { gravityVector: this.getLocalGravityVector() }
     );
     this._trajectoryDirty = false;
-    this._lastTrajectoryAngle = this.humanAimAngle;
+    this._lastTrajectoryAngle = this.getLocalAimAngle();
     this._lastTrajectoryFull = this.showFullTrajectory;
     this._lastTrajectoryAimLength = maxSteps;
     this._lastTrajectoryPegVersion = this.pegVersion;
@@ -512,8 +690,42 @@ export class PvpRuntime {
     return (hitCannon ? 1000 : 0) + Math.max(0, 220 - bestDist) * 2 + pegHits * 14;
   }
 
-  launchRound({ humanShot }) {
-    if (this.state !== 'idle' && this.state !== 'aiming') return;
+  requestRoundLaunch({ shot }) {
+    if (this.state !== 'idle' && !this.isAimingState()) return;
+    if (shot) this.flushPendingAim();
+    if (this.networkAdapter && typeof this.networkAdapter.submitAim === 'function') {
+      const angle = shot ? this.getLocalAimAngle() : this.getLocalDefaultAimAngle();
+      this.state = 'roundWait';
+      this.trajectory = null;
+      this._pendingAimPosition = null;
+      this._aimInputDirty = false;
+      this.networkAdapter.submitAim({
+        round: this.round,
+        side: this.localSide,
+        shot: shot !== false,
+        angle
+      });
+      this.emitUiStateIfChanged();
+      return;
+    }
+    this.launchRound({ humanShot: shot !== false });
+  }
+
+  launchResolvedRound({ human = null, cpu = null } = {}) {
+    const launchKey = `${human?.submittedAt || 0}:${cpu?.submittedAt || 0}:${this.round}`;
+    if (this._networkLaunchKey === launchKey && this.state === 'playing') return;
+    this._networkLaunchKey = launchKey;
+    if (human && Number.isFinite(human.angle)) this.humanAimAngle = human.angle;
+    if (cpu && Number.isFinite(cpu.angle)) this.cpuAimAngle = cpu.angle;
+    this.launchRound({
+      humanShot: human?.shot !== false,
+      cpuShot: cpu?.shot !== false,
+      force: true
+    });
+  }
+
+  launchRound({ humanShot, cpuShot = this.settings.cpuEnabled, force = false }) {
+    if (!force && this.state !== 'idle' && !this.isAimingState()) return;
     if (humanShot) this.flushPendingAim();
     this.state = 'playing';
     this.roundStartedSimMs = this.simTimeMs;
@@ -532,15 +744,17 @@ export class PvpRuntime {
       this.damagePlayer();
     }
 
-    if (this.settings.cpuEnabled) {
+    if (cpuShot) {
       this.cpuBall.launch(this.cpuAimAngle, PHYSICS_CONFIG.launchPower);
+    } else {
+      this.damageCpu();
     }
     this.syncActiveBalls();
 
     this.trajectory = null;
     this.emitUiStateIfChanged();
     if (this.playerHp <= 0 || this.cpuHp <= 0) {
-      this.finishMatch(this.cpuHp <= 0 ? 'won' : 'lost');
+      this.finishMatch(this.getLocalMatchResult() || 'lost');
     }
   }
 
@@ -632,19 +846,28 @@ export class PvpRuntime {
 
     if (this.state === 'roundEnd') {
       if (this.roundEndReadySimMs > 0 && this.simTimeMs >= this.roundEndReadySimMs) {
+        if (this.isNetworkMode()) {
+          this.render();
+          return;
+        }
         this.startAimRound();
       }
       this.render();
       return;
     }
 
-    if (this.state === 'idle' || this.state === 'aiming') {
+    if (this.state === 'roundWait') {
+      this.render();
+      return;
+    }
+
+    if (this.state === 'idle' || this.isAimingState()) {
       if (this.simTimeMs >= this.aimDeadlineSimMs) {
-        this.launchRound({ humanShot: false });
+        this.requestRoundLaunch({ shot: false });
         this.render();
         return;
       }
-      if (this.state === 'aiming') {
+      if (this.isAimingState()) {
         this.flushPendingAim();
         this.ensureTrajectoryFresh();
       }
@@ -675,7 +898,7 @@ export class PvpRuntime {
     this.checkStuckBalls();
 
     if (this.playerHp <= 0 || this.cpuHp <= 0) {
-      this.finishMatch(this.cpuHp <= 0 ? 'won' : 'lost');
+      this.finishMatch(this.getLocalMatchResult() || 'lost');
       return;
     }
 
@@ -800,6 +1023,7 @@ export class PvpRuntime {
     if (this.state !== 'playing') return;
     this.state = 'roundEnd';
     const removeIds = new Set(this.roundHitPegIds);
+    const removedPegIds = [...removeIds].filter(id => typeof id === 'string');
     if (removeIds.size > 0) {
       const removed = this.pegs.filter(peg => removeIds.has(peg.id));
       this.renderer.queuePegExitAnimations?.(removed);
@@ -814,6 +1038,12 @@ export class PvpRuntime {
     this.cpuBall.active = false;
     this.physics.setBalls([]);
     this.roundEndReadySimMs = this.simTimeMs + ROUND_END_DELAY_MS;
+    if (this.networkAdapter && typeof this.networkAdapter.publishRoundResult === 'function') {
+      this.networkAdapter.publishRoundResult({
+        round: this.round,
+        ...this.getCanonicalDuelState(removedPegIds)
+      });
+    }
   }
 
   finishMatch(result) {
@@ -825,6 +1055,12 @@ export class PvpRuntime {
     this.cpuBall.active = false;
     this.physics.setBalls([]);
     this.emitUiStateIfChanged();
+    if (this.networkAdapter && typeof this.networkAdapter.publishRoundResult === 'function') {
+      this.networkAdapter.publishRoundResult({
+        round: this.round,
+        ...this.getCanonicalDuelState([])
+      });
+    }
     if (typeof this.onGameEnd === 'function') {
       this.onGameEnd(this.state, this.score);
     }
@@ -843,19 +1079,21 @@ export class PvpRuntime {
   }
 
   getUiStateSnapshot() {
+    const localHp = this.getLocalHp();
+    const remoteHp = this.getRemoteHp();
     return {
       ballsLeft: null,
       initialBallCount: null,
-      orangePegsLeft: this.playerHp,
+      orangePegsLeft: localHp,
       totalOrangePegs: MATCH_HP,
-      playerHp: this.playerHp,
-      cpuHp: this.cpuHp,
+      playerHp: localHp,
+      cpuHp: remoteHp,
       maxHp: MATCH_HP
     };
   }
 
   getTimerRatio() {
-    if (this.state !== 'idle' && this.state !== 'aiming') return null;
+    if (this.state !== 'idle' && !this.isAimingState()) return null;
     return Utils.clamp((this.aimDeadlineSimMs - this.simTimeMs) / Math.max(1, this.settings.aimTimerMs), 0, 1);
   }
 
@@ -869,7 +1107,9 @@ export class PvpRuntime {
     hitPegIds.length = 0;
     for (const id of this.hitPegIds) hitPegIds.push(id);
 
-    const showLaunchers = this.state === 'idle' || this.state === 'aiming';
+    const showLaunchers = this.state === 'idle' || this.isAimingState() || this.state === 'roundWait';
+    const showLocalAim = this.isAimingState();
+    const localIsCpu = this.localSide === 'cpu';
     const secondaryLaunchers = this._renderSecondaryLaunchers;
     secondaryLaunchers.length = 0;
     if (showLaunchers) {
@@ -877,10 +1117,13 @@ export class PvpRuntime {
       launcher.x = this.cpuLaunchX;
       launcher.y = this.cpuLaunchY;
       launcher.angle = this.cpuAimAngle;
-      launcher.showAim = false;
+      launcher.showAim = showLocalAim && localIsCpu;
       launcher.ballScale = 1;
+      launcher.side = 'cpu';
       secondaryLaunchers.push(launcher);
     }
+
+    const localHp = this.getLocalHp();
 
     return {
       pegs: this.pegs,
@@ -894,16 +1137,16 @@ export class PvpRuntime {
       launchY: this.launchY,
       launcherBallScale: 1,
       aimAngle: this.humanAimAngle,
-      showAim: this.state === 'aiming',
+      showAim: showLocalAim && !localIsCpu,
       secondaryLaunchers,
-      trajectory: this.state === 'aiming' ? this.trajectory : null,
+      trajectory: this.isAimingState() ? this.trajectory : null,
       showFullTrajectory: this.showFullTrajectory,
       aimLength: this.aimLength,
       score: this.score,
       ballsLeft: null,
-      orangePegsLeft: this.playerHp,
+      orangePegsLeft: localHp,
       totalOrangePegs: MATCH_HP,
-      levelProgress: this.playerHp / MATCH_HP,
+      levelProgress: localHp / MATCH_HP,
       worldHeight: this.canvas.height,
       backgroundFxId: this.level ? `pvp:${this.level.id || 'level'}` : 'pvp',
       backgroundEvents: [],
@@ -923,8 +1166,8 @@ export class PvpRuntime {
     this.renderer.renderGame(state);
     if (this.onVisualState) {
       this.onVisualState({
-        cpuHp: this.cpuHp,
-        playerHp: this.playerHp,
+        cpuHp: this.getRemoteHp(),
+        playerHp: this.getLocalHp(),
         maxHp: MATCH_HP,
         timerRatio: state.pvpTimerRatio,
         timerVisible: Number.isFinite(state.pvpTimerRatio)
