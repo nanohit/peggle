@@ -665,12 +665,28 @@ async function bootWithLevels(levels, campaignName, campaignData) {
 
   // --- Progress ---
   const progressKey = campaignName ? 'peggle_progress:' + campaignName : null;
+  let savedProgress = null;
   let completedNodes, achievedNodes, currentNodeId;
-  {
-    let saved = null;
+  function readSavedProgress() {
+    if (!progressKey) return null;
     if (progressKey) {
-      try { saved = JSON.parse(localStorage.getItem(progressKey)); } catch { /* ignore */ }
+      try { return JSON.parse(localStorage.getItem(progressKey)); } catch { /* ignore */ }
     }
+    return null;
+  }
+
+  function savedProgressReferencesMissingNodes(saved) {
+    if (!saved || typeof saved !== 'object') return false;
+    if (typeof saved.levelIndex === 'number' && saved.levelIndex >= playableOrder.length) return true;
+    const ids = [
+      ...(Array.isArray(saved.completedNodeIds) ? saved.completedNodeIds : []),
+      ...(Array.isArray(saved.achievedNodeIds) ? saved.achievedNodeIds : []),
+      saved.currentNodeId
+    ].filter(id => id != null);
+    return ids.some(id => !nodeMap.has(id));
+  }
+
+  function applySavedProgress(saved) {
     const migrated = migrateProgress(saved, playableOrder, nodeMap);
     completedNodes = new Set([...migrated.completedNodes].filter(nid => nodeMap.has(nid)));
     achievedNodes = new Set(
@@ -681,21 +697,32 @@ async function bootWithLevels(levels, campaignName, campaignData) {
     currentNodeId = migrated.currentNodeId
       ?? findNextNode(playableOrder, graphParentMap, completedNodes)
       ?? playableOrder[0];
+    if (currentNodeId != null && completedNodes.has(currentNodeId)) {
+      currentNodeId = findNextNode(playableOrder, graphParentMap, completedNodes) ?? playableOrder[0];
+    }
     if (!nodeIdToLevelIndex.has(currentNodeId)) {
       currentNodeId = findNextNode(playableOrder, graphParentMap, completedNodes) ?? playableOrder[0];
     }
   }
+  savedProgress = readSavedProgress();
+  applySavedProgress(savedProgress);
 
   let unsubUiState = null;
   let mirrorState = false; // alternates on defeat
 
   function saveProgress() {
     if (!progressKey) return;
-    localStorage.setItem(progressKey, JSON.stringify({
+    const nextProgress = {
       completedNodeIds: [...completedNodes],
       achievedNodeIds: [...achievedNodes],
       currentNodeId
-    }));
+    };
+    savedProgress = nextProgress;
+    try {
+      localStorage.setItem(progressKey, JSON.stringify(nextProgress));
+    } catch (error) {
+      console.warn('[player] progress save failed', error);
+    }
   }
 
   function mapCompletedNodes() {
@@ -711,12 +738,16 @@ async function bootWithLevels(levels, campaignName, campaignData) {
         if (!fullCampaign || fullCampaign.partial || !hasCampaignLevels(fullCampaign)) return null;
         const previousCurrentNodeId = currentNodeId;
         if (!applyCampaignGraphState(fullCampaign.levels, fullCampaign)) return null;
-        completedNodes = new Set([...completedNodes].filter(nid => nodeMap.has(nid)));
-        achievedNodes = new Set([...achievedNodes].filter(nid => nodeMap.has(nid)));
-        for (const nid of completedNodes) achievedNodes.add(nid);
-        currentNodeId = nodeIdToLevelIndex.has(previousCurrentNodeId)
-          ? previousCurrentNodeId
-          : (findNextNode(playableOrder, graphParentMap, completedNodes) ?? playableOrder[0]);
+        if (savedProgress) {
+          applySavedProgress(savedProgress);
+        } else {
+          completedNodes = new Set([...completedNodes].filter(nid => nodeMap.has(nid)));
+          achievedNodes = new Set([...achievedNodes].filter(nid => nodeMap.has(nid)));
+          for (const nid of completedNodes) achievedNodes.add(nid);
+          currentNodeId = nodeIdToLevelIndex.has(previousCurrentNodeId)
+            ? previousCurrentNodeId
+            : (findNextNode(playableOrder, graphParentMap, completedNodes) ?? playableOrder[0]);
+        }
         saveProgress();
         return fullCampaign;
       })
@@ -730,6 +761,10 @@ async function bootWithLevels(levels, campaignName, campaignData) {
   async function ensureFullCampaignReady() {
     if (!campaignData?.partial) return campaignData || null;
     return await startCampaignHydration();
+  }
+
+  if (campaignData?.partial && savedProgressReferencesMissingNodes(savedProgress)) {
+    await ensureFullCampaignReady();
   }
 
   resize();
@@ -1449,6 +1484,7 @@ async function bootWithLevels(levels, campaignName, campaignData) {
           mirrorState = false;
           completedNodes.add(currentNodeId);
           achievedNodes.add(currentNodeId);
+          saveProgress();
 
           const currentNode = nodeMap.get(currentNodeId);
           const directPlayableChildren = (currentNode?.children || []).filter(cid =>
