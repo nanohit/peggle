@@ -2,6 +2,12 @@ import { api } from './api.js';
 
 const CLIENT_STORAGE_KEY = 'alea_pvp_duel_client_id';
 const DUEL_PROD_ORIGIN = 'https://al3a.vercel.app';
+const INITIAL_POLL_MS = 1200;
+const WAITING_POLL_MS = 3000;
+const SUBMITTED_AIM_POLL_MS = 750;
+const RESULT_WAIT_POLL_MS = 1200;
+const HEARTBEAT_MS = 15000;
+const DEADLINE_POKE_GRACE_MS = 450;
 
 export function getPvpDuelRoomCodeFromLocation(locationObj = window.location) {
   const params = new URLSearchParams(locationObj.search || '');
@@ -50,10 +56,16 @@ export class PvpDuelRoomController {
     this.onError = typeof onError === 'function' ? onError : null;
     this.room = null;
     this.pollTimer = null;
+    this.heartbeatTimer = null;
+    this.deadlinePokeTimer = null;
     this.polling = false;
+    this.heartbeating = false;
     this.stopped = false;
-    this.pollMs = 700;
-    this.fastPollMs = 220;
+    this.pollMs = INITIAL_POLL_MS;
+    this.waitingPollMs = WAITING_POLL_MS;
+    this.submittedAimPollMs = SUBMITTED_AIM_POLL_MS;
+    this.resultWaitPollMs = RESULT_WAIT_POLL_MS;
+    this.heartbeatMs = HEARTBEAT_MS;
     this.launchGraceMs = 1800;
     this._submittedRounds = new Set();
     this._publishedRounds = new Set();
@@ -71,15 +83,19 @@ export class PvpDuelRoomController {
   }
 
   start() {
-    if (this.pollTimer) return;
     this.stopped = false;
-    this.schedulePoll(0);
+    this.schedulePoll();
+    this.scheduleHeartbeat();
   }
 
   stop() {
     this.stopped = true;
     if (this.pollTimer) window.clearTimeout(this.pollTimer);
     this.pollTimer = null;
+    if (this.heartbeatTimer) window.clearTimeout(this.heartbeatTimer);
+    this.heartbeatTimer = null;
+    if (this.deadlinePokeTimer) window.clearTimeout(this.deadlinePokeTimer);
+    this.deadlinePokeTimer = null;
     if (this._launchTimer) window.clearTimeout(this._launchTimer);
     this._launchTimer = null;
     this._launchTimerRound = null;
@@ -88,19 +104,35 @@ export class PvpDuelRoomController {
   getPollDelay() {
     const room = this.room;
     if (!room) return this.pollMs;
+    if (room.status === 'waiting') return this.waitingPollMs;
     if (room.status === 'aiming' && this._submittedRounds.has(String(room.round))) {
-      return this.fastPollMs;
+      const remainingMs = Number.isFinite(room.aimRemainingMs)
+        ? room.aimRemainingMs
+        : Number(room.deadlineAt) - Date.now();
+      if (Number.isFinite(remainingMs) && remainingMs > 0) {
+        return Math.min(this.submittedAimPollMs, Math.max(250, remainingMs + DEADLINE_POKE_GRACE_MS));
+      }
+      return this.resultWaitPollMs;
     }
-    if (room.status === 'playing' && Number(room.launchDelayMs) > 0) {
-      return this.fastPollMs;
+    if (room.status === 'aiming') return null;
+    if (room.status === 'playing') {
+      if (this.runtime?.state === 'roundEnd' || this.runtime?.state === 'roundWait') {
+        return this.resultWaitPollMs;
+      }
+      return null;
     }
+    if (room.status === 'finished') return null;
     return this.pollMs;
   }
 
-  schedulePoll(delay = null) {
+  schedulePoll(delay = undefined) {
     if (this.stopped) return;
     if (this.pollTimer) window.clearTimeout(this.pollTimer);
-    const ms = Number.isFinite(delay) ? Math.max(0, delay) : this.getPollDelay();
+    this.pollTimer = null;
+    if (delay === null) return;
+    const nextDelay = Number.isFinite(delay) ? delay : this.getPollDelay();
+    if (!Number.isFinite(nextDelay)) return;
+    const ms = Math.max(0, nextDelay);
     this.pollTimer = window.setTimeout(() => {
       this.pollTimer = null;
       this.poll();
@@ -108,10 +140,7 @@ export class PvpDuelRoomController {
   }
 
   async poll() {
-    if (this.polling || this.stopped) {
-      this.schedulePoll();
-      return;
-    }
+    if (this.polling || this.stopped) return;
     this.polling = true;
     try {
       const room = await api.getPvpDuelRoom(this.roomCode, this.clientId, this.pegStateVersion);
@@ -124,17 +153,67 @@ export class PvpDuelRoomController {
     }
   }
 
+  scheduleHeartbeat(delay = this.heartbeatMs) {
+    if (this.stopped) return;
+    if (this.room?.status === 'finished') return;
+    if (this.heartbeatTimer) window.clearTimeout(this.heartbeatTimer);
+    this.heartbeatTimer = window.setTimeout(() => {
+      this.heartbeatTimer = null;
+      this.sendHeartbeat({ reschedule: true });
+    }, Math.max(1000, delay));
+  }
+
+  async sendHeartbeat({ reschedule = false } = {}) {
+    if (this.heartbeating || this.stopped) {
+      if (reschedule && !this.stopped) this.scheduleHeartbeat();
+      return;
+    }
+    this.heartbeating = true;
+    try {
+      const room = await api.heartbeatPvpDuelRoom(this.roomCode, this.clientId, this.pegStateVersion);
+      if (room) this.handleRoomState(room);
+    } catch (error) {
+      this.onError?.(error);
+    } finally {
+      this.heartbeating = false;
+      if (reschedule && !this.stopped && this.room?.status !== 'finished') this.scheduleHeartbeat();
+      if (!this.stopped) this.schedulePoll();
+    }
+  }
+
+  scheduleDeadlinePoke(room = this.room) {
+    if (this.deadlinePokeTimer) window.clearTimeout(this.deadlinePokeTimer);
+    this.deadlinePokeTimer = null;
+    if (!room || room.status !== 'aiming') return;
+    if (!this._submittedRounds.has(String(room.round))) return;
+    const remainingMs = Number.isFinite(room.aimRemainingMs)
+      ? room.aimRemainingMs
+      : Number(room.deadlineAt) - Date.now();
+    if (!Number.isFinite(remainingMs)) return;
+    const delay = Math.max(0, remainingMs + DEADLINE_POKE_GRACE_MS);
+    this.deadlinePokeTimer = window.setTimeout(() => {
+      this.deadlinePokeTimer = null;
+      if (this.stopped || this.room?.status !== 'aiming') return;
+      if (!this._submittedRounds.has(String(this.room.round))) return;
+      this.sendHeartbeat();
+    }, delay);
+  }
+
   async submitAim({ round, angle, shot }) {
     const key = String(round);
     if (this._submittedRounds.has(key)) return;
     this._submittedRounds.add(key);
     const room = await api.submitPvpDuelAim(this.roomCode, this.clientId, round, angle, shot, this.pegStateVersion);
     if (room) this.handleRoomState(room);
-    if (!room && !this.stopped) this.schedulePoll(this.fastPollMs);
+    this.scheduleDeadlinePoke(room || this.room);
+    if (!this.stopped) this.schedulePoll(room ? undefined : this.resultWaitPollMs);
   }
 
   async publishRoundResult(result) {
-    if (!this.room?.isHost) return;
+    if (!this.room?.isHost) {
+      this.schedulePoll(this.resultWaitPollMs);
+      return;
+    }
     const round = Number(result?.round);
     if (!Number.isFinite(round)) return;
     const key = String(round);
@@ -142,6 +221,7 @@ export class PvpDuelRoomController {
     this._publishedRounds.add(key);
     const room = await api.publishPvpDuelRoundResult(this.roomCode, this.clientId, round, result, this.pegStateVersion);
     if (room) this.handleRoomState(room);
+    if (!this.stopped) this.schedulePoll();
   }
 
   handleRoomState(room) {
@@ -167,6 +247,7 @@ export class PvpDuelRoomController {
 
     if (room.status === 'waiting') {
       this.clearPendingLaunch();
+      this.scheduleDeadlinePoke(null);
       this.runtime.holdForNetworkRoom?.();
       return;
     }
@@ -174,10 +255,12 @@ export class PvpDuelRoomController {
     if (room.status === 'aiming') {
       this.clearPendingLaunch();
       this.runtime.startNetworkAimRound?.(room.round, room.deadlineAt, room.aimRemainingMs);
+      this.scheduleDeadlinePoke(room);
       return;
     }
 
     if (room.status === 'playing' && room.launch) {
+      this.scheduleDeadlinePoke(null);
       const launchRound = Number(room.launch.round);
       if (!Number.isFinite(launchRound)) return;
       if (this.runtime.round !== launchRound) {
@@ -188,6 +271,9 @@ export class PvpDuelRoomController {
     }
 
     if (room.status === 'finished') {
+      this.scheduleDeadlinePoke(null);
+      if (this.heartbeatTimer) window.clearTimeout(this.heartbeatTimer);
+      this.heartbeatTimer = null;
       this.clearPendingLaunch();
       const result = this.runtime.getLocalMatchResult?.();
       if (result) this.runtime.finishMatch?.(result);
@@ -212,6 +298,7 @@ export class PvpDuelRoomController {
       this.clearPendingLaunch();
       this.runtime.holdForNetworkRoom?.();
       this.onState?.(room, { waitingForRoundResult: true });
+      this.schedulePoll(this.resultWaitPollMs);
       return;
     }
 

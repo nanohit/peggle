@@ -435,6 +435,10 @@ async function touchRoom(roomCode, clientId) {
   });
 }
 
+async function heartbeatRoom(roomCode, clientId) {
+  return await touchRoom(roomCode, clientId);
+}
+
 async function submitAim(roomCode, clientId, body) {
   return await mutateRoom(roomCode, (room) => {
     if (!room) return null;
@@ -521,7 +525,7 @@ export default async function handler(req, res) {
       const roomCode = normalizeRoomCode(req.query.room);
       const clientId = normalizeClientId(req.query.client);
       if (!roomCode || !clientId) return res.status(400).json({ error: 'room and client required' });
-      const room = await touchRoom(roomCode, clientId);
+      const room = await kvGet(roomKey(roomCode));
       if (!room) return res.status(404).json({ error: 'Room not found' });
       return res.json(serializeRoomForClient(room, clientId, {
         pegStateVersion: req.query.pegStateVersion
@@ -547,6 +551,7 @@ export default async function handler(req, res) {
 
       let room;
       if (action === 'join') room = await joinRoom(roomCode, clientId);
+      else if (action === 'heartbeat') room = await heartbeatRoom(roomCode, clientId);
       else if (action === 'submitAim') room = await submitAim(roomCode, clientId, body);
       else if (action === 'roundResult') room = await publishRoundResult(roomCode, clientId, body);
       else return res.status(400).json({ error: 'unknown action' });

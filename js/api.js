@@ -274,6 +274,21 @@ export const api = {
     }
   },
 
+  async heartbeatPvpDuelRoom(room, client, pegStateVersion = null) {
+    try {
+      const res = await fetch(`${API_BASE}/pvp-duel`, {
+        method: 'POST',
+        headers: jsonHeaders(),
+        body: JSON.stringify({ action: 'heartbeat', room, client, pegStateVersion })
+      });
+      if (!res.ok) return null;
+      return await res.json();
+    } catch (e) {
+      console.warn('[api] heartbeatPvpDuelRoom failed:', e);
+      return null;
+    }
+  },
+
   async submitPvpDuelAim(room, client, round, angle, shot = true, pegStateVersion = null) {
     try {
       const res = await fetch(`${API_BASE}/pvp-duel`, {
