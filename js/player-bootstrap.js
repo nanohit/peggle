@@ -18,6 +18,7 @@ import { topoOrder, buildNodeMap, buildParentMap, buildLevelIndexMap, graphFromL
 import { validateGraph } from './graph/validate.js';
 import { resolveWin, findNextNode, migrateProgress, isUnlocked } from './graph/progression.js';
 import { api } from './api.js';
+import { decodeBakedLevelJsonFromText } from './baked-level-codec.js';
 
 const ASPECT_RATIO = 3 / 4.5;
 const FRAME_RATIO = 9 / 17;
@@ -71,19 +72,9 @@ function getLevelMapCtor() {
 
 // Decompress level data from URL hash (deflate + base64url)
 async function loadFromHash() {
-  const hash = location.hash.slice(1);
-  if (!hash) return null;
+  if (!location.hash) return null;
   try {
-    const b64 = hash.replace(/-/g, '+').replace(/_/g, '/');
-    const pad = b64 + '='.repeat((4 - b64.length % 4) % 4);
-    const binary = atob(pad);
-    const bytes = Uint8Array.from(binary, c => c.charCodeAt(0));
-    const ds = new DecompressionStream('deflate');
-    const writer = ds.writable.getWriter();
-    writer.write(bytes);
-    writer.close();
-    const decompressed = await new Response(ds.readable).arrayBuffer();
-    const json = new TextDecoder().decode(decompressed);
+    const json = await decodeBakedLevelJsonFromText(location.hash);
     return normalizeLevelData(JSON.parse(json));
   } catch (e) { console.error('[player] hash decode failed:', e); return null; }
 }

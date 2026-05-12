@@ -2535,6 +2535,68 @@ html, body {
   line-height: 1.35;
 }
 
+.link-import-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 260;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 14px;
+  background: rgba(0, 0, 0, 0.58);
+}
+
+.link-import-overlay.visible {
+  display: flex;
+}
+
+.link-import-panel {
+  width: min(640px, 100%);
+  max-height: calc(100dvh - 28px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-primary);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.5);
+}
+
+.link-import-body {
+  padding: 12px;
+  overflow: auto;
+}
+
+.link-import-textarea {
+  min-height: 220px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  resize: vertical;
+  user-select: text;
+  -webkit-user-select: text;
+  touch-action: auto;
+}
+
+.link-import-status {
+  min-height: 18px;
+  margin: 2px 0 12px;
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.link-import-status.error {
+  color: #f85149;
+}
+
+.link-import-status.success {
+  color: var(--green);
+}
+
+.link-import-actions {
+  justify-content: flex-end;
+}
+
 .dialogue-inline-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

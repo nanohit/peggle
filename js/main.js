@@ -77,6 +77,7 @@ import {
 } from './dialogue-config.js';
 import { getStoredLanguage, normalizeLanguage } from './localization.js';
 import { PERK_DEFINITIONS } from './gamble-system.js';
+import { decodeBakedLevelJsonFromText, extractBakedLevelHash } from './baked-level-codec.js';
 
 // Fixed aspect ratio: 3:4.5 (width:height)
 const ASPECT_RATIO = 3 / 4.5;
@@ -367,6 +368,7 @@ class PeggleApp {
           <div class="theme-label">Import / Export</div>
           <button id="exportBtn" class="admin-btn">Export Level</button>
           <button id="importBtn" class="admin-btn">Import Level</button>
+          <button id="importLinkBtn" class="admin-btn">Import Player Link</button>
           <button id="exportTrainingBtn" class="admin-btn">Export Training</button>
         </div>
       </div>
@@ -945,6 +947,10 @@ class PeggleApp {
 
     document.getElementById('importBtn').addEventListener('click', () => {
       this.importLevel();
+    });
+
+    document.getElementById('importLinkBtn').addEventListener('click', () => {
+      this.showImportLinkDialog();
     });
 
     document.getElementById('exportTrainingBtn').addEventListener('click', () => {
@@ -5139,6 +5145,118 @@ class PeggleApp {
     };
     
     input.click();
+  }
+
+  _ensureImportLinkDialog() {
+    let overlay = document.getElementById('levelLinkImportOverlay');
+    if (overlay) return overlay;
+
+    overlay = document.createElement('div');
+    overlay.id = 'levelLinkImportOverlay';
+    overlay.className = 'link-import-overlay';
+    overlay.innerHTML = `
+      <div class="link-import-panel" role="dialog" aria-modal="true" aria-labelledby="levelLinkImportTitle">
+        <div class="level-list-header link-import-header">
+          <button id="closeLevelLinkImport" class="header-btn" type="button">&larr;</button>
+          <h2 id="levelLinkImportTitle" class="level-list-title">Import Player Link</h2>
+        </div>
+        <div class="link-import-body">
+          <label class="dialogue-field">
+            <span class="dialogue-field-label">Baked player link</span>
+            <textarea id="levelLinkImportInput" class="dialogue-field-textarea link-import-textarea" spellcheck="false" placeholder="https://peggle.vercel.app/player.html#eJ..."></textarea>
+          </label>
+          <div id="levelLinkImportStatus" class="link-import-status">Paste a player.html#... link or the hash after #.</div>
+          <div class="dialogue-editor-toolbar link-import-actions">
+            <button id="cancelLevelLinkImport" class="dialogue-preview-btn" type="button">Cancel</button>
+            <button id="confirmLevelLinkImport" class="dialogue-chip-btn" type="button">Import</button>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    const close = () => overlay.classList.remove('visible');
+    overlay.addEventListener('click', (event) => {
+      if (event.target === overlay) close();
+    });
+    overlay.querySelector('#closeLevelLinkImport')?.addEventListener('click', close);
+    overlay.querySelector('#cancelLevelLinkImport')?.addEventListener('click', close);
+    overlay.querySelector('#levelLinkImportInput')?.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        close();
+      } else if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+        event.preventDefault();
+        this._importLevelFromLinkDialog();
+      }
+    });
+    overlay.querySelector('#confirmLevelLinkImport')?.addEventListener('click', () => {
+      this._importLevelFromLinkDialog();
+    });
+
+    return overlay;
+  }
+
+  showImportLinkDialog() {
+    const overlay = this._ensureImportLinkDialog();
+    const input = overlay.querySelector('#levelLinkImportInput');
+    const status = overlay.querySelector('#levelLinkImportStatus');
+    const importButton = overlay.querySelector('#confirmLevelLinkImport');
+    if (input) input.value = '';
+    if (status) {
+      status.textContent = 'Paste a player.html#... link or the hash after #.';
+      status.classList.remove('error', 'success');
+    }
+    if (importButton) importButton.disabled = false;
+    overlay.classList.add('visible');
+    requestAnimationFrame(() => input?.focus());
+  }
+
+  async _importLevelFromLinkDialog() {
+    const overlay = this._ensureImportLinkDialog();
+    const input = overlay.querySelector('#levelLinkImportInput');
+    const status = overlay.querySelector('#levelLinkImportStatus');
+    const importButton = overlay.querySelector('#confirmLevelLinkImport');
+    const raw = input?.value || '';
+    const hash = extractBakedLevelHash(raw);
+
+    status?.classList.remove('error', 'success');
+    if (!hash) {
+      if (status) {
+        status.textContent = 'Paste the full player.html#... URL, or just the hash after #.';
+        status.classList.add('error');
+      }
+      return;
+    }
+
+    if (importButton) importButton.disabled = true;
+    if (status) status.textContent = `Decoding ${Math.max(1, Math.round(hash.length / 1024))} KB baked link...`;
+
+    try {
+      const json = await decodeBakedLevelJsonFromText(raw);
+      const parsed = JSON.parse(json);
+      if (!parsed || !Array.isArray(parsed.pegs)) {
+        throw new Error('Decoded data is not a level JSON payload.');
+      }
+      const level = this.levelManager.importLevel(json);
+      if (!level) {
+        throw new Error('The decoded level could not be imported.');
+      }
+
+      this.levelManager.setCurrentLevelById(level.id);
+      this.updateLevelTitle();
+      overlay.classList.remove('visible');
+      this.startEditor();
+      alert(`Imported "${level.name || 'Untitled Level'}" with ${level.pegs?.length || 0} pegs.`);
+    } catch (e) {
+      console.error('[import-link] failed:', e);
+      if (status) {
+        status.textContent = e?.message || 'Could not import that player link.';
+        status.classList.add('error');
+      }
+    } finally {
+      if (importButton) importButton.disabled = false;
+    }
   }
 
   exportTrainingData() {
