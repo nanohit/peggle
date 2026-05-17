@@ -407,7 +407,7 @@ export class PhysicsEngine {
   }
 
   _detectPegCollision(ball, peg) {
-    if (!ball || !peg || this.isPortalPeg(peg)) return null;
+    if (!ball || !peg || this.isPortalPeg(peg) || peg._billiardMerging) return null;
 
     const poses = this._getPegCollisionPoses(peg);
     let best = null;
@@ -473,7 +473,7 @@ export class PhysicsEngine {
 
     for (let i = 0; i < pegs.length; i++) {
       const peg = pegs[i];
-      if (this.isPortalPeg(peg)) continue;
+      if (this.isPortalPeg(peg) || peg._billiardMerging) continue;
       const poses = this._getPegCollisionPoses(peg);
       for (const pose of poses) {
         const bounds = this._getPegBounds(peg, pose);
@@ -1037,7 +1037,7 @@ export class PhysicsEngine {
     // Top wall. Survival knockback can reveal negative world-space above the
     // original board top, so the boundary is allowed to follow that viewport.
     const topY = Number.isFinite(this.ballTopY) ? this.ballTopY : 0;
-    if (ball.y - ball.radius < topY) {
+    if (!Number.isFinite(ball.lossYMin) && ball.y - ball.radius < topY) {
       ball.y = topY + ball.radius;
       ball.vy = Math.abs(ball.vy) * bounce;
     }
@@ -1327,6 +1327,7 @@ export class PhysicsEngine {
     const flipperBounce = (this.flippers && this.flippers.bounce != null)
       ? this.flippers.bounce : PHYSICS_CONFIG.bounce;
     const MAX_STEP_PX = 4; // match actual physics sub-step size
+    const stopAtWallHit = options?.stopAtWallHit === true;
 
     // Create simulated ball
     const simBall = {
@@ -1337,7 +1338,8 @@ export class PhysicsEngine {
       radius: getBallRadius(),
       portalCooldown: 0,
       speedCapBoost: 0,
-      gravityVector: options?.gravityVector || null
+      gravityVector: options?.gravityVector || null,
+      lossYMin: Number.isFinite(options?.lossYMin) ? options.lossYMin : null
     };
 
     this._buildPegGrid();
@@ -1381,15 +1383,27 @@ export class PhysicsEngine {
         // Wall collisions
         if (simBall.x - simBall.radius < 0) {
           simBall.x = simBall.radius;
+          if (stopAtWallHit) {
+            points.push({ x: simBall.x, y: simBall.y });
+            return { points, hits: simulatedHits };
+          }
           simBall.vx = Math.abs(simBall.vx) * PHYSICS_CONFIG.bounce;
         }
         if (simBall.x + simBall.radius > this.width) {
           simBall.x = this.width - simBall.radius;
+          if (stopAtWallHit) {
+            points.push({ x: simBall.x, y: simBall.y });
+            return { points, hits: simulatedHits };
+          }
           simBall.vx = -Math.abs(simBall.vx) * PHYSICS_CONFIG.bounce;
         }
         const topY = Number.isFinite(this.ballTopY) ? this.ballTopY : 0;
-        if (simBall.y - simBall.radius < topY) {
+        if (!Number.isFinite(simBall.lossYMin) && simBall.y - simBall.radius < topY) {
           simBall.y = topY + simBall.radius;
+          if (stopAtWallHit) {
+            points.push({ x: simBall.x, y: simBall.y });
+            return { points, hits: simulatedHits };
+          }
           simBall.vy = Math.abs(simBall.vy) * PHYSICS_CONFIG.bounce;
         }
 
@@ -1475,7 +1489,7 @@ export class PhysicsEngine {
       if (stopped) break;
 
       // Ball fell below active loss threshold (camera-aware in survival mode)
-      if (simBall.y > this.ballLossY) {
+      if (simBall.y > this.ballLossY || (Number.isFinite(simBall.lossYMin) && simBall.y < simBall.lossYMin)) {
         break;
       }
     }

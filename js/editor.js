@@ -26,6 +26,7 @@ import {
   normalizePortalScale,
   PORTAL_DEFAULT_SCALE
 } from './portal-defaults.js';
+import { isBilliardPegType } from './billiard-mode.js';
 import {
   PegAnimator,
   MIN_VISIBLE_RATIO,
@@ -1762,7 +1763,8 @@ export class Editor {
     }
     
     const forceCircle = this.selectedPegType === 'bumper'
-      || isPortalType(this.selectedPegType);
+      || isPortalType(this.selectedPegType)
+      || isBilliardPegType(this.selectedPegType);
     const shape = forceCircle ? 'circle' : this.selectedShape;
 
     const pegData = {
@@ -1981,6 +1983,24 @@ export class Editor {
           delete peg.gambleKnockbackEnabled;
           delete peg.gambleKnockbackDistance;
           delete peg.gambleKnockbackSmoothMs;
+        } else if (isBilliardPegType(type)) {
+          peg.shape = 'circle';
+          delete peg.width;
+          delete peg.height;
+          delete peg.curveSlices;
+          delete peg.multiballSpawnCount;
+          delete peg.gambleBallCount;
+          delete peg.gambleKnockbackEnabled;
+          delete peg.gambleKnockbackDistance;
+          delete peg.gambleKnockbackSmoothMs;
+          delete peg.bumperBounce;
+          delete peg.bumperScale;
+          delete peg.bumperDisappear;
+          delete peg.bumperOrange;
+          delete peg._bumperHitScale;
+          delete peg.portalScale;
+          delete peg.portalOneWay;
+          delete peg.portalOneWayFlip;
         } else if (type === 'multi') {
           peg.multiballSpawnCount = normalizeMultiballSpawnCount(peg.multiballSpawnCount);
           delete peg.gambleBallCount;
@@ -2060,7 +2080,8 @@ export class Editor {
       const peg = level.pegs.find(p => p.id === pegId);
       if (peg) {
         const forceCircle = peg.type === 'bumper'
-          || isPortalType(peg.type);
+          || isPortalType(peg.type)
+          || isBilliardPegType(peg.type);
         peg.shape = forceCircle ? 'circle' : shape;
         if (peg.shape === 'brick') {
           peg.width = peg.width || this.getBrickWidth();

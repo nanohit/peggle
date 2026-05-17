@@ -15,6 +15,7 @@ import { normalizeDialogueConfig } from './dialogue-config.js';
 import { normalizeLevelCharacterAssignment } from './character-config.js';
 import { normalizeLevelHitPegClearSettings } from './hit-peg-clear-settings.js';
 import { isPortalType, normalizePortalPegProperties } from './portal-defaults.js';
+import { ensureLevelBilliard, isBilliardPegType } from './billiard-mode.js';
 
 const STORAGE_KEY = 'peggle_levels';
 const TRAINING_KEY = 'peggle_training_data';
@@ -49,7 +50,11 @@ export function normalizeLevelData(level) {
   normalizeLevelHitPegClearSettings(level);
   const survival = ensureLevelSurvival(level, 600);
   const pvp = ensureLevelPvp(level);
-  if (pvp.enabled && survival.enabled) {
+  const billiard = ensureLevelBilliard(level);
+  if (billiard.enabled) {
+    survival.enabled = false;
+    pvp.enabled = false;
+  } else if (pvp.enabled && survival.enabled) {
     survival.enabled = false;
   }
   for (const peg of level.pegs) {
@@ -73,6 +78,12 @@ export function normalizeLevelData(level) {
     }
     if (peg && isPortalType(peg.type)) {
       normalizePortalPegProperties(peg, { upgradeLegacyDefault: true });
+    }
+    if (peg && isBilliardPegType(peg.type)) {
+      peg.shape = 'circle';
+      delete peg.width;
+      delete peg.height;
+      delete peg.curveSlices;
     }
   }
 
@@ -129,6 +140,7 @@ export class LevelManager {
       hitPegClearDelayMs: hitPegClear.delayMs,
       survival: ensureLevelSurvival({}, 600),
       pvp: normalizePvpSettings(null),
+      billiard: ensureLevelBilliard({}),
       visuals: normalizeVisuals(null),
       character: normalizeLevelCharacterAssignment(null),
       dialogue: normalizeDialogueConfig(null),
@@ -187,7 +199,11 @@ export class LevelManager {
     } else {
       ensureLevelPvp(level);
     }
-    if (level.pvp.enabled && level.survival.enabled) {
+    ensureLevelBilliard(level);
+    if (level.billiard.enabled) {
+      level.survival.enabled = false;
+      level.pvp.enabled = false;
+    } else if (level.pvp.enabled && level.survival.enabled) {
       level.survival.enabled = false;
     }
     level.yoyo = normalizeYoyoSettings(level.yoyo);
@@ -260,6 +276,12 @@ export class LevelManager {
     }
     if (peg.type === 'gamble') {
       Object.assign(newPeg, normalizeSurvivalGamblePegProperties(peg));
+    }
+    if (isBilliardPegType(peg.type)) {
+      newPeg.shape = 'circle';
+      delete newPeg.width;
+      delete newPeg.height;
+      delete newPeg.curveSlices;
     }
 
     level.pegs.push(newPeg);

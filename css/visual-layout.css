@@ -922,6 +922,12 @@
   z-index: 501 !important;
 }
 
+.visual-frame--billiard-top-active .visual-slot[data-slot-id="characterCircle"] {
+  border: 3px solid rgba(255, 255, 255, 0.92);
+  border-radius: 50%;
+  box-sizing: border-box;
+}
+
 /* Level-map mode: hide the live character stack in HUD */
 .visual-frame--level-map-open .visual-slot[data-slot-id="character"],
 .visual-frame--level-map-open .visual-slot[data-slot-id="characterCircle"],

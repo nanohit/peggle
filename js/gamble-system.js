@@ -915,6 +915,7 @@ export class GambleSystem {
   }
 
   canInteract() {
+    if (this.game?.isBilliardPhase?.()) return false;
     const state = this.game?.state;
     return state !== 'playing' && state !== 'won' && state !== 'lost';
   }
@@ -1307,6 +1308,12 @@ export class GambleSystem {
     if (!this.ui) return;
     this.applyThemeAssets();
     this.syncOverlayLayout();
+    const hiddenForBilliard = !!this.game?.isBilliardPhase?.();
+    this.ui.root.classList.toggle('gamble-hud--phase-hidden', hiddenForBilliard);
+    if (hiddenForBilliard) {
+      this.setPanelExpanded(false);
+      return;
+    }
 
     const interactionAllowed = this.canInteract();
     const spinUnlocked = !!this.game?.hasShotInCurrentLevel?.();

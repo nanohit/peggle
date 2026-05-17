@@ -10,6 +10,8 @@
   --accent: #58a6ff;
   --accent-hover: #79b8ff;
   --orange: #ff6b35;
+  --billiard-red: #e84d4d;
+  --billiard-yellow: #ffd447;
   --blue: #4ecdc4;
   --green: #95d5b2;
   --purple: #c77dff;
@@ -401,6 +403,30 @@ html, body {
     inset 0 1px 2px rgba(255, 190, 92, 0.72);
 }
 
+.peg-btn[data-type="billiardRed"] {
+  background: rgba(232, 77, 77, 0.2);
+  color: var(--billiard-red);
+}
+.peg-btn[data-type="billiardRed"]::after {
+  border: 1px solid rgba(255, 168, 168, 0.9);
+  background:
+    radial-gradient(ellipse at 35% 24%, rgba(255, 255, 255, 0.82) 0%, rgba(255, 255, 255, 0.82) 12%, rgba(255, 255, 255, 0) 24%),
+    radial-gradient(circle at 48% 44%, #ffe1df 0%, #ff8b82 22%, #e84d4d 56%, #9a151b 80%, #42070b 100%);
+  box-shadow: inset 0 -2px 3px rgba(66, 7, 11, 0.58);
+}
+
+.peg-btn[data-type="billiardYellow"] {
+  background: rgba(255, 212, 71, 0.2);
+  color: var(--billiard-yellow);
+}
+.peg-btn[data-type="billiardYellow"]::after {
+  border: 1px solid rgba(255, 242, 154, 0.92);
+  background:
+    radial-gradient(ellipse at 35% 24%, rgba(255, 255, 255, 0.86) 0%, rgba(255, 255, 255, 0.86) 12%, rgba(255, 255, 255, 0) 24%),
+    radial-gradient(circle at 48% 44%, #fff7bd 0%, #ffe16a 24%, #ffd447 56%, #b57b0d 80%, #4c2b04 100%);
+  box-shadow: inset 0 -2px 3px rgba(76, 43, 4, 0.56);
+}
+
 .peg-btn[data-type="blue"] {
   background: rgba(78, 205, 196, 0.2);
   color: var(--blue);
@@ -632,6 +658,10 @@ html, body {
   z-index: 1;
   pointer-events: none;
   overflow: hidden;
+}
+
+.gamble-hud.gamble-hud--phase-hidden {
+  display: none;
 }
 
 .gamble-backdrop {

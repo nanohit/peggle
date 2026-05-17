@@ -10,6 +10,11 @@ import { YoyoThreadSystem, normalizeYoyoSettings } from './yoyo-thread.js';
 import { buildBombShockwave } from './perk-bomb.js';
 import { DeepFreezeSystem } from './perk-deep-freeze.js';
 import {
+  BilliardPegSystem,
+  ensureLevelBilliard,
+  isBilliardPegType
+} from './billiard-mode.js';
+import {
   MULTIBALL_DEFAULT_SPAWN_COUNT,
   normalizeMultiballSpawnCount
 } from './multiball-settings.js';
@@ -63,6 +68,9 @@ const LAST_PEG_SLOWMO_HOLD_MS = 90;
 const LAST_PEG_SLOWMO_RECOVER_MS = 760;
 const LAST_PEG_SLOWMO_MIN_SCALE = 0.18;
 const LAST_PEG_SLOWMO_TOTAL_MS = LAST_PEG_SLOWMO_DROP_MS + LAST_PEG_SLOWMO_HOLD_MS + LAST_PEG_SLOWMO_RECOVER_MS;
+const BILLIARD_SIDE_LAUNCH_POWER_SCALE = 1.75;
+const BILLIARD_BOTTOM_LAUNCH_POWER_SCALE = 2;
+const BILLIARD_EXTRA_LAUNCHER_LAYOUT = 'bottom-corners'; // 'bottom-corners' or 'cross'
 
 function average(values) {
   if (!Array.isArray(values) || values.length === 0) return 0;
@@ -190,6 +198,11 @@ export class Game {
     this.deepFreezeSystem = new DeepFreezeSystem();
     this.queuedDeepFreezeShots = 0;
     this.deepFreezeShotActive = false;
+    this.billiardSettings = ensureLevelBilliard({});
+    this.billiardPhase = false;
+    this.billiardLauncherIndex = 0;
+    this.initialBilliardTargets = 0;
+    this.billiardSystem = new BilliardPegSystem(this.billiardSettings);
     this.debugDrag = {
       enabled: false,
       dragging: false
@@ -249,6 +262,21 @@ export class Game {
   setupInput() {
     const canvas = this.canvas;
     const sig = { signal: this.abortController.signal };
+    const frame = canvas.closest?.('.visual-frame') || null;
+
+    const handleFrameBilliardLauncherSelect = (e) => {
+      if (!frame || e.target === canvas || canvas.contains(e.target)) return;
+      if (this._isInputSuppressed(e)) return;
+      if (this.isEndSequenceActive()) return;
+      if (this.trySelectBilliardLauncherFromEvent(e)) {
+        if (e.stopPropagation) e.stopPropagation();
+      }
+    };
+
+    if (frame && frame !== canvas) {
+      frame.addEventListener('mousedown', handleFrameBilliardLauncherSelect, { capture: true, ...sig });
+      frame.addEventListener('touchstart', handleFrameBilliardLauncherSelect, { capture: true, passive: false, ...sig });
+    }
 
     // --- Touch input (standard + confirm-shoot with tap vs drag detection) ---
     let touchDragged = false;
@@ -260,6 +288,7 @@ export class Game {
       if (this.handleUltraAimQteInput(e)) return;
       if (this._handleDebugDragStart(e)) return;
       touchDragged = false;
+      if (this.trySelectBilliardLauncherFromEvent(e)) return;
       if (this.state === 'confirmAim') {
         // Second touch starts — will check on touchend if it was a tap or drag
         e.preventDefault();
@@ -312,6 +341,7 @@ export class Game {
       initAudio();
       if (this.handleUltraAimQteInput(e)) return;
       if (this._handleDebugDragStart(e)) return;
+      if (this.trySelectBilliardLauncherFromEvent(e)) return;
       if (this.confirmShoot) {
         // In confirm mode, click fires (from any aiming state)
         if (this.isAimingState()) {
@@ -435,15 +465,18 @@ export class Game {
 
   getUiStateSnapshot() {
     const survivalMode = this.isSurvivalMode();
+    const billiardPhase = this.isBilliardPhase();
     // Orange pegs left across the whole level: initial minus removed minus currently-hit-this-turn
     let currentTurnOrangeHits = 0;
-    if (!survivalMode && this.turnHitPegIds.length > 0) {
+    if (!survivalMode && !billiardPhase && this.turnHitPegIds.length > 0) {
       const turnHitSet = this.getTurnHitPegIdSet();
       for (const peg of this.pegs) {
         if (turnHitSet.has(peg.id) && this.isOrangePeg(peg)) currentTurnOrangeHits++;
       }
     }
-    const orangeLeft = survivalMode
+    const orangeLeft = billiardPhase
+      ? this.getBilliardTargetsLeft()
+      : survivalMode
       ? this.getSurvivalTargetsLeft(true)
       : Math.max(0, this.initialOrangePegs - this.removedOrangePegs - currentTurnOrangeHits);
     const waitingForSurvivalSpinBalls = survivalMode && this.gambleBalls <= 0;
@@ -461,13 +494,17 @@ export class Game {
       gambleBalls: this.gambleBalls,
       showFullTrajectory: !!this.showFullTrajectory,
       orangePegsLeft: orangeLeft,
-      totalOrangePegs: survivalMode ? this.totalSurvivalTargets : this.initialOrangePegs,
+      totalOrangePegs: billiardPhase
+        ? this.initialBilliardTargets
+        : (survivalMode ? this.totalSurvivalTargets : this.initialOrangePegs),
+      billiardPhase,
+      billiardLauncherIndex: billiardPhase ? this.billiardLauncherIndex : null,
     };
   }
 
   getUiStateSignature() {
     const snapshot = this.getUiStateSnapshot();
-    return `${snapshot.state}|${snapshot.ballsLeft}|${snapshot.initialBallCount}|${snapshot.showFullTrajectory ? 1 : 0}|${snapshot.orangePegsLeft}`;
+    return `${snapshot.state}|${snapshot.ballsLeft}|${snapshot.initialBallCount}|${snapshot.showFullTrajectory ? 1 : 0}|${snapshot.orangePegsLeft}|${snapshot.totalOrangePegs}|${snapshot.billiardPhase ? 1 : 0}|${snapshot.billiardLauncherIndex ?? ''}`;
   }
 
   subscribeUiState(listener) {
@@ -946,6 +983,14 @@ export class Game {
     const scaleX = this.canvas.width / rect.width;
     const scaleY = this.canvas.height / rect.height;
 
+    const { clientX, clientY } = this.getInputClientPosition(e);
+    return {
+      x: (clientX - rect.left) * scaleX,
+      y: (clientY - rect.top) * scaleY + this.getCameraY()
+    };
+  }
+
+  getInputClientPosition(e) {
     let clientX, clientY;
     if (e.touches && e.touches.length > 0) {
       clientX = e.touches[0].clientX;
@@ -958,10 +1003,7 @@ export class Game {
       clientY = e.clientY;
     }
 
-    return {
-      x: (clientX - rect.left) * scaleX,
-      y: (clientY - rect.top) * scaleY + this.getCameraY()
-    };
+    return { clientX, clientY };
   }
 
   _handleDebugDragStart(e) {
@@ -1067,13 +1109,13 @@ export class Game {
     const dist = Math.sqrt(dx * dx + dy * dy);
 
     if (dist < 5) {
-      this.aimAngle = Math.PI / 2;
+      this.aimAngle = this.getDefaultAimAngle();
     } else {
       // Find launch angle so the trajectory passes through cursor (tx,ty).
       // Simulate at a candidate angle, see where the ball is at distance `dist`,
       // measure the miss, correct the target. Two passes converge well.
       const g = PHYSICS_CONFIG.gravity;
-      const v = PHYSICS_CONFIG.launchPower;
+      const v = this.getCurrentLaunchPower();
       const f = PHYSICS_CONFIG.friction;
       let cx = tx, cy = ty; // corrected target
       for (let pass = 0; pass < 2; pass++) {
@@ -1106,18 +1148,258 @@ export class Game {
       this.launchX,
       this.launchY,
       this.aimAngle,
-      PHYSICS_CONFIG.launchPower,
+      this.getCurrentLaunchPower(),
       steps,
-      stopAtHit
+      stopAtHit,
+      this.isBilliardPhase()
+        ? { stopAtWallHit: this.billiardSettings?.wallBounceAim === false }
+        : null
     );
   }
 
   shouldShowFullTrajectory() {
+    if (this.isBilliardPhase()) return false;
     return this.showFullTrajectory;
   }
 
   isSurvivalMode() {
     return this.survivalRuntime.isEnabled();
+  }
+
+  isBilliardPhase() {
+    return !!this.billiardPhase;
+  }
+
+  getBilliardTargetsLeft() {
+    if (!Array.isArray(this.pegs)) return 0;
+    return this.pegs.filter(peg => isBilliardPegType(peg?.type)).length;
+  }
+
+  syncBilliardPegRuntimeFlags(pegs = this.pegs) {
+    if (!Array.isArray(pegs)) return;
+    const orangeBounceEnabled = this.isBilliardPhase() && this.billiardSettings?.pvpBounce === true;
+    for (const peg of pegs) {
+      if (!peg) continue;
+      if (peg.type === 'orange' && orangeBounceEnabled) {
+        peg._billiardPvpBounce = true;
+      } else {
+        delete peg._billiardPvpBounce;
+      }
+    }
+  }
+
+  getBilliardTopSelectCircle() {
+    const slot = document.querySelector('#visualFrame .visual-slot[data-slot-id="characterCircle"]');
+    if (!slot || !this.canvas) return null;
+    const slotRect = slot.getBoundingClientRect();
+    const canvasRect = this.canvas.getBoundingClientRect();
+    if (!slotRect.width || !slotRect.height || !canvasRect.width || !canvasRect.height) return null;
+    const scaleX = this.canvas.width / canvasRect.width;
+    const scaleY = this.canvas.height / canvasRect.height;
+    return {
+      x: ((slotRect.left + slotRect.width / 2) - canvasRect.left) * scaleX,
+      y: ((slotRect.top + slotRect.height / 2) - canvasRect.top) * scaleY + this.getCameraY(),
+      radius: Math.max(slotRect.width * scaleX, slotRect.height * scaleY) * 0.5
+    };
+  }
+
+  isBilliardTopLauncherEvent(e) {
+    if (!this.isBilliardPhase()) return false;
+    if (!(this.state === 'idle' || this.isAimingState())) return false;
+    const { clientX, clientY } = this.getInputClientPosition(e);
+    if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return false;
+
+    const slotIds = ['characterCircle', 'healthCircle', 'healthCharCircle', 'character'];
+    for (const slotId of slotIds) {
+      const slot = document.querySelector(`#visualFrame .visual-slot[data-slot-id="${slotId}"]`);
+      if (!slot || slot.style.display === 'none') continue;
+      const rect = slot.getBoundingClientRect();
+      if (!rect.width || !rect.height) continue;
+      const pad = Math.max(2, Math.min(rect.width, rect.height) * 0.08);
+      if (
+        clientX >= rect.left - pad
+        && clientX <= rect.right + pad
+        && clientY >= rect.top - pad
+        && clientY <= rect.bottom + pad
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  getBilliardLaunchers() {
+    const width = this.canvas?.width || 0;
+    const height = this.canvas?.height || 0;
+    const cameraY = this.getCameraY();
+    const topRadius = 30;
+    const extraRadius = 20;
+    const extraSelectRadius = 28;
+    const extraSafePadding = 5;
+    const extraSafeKick = 0.9;
+    const lowerY = Math.max(48, height - 48) + cameraY;
+    const leftX = 48;
+    const rightX = Math.max(48, width - 48);
+    const topSelect = this.getBilliardTopSelectCircle();
+    const launchers = [
+      {
+        index: 0,
+        side: 'top',
+        x: width / 2,
+        y: 40 + cameraY,
+        selectX: topSelect?.x,
+        selectY: topSelect?.y,
+        defaultAngle: Math.PI / 2,
+        radius: topRadius,
+        safePadding: 10,
+        selectRadius: topSelect ? Math.max(24, topSelect.radius) : 42
+      },
+    ];
+
+    if (BILLIARD_EXTRA_LAUNCHER_LAYOUT === 'cross') {
+      launchers.push(
+        { index: 1, side: 'bottom', x: width / 2, y: Math.max(40, height - 40) + cameraY, defaultAngle: -Math.PI / 2, radius: extraRadius, selectRadius: extraSelectRadius, safePadding: extraSafePadding, safeKick: extraSafeKick, assetLauncher: true },
+        { index: 2, side: 'left', x: 34, y: height / 2 + cameraY, defaultAngle: 0, radius: extraRadius, selectRadius: extraSelectRadius, safePadding: extraSafePadding, safeKick: extraSafeKick, assetLauncher: true },
+        { index: 3, side: 'right', x: Math.max(34, width - 34), y: height / 2 + cameraY, defaultAngle: Math.PI, radius: extraRadius, selectRadius: extraSelectRadius, safePadding: extraSafePadding, safeKick: extraSafeKick, assetLauncher: true }
+      );
+      return launchers;
+    }
+
+    launchers.push(
+      { index: 1, side: 'bottomLeft', x: leftX, y: lowerY, defaultAngle: -Math.PI / 4, radius: extraRadius, selectRadius: extraSelectRadius, safePadding: extraSafePadding, safeKick: extraSafeKick, assetLauncher: true },
+      { index: 2, side: 'bottomRight', x: rightX, y: lowerY, defaultAngle: -Math.PI * 3 / 4, radius: extraRadius, selectRadius: extraSelectRadius, safePadding: extraSafePadding, safeKick: extraSafeKick, assetLauncher: true }
+    );
+    return launchers;
+  }
+
+  getActiveBilliardLauncher() {
+    const launchers = this.getBilliardLaunchers();
+    return launchers.find(launcher => launcher.index === this.billiardLauncherIndex) || launchers[0];
+  }
+
+  getSecondaryBilliardLaunchersForRender() {
+    if (!this.isBilliardPhase()) return null;
+    const drawActiveAsSecondary = !(this.state === 'idle' || this.isAimingState());
+    return this.getBilliardLaunchers()
+      .filter(launcher => launcher.index !== 0)
+      .filter(launcher => drawActiveAsSecondary || launcher.index !== this.billiardLauncherIndex)
+      .map(launcher => ({
+        ...launcher,
+        angle: launcher.defaultAngle,
+        showAim: false,
+        ballScale: launcher.index === this.billiardLauncherIndex ? 1 : 0.86,
+        assetLauncher: true,
+        active: launcher.index === this.billiardLauncherIndex
+      }));
+  }
+
+  getPrimaryBilliardLauncherForRender() {
+    if (!this.isBilliardPhase()) return null;
+    const launcher = this.getActiveBilliardLauncher();
+    return {
+      ...launcher,
+      angle: this.aimAngle,
+      showAim: this.isAimingState(),
+      ballScale: this.getLauncherBallScale(),
+      assetLauncher: !!launcher.assetLauncher,
+      active: true
+    };
+  }
+
+  getDefaultAimAngle() {
+    return this.isBilliardPhase()
+      ? (this.getActiveBilliardLauncher()?.defaultAngle ?? Math.PI / 2)
+      : Math.PI / 2;
+  }
+
+  getBilliardLaunchPower(launcher = this.getActiveBilliardLauncher()) {
+    const side = launcher?.side;
+    if (side === 'bottom' || side === 'bottomLeft' || side === 'bottomRight') return PHYSICS_CONFIG.launchPower * BILLIARD_BOTTOM_LAUNCH_POWER_SCALE;
+    if (side === 'left' || side === 'right') return PHYSICS_CONFIG.launchPower * BILLIARD_SIDE_LAUNCH_POWER_SCALE;
+    return PHYSICS_CONFIG.launchPower;
+  }
+
+  getCurrentLaunchPower() {
+    return this.isBilliardPhase()
+      ? this.getBilliardLaunchPower()
+      : PHYSICS_CONFIG.launchPower;
+  }
+
+  getBilliardSafetyBounds() {
+    return {
+      width: this.canvas?.width || 0,
+      height: this.canvas?.height || 0,
+      launchers: this.getBilliardLaunchers()
+    };
+  }
+
+  applyBilliardPegSafety(options = null) {
+    if (!this.isBilliardPhase()) return false;
+    return this.billiardSystem.applySafety(
+      this.pegs,
+      this.getBilliardSafetyBounds(),
+      options
+    );
+  }
+
+  getBilliardLauncherAt(x, y) {
+    if (!this.isBilliardPhase()) return null;
+    for (const launcher of this.getBilliardLaunchers()) {
+      const dx = x - (Number.isFinite(launcher.selectX) ? launcher.selectX : launcher.x);
+      const dy = y - (Number.isFinite(launcher.selectY) ? launcher.selectY : launcher.y);
+      const hitRadius = Math.max(launcher.selectRadius || 0, launcher.radius || 0, 18);
+      if (dx * dx + dy * dy <= hitRadius * hitRadius) return launcher;
+    }
+    return null;
+  }
+
+  selectBilliardLauncher(index, options = null) {
+    if (!this.isBilliardPhase()) return false;
+    const launchers = this.getBilliardLaunchers();
+    const next = launchers.find(launcher => launcher.index === index);
+    if (!next) return false;
+
+    this.billiardLauncherIndex = next.index;
+    this.updateLaunchPosition();
+    this.yoyoThread.setLaunchAnchor(this.launchX, this.launchY);
+    if (options?.preserveAim === false) {
+      this.aimAngle = next.defaultAngle;
+    }
+
+    if (!this.hasActiveBalls()) {
+      const launcherBall = this.getLauncherBall();
+      if (launcherBall) {
+        launcherBall.x = this.launchX;
+        launcherBall.y = this.launchY;
+      } else if (this.balls.length === 1 && !this.balls[0].active) {
+        this.balls[0].x = this.launchX;
+        this.balls[0].y = this.launchY;
+      }
+    }
+    if (this.isAimingState()) this.updateTrajectory();
+    this.emitUiStateIfChanged(true, 'billiard-launcher-select');
+    return true;
+  }
+
+  trySelectBilliardLauncherFromEvent(e) {
+    if (!this.isBilliardPhase()) return false;
+    if (!(this.state === 'idle' || this.isAimingState())) return false;
+    if (this.isBilliardTopLauncherEvent(e)) {
+      if (e?.cancelable) e.preventDefault();
+      this.selectBilliardLauncher(0, { preserveAim: false });
+      this.state = 'idle';
+      this.trajectory = null;
+      return true;
+    }
+    const pos = this.getInputWorldPosition(e);
+    const launcher = this.getBilliardLauncherAt(pos.x, pos.y);
+    if (!launcher) return false;
+
+    if (e?.cancelable) e.preventDefault();
+    this.selectBilliardLauncher(launcher.index, { preserveAim: false });
+    this.state = 'idle';
+    this.trajectory = null;
+    return true;
   }
 
   getCameraY() {
@@ -1132,6 +1414,12 @@ export class Game {
   }
 
   updateLaunchPosition() {
+    if (this.isBilliardPhase()) {
+      const launcher = this.getActiveBilliardLauncher();
+      this.launchX = launcher.x;
+      this.launchY = launcher.y;
+      return;
+    }
     this.launchX = this.canvas.width / 2;
     this.launchY = 40 + this.getCameraY();
   }
@@ -1577,6 +1865,12 @@ export class Game {
   }
 
   refreshFlipperState() {
+    if (this.isBilliardPhase()) {
+      this.flippers = null;
+      this.physics.setFlippers(null);
+      return;
+    }
+
     let flipperConfig = null;
     if (this.baseFlipperConfig && this.baseFlipperConfig.enabled) {
       flipperConfig = this.baseFlipperConfig;
@@ -1726,11 +2020,18 @@ export class Game {
     ) {
       this.setEndSequenceConfig(levelData.visuals.endSequence);
     }
+    const billiardSettings = ensureLevelBilliard(levelData);
+    if (billiardSettings.enabled) {
+      levelData.survival = { ...(levelData.survival || {}), enabled: false };
+    }
     const survivalSettings = ensureLevelSurvival(levelData, this.canvas.height);
     const yoyoSettings = normalizeYoyoSettings(levelData.yoyo);
     this.survivalRuntime.resize(this.canvas.height);
     this.survivalRuntime.configure(survivalSettings);
     this.survivalRuntime.resetCamera(true);
+    this.billiardSettings = billiardSettings;
+    this.billiardSystem.configure(billiardSettings);
+    this.billiardSystem.clear(this.pegs);
     this.yoyoPerkUsesRemaining = 0;
     this.finishDeepFreezeShot();
     this.resetUltraAimRuntime();
@@ -1757,12 +2058,26 @@ export class Game {
       if (isPortalType(copy.type)) {
         normalizePortalPegProperties(copy, { upgradeLegacyDefault: true });
       }
-      if (p.curveSlices) copy.curveSlices = p.curveSlices.map(s => ({ ...s }));
+      if (isBilliardPegType(copy.type)) {
+        copy.shape = 'circle';
+        delete copy.width;
+        delete copy.height;
+        delete copy.curveSlices;
+      }
+      if (!isBilliardPegType(copy.type) && p.curveSlices) copy.curveSlices = p.curveSlices.map(s => ({ ...s }));
       if (p.animation) copy.animation = { ...p.animation };
       return copy;
     });
     this.physics.setPegs(this.pegs);
     this.animator.loadFromLevel(this.pegs, this.groups);
+    this.billiardPhase = !!(billiardSettings.enabled && this.getBilliardTargetsLeft() > 0);
+    this.billiardLauncherIndex = 0;
+    this.initialBilliardTargets = this.billiardPhase ? this.getBilliardTargetsLeft() : 0;
+    this.syncBilliardPegRuntimeFlags();
+    if (this.billiardPhase && this.applyBilliardPegSafety({ settle: true })) {
+      this.physics.setPegs(this.pegs);
+      this.animator.loadFromLevel(this.pegs, this.groups);
+    }
 
     // Load flippers
     const normalizedFlippers = normalizeFlipperConfig(levelData.flippers, {
@@ -1776,7 +2091,7 @@ export class Game {
     this.temporaryFlipperActive = false;
     this.refreshFlipperState();
 
-    this.physics.setBucketEnabled(!this.isSurvivalMode());
+    this.physics.setBucketEnabled(!this.isSurvivalMode() && !this.isBilliardPhase());
     this.syncPhysicsViewportBounds();
 
     this.score = 0;
@@ -1962,34 +2277,45 @@ export class Game {
     if (this.state !== 'aiming' && this.state !== 'confirmAim') return;
     if (Number.isFinite(this.ballsLeft) && this.ballsLeft <= 0) return;
     const survivalMode = this.isSurvivalMode();
+    const billiardPhase = this.isBilliardPhase();
     const hadActiveSurvivalBalls = survivalMode && this.hasActiveBalls();
     const launchBalls = survivalMode
       ? [this.ensureSurvivalLauncherBall()].filter(Boolean)
       : this.balls;
     if (launchBalls.length === 0) return;
 
-    const ultraAimLaunch = this.armUltraAimForLaunch();
-    if (!this.baseFlipperConfig && !this.temporaryFlipperActive && this.temporaryFlipperTurns > 0) {
+    const ultraAimLaunch = billiardPhase ? false : this.armUltraAimForLaunch();
+    if (!billiardPhase && !this.baseFlipperConfig && !this.temporaryFlipperActive && this.temporaryFlipperTurns > 0) {
       this.temporaryFlipperTurns--;
       this.temporaryFlipperActive = true;
       this.refreshFlipperState();
     }
-    if (!ultraAimLaunch) {
+    if (!billiardPhase && !ultraAimLaunch) {
       this.armBombPerkForLaunch();
       this.armDeepFreezeForLaunch();
+    }
+    if (billiardPhase) {
+      this.billiardSystem.startShot(this.pegs);
+      this.physics.clearHitPegs();
     }
 
     this.state = 'playing';
     initAudio();
     resetHitCounter();
     lightTap();
+    const launchPower = this.getCurrentLaunchPower();
     for (const ball of launchBalls) {
-      ball.launch(this.aimAngle);
+      ball.launch(this.aimAngle, launchPower);
       ball.isLauncherBall = false;
       ball.ultraAimStuck = false;
       ball.ultraAimQteBall = false;
-      this.configureBallYoyoState(ball, { suppressPerkBinding: ultraAimLaunch });
-      if (ball.yoyoEligible !== false) {
+      if (billiardPhase) {
+        ball.yoyoEligible = false;
+        ball.yoyoPerkBound = false;
+      } else {
+        this.configureBallYoyoState(ball, { suppressPerkBinding: ultraAimLaunch });
+      }
+      if (!billiardPhase && ball.yoyoEligible !== false) {
         this.yoyoThread.registerBallLaunch(ball, this.launchX, this.launchY);
         this.consumeYoyoPerkUseOnBind(ball);
       }
@@ -2012,7 +2338,8 @@ export class Game {
     this.emitGameplayEvent('shot_launched', {
       shotsFired: this.shotsFired,
       ballsLeft: this.ballsLeft,
-      survivalMode
+      survivalMode,
+      billiardPhase
     });
   }
 
@@ -2210,7 +2537,240 @@ export class Game {
     this.animator.notifyHit(peg.id);
   }
 
+  handleBilliardHitEvents(hitEvents = []) {
+    if (!Array.isArray(hitEvents) || hitEvents.length === 0) return;
+    const sounded = new Set();
+    for (const event of hitEvents) {
+      const peg = event?.peg;
+      if (!peg) continue;
+
+      if (event.portalHit) {
+        this.triggerPortalPulse(event.peg);
+        if (event.portalExit) {
+          this.triggerPortalPulse(event.portalExit);
+        }
+        this.animator.notifyHit(peg.id);
+        continue;
+      }
+
+      if (event.bumperAnimOnly) {
+        peg._bumperHitScale = 1.3;
+        this.animator.notifyHit(peg.id);
+        continue;
+      }
+
+      this.animator.notifyHit(peg.id);
+      if (peg.type !== 'obstacle' && !sounded.has(peg.id)) {
+        sounded.add(peg.id);
+        pegHitSound();
+      }
+    }
+  }
+
+  completeBilliardMerges(completedMerges = []) {
+    if (!Array.isArray(completedMerges) || completedMerges.length === 0) return false;
+    const byId = new Map(this.pegs.map(peg => [peg?.id, peg]).filter(([id, peg]) => id && peg));
+    const removeIds = new Set();
+    const removedPegs = [];
+    const newPegs = [];
+
+    for (const merge of completedMerges) {
+      const a = byId.get(merge?.aId);
+      const b = byId.get(merge?.bId);
+      if (!a || !b) continue;
+      if (removeIds.has(a.id) || removeIds.has(b.id)) continue;
+      removeIds.add(a.id);
+      removeIds.add(b.id);
+      removedPegs.push(a, b);
+
+      const newPeg = {
+        id: Utils.generateId(),
+        x: Number.isFinite(merge.x) ? merge.x : (a.x + b.x) * 0.5,
+        y: Number.isFinite(merge.y) ? merge.y : (a.y + b.y) * 0.5,
+        type: 'orange',
+        shape: 'circle',
+        groupId: null
+      };
+      if (this.billiardSettings?.pvpBounce === true) {
+        newPeg._billiardPvpBounce = true;
+      }
+      newPegs.push(newPeg);
+
+      this.queueBackgroundEvent({
+        kind: 'pegSplash',
+        x: Number.isFinite(merge.x) ? merge.x : (a.x + b.x) * 0.5,
+        y: Number.isFinite(merge.y) ? merge.y : (a.y + b.y) * 0.5,
+        radius: 74,
+        strength: 1.05,
+        burst: 1.5,
+        swirl: 0.8,
+        spread: 1.45,
+        speed: 0,
+        normalX: 0,
+        normalY: -1
+      });
+    }
+
+    if (removeIds.size === 0) return false;
+    this.pegs = this.pegs.filter(peg => !removeIds.has(peg.id));
+    this.pegs.push(...newPegs);
+    this.syncBilliardPegRuntimeFlags();
+    this.renderer.queuePegExitAnimations?.(removedPegs);
+    this.physics.setPegs(this.pegs);
+    this.animator.loadFromLevel(this.pegs, this.groups);
+    this.physics.clearHitPegs();
+    this.emitUiStateIfChanged(true, 'billiard-merge');
+    this.emitGameplayEvent('billiard_merge', {
+      count: newPegs.length,
+      targetsLeft: this.getBilliardTargetsLeft()
+    });
+    return true;
+  }
+
+  applyBilliardBallAntiTraps() {
+    if (!this.isBilliardPhase() || !Array.isArray(this.balls)) return;
+    const width = this.canvas.width;
+    const topY = 0;
+
+    for (const ball of this.balls) {
+      if (!ball || !ball.active) continue;
+      const radius = ball.radius || getBallRadius();
+      const bounce = PHYSICS_CONFIG.bounce;
+
+      if (ball.x - radius < 0) {
+        ball.x = radius;
+        ball.vx = Math.abs(ball.vx) * bounce;
+      } else if (ball.x + radius > width) {
+        ball.x = width - radius;
+        ball.vx = -Math.abs(ball.vx) * bounce;
+      }
+
+      if (ball.y - radius < topY) {
+        ball.y = topY + radius;
+        ball.vy = Math.abs(ball.vy) * bounce;
+      }
+    }
+  }
+
+  handleBilliardPhysicsResult(result, dt, worldHeight) {
+    for (const contact of result.contactEvents || []) {
+      if (!contact?.peg || !contact?.ball) continue;
+      if (this.billiardSystem.applyBallImpact(contact.peg, contact.ball, contact.impact)) {
+        this.animator.suspendPeg(contact.peg.id);
+      }
+    }
+    this.handleBilliardHitEvents(result.hitEvents);
+
+    const step = this.billiardSystem.step(this.pegs, dt, {
+      width: this.canvas.width,
+      height: worldHeight,
+      launchers: this.getBilliardLaunchers()
+    });
+    if (step.completedMerges.length > 0) {
+      this.completeBilliardMerges(step.completedMerges);
+    }
+
+    if (this.getBilliardTargetsLeft() === 0) {
+      this.startMainPhaseFromBilliard();
+      return;
+    }
+
+    if (result.ballsRemaining > 0) {
+      this.applyBilliardBallAntiTraps();
+    }
+
+    if (
+      result.ballsRemaining === 0
+      && !this.billiardSystem.hasMovingPegs(this.pegs)
+    ) {
+      this.endBilliardTurn();
+    }
+  }
+
+  startMainPhaseFromBilliard() {
+    if (!this.isBilliardPhase()) return false;
+    this.billiardSystem.clear(this.pegs);
+    this.billiardPhase = false;
+    this.billiardLauncherIndex = 0;
+    this.refreshFlipperState();
+    this.physics.setBucketEnabled(!this.isSurvivalMode());
+
+    this.score = 0;
+    this.ballsLeft = 10;
+    this.initialBallCount = 10;
+    this.gambleBalls = 0;
+    this.initialGambleBallCount = 0;
+    this.hitPegIds = [];
+    this.turnHitPegIds = [];
+    this.shotsFired = 0;
+    this._turnBucketCatchCount = 0;
+    this.pendingHitPegClears.clear();
+    this.removedOrangePegs = 0;
+    this.initialOrangePegs = this.getTotalOrangePegs();
+    this.bucketCatchLight = 0;
+    this.state = 'idle';
+    this.trajectory = null;
+    this.lastUiStateSignature = '';
+    this.physics.clearHitPegs();
+    this.physics.setPegs(this.pegs);
+    this.resetStuckBallTracking();
+    this.updateLaunchPosition();
+    this.clearDynamicYoyoAnchors();
+    this.yoyoThread.clear();
+    this.yoyoThread.setLaunchAnchor(this.launchX, this.launchY);
+    this.resetBall();
+    this.emitUiStateIfChanged(true, 'billiard-complete');
+    this.emitGameplayEvent('billiard_complete', {
+      orangePegs: this.initialOrangePegs,
+      ballsLeft: this.ballsLeft
+    });
+    return true;
+  }
+
+  endBilliardTurn() {
+    if (!this.isBilliardPhase()) return false;
+    this.yoyoThread.clear();
+    this.clearDynamicYoyoAnchors();
+    this.resetUltraAimRuntime();
+    this.billiardSystem.finishShot(this.pegs);
+    this.hitPegIds = [];
+    this.turnHitPegIds = [];
+    this.physics.clearHitPegs();
+    this.resetStuckBallTracking();
+    if (this.applyBilliardPegSafety({ settle: true })) {
+      this.physics.setPegs(this.pegs);
+      this.animator.loadFromLevel(this.pegs, this.groups);
+    }
+
+    if (this.getBilliardTargetsLeft() === 0) {
+      return this.startMainPhaseFromBilliard();
+    }
+
+    this.emitGameplayEvent('ball_lost_clean', {
+      turnHitCount: 0,
+      ballsLeft: this.ballsLeft,
+      shotsFired: this.shotsFired,
+      billiardPhase: true
+    });
+
+    if (this.ballsLeft <= 0) {
+      this.billiardSystem.clear(this.pegs);
+      this._finalizeEndState('lost');
+      return true;
+    }
+
+    this.state = 'idle';
+    this.resetBall();
+    this.emitUiStateIfChanged(true, 'billiard-turn-ended');
+    return true;
+  }
+
   endTurn() {
+    if (this.isBilliardPhase()) {
+      this.endBilliardTurn();
+      return;
+    }
+
     if (this._pendingEndResult?.result === 'won' && this._pendingEndResult.readyToResolve) {
       this._maybeFinalizePendingEndResult();
       if (this.state === 'won') return;
@@ -2443,6 +3003,10 @@ export class Game {
 
     const result = this.physics.update(dt);
     this.balls = this.physics.balls;
+    if (this.isBilliardPhase()) {
+      this.handleBilliardPhysicsResult(result, dt, worldHeight);
+      return;
+    }
     if (this.deepFreezeSystem.isActive()) {
       for (const contact of result.contactEvents) {
         if (this.deepFreezeSystem.applyBallImpact(contact.peg, contact.ball, contact.impact)) {
@@ -2781,6 +3345,7 @@ export class Game {
     const qteTrajectory = ultraAimQteActive ? this.ultraAimQte.trajectory : null;
     const snapshot = this.getUiStateSnapshot();
     const survivalMode = this.isSurvivalMode();
+    const billiardPhase = this.isBilliardPhase();
     const worldHeight = survivalMode ? this.survivalRuntime.getWorldHeight() : this.canvas.height;
     const totalTargets = snapshot.totalOrangePegs;
     const targetsLeft = snapshot.orangePegsLeft;
@@ -2799,7 +3364,9 @@ export class Game {
       this._frozenSurvivalTrackerState = null;
     }
     const boardProgress = survivalMode ? (trackerState?.progressRatio ?? 0) : pegProgress;
-    const centerLabel = survivalMode
+    const centerLabel = billiardPhase
+      ? `MIX ${Math.max(0, totalTargets - targetsLeft)}/${totalTargets}`
+      : survivalMode
       ? `PEGS ${Math.max(0, totalTargets - targetsLeft)}/${totalTargets}`
       : null;
     const cameraY = this.getCameraY();
@@ -2810,13 +3377,14 @@ export class Game {
       hitPegIds: allHitIds,
       wrapCopyPegIds: this.animator.getAnimatedPegIds(),
       balls: this.balls,
-      bucket: survivalMode ? null : this.physics.bucket,
+      bucket: (survivalMode || billiardPhase) ? null : this.physics.bucket,
       flippers: this.flippers,
       cameraY,
       showLauncher: this.state === 'idle' || this.isAimingState(),
       launchX: this.launchX,
       launchY: this.launchY,
       launcherBallScale: this.getLauncherBallScale(),
+      launcherOptions: this.getPrimaryBilliardLauncherForRender(),
       aimAngle: this.aimAngle,
       showAim: this.isAimingState(),
       showQteAim: ultraAimQteActive,
@@ -2826,6 +3394,7 @@ export class Game {
       trajectoryStyle: ultraAimQteActive ? 'qte' : 'default',
       trajectory: qteTrajectory || (this.isAimingState() ? this.trajectory : null),
       showFullTrajectory: ultraAimQteActive ? false : this.shouldShowFullTrajectory(),
+      secondaryLaunchers: this.getSecondaryBilliardLaunchersForRender(),
       aimLength: this.aimLength,
       yoyoThreads: this.yoyoThread.getRenderThreads(),
       score: this.score,
@@ -3149,6 +3718,7 @@ export class Game {
   }
 
   getGambleAutoLuckRatio() {
+    if (this.isBilliardPhase()) return 0;
     if (this.isSurvivalMode()) {
       const tracker = this.survivalRuntime.getTrackerState();
       const progress = Number(tracker?.progressRatio);
@@ -3165,6 +3735,7 @@ export class Game {
 
   canGamble(ballCost = 1) {
     const cost = Math.max(1, Math.floor(ballCost));
+    if (this.isBilliardPhase()) return false;
     if (!(this.state === 'idle' || this.state === 'aiming')) return false;
     if (this.isSurvivalMode()) {
       return this.gambleBalls >= cost;
@@ -3174,6 +3745,7 @@ export class Game {
   }
 
   hasShotInCurrentLevel() {
+    if (this.isBilliardPhase()) return false;
     return this.shotsFired > 0 || (this.isSurvivalMode() && this.gambleBalls > 0);
   }
 

@@ -325,6 +325,10 @@ export class VisualLayout {
     }
   }
 
+  setBilliardTopLauncherActive(active = false) {
+    this.frame?.classList.toggle('visual-frame--billiard-top-active', !!active);
+  }
+
   setGambleOverlayState({ open = false, target = null } = {}) {
     this.gambleOverlayState = {
       open: !!open,

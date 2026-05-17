@@ -630,6 +630,7 @@ export class PvpRuntime {
       ? steps
       : (this.showFullTrajectory ? 1000 : (this.aimLength > 0 ? Math.max(2, Math.round(this.aimLength)) : 0));
     const launch = this.getLocalLaunch();
+    const localBall = this.localSide === 'cpu' ? this.cpuBall : this.humanBall;
     this.trajectory = this.physics.predictTrajectory(
       launch.x,
       launch.y,
@@ -637,7 +638,10 @@ export class PvpRuntime {
       PHYSICS_CONFIG.launchPower,
       maxSteps,
       !this.showFullTrajectory,
-      { gravityVector: this.getLocalGravityVector() }
+      {
+        gravityVector: this.getLocalGravityVector(),
+        lossYMin: localBall?.lossYMin
+      }
     );
     this._trajectoryDirty = false;
     this._lastTrajectoryAngle = this.getLocalAimAngle();
@@ -678,7 +682,10 @@ export class PvpRuntime {
       PHYSICS_CONFIG.launchPower,
       steps,
       false,
-      { gravityVector: this.cpuGravityVector }
+      {
+        gravityVector: this.cpuGravityVector,
+        lossYMin: this.cpuBall.lossYMin
+      }
     );
     const target = this.getTargetCircles().player;
     let bestDist = Infinity;

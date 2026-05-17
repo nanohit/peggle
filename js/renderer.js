@@ -23,6 +23,14 @@ const COLORS = {
   orange: '#ff6b35',
   orangeHit: '#ffb347',
   orangeGlow: 'rgba(255, 107, 53, 0.5)',
+
+  billiardRed: '#e84d4d',
+  billiardRedHit: '#ff9a94',
+  billiardRedGlow: 'rgba(232, 77, 77, 0.42)',
+
+  billiardYellow: '#ffd447',
+  billiardYellowHit: '#fff0a1',
+  billiardYellowGlow: 'rgba(255, 212, 71, 0.42)',
   
   blue: '#4ecdc4',
   blueHit: '#7ee8e2',
@@ -98,6 +106,8 @@ const COLORS = {
 
 const PEG_COLORS = {
   orange: { main: COLORS.orange, hit: COLORS.orangeHit, glow: COLORS.orangeGlow },
+  billiardRed: { main: COLORS.billiardRed, hit: COLORS.billiardRedHit, glow: COLORS.billiardRedGlow },
+  billiardYellow: { main: COLORS.billiardYellow, hit: COLORS.billiardYellowHit, glow: COLORS.billiardYellowGlow },
   blue: { main: COLORS.blue, hit: COLORS.blueHit, glow: COLORS.blueGlow },
   green: { main: COLORS.green, hit: COLORS.greenHit, glow: COLORS.greenGlow },
   purple: { main: COLORS.purple, hit: COLORS.purpleHit, glow: COLORS.purpleGlow },
@@ -123,6 +133,34 @@ const PEG_SURFACE_STYLES = {
     hitBright: '#fff1bc',
     hitLight: '#ffbd4c',
     hitMain: '#ff8b24'
+  },
+  billiardRed: {
+    bright: '#ffe1df',
+    light: '#ff8b82',
+    main: '#e84d4d',
+    deep: '#9a151b',
+    shadow: '#42070b',
+    rimLight: 'rgba(255, 159, 151, 0.94)',
+    line: 'rgba(255, 210, 205, 0.44)',
+    core: 'rgba(244, 82, 76, 0.44)',
+    glow: 'rgba(232, 77, 77, 0.26)',
+    hitBright: '#ffffff',
+    hitLight: '#ffc1bc',
+    hitMain: '#ff746c'
+  },
+  billiardYellow: {
+    bright: '#fff7bd',
+    light: '#ffe16a',
+    main: '#ffd447',
+    deep: '#b57b0d',
+    shadow: '#4c2b04',
+    rimLight: 'rgba(255, 244, 151, 0.94)',
+    line: 'rgba(255, 252, 210, 0.44)',
+    core: 'rgba(255, 213, 75, 0.44)',
+    glow: 'rgba(255, 212, 71, 0.24)',
+    hitBright: '#ffffff',
+    hitLight: '#fff1a8',
+    hitMain: '#ffe16a'
   },
   blue: {
     bright: '#d7fffb',
@@ -298,6 +336,17 @@ export class Renderer {
     const bucketImg = new Image();
     bucketImg.onload = () => { this._bucketImg = bucketImg; };
     bucketImg.src = 'visuals/bucket.webp';
+
+    this._billiardCannonImages = {
+      top: null,
+      circle: null
+    };
+    const billiardTopImg = new Image();
+    billiardTopImg.onload = () => { this._billiardCannonImages.top = billiardTopImg; };
+    billiardTopImg.src = 'visuals/assets_webtp/top.webp';
+    const billiardCircleImg = new Image();
+    billiardCircleImg.onload = () => { this._billiardCannonImages.circle = billiardCircleImg; };
+    billiardCircleImg.src = 'visuals/assets_webtp/character_circle.webp';
   }
 
   resize(width, height) {
@@ -1889,9 +1938,15 @@ export class Renderer {
   }
 
   drawLauncher(x, y, angle, showAim = true, ballScale = 1, options = null) {
+    if (options?.assetLauncher) {
+      this.drawBilliardAssetLauncher(x, y, angle, showAim, ballScale, options);
+      return;
+    }
+
     const ctx = this.ctx;
     const previewRadius = getBallRadius() * Math.max(0.2, Math.min(1, Number.isFinite(ballScale) ? ballScale : 1));
     const isCpu = options?.side === 'cpu' || options?.enemy === true;
+    const active = !!options?.active;
     
     // Launcher base
     ctx.fillStyle = COLORS.launcher;
@@ -1904,6 +1959,18 @@ export class Renderer {
     ctx.beginPath();
     ctx.arc(x, y, previewRadius, 0, Math.PI * 2);
     ctx.fill();
+
+    if (active) {
+      ctx.save();
+      ctx.shadowColor = 'rgba(255, 255, 255, 0.7)';
+      ctx.shadowBlur = 12;
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.75)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(x, y, previewRadius + 8, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
 
     if (isCpu) {
       ctx.save();
@@ -1927,6 +1994,83 @@ export class Renderer {
       ctx.lineTo(x + Math.cos(angle) * indicatorLen, y + Math.sin(angle) * indicatorLen);
       ctx.stroke();
     }
+  }
+
+  drawBilliardAssetLauncher(x, y, angle, showAim = true, ballScale = 1, options = null) {
+    const ctx = this.ctx;
+    const previewRadius = getBallRadius() * Math.max(0.2, Math.min(1, Number.isFinite(ballScale) ? ballScale : 1));
+    const circleImg = this._billiardCannonImages?.circle;
+    const topImg = this._billiardCannonImages?.top;
+    const active = !!options?.active;
+    const renderAngle = Number.isFinite(angle) ? angle : (options?.defaultAngle || Math.PI / 2);
+    const bodyAngle = Number.isFinite(options?.defaultAngle) ? options.defaultAngle : renderAngle;
+
+    ctx.save();
+    ctx.translate(x, y);
+    // In asset space, the top ornament points toward +Y, matching the original top cannon.
+    ctx.rotate(bodyAngle - Math.PI / 2);
+
+    if (topImg) {
+      const topW = 118;
+      const topH = topW * (topImg.naturalHeight || topImg.height || 188) / Math.max(1, topImg.naturalWidth || topImg.width || 389);
+      ctx.save();
+      ctx.globalAlpha = active ? 0.98 : 0.78;
+      ctx.drawImage(topImg, -topW / 2, -topH - 8, topW, topH);
+      ctx.restore();
+    }
+
+    if (circleImg) {
+      const size = active ? 66 : 58;
+      ctx.save();
+      ctx.globalAlpha = active ? 1 : 0.86;
+      ctx.drawImage(circleImg, -size / 2, -size / 2, size, size);
+      ctx.restore();
+    } else {
+      ctx.fillStyle = 'rgba(17, 24, 39, 0.88)';
+      ctx.beginPath();
+      ctx.arc(0, 0, active ? 30 : 26, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.42)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+
+    if (active) {
+      ctx.save();
+      ctx.shadowColor = 'rgba(255, 255, 255, 0.65)';
+      ctx.shadowBlur = 12;
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(0, 0, 34, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    ctx.fillStyle = COLORS.ball;
+    ctx.beginPath();
+    ctx.arc(0, 0, previewRadius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(-previewRadius * 0.25, -previewRadius * 0.25, previewRadius * 0.35, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.fill();
+
+    if (showAim) {
+      const indicatorLen = 32;
+      ctx.save();
+      ctx.rotate(renderAngle - bodyAngle);
+      ctx.strokeStyle = COLORS.launcherAim;
+      ctx.lineWidth = 3;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(0, previewRadius + 3);
+      ctx.lineTo(0, indicatorLen);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    ctx.restore();
   }
 
   drawAimReticle(x, y, angle) {
@@ -3185,7 +3329,7 @@ export class Renderer {
     }
 
     if (state.showLauncher) {
-      this.drawLauncher(state.launchX, state.launchY, state.aimAngle, state.showAim, state.launcherBallScale);
+      this.drawLauncher(state.launchX, state.launchY, state.aimAngle, state.showAim, state.launcherBallScale, state.launcherOptions || null);
     }
 
     if (Array.isArray(state.secondaryLaunchers)) {

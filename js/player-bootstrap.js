@@ -30,6 +30,7 @@ const ASPECT_RATIO = 3 / 4.5;
 const FRAME_RATIO = 9 / 17;
 const WORLD_W = 400;
 const WORLD_H = Math.round(WORLD_W / ASPECT_RATIO); // 600
+const PVP_DUEL_LEVELS_STORAGE_KEY = 'pvp:duel:levels';
 let levelMapModulePromise = null;
 let levelMapCtorPromise = null;
 let levelMapCssPromise = null;
@@ -290,6 +291,96 @@ function getRequestedNames() {
   return raw.split(',').map(s => s.trim()).filter(Boolean);
 }
 
+function isPvpCpuDuelRequested(locationObj = window.location) {
+  const params = new URLSearchParams(locationObj.search || '');
+  return params.get('duel') === 'cpu' || params.get('pvp') === 'cpu' || params.get('cpuDuel') === '1';
+}
+
+function createPvpCpuDuelUrl() {
+  const url = new URL(window.location.href);
+  if (url.protocol !== 'file:') {
+    url.pathname = '/player.html';
+  }
+  url.search = 'duel=cpu';
+  url.hash = '';
+  return url.toString();
+}
+
+function normalizePvpDuelLevelNames(names) {
+  if (!Array.isArray(names)) return [];
+  return [...new Set(names.map(name => (typeof name === 'string' ? name.trim() : '')).filter(Boolean))];
+}
+
+function readLocalPvpDuelLevelNames() {
+  try {
+    return normalizePvpDuelLevelNames(JSON.parse(localStorage.getItem(PVP_DUEL_LEVELS_STORAGE_KEY) || '[]'));
+  } catch {
+    return [];
+  }
+}
+
+function writeLocalPvpDuelLevelNames(names) {
+  try {
+    localStorage.setItem(PVP_DUEL_LEVELS_STORAGE_KEY, JSON.stringify(normalizePvpDuelLevelNames(names)));
+  } catch { /* storage unavailable */ }
+}
+
+function shuffled(items) {
+  const next = [...items];
+  for (let i = next.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [next[i], next[j]] = [next[j], next[i]];
+  }
+  return next;
+}
+
+function preparePvpCpuDuelLevel(levelData) {
+  if (!levelData || !Array.isArray(levelData.pegs)) return null;
+  const level = normalizeLevelData(cloneLevelData(levelData));
+  const pvp = ensureLevelPvp(level);
+  if (!pvp.enabled) return null;
+  level.pvp = { ...pvp, enabled: true, cpuEnabled: true };
+  return level;
+}
+
+function pickPreparedPvpCpuDuelLevel(levels) {
+  const candidates = (Array.isArray(levels) ? levels : [])
+    .map(preparePvpCpuDuelLevel)
+    .filter(Boolean);
+  if (candidates.length === 0) return null;
+  return shuffled(candidates)[0];
+}
+
+async function loadRandomPvpCpuDuelLevel(options = {}) {
+  const preferred = pickPreparedPvpCpuDuelLevel(options.preferredLevels);
+  if (preferred) return preferred;
+
+  const cachedNames = readLocalPvpDuelLevelNames();
+  for (const name of shuffled(cachedNames)) {
+    const level = preparePvpCpuDuelLevel(loadBakedLevel(name) || await fetchLevel(name));
+    if (level) return level;
+  }
+
+  const remoteNames = normalizePvpDuelLevelNames(await api.listPvpDuelLevels());
+  if (remoteNames.length > 0) writeLocalPvpDuelLevelNames(remoteNames);
+  for (const name of shuffled(remoteNames)) {
+    const level = preparePvpCpuDuelLevel(loadBakedLevel(name) || await fetchLevel(name));
+    if (level) return level;
+  }
+
+  const primary = options.skipPrimaryFallback ? null : await loadPrimaryFullCampaign();
+  return pickPreparedPvpCpuDuelLevel(primary?.levels);
+}
+
+async function bootPvpCpuDuel() {
+  const level = await loadRandomPvpCpuDuelLevel();
+  if (!level) {
+    showError('No PvP Duel levels configured for CPU mode.');
+    return;
+  }
+  bootWithLevels([level], null, null, { cpuDuel: true });
+}
+
 function showError(msg) {
   document.body.style.cssText = 'display:flex;justify-content:center;align-items:center;color:#fff;font:18px sans-serif;text-align:center;padding:20px;';
   document.body.textContent = msg;
@@ -459,6 +550,10 @@ async function resolve() {
   // Priority 3: ?level=name1,name2 → individual baked levels
   const names = getRequestedNames();
   if (names.length === 0) {
+    if (isPvpCpuDuelRequested()) {
+      bootPvpCpuDuel();
+      return;
+    }
     const duelRoomCode = getPvpDuelRoomCodeFromLocation();
     if (duelRoomCode) {
       bootPvpDuelRoom(duelRoomCode);
@@ -525,7 +620,7 @@ async function bootPvpDuelRoom(roomCode) {
   loadDeferredImages(pauseOverlay);
   pauseOverlay.querySelector('#pauseLevelBtn')?.remove();
   pauseOverlay.querySelector('#pausePvpDuelBtn')?.addEventListener('click', () => {
-    window.location.href = createPvpDuelRoomUrl();
+    window.location.href = createPvpCpuDuelUrl();
   });
   const confirmInput = pauseOverlay.querySelector('#pauseConfirmInput');
   if (confirmInput) {
@@ -751,7 +846,7 @@ async function bootPvpDuelRoom(roomCode) {
   }
 }
 
-async function bootWithLevels(levels, campaignName, campaignData) {
+async function bootWithLevels(levels, campaignName, campaignData, options = {}) {
 
   const canvas = document.getElementById('gameCanvas');
   canvas.getContext('2d', { alpha: false });
@@ -773,6 +868,8 @@ async function bootWithLevels(levels, campaignName, campaignData) {
   let gambleSystem = null;
   let activeLevelData = null;
   let characterRegistry = loadCharacterRegistry();
+  const initialCpuDuelMode = options?.cpuDuel === true;
+  let activeCpuDuelMode = initialCpuDuelMode;
 
   function refreshPortraitRegistry(nextRegistry) {
     if (!nextRegistry) return;
@@ -1137,6 +1234,10 @@ async function bootWithLevels(levels, campaignName, campaignData) {
   }
 
   function restartFromPause() {
+    if (activeCpuDuelMode) {
+      startRandomCpuDuelLevel({ suppressInputMs: 650 });
+      return;
+    }
     hidePause();
     startLevel(currentNodeId);
   }
@@ -1409,13 +1510,44 @@ async function bootWithLevels(levels, campaignName, campaignData) {
     }
   }
 
+  let pvpCpuDuelLaunchPromise = null;
+  async function startRandomCpuDuelLevel(options = {}) {
+    if (pvpCpuDuelLaunchPromise) return pvpCpuDuelLaunchPromise;
+
+    const button = pauseOverlay.querySelector('#pausePvpDuelBtn');
+    if (button) button.disabled = true;
+
+    pvpCpuDuelLaunchPromise = (async () => {
+      const preferredLevels = initialCpuDuelMode ? [] : originalLevels;
+      const level = await loadRandomPvpCpuDuelLevel({ preferredLevels });
+      if (!level) {
+        alert('No PvP Duel levels configured for CPU mode.');
+        return false;
+      }
+
+      mirrorState = false;
+      return startLevel(currentNodeId, {
+        levelData: level,
+        cpuDuel: true,
+        suppressInputMs: Number.isFinite(options.suppressInputMs) ? options.suppressInputMs : 250
+      });
+    })().finally(() => {
+      pvpCpuDuelLaunchPromise = null;
+      if (button) button.disabled = false;
+    });
+
+    return pvpCpuDuelLaunchPromise;
+  }
+
   const pauseLevelBtn = pauseOverlay.querySelector('#pauseLevelBtn');
   pauseLevelBtn.addEventListener('pointerenter', () => scheduleLevelMapPrewarm({ immediate: true, includePortraits: true }));
   pauseLevelBtn.addEventListener('touchstart', () => scheduleLevelMapPrewarm({ immediate: true, includePortraits: true }), { passive: true });
   pauseLevelBtn.addEventListener('click', () => showLevelMap());
   const pausePvpDuelBtn = pauseOverlay.querySelector('#pausePvpDuelBtn');
-  pausePvpDuelBtn?.addEventListener('click', () => {
-    window.location.href = createPvpDuelRoomUrl();
+  pausePvpDuelBtn?.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    startRandomCpuDuelLevel();
   });
   // Confirm-shoot checkbox (second tap to fire)
   const confirmInput = pauseOverlay.querySelector('#pauseConfirmInput');
@@ -1442,18 +1574,11 @@ async function bootWithLevels(levels, campaignName, campaignData) {
 
   // Make topLeft and leftCircle slots trigger pause in play mode
   function setupPauseTriggers() {
-    const blockFrameInput = (event) => {
-      event.stopPropagation();
-      if (event.cancelable) event.preventDefault();
-    };
     for (const slotId of ['top', 'topRight']) {
       const el = visualLayout.slotElements[slotId];
       if (!el) continue;
-      el.classList.remove('visual-slot--pause-trigger');
-      el.classList.add('visual-slot--input-shield');
-      for (const type of ['pointerdown', 'pointerup', 'click', 'touchstart', 'touchend']) {
-        el.addEventListener(type, blockFrameInput, { passive: false });
-      }
+      el.classList.remove('visual-slot--pause-trigger', 'visual-slot--input-shield');
+      el.classList.add('visual-slot--decorative-inert');
     }
     const rightCircle = visualLayout.slotElements.rightCircle;
     if (rightCircle) {
@@ -1627,12 +1752,22 @@ async function bootWithLevels(levels, campaignName, campaignData) {
   function startLevel(nodeId, options = {}) {
     const clearTransition = options.clearTransition !== false;
     if (clearTransition) clearLevelTransitionArtifacts();
-    const levelIndex = nodeIdToLevelIndex.get(nodeId);
-    if (levelIndex == null) return false;
-    const original = originalLevels[levelIndex];
-    if (!original) return false;
-    currentNodeId = nodeId;
-    const levelData = mirrorState ? mirrorLevel(original) : cloneLevelData(original);
+    const preparedLevel = options.levelData && Array.isArray(options.levelData.pegs)
+      ? options.levelData
+      : null;
+    let levelData = null;
+    if (preparedLevel) {
+      activeCpuDuelMode = options.cpuDuel === true;
+      levelData = cloneLevelData(preparedLevel);
+    } else {
+      activeCpuDuelMode = initialCpuDuelMode;
+      const levelIndex = nodeIdToLevelIndex.get(nodeId);
+      if (levelIndex == null) return false;
+      const original = originalLevels[levelIndex];
+      if (!original) return false;
+      currentNodeId = nodeId;
+      levelData = mirrorState ? mirrorLevel(original) : cloneLevelData(original);
+    }
     activeLevelData = levelData;
 
     // Cleanup previous
@@ -1725,6 +1860,9 @@ async function bootWithLevels(levels, campaignName, campaignData) {
       if (Number.isFinite(snapshot.orangePegsLeft)) {
         visualLayout.updateHealthBar(snapshot.orangePegsLeft, snapshot.totalOrangePegs);
       }
+      visualLayout.setBilliardTopLauncherActive?.(
+        !!snapshot.billiardPhase && snapshot.billiardLauncherIndex === 0
+      );
       if (!pvp.enabled) {
         visualLayout.setPvpOpponentTarget?.(null);
       }
@@ -1755,7 +1893,11 @@ async function bootWithLevels(levels, campaignName, campaignData) {
           canvas.addEventListener('touchstart', guarded, { once: true, passive: false });
         };
 
-        if (result === 'won') {
+        if (activeCpuDuelMode && pvp.enabled) {
+          onceAction(() => {
+            startRandomCpuDuelLevel({ suppressInputMs: 650 });
+          });
+        } else if (result === 'won') {
           await ensureFullCampaignReady();
           if (!endedGame || game !== endedGame) return;
           if (campaignData?.partial) {

@@ -42,6 +42,13 @@ import {
   PORTAL_MAX_SCALE,
   PORTAL_MIN_SCALE
 } from './portal-defaults.js';
+import {
+  BILLIARD_RED,
+  BILLIARD_YELLOW,
+  ensureLevelBilliard,
+  isBilliardPegType,
+  normalizeBilliardSettings
+} from './billiard-mode.js';
 import { VisualLayout } from './visual-layout.js';
 import { normalizeVisuals } from './visual-config.js';
 import {
@@ -675,11 +682,14 @@ class PeggleApp {
     const level = this.levelManager.getCurrentLevel();
     if (level) {
       const prev = level.survival ? { ...level.survival } : null;
+      const prevBilliard = level.billiard ? { ...level.billiard } : null;
       const normalized = ensureLevelSurvival(level, worldH);
+      const billiard = ensureLevelBilliard(level);
       const prevBackground = prev?.background || {};
       const nextBackground = normalized.background || {};
       if (
         !prev ||
+        !prevBilliard ||
         prev.enabled !== normalized.enabled ||
         prev.worldHeight !== normalized.worldHeight ||
         prev.scrollSpeed !== normalized.scrollSpeed ||
@@ -691,6 +701,10 @@ class PeggleApp {
         prevBackground.image !== nextBackground.image ||
         prevBackground.fit !== nextBackground.fit ||
         prevBackground.darken !== nextBackground.darken ||
+        prevBilliard.enabled !== billiard.enabled ||
+        prevBilliard.attractionRadius !== billiard.attractionRadius ||
+        prevBilliard.wallBounceAim !== billiard.wallBounceAim ||
+        prevBilliard.pvpBounce !== billiard.pvpBounce ||
         JSON.stringify(prevBackground.liquid || null) !== JSON.stringify(nextBackground.liquid || null)
       ) {
         this.levelManager.save();
@@ -1114,6 +1128,7 @@ class PeggleApp {
     // Survival mode panel
     this.setupSurvivalPanel();
     this.setupPvpPanel();
+    this.setupBilliardPanel();
     this.setupAimLengthPanel();
 
     // Keyboard shortcuts
@@ -2130,6 +2145,50 @@ class PeggleApp {
     });
   }
 
+  setupBilliardPanel() {
+    const panel = document.getElementById('billiardPanel');
+    const toggle = document.getElementById('billiardModeToggle');
+    const controls = document.getElementById('billiardControls');
+    const attractionSlider = document.getElementById('billiardAttractionSlider');
+    const attractionInput = document.getElementById('billiardAttractionInput');
+    const wallBounceAimToggle = document.getElementById('billiardWallBounceAimToggle');
+    const pvpBounceToggle = document.getElementById('billiardPvpBounceToggle');
+    if (!panel || !toggle || !controls || !attractionSlider || !attractionInput || !wallBounceAimToggle || !pvpBounceToggle) {
+      return;
+    }
+
+    toggle.addEventListener('change', () => {
+      this.updateLevelBilliardSettings({ enabled: toggle.checked });
+      if (toggle.checked) {
+        this.updateLevelSurvivalSettings({ enabled: false }, { refreshUi: false });
+        this.updateLevelPvpSettings({ enabled: false }, { refreshUi: false });
+      }
+      this._setBilliardSettingsVisible(toggle.checked);
+      this.updateLevelSettings();
+    });
+
+    const applyAttraction = (rawValue) => {
+      const value = Math.max(20, Math.min(80, Math.round(parseFloat(rawValue) || 32)));
+      attractionSlider.value = value;
+      attractionInput.value = value;
+      this.updateLevelBilliardSettings({ attractionRadius: value });
+    };
+
+    attractionSlider.addEventListener('input', () => {
+      attractionInput.value = attractionSlider.value;
+    });
+    attractionSlider.addEventListener('change', () => applyAttraction(attractionSlider.value));
+    attractionInput.addEventListener('change', () => applyAttraction(attractionInput.value));
+
+    wallBounceAimToggle.addEventListener('change', () => {
+      this.updateLevelBilliardSettings({ wallBounceAim: wallBounceAimToggle.checked });
+    });
+
+    pvpBounceToggle.addEventListener('change', () => {
+      this.updateLevelBilliardSettings({ pvpBounce: pvpBounceToggle.checked });
+    });
+  }
+
   _getSurvivalCurveMetrics(canvas) {
     const width = canvas?.width || 154;
     const height = canvas?.height || 86;
@@ -2292,6 +2351,12 @@ class PeggleApp {
     container.classList.toggle('hidden', !visible);
   }
 
+  _setBilliardSettingsVisible(visible) {
+    const container = document.getElementById('billiardControls');
+    if (!container) return;
+    container.classList.toggle('hidden', !visible);
+  }
+
   setSurvivalPanelVisible(visible) {
     const panel = document.getElementById('survivalPanel');
     if (!panel) return;
@@ -2300,6 +2365,12 @@ class PeggleApp {
 
   setPvpPanelVisible(visible) {
     const panel = document.getElementById('pvpPanel');
+    if (!panel) return;
+    panel.classList.toggle('visible', !!visible);
+  }
+
+  setBilliardPanelVisible(visible) {
+    const panel = document.getElementById('billiardPanel');
     if (!panel) return;
     panel.classList.toggle('visible', !!visible);
   }
@@ -2405,6 +2476,7 @@ class PeggleApp {
     );
     if (level.survival.enabled) {
       level.pvp = normalizePvpSettings({ ...(level.pvp || {}), enabled: false });
+      level.billiard = normalizeBilliardSettings({ ...(level.billiard || {}), enabled: false });
     }
     if (options.save !== false) {
       this.levelManager.save();
@@ -2429,6 +2501,7 @@ class PeggleApp {
         ...ensureLevelSurvival(level, this.canvas.height),
         enabled: false
       }, this.canvas.height);
+      level.billiard = normalizeBilliardSettings({ ...(level.billiard || {}), enabled: false });
       if (level.pvp.symmetryEnabled) {
         normalizePvpAuthoredPegs(level, this.canvas.height);
       }
@@ -2443,6 +2516,28 @@ class PeggleApp {
     }
     if (this.editor && this.editor.onPegCountChange) {
       this.editor.onPegCountChange(level.pegs.length);
+    }
+  }
+
+  updateLevelBilliardSettings(partialSettings, options = {}) {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level) return;
+
+    const current = ensureLevelBilliard(level);
+    level.billiard = normalizeBilliardSettings({ ...current, ...(partialSettings || {}) });
+    if (level.billiard.enabled) {
+      level.survival = normalizeSurvivalSettings({
+        ...ensureLevelSurvival(level, this.canvas.height),
+        enabled: false
+      }, this.canvas.height);
+      level.pvp = normalizePvpSettings({ ...(level.pvp || {}), enabled: false });
+    }
+
+    if (options.save !== false) {
+      this.levelManager.save();
+    }
+    if (options.refreshUi !== false) {
+      this.updateLevelSettings();
     }
   }
 
@@ -2527,7 +2622,7 @@ class PeggleApp {
   }
 
   _isCircleOnlyType(type) {
-    return type === 'bumper' || this._isPortalType(type);
+    return type === 'bumper' || this._isPortalType(type) || isBilliardPegType(type);
   }
 
   _setActiveShapeButton(shape) {
@@ -2568,7 +2663,7 @@ class PeggleApp {
     if (!row || !picker || !this.editor) return;
 
     const typeColors = {
-      orange: '#ff6b35', blue: '#4ecdc4', green: '#95d5b2',
+      orange: '#ff6b35', billiardRed: '#e84d4d', billiardYellow: '#ffd447', blue: '#4ecdc4', green: '#95d5b2',
       purple: '#c77dff', multi: '#ff4d9d', obstacle: '#6b7280',
       gamble: '#8cff00', bumper: '#e0e0e0', portalBlue: '#4ecdc4', portalOrange: '#ff8b3d'
     };
@@ -2838,6 +2933,7 @@ class PeggleApp {
     document.querySelector('.toolbar').style.display = 'flex';
     this.setSurvivalPanelVisible(true);
     this.setPvpPanelVisible(true);
+    this.setBilliardPanelVisible(true);
     this.setAimLengthPanelVisible(true);
 
     // Sync tool button states
@@ -2897,8 +2993,24 @@ class PeggleApp {
       return;
     }
 
+    const billiard = ensureLevelBilliard(level);
+    if (billiard.enabled) {
+      const redCount = level.pegs.filter(p => p.type === BILLIARD_RED).length;
+      const yellowCount = level.pegs.filter(p => p.type === BILLIARD_YELLOW).length;
+      if (redCount === 0 || yellowCount === 0) {
+        alert('Add at least one red and one yellow billiard peg to play Billiard Mode.');
+        this.startEditor();
+        return;
+      }
+      if (redCount !== yellowCount) {
+        alert('Billiard Mode needs the same number of red and yellow pegs.');
+        this.startEditor();
+        return;
+      }
+    }
+
     const survival = ensureLevelSurvival(level, this.canvas.height);
-    if (!survival.enabled) {
+    if (!survival.enabled && !billiard.enabled) {
       // Check for at least one orange peg in classic mode
       const orangePegs = level.pegs.filter(p => p.type === 'orange' || (p.type === 'bumper' && p.bumperOrange));
       if (orangePegs.length === 0) {
@@ -2978,6 +3090,9 @@ class PeggleApp {
       if (Number.isFinite(snapshot.orangePegsLeft)) {
         this.visualLayout.updateHealthBar(snapshot.orangePegsLeft, snapshot.totalOrangePegs);
       }
+      this.visualLayout.setBilliardTopLauncherActive?.(
+        !!snapshot.billiardPhase && snapshot.billiardLauncherIndex === 0
+      );
     });
 
     // Update UI
@@ -2986,6 +3101,7 @@ class PeggleApp {
     document.querySelector('.toolbar').style.display = 'none';
     this.setSurvivalPanelVisible(false);
     this.setPvpPanelVisible(false);
+    this.setBilliardPanelVisible(false);
     this.setAimLengthPanelVisible(false);
     this._applyLevelVisuals();
     this.visualLayout.setEditMode(false);
@@ -3007,6 +3123,7 @@ class PeggleApp {
     document.querySelector('.toolbar').style.display = 'none';
     this.setSurvivalPanelVisible(false);
     this.setPvpPanelVisible(false);
+    this.setBilliardPanelVisible(false);
     this.setAimLengthPanelVisible(false);
     this.visualLayout.setPvpMode?.(true);
     this.visualLayout.setEditMode(false);
@@ -3322,6 +3439,19 @@ class PeggleApp {
     if (aimSlider) aimSlider.value = aimVal;
     if (aimInput) aimInput.value = aimVal;
     this._setPvpSettingsVisible(!!pvp.enabled);
+
+    const billiard = ensureLevelBilliard(level);
+    const billiardToggle = document.getElementById('billiardModeToggle');
+    const billiardAttractionSlider = document.getElementById('billiardAttractionSlider');
+    const billiardAttractionInput = document.getElementById('billiardAttractionInput');
+    const billiardWallBounceAimToggle = document.getElementById('billiardWallBounceAimToggle');
+    const billiardPvpBounceToggle = document.getElementById('billiardPvpBounceToggle');
+    if (billiardToggle) billiardToggle.checked = !!billiard.enabled;
+    if (billiardAttractionSlider) billiardAttractionSlider.value = Math.round(billiard.attractionRadius);
+    if (billiardAttractionInput) billiardAttractionInput.value = Math.round(billiard.attractionRadius);
+    if (billiardWallBounceAimToggle) billiardWallBounceAimToggle.checked = billiard.wallBounceAim !== false;
+    if (billiardPvpBounceToggle) billiardPvpBounceToggle.checked = billiard.pvpBounce === true;
+    this._setBilliardSettingsVisible(!!billiard.enabled);
     
     const isInTraining = this.levelManager.isInTraining(level.id);
     document.getElementById('addToTrainingBtn').textContent = isInTraining ? 'Remove from Training' : 'Add to Training';

@@ -131,6 +131,32 @@
             </div>
           </div>
         </div>
+        <!-- Billiard settings side panel -->
+        <div id="billiardPanel" class="survival-panel billiard-panel">
+          <div class="survival-panel-title">Billiard Mode</div>
+          <label class="survival-toggle-row">
+            <span>Enable Billiard</span>
+            <input type="checkbox" id="billiardModeToggle">
+          </label>
+          <div id="billiardControls" class="survival-controls hidden">
+            <div class="survival-control">
+              <label for="billiardAttractionSlider">Attraction Radius</label>
+              <div class="survival-control-row">
+                <input type="range" id="billiardAttractionSlider" min="20" max="80" step="1" value="32">
+                <input type="number" id="billiardAttractionInput" min="20" max="80" step="1" value="32">
+              </div>
+            </div>
+            <label class="survival-toggle-row compact-toggle-row">
+              <span>Bounce Aim Off Walls</span>
+              <input type="checkbox" id="billiardWallBounceAimToggle" checked>
+            </label>
+            <label class="survival-toggle-row compact-toggle-row">
+              <span>PvP Bounce</span>
+              <input type="checkbox" id="billiardPvpBounceToggle">
+            </label>
+            <div class="survival-hint">Use red and yellow billiard pegs. Red merges only with yellow; blue pegs slide as neutral balls.</div>
+          </div>
+        </div>
       </div>
       <!-- Aim length slider -->
       <div id="aimLengthPanel" class="aim-length-panel">
@@ -301,6 +327,8 @@
       <div class="toolbar-group">
         <div class="peg-buttons">
           <button class="peg-btn" data-type="orange" title="Orange (Must Hit)"></button>
+          <button class="peg-btn" data-type="billiardRed" title="Billiard Red"></button>
+          <button class="peg-btn" data-type="billiardYellow" title="Billiard Yellow"></button>
           <button class="peg-btn active" data-type="blue" title="Blue (Normal)"></button>
           <button class="peg-btn" data-type="green" title="Green (Special)"></button>
           <button class="peg-btn" data-type="purple" title="Purple (Bonus)"></button>
