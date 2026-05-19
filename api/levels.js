@@ -2,6 +2,7 @@ import Redis from 'ioredis';
 import fs from 'fs/promises';
 import {
   createMirrorEnvelope,
+  isDriveRestoreMode,
   mirrorMetaFromEnvelope,
   mirrorMetaKey,
   readDriveRecord,
@@ -61,17 +62,13 @@ function sanitizeLevelForPlayer(level) {
 }
 
 async function getMirroredValue(collection, name, key) {
-  const [redisValue, redisMeta, driveRecord] = await Promise.all([
-    kvGet(key).catch(error => {
-      console.warn('[api/levels] Redis read failed:', key, error?.message || error);
-      return null;
-    }),
-    kvGet(mirrorMetaKey(key)).catch(error => {
-      console.warn('[api/levels] Redis mirror meta read failed:', key, error?.message || error);
-      return null;
-    }),
-    readDriveRecord(collection, name)
-  ]);
+  const redisValue = await kvGet(key);
+  if (redisValue != null && !isDriveRestoreMode()) return redisValue;
+
+  const redisMeta = await kvGet(mirrorMetaKey(key));
+  if (redisValue == null && redisMeta?.deleted === true && !isDriveRestoreMode()) return null;
+
+  const driveRecord = await readDriveRecord(collection, name);
   const selected = selectMirroredValue({ redisValue, redisMeta, driveRecord });
   return selected.found ? selected.value : null;
 }

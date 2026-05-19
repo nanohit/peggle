@@ -14,6 +14,10 @@ export function isDriveMirrorEnabled() {
     && !!process.env.GOOGLE_DRIVE_REFRESH_TOKEN;
 }
 
+export function isDriveRestoreMode() {
+  return process.env.GOOGLE_DRIVE_RESTORE_MODE === '1';
+}
+
 export function mirrorMetaKey(key) {
   return `drive:meta:${key}`;
 }
@@ -56,7 +60,7 @@ function compareMirrorVersions(a, b) {
 
 function driveWinsOverLegacy(record) {
   if (record?.source === 'api-write' || record?.source === 'api-delete') return true;
-  return process.env.GOOGLE_DRIVE_RESTORE_MODE === '1';
+  return isDriveRestoreMode();
 }
 
 export function selectMirroredValue({ redisValue, redisMeta, driveRecord }) {
