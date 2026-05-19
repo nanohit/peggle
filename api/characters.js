@@ -1,5 +1,13 @@
 import Redis from 'ioredis';
 import fs from 'fs/promises';
+import {
+  createMirrorEnvelope,
+  mirrorMetaFromEnvelope,
+  mirrorMetaKey,
+  readDriveRecord,
+  selectMirroredValue,
+  writeDriveRecord
+} from './drive-store.js';
 
 let redis;
 function getRedis() {
@@ -35,6 +43,44 @@ async function kvDel(key) {
 }
 
 const REGISTRY_KEY = 'character:__registry';
+const CHARACTER_COLLECTION = 'characters';
+
+async function getMirroredValue(collection, name, key) {
+  const [redisValue, redisMeta, driveRecord] = await Promise.all([
+    kvGet(key).catch(error => {
+      console.warn('[api/characters] Redis read failed:', key, error?.message || error);
+      return null;
+    }),
+    kvGet(mirrorMetaKey(key)).catch(error => {
+      console.warn('[api/characters] Redis mirror meta read failed:', key, error?.message || error);
+      return null;
+    }),
+    readDriveRecord(collection, name)
+  ]);
+  const selected = selectMirroredValue({ redisValue, redisMeta, driveRecord });
+  return selected.found ? selected.value : null;
+}
+
+async function writeMirroredValue(collection, name, key, value, { deleted = false, source = 'api-write' } = {}) {
+  const envelope = createMirrorEnvelope({ key, collection, name, value, deleted, source });
+  let redisOk = false;
+  let driveOk = false;
+
+  try {
+    if (deleted) {
+      await kvDel(key);
+    } else {
+      await kvSet(key, value);
+    }
+    await kvSet(mirrorMetaKey(key), mirrorMetaFromEnvelope(envelope));
+    redisOk = true;
+  } catch (error) {
+    console.warn('[api/characters] Redis mirror write failed:', key, error?.message || error);
+  }
+
+  driveOk = await writeDriveRecord(collection, name, envelope);
+  return { ok: redisOk || driveOk, redisOk, driveOk, envelope };
+}
 
 async function readStaticCharacterRegistry() {
   try {
@@ -60,7 +106,7 @@ export default async function handler(req, res) {
     if (req.method === 'OPTIONS') return res.status(204).end();
 
     if (req.method === 'GET') {
-      const registry = await kvGet(REGISTRY_KEY) || await readStaticCharacterRegistry();
+      const registry = await getMirroredValue(CHARACTER_COLLECTION, '__registry', REGISTRY_KEY) || await readStaticCharacterRegistry();
       if (!registry) return res.status(404).json({ error: 'No registry stored' });
       res.setHeader('Cache-Control', 'no-store');
       return res.json(registry);
@@ -71,13 +117,18 @@ export default async function handler(req, res) {
       if (!data || typeof data !== 'object') {
         return res.status(400).json({ error: 'data required' });
       }
-      await kvSet(REGISTRY_KEY, data);
-      return res.json({ ok: true });
+      const registryWrite = await writeMirroredValue(CHARACTER_COLLECTION, '__registry', REGISTRY_KEY, data);
+      if (!registryWrite.ok) throw new Error('Failed to persist character registry to Redis or Drive');
+      return res.json({ ok: true, storage: { redis: registryWrite.redisOk, drive: registryWrite.driveOk } });
     }
 
     if (req.method === 'DELETE') {
-      await kvDel(REGISTRY_KEY);
-      return res.json({ ok: true });
+      const registryDelete = await writeMirroredValue(CHARACTER_COLLECTION, '__registry', REGISTRY_KEY, null, {
+        deleted: true,
+        source: 'api-delete'
+      });
+      if (!registryDelete.ok) throw new Error('Failed to delete character registry from Redis or Drive');
+      return res.json({ ok: true, storage: { redis: registryDelete.redisOk, drive: registryDelete.driveOk } });
     }
 
     res.status(405).json({ error: 'Method not allowed' });

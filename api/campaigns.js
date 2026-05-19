@@ -2,6 +2,14 @@ import Redis from 'ioredis';
 import fs from 'fs/promises';
 import { topoOrder, buildNodeMap, resolveNodeLevelName, syncLevelNames } from '../js/graph/core.js';
 import { validateGraph } from '../js/graph/validate.js';
+import {
+  createMirrorEnvelope,
+  mirrorMetaFromEnvelope,
+  mirrorMetaKey,
+  readDriveRecord,
+  selectMirroredValue,
+  writeDriveRecord
+} from './drive-store.js';
 
 let redis;
 function getRedis() {
@@ -37,6 +45,9 @@ async function kvDel(key) {
 }
 
 const INDEX_KEY = 'campaign:__index';
+const CAMPAIGN_COLLECTION = 'campaigns';
+const LEVEL_COLLECTION = 'levels';
+const CONFIG_COLLECTION = 'config';
 
 function cloneJson(value) {
   if (value == null) return value;
@@ -53,6 +64,43 @@ function sanitizeLevelForPlayer(level) {
     delete snapshot.emotions;
   }
   return next;
+}
+
+async function getMirroredValue(collection, name, key) {
+  const [redisValue, redisMeta, driveRecord] = await Promise.all([
+    kvGet(key).catch(error => {
+      console.warn('[api/campaigns] Redis read failed:', key, error?.message || error);
+      return null;
+    }),
+    kvGet(mirrorMetaKey(key)).catch(error => {
+      console.warn('[api/campaigns] Redis mirror meta read failed:', key, error?.message || error);
+      return null;
+    }),
+    readDriveRecord(collection, name)
+  ]);
+  const selected = selectMirroredValue({ redisValue, redisMeta, driveRecord });
+  return selected.found ? selected.value : null;
+}
+
+async function writeMirroredValue(collection, name, key, value, { deleted = false, source = 'api-write' } = {}) {
+  const envelope = createMirrorEnvelope({ key, collection, name, value, deleted, source });
+  let redisOk = false;
+  let driveOk = false;
+
+  try {
+    if (deleted) {
+      await kvDel(key);
+    } else {
+      await kvSet(key, value);
+    }
+    await kvSet(mirrorMetaKey(key), mirrorMetaFromEnvelope(envelope));
+    redisOk = true;
+  } catch (error) {
+    console.warn('[api/campaigns] Redis mirror write failed:', key, error?.message || error);
+  }
+
+  driveOk = await writeDriveRecord(collection, name, envelope);
+  return { ok: redisOk || driveOk, redisOk, driveOk, envelope };
 }
 
 function sendCacheableCampaign(res, payload) {
@@ -156,11 +204,11 @@ async function getStaticCampaignNames() {
 }
 
 async function getCampaignData(name) {
-  return await kvGet(`campaign:${name}`) || await getStaticCampaign(name);
+  return await getMirroredValue(CAMPAIGN_COLLECTION, name, `campaign:${name}`) || await getStaticCampaign(name);
 }
 
 async function getLevelData(name) {
-  const data = await kvGet(`level:${name}`);
+  const data = await getMirroredValue(LEVEL_COLLECTION, name, `level:${name}`);
   if (data) return data;
   const exact = await readStaticJson(`../data/player/levels/${staticNamePath(name)}.json`);
   if (exact) return exact;
@@ -186,7 +234,7 @@ export default async function handler(req, res) {
       const initialOnly = resolve === 'initial' || initial === 'true';
 
       if (!name && primary === 'true') {
-        const primaryName = await kvGet('config:primaryCampaign') || await getStaticPrimaryName();
+        const primaryName = await getMirroredValue(CONFIG_COLLECTION, 'primaryCampaign', 'config:primaryCampaign') || await getStaticPrimaryName();
         if (typeof primaryName === 'string' && primaryName) {
           name = primaryName;
         } else {
@@ -195,7 +243,7 @@ export default async function handler(req, res) {
       }
 
       if (!name) {
-        const names = [...new Set([...((await kvGet(INDEX_KEY)) || []), ...(await getStaticCampaignNames())])].sort();
+        const names = [...new Set([...((await getMirroredValue(CAMPAIGN_COLLECTION, '__index', INDEX_KEY)) || []), ...(await getStaticCampaignNames())])].sort();
         if (names.length === 0) return sendCacheableCampaign(res, { campaigns: [] });
         const rawCampaigns = await Promise.all(names.map(n => getCampaignData(n)));
         const campaigns = [];
@@ -348,29 +396,38 @@ export default async function handler(req, res) {
 
       if (!Array.isArray(data.levelNames)) data.levelNames = [];
 
-      await kvSet(`campaign:${name}`, data);
+      const campaignWrite = await writeMirroredValue(CAMPAIGN_COLLECTION, name, `campaign:${name}`, data);
+      if (!campaignWrite.ok) throw new Error(`Failed to persist campaign:${name} to Redis or Drive`);
 
-      const names = (await kvGet(INDEX_KEY)) || [];
+      const names = (await getMirroredValue(CAMPAIGN_COLLECTION, '__index', INDEX_KEY)) || [];
       if (!names.includes(name)) {
         names.push(name);
         names.sort();
-        await kvSet(INDEX_KEY, names);
+        const indexWrite = await writeMirroredValue(CAMPAIGN_COLLECTION, '__index', INDEX_KEY, names);
+        if (!indexWrite.ok) console.warn('[api/campaigns] Failed to update mirrored index after saving:', name);
       }
 
-      return res.json({ ok: true });
+      return res.json({ ok: true, storage: { redis: campaignWrite.redisOk, drive: campaignWrite.driveOk } });
     }
 
     if (req.method === 'DELETE') {
       const { name } = req.query;
       if (!name) return res.status(400).json({ error: 'name required' });
 
-      await kvDel(`campaign:${name}`);
+      const campaignDelete = await writeMirroredValue(CAMPAIGN_COLLECTION, name, `campaign:${name}`, null, {
+        deleted: true,
+        source: 'api-delete'
+      });
+      if (!campaignDelete.ok) throw new Error(`Failed to delete campaign:${name} from Redis or Drive`);
 
-      const names = (await kvGet(INDEX_KEY)) || [];
+      const names = (await getMirroredValue(CAMPAIGN_COLLECTION, '__index', INDEX_KEY)) || [];
       const filtered = names.filter(n => n !== name);
-      await kvSet(INDEX_KEY, filtered);
+      const indexWrite = await writeMirroredValue(CAMPAIGN_COLLECTION, '__index', INDEX_KEY, filtered, {
+        source: 'api-delete'
+      });
+      if (!indexWrite.ok) console.warn('[api/campaigns] Failed to update mirrored index after deleting:', name);
 
-      return res.json({ ok: true });
+      return res.json({ ok: true, storage: { redis: campaignDelete.redisOk, drive: campaignDelete.driveOk } });
     }
 
     res.status(405).json({ error: 'Method not allowed' });

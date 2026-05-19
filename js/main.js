@@ -74,6 +74,7 @@ import {
 import { PortraitReactionController } from './portrait-reactions.js';
 import { CampaignManager } from './campaign-manager.js';
 import { api } from './api.js';
+import { compressImageFile, compressLevelBackgroundImages } from './image-compression.js';
 import { computeLayout, toPixelPositions } from './graph/layout.js';
 import { Utils } from './utils.js';
 import { DialogueController } from './dialogue-controller.js';
@@ -513,12 +514,12 @@ class PeggleApp {
 
   _debouncedRemoteSync() {
     if (this._syncTimer) clearTimeout(this._syncTimer);
-    this._syncTimer = setTimeout(() => {
+    this._syncTimer = setTimeout(async () => {
       this._syncTimer = null;
       const level = this.levelManager.getCurrentLevel();
       if (!level) return;
       const safeName = (level.name || 'untitled').replace(/[^a-zA-Z0-9_-]/g, '_');
-      const snapshot = this._cloneLevelSnapshot(level);
+      const snapshot = await this._cloneLevelSnapshotForStorage(level);
       if (!snapshot) return;
       api.saveLevel(safeName, snapshot).then(ok => {
         if (ok) console.log('[auto-sync] Saved to remote:', safeName);
@@ -705,6 +706,8 @@ class PeggleApp {
         prevBilliard.attractionRadius !== billiard.attractionRadius ||
         prevBilliard.wallBounceAim !== billiard.wallBounceAim ||
         prevBilliard.pvpBounce !== billiard.pvpBounce ||
+        prevBilliard.fixedMainBalls !== billiard.fixedMainBalls ||
+        prevBilliard.mainBallPenalty !== billiard.mainBallPenalty ||
         JSON.stringify(prevBackground.liquid || null) !== JSON.stringify(nextBackground.liquid || null)
       ) {
         this.levelManager.save();
@@ -2059,18 +2062,34 @@ class PeggleApp {
           background: { type: 'none', image: null, fit: 'cover', liquid: null }
         });
       });
-      backgroundInput.addEventListener('change', () => {
+      backgroundInput.addEventListener('change', async () => {
         const file = backgroundInput.files && backgroundInput.files[0];
         if (!file) return;
-        const reader = new FileReader();
-        reader.onload = () => {
-          const image = typeof reader.result === 'string' ? reader.result : null;
-          if (!image) return;
+        backgroundUploadBtn.disabled = true;
+        try {
+          const level = this.levelManager.getCurrentLevel();
+          const survival = level ? ensureLevelSurvival(level, this.canvas.height) : null;
+          const maxHeight = Math.max(
+            this.canvas.height,
+            Math.min(2400, Math.round(Number(survival?.worldHeight) || this.canvas.height * 3))
+          );
+          const image = await compressImageFile(file, {
+            maxWidth: Math.max(800, Math.round(this.canvas.width * 2)),
+            maxHeight,
+            quality: 0.8,
+            fallbackType: 'image/jpeg',
+            maxDataUrlBytes: 520 * 1024
+          });
+          if (!image) {
+            alert('Could not read that image.');
+            return;
+          }
           this.updateLevelSurvivalSettings({
             background: { type: 'image', image, fit: 'cover', liquid: null }
           });
-        };
-        reader.readAsDataURL(file);
+        } finally {
+          backgroundUploadBtn.disabled = false;
+        }
       });
     }
 
@@ -2153,9 +2172,22 @@ class PeggleApp {
     const attractionInput = document.getElementById('billiardAttractionInput');
     const wallBounceAimToggle = document.getElementById('billiardWallBounceAimToggle');
     const pvpBounceToggle = document.getElementById('billiardPvpBounceToggle');
-    if (!panel || !toggle || !controls || !attractionSlider || !attractionInput || !wallBounceAimToggle || !pvpBounceToggle) {
+    const fixedMainBallsToggle = document.getElementById('billiardFixedMainBallsToggle');
+    const mainBallPenaltySlider = document.getElementById('billiardMainBallPenaltySlider');
+    const mainBallPenaltyInput = document.getElementById('billiardMainBallPenaltyInput');
+    if (
+      !panel || !toggle || !controls || !attractionSlider || !attractionInput
+      || !wallBounceAimToggle || !pvpBounceToggle || !fixedMainBallsToggle
+      || !mainBallPenaltySlider || !mainBallPenaltyInput
+    ) {
       return;
     }
+
+    const syncMainBallPenaltyEnabled = () => {
+      const disabled = fixedMainBallsToggle.checked;
+      mainBallPenaltySlider.disabled = disabled;
+      mainBallPenaltyInput.disabled = disabled;
+    };
 
     toggle.addEventListener('change', () => {
       this.updateLevelBilliardSettings({ enabled: toggle.checked });
@@ -2187,6 +2219,25 @@ class PeggleApp {
     pvpBounceToggle.addEventListener('change', () => {
       this.updateLevelBilliardSettings({ pvpBounce: pvpBounceToggle.checked });
     });
+
+    fixedMainBallsToggle.addEventListener('change', () => {
+      syncMainBallPenaltyEnabled();
+      this.updateLevelBilliardSettings({ fixedMainBalls: fixedMainBallsToggle.checked });
+    });
+
+    const applyMainBallPenalty = (rawValue) => {
+      const value = Math.max(0, Math.min(10, Math.round(parseFloat(rawValue) || 0)));
+      mainBallPenaltySlider.value = value;
+      mainBallPenaltyInput.value = value;
+      this.updateLevelBilliardSettings({ mainBallPenalty: value });
+    };
+
+    mainBallPenaltySlider.addEventListener('input', () => {
+      mainBallPenaltyInput.value = mainBallPenaltySlider.value;
+    });
+    mainBallPenaltySlider.addEventListener('change', () => applyMainBallPenalty(mainBallPenaltySlider.value));
+    mainBallPenaltyInput.addEventListener('change', () => applyMainBallPenalty(mainBallPenaltyInput.value));
+    syncMainBallPenaltyEnabled();
   }
 
   _getSurvivalCurveMetrics(canvas) {
@@ -3294,7 +3345,7 @@ class PeggleApp {
       return;
     }
 
-    const snapshot = this._cloneLevelSnapshot(level);
+    const snapshot = await this._cloneLevelSnapshotForStorage(level);
     if (!snapshot) {
       alert('Failed to bake level snapshot.');
       return;
@@ -3446,11 +3497,23 @@ class PeggleApp {
     const billiardAttractionInput = document.getElementById('billiardAttractionInput');
     const billiardWallBounceAimToggle = document.getElementById('billiardWallBounceAimToggle');
     const billiardPvpBounceToggle = document.getElementById('billiardPvpBounceToggle');
+    const billiardFixedMainBallsToggle = document.getElementById('billiardFixedMainBallsToggle');
+    const billiardMainBallPenaltySlider = document.getElementById('billiardMainBallPenaltySlider');
+    const billiardMainBallPenaltyInput = document.getElementById('billiardMainBallPenaltyInput');
     if (billiardToggle) billiardToggle.checked = !!billiard.enabled;
     if (billiardAttractionSlider) billiardAttractionSlider.value = Math.round(billiard.attractionRadius);
     if (billiardAttractionInput) billiardAttractionInput.value = Math.round(billiard.attractionRadius);
     if (billiardWallBounceAimToggle) billiardWallBounceAimToggle.checked = billiard.wallBounceAim !== false;
     if (billiardPvpBounceToggle) billiardPvpBounceToggle.checked = billiard.pvpBounce === true;
+    if (billiardFixedMainBallsToggle) billiardFixedMainBallsToggle.checked = billiard.fixedMainBalls === true;
+    if (billiardMainBallPenaltySlider) {
+      billiardMainBallPenaltySlider.value = Math.round(billiard.mainBallPenalty);
+      billiardMainBallPenaltySlider.disabled = billiard.fixedMainBalls === true;
+    }
+    if (billiardMainBallPenaltyInput) {
+      billiardMainBallPenaltyInput.value = Math.round(billiard.mainBallPenalty);
+      billiardMainBallPenaltyInput.disabled = billiard.fixedMainBalls === true;
+    }
     this._setBilliardSettingsVisible(!!billiard.enabled);
     
     const isInTraining = this.levelManager.isInTraining(level.id);
@@ -5264,11 +5327,11 @@ class PeggleApp {
     this._hideDialoguePreview();
   }
 
-  exportLevel() {
+  async exportLevel() {
     const level = this.levelManager.getCurrentLevel();
     if (!level) return;
 
-    const snapshot = this._cloneLevelSnapshot(level);
+    const snapshot = await this._cloneLevelSnapshotForStorage(level);
     const json = JSON.stringify(snapshot, null, 2);
     const blob = new Blob([json], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -5456,6 +5519,16 @@ class PeggleApp {
     return cloneLevelSnapshot(copy);
   }
 
+  async _cloneLevelSnapshotForStorage(level) {
+    const snapshot = this._cloneLevelSnapshot(level);
+    if (!snapshot) return null;
+    await compressLevelBackgroundImages(snapshot, {
+      viewportWidth: this.canvas?.width || MAX_WIDTH,
+      viewportHeight: this.canvas?.height || 600
+    });
+    return snapshot;
+  }
+
   _readBakedLevelSnapshot(bakedName) {
     const raw = localStorage.getItem('baked:' + bakedName);
     if (!raw) return null;
@@ -5474,6 +5547,13 @@ class PeggleApp {
 
   _writeBakedLevelSnapshot(bakedName, snapshot) {
     const normalized = this._cloneLevelSnapshot(snapshot);
+    if (!normalized) return null;
+    localStorage.setItem('baked:' + bakedName, JSON.stringify(normalized));
+    return normalized;
+  }
+
+  async _writeBakedLevelSnapshotForStorage(bakedName, snapshot) {
+    const normalized = await this._cloneLevelSnapshotForStorage(snapshot);
     if (!normalized) return null;
     localStorage.setItem('baked:' + bakedName, JSON.stringify(normalized));
     return normalized;
@@ -5542,9 +5622,13 @@ class PeggleApp {
   }
 
   async _saveBakedLevelRemote(bakedName, snapshot) {
+    const savePromise = (async () => {
+      const outbound = await this._cloneLevelSnapshotForStorage(snapshot);
+      return api.saveLevel(bakedName, outbound || snapshot);
+    })();
     const ok = await this._trackPendingRemoteLevelSave(
       bakedName,
-      api.saveLevel(bakedName, snapshot)
+      savePromise
     );
     if (!ok) {
       console.warn('[campaign] Failed to sync level to remote:', bakedName);
@@ -5559,7 +5643,7 @@ class PeggleApp {
   async _cacheRemoteBakedLevel(bakedName) {
     const remoteLevel = await api.getLevel(bakedName);
     if (!remoteLevel || !Array.isArray(remoteLevel.pegs)) return null;
-    const snapshot = this._writeBakedLevelSnapshot(bakedName, remoteLevel);
+    const snapshot = await this._writeBakedLevelSnapshotForStorage(bakedName, remoteLevel);
     return snapshot;
   }
 
@@ -5570,7 +5654,7 @@ class PeggleApp {
         alert('Editor level not found: ' + (entry.displayName || entry.name));
         return false;
       }
-      const snapshot = this._writeBakedLevelSnapshot(entry.name, editorLevel);
+      const snapshot = await this._writeBakedLevelSnapshotForStorage(entry.name, editorLevel);
       if (!snapshot) return false;
       this._saveBakedLevelRemoteInBackground(entry.name, snapshot);
       return true;
@@ -5655,7 +5739,7 @@ class PeggleApp {
         alert('Only levels with PvP Mode enabled can be added to Duel.');
         return false;
       }
-      const snapshot = this._writeBakedLevelSnapshot(entry.name, editorLevel);
+      const snapshot = await this._writeBakedLevelSnapshotForStorage(entry.name, editorLevel);
       if (!snapshot) return false;
       const ok = await this._saveBakedLevelRemote(entry.name, snapshot);
       if (!ok) {
@@ -5848,7 +5932,7 @@ class PeggleApp {
       if (!snapshot) {
         const editorLevel = this._findEditorLevelByBakedName(bakedName);
         if (editorLevel) {
-          snapshot = this._writeBakedLevelSnapshot(bakedName, editorLevel);
+          snapshot = await this._writeBakedLevelSnapshotForStorage(bakedName, editorLevel);
         } else {
           snapshot = await this._cacheRemoteBakedLevel(bakedName);
         }
@@ -6353,7 +6437,7 @@ class PeggleApp {
             return safe === name || l.name === name;
           });
           if (editorLevel) {
-            const snapshot = this._writeBakedLevelSnapshot(name, editorLevel);
+            const snapshot = await this._writeBakedLevelSnapshotForStorage(name, editorLevel);
             if (snapshot) {
               await this._saveBakedLevelRemote(name, snapshot);
             }
@@ -6484,7 +6568,7 @@ class PeggleApp {
       if (editorMod && bakedMod && editorMod <= bakedMod) return false;
     }
 
-    const snapshot = this._writeBakedLevelSnapshot(bakedName, editorLevel);
+    const snapshot = await this._writeBakedLevelSnapshotForStorage(bakedName, editorLevel);
     if (!snapshot) return false;
     await this._saveBakedLevelRemote(bakedName, snapshot);
     return true;

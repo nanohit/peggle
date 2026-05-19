@@ -154,6 +154,17 @@
               <span>PvP Bounce</span>
               <input type="checkbox" id="billiardPvpBounceToggle">
             </label>
+            <label class="survival-toggle-row compact-toggle-row">
+              <span>Fixed 10 Main Balls</span>
+              <input type="checkbox" id="billiardFixedMainBallsToggle">
+            </label>
+            <div class="survival-control">
+              <label for="billiardMainBallPenaltySlider">Main Ball Penalty</label>
+              <div class="survival-control-row">
+                <input type="range" id="billiardMainBallPenaltySlider" min="0" max="10" step="1" value="2">
+                <input type="number" id="billiardMainBallPenaltyInput" min="0" max="10" step="1" value="2">
+              </div>
+            </div>
             <div class="survival-hint">Use red and yellow billiard pegs. Red merges only with yellow; blue pegs slide as neutral balls.</div>
           </div>
         </div>

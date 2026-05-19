@@ -1,9 +1,19 @@
 import Redis from 'ioredis';
 import fs from 'fs/promises';
+import {
+  createMirrorEnvelope,
+  mirrorMetaFromEnvelope,
+  mirrorMetaKey,
+  readDriveRecord,
+  selectMirroredValue,
+  writeDriveRecord
+} from './drive-store.js';
 
 const ROOM_TTL_SECONDS = 60 * 60 * 3;
 const LEVEL_LIST_KEY = 'pvp:duel:levels';
 const LEVEL_INDEX_KEY = 'level:__index';
+const PVP_DUEL_COLLECTION = 'pvp-duel';
+const LEVEL_COLLECTION = 'levels';
 const MATCH_HP = 3;
 const LAUNCH_SYNC_DELAY_MS = 900;
 const ROUND_STALE_MS = 26000;
@@ -40,6 +50,39 @@ async function kvSet(key, value, ttlSeconds = null) {
   } else {
     await client.set(key, payload);
   }
+}
+
+async function getMirroredValue(collection, name, key) {
+  const [redisValue, redisMeta, driveRecord] = await Promise.all([
+    kvGet(key).catch(error => {
+      console.warn('[api/pvp-duel] Redis read failed:', key, error?.message || error);
+      return null;
+    }),
+    kvGet(mirrorMetaKey(key)).catch(error => {
+      console.warn('[api/pvp-duel] Redis mirror meta read failed:', key, error?.message || error);
+      return null;
+    }),
+    readDriveRecord(collection, name)
+  ]);
+  const selected = selectMirroredValue({ redisValue, redisMeta, driveRecord });
+  return selected.found ? selected.value : null;
+}
+
+async function writeMirroredValue(collection, name, key, value) {
+  const envelope = createMirrorEnvelope({ key, collection, name, value });
+  let redisOk = false;
+  let driveOk = false;
+
+  try {
+    await kvSet(key, value);
+    await kvSet(mirrorMetaKey(key), mirrorMetaFromEnvelope(envelope));
+    redisOk = true;
+  } catch (error) {
+    console.warn('[api/pvp-duel] Redis mirror write failed:', key, error?.message || error);
+  }
+
+  driveOk = await writeDriveRecord(collection, name, envelope);
+  return { ok: redisOk || driveOk, redisOk, driveOk, envelope };
 }
 
 function roomKey(roomCode) {
@@ -103,7 +146,7 @@ async function getStaticLevelNames() {
 }
 
 async function getLevelData(name) {
-  const data = await kvGet(`level:${name}`);
+  const data = await getMirroredValue(LEVEL_COLLECTION, name, `level:${name}`);
   if (data) return data;
   return await getStaticLevel(name);
 }
@@ -123,7 +166,7 @@ function sanitizeLevelForPlayer(level) {
 }
 
 async function discoverPvpLevelNames() {
-  const configured = await kvGet(LEVEL_LIST_KEY);
+  const configured = await getMirroredValue(PVP_DUEL_COLLECTION, 'levels', LEVEL_LIST_KEY);
   if (Array.isArray(configured)) {
     return configured.filter(name => typeof name === 'string' && name);
   }
@@ -133,7 +176,7 @@ async function discoverPvpLevelNames() {
     return pvpDiscoveryCache.names;
   }
 
-  const remoteNames = (await kvGet(LEVEL_INDEX_KEY)) || [];
+  const remoteNames = (await getMirroredValue(LEVEL_COLLECTION, '__index', LEVEL_INDEX_KEY)) || [];
   const names = [...new Set([...remoteNames, ...(await getStaticLevelNames())])].sort();
   const pvpNames = [];
   for (const name of names) {
@@ -540,9 +583,10 @@ export default async function handler(req, res) {
         const names = Array.isArray(body.names)
           ? [...new Set(body.names.filter(name => typeof name === 'string' && name))]
           : [];
-        await kvSet(LEVEL_LIST_KEY, names);
+        const listWrite = await writeMirroredValue(PVP_DUEL_COLLECTION, 'levels', LEVEL_LIST_KEY, names);
+        if (!listWrite.ok) throw new Error('Failed to persist PvP Duel level list to Redis or Drive');
         pvpDiscoveryCache = { expiresAt: 0, names: null };
-        return res.json({ ok: true, names });
+        return res.json({ ok: true, names, storage: { redis: listWrite.redisOk, drive: listWrite.driveOk } });
       }
 
       const roomCode = normalizeRoomCode(body.room);

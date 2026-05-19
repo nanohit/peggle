@@ -11,13 +11,17 @@ const DEFAULTS = Object.freeze({
   attractionRadius: 32,
   mergeDurationMs: 320,
   wallBounceAim: true,
-  pvpBounce: false
+  pvpBounce: false,
+  fixedMainBalls: false,
+  mainBallPenalty: 2
 });
 
 const ATTRACTION_RADIUS_MIN = 20;
 const ATTRACTION_RADIUS_MAX = 80;
 const MERGE_DURATION_MIN_MS = 160;
 const MERGE_DURATION_MAX_MS = 900;
+const MAIN_BALL_PENALTY_MIN = 0;
+const MAIN_BALL_PENALTY_MAX = 10;
 
 const BASE_STEP_SECONDS = 1 / 120;
 const MAX_SLIDE_STEP_PX = 3.5;
@@ -62,7 +66,14 @@ export function normalizeBilliardSettings(rawSettings = null) {
       DEFAULTS.mergeDurationMs
     )),
     wallBounceAim: raw.wallBounceAim !== false,
-    pvpBounce: raw.pvpBounce === true
+    pvpBounce: raw.pvpBounce === true,
+    fixedMainBalls: raw.fixedMainBalls === true,
+    mainBallPenalty: Math.round(clampNumber(
+      raw.mainBallPenalty,
+      MAIN_BALL_PENALTY_MIN,
+      MAIN_BALL_PENALTY_MAX,
+      DEFAULTS.mainBallPenalty
+    ))
   };
 }
 
@@ -236,7 +247,9 @@ function applyLauncherRepel(peg, launchers = []) {
   for (const launcher of launchers) {
     if (!launcher || !Number.isFinite(launcher.x) || !Number.isFinite(launcher.y)) continue;
     const padding = Number.isFinite(launcher.safePadding) ? Math.max(0, launcher.safePadding) : LAUNCHER_SAFE_PADDING;
-    const clearance = (launcher.radius || 24) + radius + padding;
+    const hardClearance = (launcher.radius || 24) + radius + padding;
+    const safeInset = Number.isFinite(launcher.safeInset) ? Math.max(0, launcher.safeInset) : 0;
+    const clearance = Math.max(hardClearance, safeInset);
     const dx = peg.x - launcher.x;
     const dy = peg.y - launcher.y;
     const dist = Math.hypot(dx, dy);
@@ -244,16 +257,17 @@ function applyLauncherRepel(peg, launchers = []) {
     const fallbackAngle = Number.isFinite(launcher.defaultAngle) ? launcher.defaultAngle : Math.PI / 2;
     const nx = dist > 0.0001 ? dx / dist : Math.cos(fallbackAngle);
     const ny = dist > 0.0001 ? dy / dist : Math.sin(fallbackAngle);
-    shiftPegPosition(peg, nx * (clearance - dist + 0.5), ny * (clearance - dist + 0.5));
+    shiftPegPosition(peg, nx * (clearance - dist + 1.25), ny * (clearance - dist + 1.25));
     const vn = motion.vx * nx + motion.vy * ny;
     if (vn < 0) {
       motion.vx -= (1 + LAUNCHER_REPEL_BOUNCE) * vn * nx;
       motion.vy -= (1 + LAUNCHER_REPEL_BOUNCE) * vn * ny;
     }
     const safeKick = Number.isFinite(launcher.safeKick) ? Math.max(0, launcher.safeKick) : 0.8;
-    if (Utils.magnitude(motion.vx, motion.vy) < safeKick) {
-      motion.vx += nx * safeKick;
-      motion.vy += ny * safeKick;
+    const nextVn = motion.vx * nx + motion.vy * ny;
+    if (nextVn < safeKick) {
+      motion.vx += (safeKick - nextVn) * nx;
+      motion.vy += (safeKick - nextVn) * ny;
     }
     peg._billiardActive = true;
     clampMotion(motion);

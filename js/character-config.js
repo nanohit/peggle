@@ -1,4 +1,5 @@
 import { resolveAssetPaths } from './visual-config.js';
+import { compressImageFile } from './image-compression.js';
 
 export const CHARACTER_REGISTRY_VERSION = 1;
 export const CHARACTER_REGISTRY_STORAGE_KEY = 'peggle_character_registry_v1';
@@ -789,48 +790,11 @@ export function getLevelCharacterPortraitSources(level, registry = loadCharacter
 }
 
 export function readCharacterImageFile(file, maxSize = 512) {
-  return new Promise(resolve => {
-    if (!file) {
-      resolve(null);
-      return;
-    }
-    if (typeof Image === 'undefined' || typeof document === 'undefined') {
-      const reader = new FileReader();
-      reader.onload = event => resolve(event.target.result);
-      reader.onerror = () => resolve(null);
-      reader.readAsDataURL(file);
-      return;
-    }
-
-    const img = new Image();
-    const objectUrl = URL.createObjectURL(file);
-    img.onload = () => {
-      let width = img.width;
-      let height = img.height;
-      if (width > maxSize || height > maxSize) {
-        const scale = maxSize / Math.max(width, height);
-        width = Math.round(width * scale);
-        height = Math.round(height * scale);
-      }
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0, width, height);
-      URL.revokeObjectURL(objectUrl);
-      try {
-        resolve(canvas.toDataURL('image/webp', 0.82));
-      } catch {
-        resolve(canvas.toDataURL('image/png'));
-      }
-    };
-    img.onerror = () => {
-      URL.revokeObjectURL(objectUrl);
-      const reader = new FileReader();
-      reader.onload = event => resolve(event.target.result);
-      reader.onerror = () => resolve(null);
-      reader.readAsDataURL(file);
-    };
-    img.src = objectUrl;
+  return compressImageFile(file, {
+    maxWidth: maxSize,
+    maxHeight: maxSize,
+    quality: 0.82,
+    fallbackType: 'image/png',
+    maxDataUrlBytes: 220 * 1024
   });
 }

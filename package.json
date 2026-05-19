@@ -2,7 +2,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "rm -rf dist public && esbuild js/player-bootstrap.js --bundle --format=esm --splitting --outdir=dist --minify && mkdir -p public && cp player.html editor.html public/ && cp -R dist css js visuals fonts data public/"
+    "check": "node --check api/*.js && node --check scripts/*.mjs && node --check js/main.js && node --check js/player-bootstrap.js && node --check js/image-compression.js && node --check js/visual-layout.js && node --check js/character-config.js"
   },
   "dependencies": {
     "ioredis": "^5.10.0",

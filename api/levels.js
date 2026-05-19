@@ -1,5 +1,13 @@
 import Redis from 'ioredis';
 import fs from 'fs/promises';
+import {
+  createMirrorEnvelope,
+  mirrorMetaFromEnvelope,
+  mirrorMetaKey,
+  readDriveRecord,
+  selectMirroredValue,
+  writeDriveRecord
+} from './drive-store.js';
 
 let redis;
 function getRedis() {
@@ -35,6 +43,7 @@ async function kvDel(key) {
 }
 
 const INDEX_KEY = 'level:__index';
+const LEVEL_COLLECTION = 'levels';
 
 function cloneJson(value) {
   if (value == null) return value;
@@ -49,6 +58,43 @@ function sanitizeLevelForPlayer(level) {
     delete snapshot.emotions;
   }
   return next;
+}
+
+async function getMirroredValue(collection, name, key) {
+  const [redisValue, redisMeta, driveRecord] = await Promise.all([
+    kvGet(key).catch(error => {
+      console.warn('[api/levels] Redis read failed:', key, error?.message || error);
+      return null;
+    }),
+    kvGet(mirrorMetaKey(key)).catch(error => {
+      console.warn('[api/levels] Redis mirror meta read failed:', key, error?.message || error);
+      return null;
+    }),
+    readDriveRecord(collection, name)
+  ]);
+  const selected = selectMirroredValue({ redisValue, redisMeta, driveRecord });
+  return selected.found ? selected.value : null;
+}
+
+async function writeMirroredValue(collection, name, key, value, { deleted = false, source = 'api-write' } = {}) {
+  const envelope = createMirrorEnvelope({ key, collection, name, value, deleted, source });
+  let redisOk = false;
+  let driveOk = false;
+
+  try {
+    if (deleted) {
+      await kvDel(key);
+    } else {
+      await kvSet(key, value);
+    }
+    await kvSet(mirrorMetaKey(key), mirrorMetaFromEnvelope(envelope));
+    redisOk = true;
+  } catch (error) {
+    console.warn('[api/levels] Redis mirror write failed:', key, error?.message || error);
+  }
+
+  driveOk = await writeDriveRecord(collection, name, envelope);
+  return { ok: redisOk || driveOk, redisOk, driveOk, envelope };
 }
 
 function staticNamePath(name) {
@@ -115,11 +161,11 @@ export default async function handler(req, res) {
       res.setHeader('Cache-Control', 'no-store');
       const { name } = req.query;
       if (!name) {
-        const remoteNames = (await kvGet(INDEX_KEY)) || [];
+        const remoteNames = (await getMirroredValue(LEVEL_COLLECTION, '__index', INDEX_KEY)) || [];
         const names = [...new Set([...remoteNames, ...(await getStaticLevelNames())])].sort();
         return res.json({ names });
       }
-      const data = await kvGet(`level:${name}`) || await getStaticLevel(name);
+      const data = await getMirroredValue(LEVEL_COLLECTION, name, `level:${name}`) || await getStaticLevel(name);
       if (!data) return res.status(404).json({ error: 'Not found' });
       return res.json(sanitizeLevelForPlayer(data));
     }
@@ -128,29 +174,39 @@ export default async function handler(req, res) {
       const { name, data } = req.body;
       if (!name || !data) return res.status(400).json({ error: 'name and data required' });
 
-      await kvSet(`level:${name}`, sanitizeLevelForPlayer(data));
+      const stored = sanitizeLevelForPlayer(data);
+      const itemWrite = await writeMirroredValue(LEVEL_COLLECTION, name, `level:${name}`, stored);
+      if (!itemWrite.ok) throw new Error(`Failed to persist level:${name} to Redis or Drive`);
 
-      const names = (await kvGet(INDEX_KEY)) || [];
+      const names = (await getMirroredValue(LEVEL_COLLECTION, '__index', INDEX_KEY)) || [];
       if (!names.includes(name)) {
         names.push(name);
         names.sort();
-        await kvSet(INDEX_KEY, names);
+        const indexWrite = await writeMirroredValue(LEVEL_COLLECTION, '__index', INDEX_KEY, names);
+        if (!indexWrite.ok) console.warn('[api/levels] Failed to update mirrored index after saving:', name);
       }
 
-      return res.json({ ok: true });
+      return res.json({ ok: true, storage: { redis: itemWrite.redisOk, drive: itemWrite.driveOk } });
     }
 
     if (req.method === 'DELETE') {
       const { name } = req.query;
       if (!name) return res.status(400).json({ error: 'name required' });
 
-      await kvDel(`level:${name}`);
+      const itemDelete = await writeMirroredValue(LEVEL_COLLECTION, name, `level:${name}`, null, {
+        deleted: true,
+        source: 'api-delete'
+      });
+      if (!itemDelete.ok) throw new Error(`Failed to delete level:${name} from Redis or Drive`);
 
-      const names = (await kvGet(INDEX_KEY)) || [];
+      const names = (await getMirroredValue(LEVEL_COLLECTION, '__index', INDEX_KEY)) || [];
       const filtered = names.filter(n => n !== name);
-      await kvSet(INDEX_KEY, filtered);
+      const indexWrite = await writeMirroredValue(LEVEL_COLLECTION, '__index', INDEX_KEY, filtered, {
+        source: 'api-delete'
+      });
+      if (!indexWrite.ok) console.warn('[api/levels] Failed to update mirrored index after deleting:', name);
 
-      return res.json({ ok: true });
+      return res.json({ ok: true, storage: { redis: itemDelete.redisOk, drive: itemDelete.driveOk } });
     }
 
     res.status(405).json({ error: 'Method not allowed' });

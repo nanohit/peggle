@@ -3,43 +3,9 @@
 
 import { DEFAULT_SHOCKWAVE_EFFECT, DEFAULT_SHOCKWAVE_VICTORY_SETTINGS } from './shockwave-effect.js';
 import { DEFAULT_END_SEQUENCE, SLOT_DEFS, DEFAULT_LAYER_ORDER, resolveAssetPaths, normalizeVisuals } from './visual-config.js';
+import { compressImageFile } from './image-compression.js';
 
 const imageCache = new Map();
-
-// Compress and resize uploaded images to reduce storage size.
-// Max 512px on longest side, WebP at 0.8 quality (~10-40KB output).
-function compressImage(file, maxSize = 512) {
-  return new Promise(resolve => {
-    const img = new Image();
-    img.onload = () => {
-      let w = img.width, h = img.height;
-      if (w > maxSize || h > maxSize) {
-        const scale = maxSize / Math.max(w, h);
-        w = Math.round(w * scale);
-        h = Math.round(h * scale);
-      }
-      const canvas = document.createElement('canvas');
-      canvas.width = w;
-      canvas.height = h;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0, w, h);
-      // Try WebP first, fall back to JPEG
-      let dataUrl = canvas.toDataURL('image/webp', 0.8);
-      if (dataUrl.startsWith('data:image/webp')) {
-        resolve(dataUrl);
-      } else {
-        resolve(canvas.toDataURL('image/jpeg', 0.8));
-      }
-    };
-    img.onerror = () => {
-      // Can't decode — fall back to raw file
-      const reader = new FileReader();
-      reader.onload = e => resolve(e.target.result);
-      reader.readAsDataURL(file);
-    };
-    img.src = URL.createObjectURL(file);
-  });
-}
 
 function loadImage(src) {
   if (imageCache.has(src)) return Promise.resolve(imageCache.get(src));
@@ -875,7 +841,14 @@ export class VisualLayout {
         const file = ev.target.files[0];
         if (!file || !this.config) return;
         // Background covers full canvas (400×600), allow larger max size
-        const dataUrl = await compressImage(file, 800);
+        const dataUrl = await compressImageFile(file, {
+          maxWidth: 800,
+          maxHeight: 800,
+          quality: 0.8,
+          fallbackType: 'image/jpeg',
+          maxDataUrlBytes: 420 * 1024
+        });
+        if (!dataUrl) return;
         this.config.background.image = dataUrl;
         this._emitChange();
       };
@@ -889,7 +862,14 @@ export class VisualLayout {
       input.onchange = async ev => {
         const file = ev.target.files[0];
         if (!file || !this.config) return;
-        const dataUrl = await compressImage(file, 800);
+        const dataUrl = await compressImageFile(file, {
+          maxWidth: 800,
+          maxHeight: 800,
+          quality: 0.8,
+          fallbackType: 'image/jpeg',
+          maxDataUrlBytes: 420 * 1024
+        });
+        if (!dataUrl) return;
         this.config.background.progressionImage = dataUrl;
         this._syncProgressBgButtons();
         this._emitChange();
@@ -1591,7 +1571,8 @@ export class VisualLayout {
     input.onchange = async e => {
       const file = e.target.files[0];
       if (!file) return;
-      const dataUrl = await compressImage(file);
+      const dataUrl = await compressImageFile(file);
+      if (!dataUrl) return;
       if (this.config.slots[slotId]) {
         this.config.slots[slotId].customSrc = dataUrl;
         this._resolvedAssets[slotId] = dataUrl;

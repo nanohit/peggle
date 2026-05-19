@@ -1175,6 +1175,13 @@ export class Game {
     return this.pegs.filter(peg => isBilliardPegType(peg?.type)).length;
   }
 
+  getBilliardMainPhaseBallCount(orangeCount = this.getTotalOrangePegs()) {
+    if (this.billiardSettings?.fixedMainBalls === true) return 10;
+    const count = Math.max(0, Math.floor(Number(orangeCount) || 0));
+    const penalty = Math.max(0, Math.min(10, Math.round(Number(this.billiardSettings?.mainBallPenalty) || 0)));
+    return Math.max(1, Math.min(10, count - penalty));
+  }
+
   syncBilliardPegRuntimeFlags(pegs = this.pegs) {
     if (!Array.isArray(pegs)) return;
     const orangeBounceEnabled = this.isBilliardPhase() && this.billiardSettings?.pvpBounce === true;
@@ -1235,8 +1242,9 @@ export class Game {
     const topRadius = 30;
     const extraRadius = 20;
     const extraSelectRadius = 28;
-    const extraSafePadding = 5;
-    const extraSafeKick = 0.9;
+    const extraSafePadding = 18;
+    const extraSafeKick = 1.35;
+    const extraSafeInset = 56;
     const lowerY = Math.max(48, height - 48) + cameraY;
     const leftX = 48;
     const rightX = Math.max(48, width - 48);
@@ -1251,23 +1259,25 @@ export class Game {
         selectY: topSelect?.y,
         defaultAngle: Math.PI / 2,
         radius: topRadius,
-        safePadding: 10,
+        safePadding: 16,
+        safeKick: 1.15,
+        safeInset: 54,
         selectRadius: topSelect ? Math.max(24, topSelect.radius) : 42
       },
     ];
 
     if (BILLIARD_EXTRA_LAUNCHER_LAYOUT === 'cross') {
       launchers.push(
-        { index: 1, side: 'bottom', x: width / 2, y: Math.max(40, height - 40) + cameraY, defaultAngle: -Math.PI / 2, radius: extraRadius, selectRadius: extraSelectRadius, safePadding: extraSafePadding, safeKick: extraSafeKick, assetLauncher: true },
-        { index: 2, side: 'left', x: 34, y: height / 2 + cameraY, defaultAngle: 0, radius: extraRadius, selectRadius: extraSelectRadius, safePadding: extraSafePadding, safeKick: extraSafeKick, assetLauncher: true },
-        { index: 3, side: 'right', x: Math.max(34, width - 34), y: height / 2 + cameraY, defaultAngle: Math.PI, radius: extraRadius, selectRadius: extraSelectRadius, safePadding: extraSafePadding, safeKick: extraSafeKick, assetLauncher: true }
+        { index: 1, side: 'bottom', x: width / 2, y: Math.max(40, height - 40) + cameraY, defaultAngle: -Math.PI / 2, radius: extraRadius, selectRadius: extraSelectRadius, safePadding: extraSafePadding, safeKick: extraSafeKick, safeInset: extraSafeInset, assetLauncher: true },
+        { index: 2, side: 'left', x: 34, y: height / 2 + cameraY, defaultAngle: 0, radius: extraRadius, selectRadius: extraSelectRadius, safePadding: extraSafePadding, safeKick: extraSafeKick, safeInset: extraSafeInset, assetLauncher: true },
+        { index: 3, side: 'right', x: Math.max(34, width - 34), y: height / 2 + cameraY, defaultAngle: Math.PI, radius: extraRadius, selectRadius: extraSelectRadius, safePadding: extraSafePadding, safeKick: extraSafeKick, safeInset: extraSafeInset, assetLauncher: true }
       );
       return launchers;
     }
 
     launchers.push(
-      { index: 1, side: 'bottomLeft', x: leftX, y: lowerY, defaultAngle: -Math.PI / 4, radius: extraRadius, selectRadius: extraSelectRadius, safePadding: extraSafePadding, safeKick: extraSafeKick, assetLauncher: true },
-      { index: 2, side: 'bottomRight', x: rightX, y: lowerY, defaultAngle: -Math.PI * 3 / 4, radius: extraRadius, selectRadius: extraSelectRadius, safePadding: extraSafePadding, safeKick: extraSafeKick, assetLauncher: true }
+      { index: 1, side: 'bottomLeft', x: leftX, y: lowerY, defaultAngle: -Math.PI / 4, radius: extraRadius, selectRadius: extraSelectRadius, safePadding: extraSafePadding, safeKick: extraSafeKick, safeInset: extraSafeInset, assetLauncher: true },
+      { index: 2, side: 'bottomRight', x: rightX, y: lowerY, defaultAngle: -Math.PI * 3 / 4, radius: extraRadius, selectRadius: extraSelectRadius, safePadding: extraSafePadding, safeKick: extraSafeKick, safeInset: extraSafeInset, assetLauncher: true }
     );
     return launchers;
   }
@@ -2689,6 +2699,7 @@ export class Game {
 
   startMainPhaseFromBilliard() {
     if (!this.isBilliardPhase()) return false;
+    const mainPhaseBalls = this.getBilliardMainPhaseBallCount(this.getTotalOrangePegs());
     this.billiardSystem.clear(this.pegs);
     this.billiardPhase = false;
     this.billiardLauncherIndex = 0;
@@ -2696,8 +2707,8 @@ export class Game {
     this.physics.setBucketEnabled(!this.isSurvivalMode());
 
     this.score = 0;
-    this.ballsLeft = 10;
-    this.initialBallCount = 10;
+    this.ballsLeft = mainPhaseBalls;
+    this.initialBallCount = mainPhaseBalls;
     this.gambleBalls = 0;
     this.initialGambleBallCount = 0;
     this.hitPegIds = [];

@@ -1,5 +1,13 @@
 import Redis from 'ioredis';
 import fs from 'fs/promises';
+import {
+  createMirrorEnvelope,
+  mirrorMetaFromEnvelope,
+  mirrorMetaKey,
+  readDriveRecord,
+  selectMirroredValue,
+  writeDriveRecord
+} from './drive-store.js';
 
 let redis;
 function getRedis() {
@@ -26,6 +34,41 @@ async function kvSet(key, value) {
   const client = getRedis();
   if (!client) throw new Error('REDIS_URL is not configured');
   await client.set(key, JSON.stringify(value));
+}
+
+const CONFIG_COLLECTION = 'config';
+
+async function getMirroredValue(collection, name, key) {
+  const [redisValue, redisMeta, driveRecord] = await Promise.all([
+    kvGet(key).catch(error => {
+      console.warn('[api/config] Redis read failed:', key, error?.message || error);
+      return null;
+    }),
+    kvGet(mirrorMetaKey(key)).catch(error => {
+      console.warn('[api/config] Redis mirror meta read failed:', key, error?.message || error);
+      return null;
+    }),
+    readDriveRecord(collection, name)
+  ]);
+  const selected = selectMirroredValue({ redisValue, redisMeta, driveRecord });
+  return selected.found ? selected.value : null;
+}
+
+async function writeMirroredValue(collection, name, key, value) {
+  const envelope = createMirrorEnvelope({ key, collection, name, value });
+  let redisOk = false;
+  let driveOk = false;
+
+  try {
+    await kvSet(key, value);
+    await kvSet(mirrorMetaKey(key), mirrorMetaFromEnvelope(envelope));
+    redisOk = true;
+  } catch (error) {
+    console.warn('[api/config] Redis mirror write failed:', key, error?.message || error);
+  }
+
+  driveOk = await writeDriveRecord(collection, name, envelope);
+  return { ok: redisOk || driveOk, redisOk, driveOk, envelope };
 }
 
 async function readStaticJson(path) {
@@ -63,7 +106,7 @@ export default async function handler(req, res) {
 
     if (req.method === 'GET') {
       if (!key) return res.status(400).json({ error: 'key required' });
-      const value = await kvGet(`config:${key}`) ?? await getStaticConfigValue(key);
+      const value = await getMirroredValue(CONFIG_COLLECTION, key, `config:${key}`) ?? await getStaticConfigValue(key);
       res.setHeader('Cache-Control', 'no-store');
       return res.json({ key, value });
     }
@@ -72,8 +115,9 @@ export default async function handler(req, res) {
       const { key: bodyKey, value } = req.body;
       const k = bodyKey || key;
       if (!k) return res.status(400).json({ error: 'key required' });
-      await kvSet(`config:${k}`, value);
-      return res.json({ ok: true });
+      const configWrite = await writeMirroredValue(CONFIG_COLLECTION, k, `config:${k}`, value);
+      if (!configWrite.ok) throw new Error(`Failed to persist config:${k} to Redis or Drive`);
+      return res.json({ ok: true, storage: { redis: configWrite.redisOk, drive: configWrite.driveOk } });
     }
 
     res.status(405).json({ error: 'Method not allowed' });
