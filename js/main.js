@@ -49,6 +49,10 @@ import {
   isBilliardPegType,
   normalizeBilliardSettings
 } from './billiard-mode.js';
+import {
+  ensureLevelDestruction,
+  normalizeDestructionSettings
+} from './destruction-mode.js';
 import { VisualLayout } from './visual-layout.js';
 import { normalizeVisuals } from './visual-config.js';
 import {
@@ -1125,6 +1129,9 @@ class PeggleApp {
     // Multiball panel
     this.setupMultiballPanel();
 
+    // Destruction selected-peg panel
+    this.setupDestructionPegPanel();
+
     // Flipper panel
     this.setupFlipperPanel();
 
@@ -1132,6 +1139,7 @@ class PeggleApp {
     this.setupSurvivalPanel();
     this.setupPvpPanel();
     this.setupBilliardPanel();
+    this.setupDestructionPanel();
     this.setupAimLengthPanel();
 
     // Keyboard shortcuts
@@ -1804,6 +1812,67 @@ class PeggleApp {
     document.getElementById('multiballPanel').classList.remove('visible');
   }
 
+  setupDestructionPegPanel() {
+    const panel = document.getElementById('destructionPegPanel');
+    const closeBtn = document.getElementById('closeDestructionPegPanel');
+    const staticToggle = document.getElementById('destructionStaticToggle');
+    const hitToggle = document.getElementById('destructionPhysicsOnHitToggle');
+    const ballOnlyToggle = document.getElementById('destructionPhysicsOnHitBallOnlyToggle');
+    const groupToggle = document.getElementById('destructionGroupToggle');
+    if (!panel || !closeBtn || !staticToggle || !hitToggle || !ballOnlyToggle || !groupToggle) return;
+
+    closeBtn.addEventListener('click', () => this.closeDestructionPegPanel());
+    staticToggle.addEventListener('change', () => {
+      if (!this.editor) return;
+      this.editor.setSelectedDestructionStatic(staticToggle.checked);
+      this.showDestructionPegPanel();
+    });
+    hitToggle.addEventListener('change', () => {
+      if (!this.editor) return;
+      this.editor.setSelectedDestructionPhysicsOnHit(hitToggle.checked);
+      this.showDestructionPegPanel();
+    });
+    ballOnlyToggle.addEventListener('change', () => {
+      if (!this.editor) return;
+      this.editor.setSelectedDestructionPhysicsOnHitBallOnly(ballOnlyToggle.checked);
+      this.showDestructionPegPanel();
+    });
+    groupToggle.addEventListener('change', () => {
+      if (!this.editor) return;
+      const applied = this.editor.setSelectedDestructionGrouped(groupToggle.checked);
+      if (!applied) groupToggle.checked = false;
+      this.showDestructionPegPanel();
+    });
+  }
+
+  showDestructionPegPanel() {
+    const props = this.editor ? this.editor.getSelectedDestructionProperties() : null;
+    if (!props) return;
+    const panel = document.getElementById('destructionPegPanel');
+    const staticToggle = document.getElementById('destructionStaticToggle');
+    const hitToggle = document.getElementById('destructionPhysicsOnHitToggle');
+    const ballOnlyToggle = document.getElementById('destructionPhysicsOnHitBallOnlyToggle');
+    const groupToggle = document.getElementById('destructionGroupToggle');
+    if (!panel || !staticToggle || !hitToggle || !ballOnlyToggle || !groupToggle) return;
+
+    staticToggle.indeterminate = !!props.staticMixed;
+    staticToggle.checked = !props.staticMixed && !!props.static;
+    hitToggle.indeterminate = !!props.physicsOnHitMixed;
+    hitToggle.checked = !props.physicsOnHitMixed && !!props.physicsOnHit;
+    hitToggle.disabled = !props.staticMixed && !!props.static;
+    ballOnlyToggle.indeterminate = !!props.physicsOnHitBallOnlyMixed;
+    ballOnlyToggle.checked = !props.physicsOnHitBallOnlyMixed && !!props.physicsOnHitBallOnly;
+    ballOnlyToggle.disabled = (!props.staticMixed && !!props.static) || (!props.physicsOnHitMixed && !props.physicsOnHit);
+    groupToggle.indeterminate = !!props.groupedMixed;
+    groupToggle.checked = !props.groupedMixed && !!props.grouped;
+    groupToggle.disabled = !props.canGroup;
+    panel.classList.add('visible');
+  }
+
+  closeDestructionPegPanel() {
+    document.getElementById('destructionPegPanel')?.classList.remove('visible');
+  }
+
   setupFlipperPanel() {
     document.getElementById('closeFlipperPanel').addEventListener('click', () => {
       this.closeFlipperPanel();
@@ -1908,6 +1977,8 @@ class PeggleApp {
       this.updateLevelSurvivalSettings({ enabled: toggle.checked });
       if (toggle.checked) {
         this.updateLevelPvpSettings({ enabled: false }, { refreshUi: false });
+        this.updateLevelBilliardSettings({ enabled: false }, { refreshUi: false });
+        this.updateLevelDestructionSettings({ enabled: false }, { refreshUi: false });
       }
       this._setSurvivalSettingsVisible(toggle.checked);
       this.updateLevelSettings();
@@ -2140,6 +2211,8 @@ class PeggleApp {
       this.updateLevelPvpSettings({ enabled: toggle.checked });
       if (toggle.checked) {
         this.updateLevelSurvivalSettings({ enabled: false }, { refreshUi: false });
+        this.updateLevelBilliardSettings({ enabled: false }, { refreshUi: false });
+        this.updateLevelDestructionSettings({ enabled: false }, { refreshUi: false });
       }
       this._setPvpSettingsVisible(toggle.checked);
       this.updateLevelSettings();
@@ -2194,6 +2267,7 @@ class PeggleApp {
       if (toggle.checked) {
         this.updateLevelSurvivalSettings({ enabled: false }, { refreshUi: false });
         this.updateLevelPvpSettings({ enabled: false }, { refreshUi: false });
+        this.updateLevelDestructionSettings({ enabled: false }, { refreshUi: false });
       }
       this._setBilliardSettingsVisible(toggle.checked);
       this.updateLevelSettings();
@@ -2238,6 +2312,133 @@ class PeggleApp {
     mainBallPenaltySlider.addEventListener('change', () => applyMainBallPenalty(mainBallPenaltySlider.value));
     mainBallPenaltyInput.addEventListener('change', () => applyMainBallPenalty(mainBallPenaltyInput.value));
     syncMainBallPenaltyEnabled();
+  }
+
+  setupDestructionPanel() {
+    const toggle = document.getElementById('destructionModeToggle');
+    const controls = document.getElementById('destructionControls');
+    const gravityYSlider = document.getElementById('destructionGravityYSlider');
+    const gravityYInput = document.getElementById('destructionGravityYInput');
+    const gravityXSlider = document.getElementById('destructionGravityXSlider');
+    const gravityXInput = document.getElementById('destructionGravityXInput');
+    const bounceSlider = document.getElementById('destructionBounceSlider');
+    const bounceInput = document.getElementById('destructionBounceInput');
+    const ballBounceSlider = document.getElementById('destructionBallBounceSlider');
+    const ballBounceInput = document.getElementById('destructionBallBounceInput');
+    const bombSlider = document.getElementById('destructionBombSlider');
+    const bombInput = document.getElementById('destructionBombInput');
+    const gripSlider = document.getElementById('destructionGripSlider');
+    const gripInput = document.getElementById('destructionGripInput');
+    const pileClearSlider = document.getElementById('destructionPileClearSlider');
+    const pileClearInput = document.getElementById('destructionPileClearInput');
+    if (
+      !toggle || !controls || !gravityYSlider || !gravityYInput || !gravityXSlider || !gravityXInput
+      || !bounceSlider || !bounceInput || !ballBounceSlider || !ballBounceInput
+      || !bombSlider || !bombInput || !gripSlider || !gripInput
+      || !pileClearSlider || !pileClearInput
+    ) {
+      return;
+    }
+
+    const format = (value, digits = 2) => Number(value).toFixed(digits).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1');
+    const defaults = normalizeDestructionSettings({});
+    const controlMap = {
+      gravityY: { slider: gravityYSlider, input: gravityYInput, scale: 100, min: -0.2, max: 1.2, digits: 2 },
+      gravityX: { slider: gravityXSlider, input: gravityXInput, scale: 100, min: -0.8, max: 0.8, digits: 2 },
+      restitution: { slider: bounceSlider, input: bounceInput, scale: 100, min: 0, max: 1.25, digits: 2 },
+      dynamicPegBallBounce: { slider: ballBounceSlider, input: ballBounceInput, scale: 100, min: 0, max: 1.25, digits: 2 },
+      bombImpulse: { slider: bombSlider, input: bombInput, scale: 1, min: 0, max: 32, digits: 1 },
+      surfaceGrip: { slider: gripSlider, input: gripInput, scale: 100, min: 0, max: 1, digits: 2 },
+      stuckPileClearDelayMs: { slider: pileClearSlider, input: pileClearInput, scale: 1, min: 0, max: 2000, digits: 2, secondsInput: true }
+    };
+    const applyScaled = (prop, slider, input, rawValue, scale, min, max, options = null) => {
+      const isMsSecondsInput = prop === 'stuckPileClearDelayMs' && options?.fromSecondsInput === true;
+      const rawNumber = parseFloat(rawValue);
+      const candidate = isMsSecondsInput ? rawNumber * 1000 : rawNumber;
+      const value = Math.max(min, Math.min(max, Number.isFinite(candidate) ? candidate : 0));
+      const normalized = normalizeDestructionSettings({ [prop]: value });
+      const next = normalized[prop];
+      slider.value = Math.round(next * scale);
+      if (prop === 'stuckPileClearDelayMs') input.value = format(next / 1000, 2);
+      else input.value = format(next, prop === 'bombImpulse' ? 1 : 2);
+      this.updateLevelDestructionSettings({ [prop]: next });
+    };
+    const applyControlValue = (prop, value) => {
+      const config = controlMap[prop];
+      if (!config) return;
+      applyScaled(prop, config.slider, config.input, value, config.scale, config.min, config.max);
+    };
+
+    toggle.addEventListener('change', () => {
+      this.updateLevelDestructionSettings({ enabled: toggle.checked });
+      if (toggle.checked) {
+        this.updateLevelSurvivalSettings({ enabled: false }, { refreshUi: false });
+        this.updateLevelPvpSettings({ enabled: false }, { refreshUi: false });
+        this.updateLevelBilliardSettings({ enabled: false }, { refreshUi: false });
+      }
+      this._setDestructionSettingsVisible(toggle.checked);
+      this.updateLevelSettings();
+      this.syncSelectionPanels();
+    });
+
+    gravityYSlider.addEventListener('input', () => {
+      gravityYInput.value = format(parseFloat(gravityYSlider.value) / 100, 2);
+    });
+    gravityYSlider.addEventListener('change', () => applyScaled('gravityY', gravityYSlider, gravityYInput, parseFloat(gravityYSlider.value) / 100, 100, -0.2, 1.2));
+    gravityYInput.addEventListener('change', () => applyScaled('gravityY', gravityYSlider, gravityYInput, gravityYInput.value, 100, -0.2, 1.2));
+
+    gravityXSlider.addEventListener('input', () => {
+      gravityXInput.value = format(parseFloat(gravityXSlider.value) / 100, 2);
+    });
+    gravityXSlider.addEventListener('change', () => applyScaled('gravityX', gravityXSlider, gravityXInput, parseFloat(gravityXSlider.value) / 100, 100, -0.8, 0.8));
+    gravityXInput.addEventListener('change', () => applyScaled('gravityX', gravityXSlider, gravityXInput, gravityXInput.value, 100, -0.8, 0.8));
+
+    bounceSlider.addEventListener('input', () => {
+      bounceInput.value = format(parseFloat(bounceSlider.value) / 100, 2);
+    });
+    bounceSlider.addEventListener('change', () => applyScaled('restitution', bounceSlider, bounceInput, parseFloat(bounceSlider.value) / 100, 100, 0, 1.25));
+    bounceInput.addEventListener('change', () => applyScaled('restitution', bounceSlider, bounceInput, bounceInput.value, 100, 0, 1.25));
+
+    ballBounceSlider.addEventListener('input', () => {
+      ballBounceInput.value = format(parseFloat(ballBounceSlider.value) / 100, 2);
+    });
+    ballBounceSlider.addEventListener('change', () => applyScaled('dynamicPegBallBounce', ballBounceSlider, ballBounceInput, parseFloat(ballBounceSlider.value) / 100, 100, 0, 1.25));
+    ballBounceInput.addEventListener('change', () => applyScaled('dynamicPegBallBounce', ballBounceSlider, ballBounceInput, ballBounceInput.value, 100, 0, 1.25));
+
+    bombSlider.addEventListener('input', () => {
+      bombInput.value = bombSlider.value;
+    });
+    bombSlider.addEventListener('change', () => applyScaled('bombImpulse', bombSlider, bombInput, bombSlider.value, 1, 0, 32));
+    bombInput.addEventListener('change', () => applyScaled('bombImpulse', bombSlider, bombInput, bombInput.value, 1, 0, 32));
+
+    gripSlider.addEventListener('input', () => {
+      gripInput.value = format(parseFloat(gripSlider.value) / 100, 2);
+    });
+    gripSlider.addEventListener('change', () => applyScaled('surfaceGrip', gripSlider, gripInput, parseFloat(gripSlider.value) / 100, 100, 0, 1));
+    gripInput.addEventListener('change', () => applyScaled('surfaceGrip', gripSlider, gripInput, gripInput.value, 100, 0, 1));
+
+    pileClearSlider.addEventListener('input', () => {
+      pileClearInput.value = format((parseFloat(pileClearSlider.value) || 0) / 1000, 2);
+    });
+    pileClearSlider.addEventListener('change', () => applyScaled('stuckPileClearDelayMs', pileClearSlider, pileClearInput, pileClearSlider.value, 1, 0, 2000));
+    pileClearInput.addEventListener('change', () => applyScaled(
+      'stuckPileClearDelayMs',
+      pileClearSlider,
+      pileClearInput,
+      pileClearInput.value,
+      1,
+      0,
+      2000,
+      { fromSecondsInput: true }
+    ));
+
+    controls.querySelectorAll('[data-destruction-default]').forEach(button => {
+      button.addEventListener('click', () => {
+        const prop = button.getAttribute('data-destruction-default');
+        if (!prop || !Object.prototype.hasOwnProperty.call(defaults, prop)) return;
+        applyControlValue(prop, defaults[prop]);
+      });
+    });
   }
 
   _getSurvivalCurveMetrics(canvas) {
@@ -2408,6 +2609,12 @@ class PeggleApp {
     container.classList.toggle('hidden', !visible);
   }
 
+  _setDestructionSettingsVisible(visible) {
+    const container = document.getElementById('destructionControls');
+    if (!container) return;
+    container.classList.toggle('hidden', !visible);
+  }
+
   setSurvivalPanelVisible(visible) {
     const panel = document.getElementById('survivalPanel');
     if (!panel) return;
@@ -2422,6 +2629,12 @@ class PeggleApp {
 
   setBilliardPanelVisible(visible) {
     const panel = document.getElementById('billiardPanel');
+    if (!panel) return;
+    panel.classList.toggle('visible', !!visible);
+  }
+
+  setDestructionPanelVisible(visible) {
+    const panel = document.getElementById('destructionPanel');
     if (!panel) return;
     panel.classList.toggle('visible', !!visible);
   }
@@ -2528,6 +2741,7 @@ class PeggleApp {
     if (level.survival.enabled) {
       level.pvp = normalizePvpSettings({ ...(level.pvp || {}), enabled: false });
       level.billiard = normalizeBilliardSettings({ ...(level.billiard || {}), enabled: false });
+      level.destruction = normalizeDestructionSettings({ ...(level.destruction || {}), enabled: false });
     }
     if (options.save !== false) {
       this.levelManager.save();
@@ -2553,6 +2767,7 @@ class PeggleApp {
         enabled: false
       }, this.canvas.height);
       level.billiard = normalizeBilliardSettings({ ...(level.billiard || {}), enabled: false });
+      level.destruction = normalizeDestructionSettings({ ...(level.destruction || {}), enabled: false });
       if (level.pvp.symmetryEnabled) {
         normalizePvpAuthoredPegs(level, this.canvas.height);
       }
@@ -2582,6 +2797,35 @@ class PeggleApp {
         enabled: false
       }, this.canvas.height);
       level.pvp = normalizePvpSettings({ ...(level.pvp || {}), enabled: false });
+      level.destruction = normalizeDestructionSettings({ ...(level.destruction || {}), enabled: false });
+    }
+
+    if (options.save !== false) {
+      this.levelManager.save();
+    }
+    if (this.game) {
+      this.game.destructionSettings = level.destruction;
+      this.game.destructionSystem.configure(level.destruction);
+      this.game.syncDestructionContactSettings?.();
+    }
+    if (options.refreshUi !== false) {
+      this.updateLevelSettings();
+    }
+  }
+
+  updateLevelDestructionSettings(partialSettings, options = {}) {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level) return;
+
+    const current = ensureLevelDestruction(level);
+    level.destruction = normalizeDestructionSettings({ ...current, ...(partialSettings || {}) });
+    if (level.destruction.enabled) {
+      level.survival = normalizeSurvivalSettings({
+        ...ensureLevelSurvival(level, this.canvas.height),
+        enabled: false
+      }, this.canvas.height);
+      level.pvp = normalizePvpSettings({ ...(level.pvp || {}), enabled: false });
+      level.billiard = normalizeBilliardSettings({ ...(level.billiard || {}), enabled: false });
     }
 
     if (options.save !== false) {
@@ -2702,6 +2946,14 @@ class PeggleApp {
       this.showMultiballPanel();
     } else {
       this.closeMultiballPanel();
+    }
+
+    const level = this.levelManager.getCurrentLevel();
+    const destruction = level ? ensureLevelDestruction(level) : null;
+    if (count > 0 && destruction?.enabled) {
+      this.showDestructionPegPanel();
+    } else {
+      this.closeDestructionPegPanel();
     }
 
     // Show/hide peg color picker
@@ -2985,6 +3237,7 @@ class PeggleApp {
     this.setSurvivalPanelVisible(true);
     this.setPvpPanelVisible(true);
     this.setBilliardPanelVisible(true);
+    this.setDestructionPanelVisible(true);
     this.setAimLengthPanelVisible(true);
 
     // Sync tool button states
@@ -3026,6 +3279,7 @@ class PeggleApp {
       this.closeBumperPanel();
       this.closePortalPanel();
       this.closeMultiballPanel();
+      this.closeDestructionPegPanel();
       this.closeFlipperPanel();
       this.editor.stop();
       this.editor = null;
@@ -3153,6 +3407,7 @@ class PeggleApp {
     this.setSurvivalPanelVisible(false);
     this.setPvpPanelVisible(false);
     this.setBilliardPanelVisible(false);
+    this.setDestructionPanelVisible(false);
     this.setAimLengthPanelVisible(false);
     this._applyLevelVisuals();
     this.visualLayout.setEditMode(false);
@@ -3515,6 +3770,40 @@ class PeggleApp {
       billiardMainBallPenaltyInput.disabled = billiard.fixedMainBalls === true;
     }
     this._setBilliardSettingsVisible(!!billiard.enabled);
+
+    const destruction = ensureLevelDestruction(level);
+    const destructionToggle = document.getElementById('destructionModeToggle');
+    const destructionGravityYSlider = document.getElementById('destructionGravityYSlider');
+    const destructionGravityYInput = document.getElementById('destructionGravityYInput');
+    const destructionGravityXSlider = document.getElementById('destructionGravityXSlider');
+    const destructionGravityXInput = document.getElementById('destructionGravityXInput');
+    const destructionBounceSlider = document.getElementById('destructionBounceSlider');
+    const destructionBounceInput = document.getElementById('destructionBounceInput');
+    const destructionBallBounceSlider = document.getElementById('destructionBallBounceSlider');
+    const destructionBallBounceInput = document.getElementById('destructionBallBounceInput');
+    const destructionBombSlider = document.getElementById('destructionBombSlider');
+    const destructionBombInput = document.getElementById('destructionBombInput');
+    const destructionGripSlider = document.getElementById('destructionGripSlider');
+    const destructionGripInput = document.getElementById('destructionGripInput');
+    const destructionPileClearSlider = document.getElementById('destructionPileClearSlider');
+    const destructionPileClearInput = document.getElementById('destructionPileClearInput');
+    const fmtDestruction = (value, digits = 2) => Number(value).toFixed(digits).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1');
+    if (destructionToggle) destructionToggle.checked = !!destruction.enabled;
+    if (destructionGravityYSlider) destructionGravityYSlider.value = Math.round(destruction.gravityY * 100);
+    if (destructionGravityYInput) destructionGravityYInput.value = fmtDestruction(destruction.gravityY);
+    if (destructionGravityXSlider) destructionGravityXSlider.value = Math.round(destruction.gravityX * 100);
+    if (destructionGravityXInput) destructionGravityXInput.value = fmtDestruction(destruction.gravityX);
+    if (destructionBounceSlider) destructionBounceSlider.value = Math.round(destruction.restitution * 100);
+    if (destructionBounceInput) destructionBounceInput.value = fmtDestruction(destruction.restitution);
+    if (destructionBallBounceSlider) destructionBallBounceSlider.value = Math.round(destruction.dynamicPegBallBounce * 100);
+    if (destructionBallBounceInput) destructionBallBounceInput.value = fmtDestruction(destruction.dynamicPegBallBounce);
+    if (destructionBombSlider) destructionBombSlider.value = Math.round(destruction.bombImpulse);
+    if (destructionBombInput) destructionBombInput.value = fmtDestruction(destruction.bombImpulse, 1);
+    if (destructionGripSlider) destructionGripSlider.value = Math.round(destruction.surfaceGrip * 100);
+    if (destructionGripInput) destructionGripInput.value = fmtDestruction(destruction.surfaceGrip);
+    if (destructionPileClearSlider) destructionPileClearSlider.value = Math.round(destruction.stuckPileClearDelayMs);
+    if (destructionPileClearInput) destructionPileClearInput.value = fmtDestruction(destruction.stuckPileClearDelayMs / 1000);
+    this._setDestructionSettingsVisible(!!destruction.enabled);
     
     const isInTraining = this.levelManager.isInTraining(level.id);
     document.getElementById('addToTrainingBtn').textContent = isInTraining ? 'Remove from Training' : 'Add to Training';

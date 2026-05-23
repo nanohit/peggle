@@ -681,7 +681,7 @@ export class YoyoThreadSystem {
         const remaining = Math.max(direct, budget - usedInSegments);
         maxWrapLen = remaining;
       } else {
-        maxWrapLen = direct * 2.5;
+        maxWrapLen = direct + Math.min(direct * 0.85, this.height * 0.55);
       }
       state.ropeLength = Math.max(direct, Math.min(nodePathLen, maxWrapLen));
 
@@ -701,6 +701,8 @@ export class YoyoThreadSystem {
         state.retractStartDist = Math.max(1, Utils.distance(ball.x, ball.y, state.anchorX, state.anchorY));
         state.retractNodeCount = Math.max(8, state.nodes.length || this.settings.minNodes);
       }
+      this._constrainBallToWorld(ball);
+      this._pinEndpoints(state, ball);
       this._simulateAllPortalSegments(state, obstacles);
       state.prevBallX = ball.x;
       state.prevBallY = ball.y;
@@ -722,6 +724,8 @@ export class YoyoThreadSystem {
     const prePullY = ball.y;
     this._applyRetractionForce(state, ball, retractScale);
     this._simulateRope(state, ball, activeObstacles, dt, prePullX, prePullY);
+    this._constrainBallToWorld(ball);
+    this._pinEndpoints(state, ball);
 
     if (this._tryFinishRetractionAtAnchor(state, ball, releaseEvents)) {
       return;
@@ -1098,12 +1102,14 @@ export class YoyoThreadSystem {
       this._solveDistanceConstraints(state, allowCompression);
       this._solveNodeObstacleConstraints(state, obstacles, ropeRadius, retracting);
       this._solveSegmentObstacleConstraints(state, obstacles, ropeRadius, retracting);
+      this._solveWorldBoundsConstraints(state, ropeRadius, retracting);
       this._solveBendConstraints(state, bendStiffness, obstacles, ropeRadius);
     }
 
     this._pinEndpoints(state, ball);
     this._solveNodeObstacleConstraints(state, obstacles, ropeRadius, retracting);
     this._solveSegmentObstacleConstraints(state, obstacles, ropeRadius, retracting);
+    this._solveWorldBoundsConstraints(state, ropeRadius, retracting);
     this._pinEndpoints(state, ball);
   }
 
@@ -1245,6 +1251,32 @@ export class YoyoThreadSystem {
         } else if (obs.kind === 'brick') {
           this._resolveSegmentBrick(a, b, obs, ropeRadius, i, lastIndex, retracting);
         }
+      }
+    }
+  }
+
+  _solveWorldBoundsConstraints(state, ropeRadius = 0, retracting = false) {
+    const nodes = state.nodes;
+    if (!Array.isArray(nodes) || nodes.length < 3) return;
+    const margin = Math.max(0, ropeRadius);
+    const minX = margin;
+    const maxX = Math.max(minX, this.width - margin);
+    const minY = margin;
+    const lastIndex = nodes.length - 1;
+
+    for (let i = 1; i < lastIndex; i++) {
+      const node = nodes[i];
+      if (!node) continue;
+      if (node.x < minX) {
+        node.x = minX;
+        this._dampNodeAgainstNormal(node, 1, 0, retracting);
+      } else if (node.x > maxX) {
+        node.x = maxX;
+        this._dampNodeAgainstNormal(node, -1, 0, retracting);
+      }
+      if (node.y < minY) {
+        node.y = minY;
+        this._dampNodeAgainstNormal(node, 0, 1, retracting);
       }
     }
   }

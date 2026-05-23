@@ -10,13 +10,14 @@ import { getLevelCharacterPortraitSources, loadCharacterRegistry, resolveCharact
 
 const BIG_R = 38;
 const SMALL_R = 24;
-const ROW_GAP = 115;
-const COL_GAP = 115;
-const PAD_TOP = 70;
+const ROW_GAP = 92;
+const COL_GAP = 104;
+const PAD_TOP = 58;
 const PAD_BOTTOM = 80;
 const LINE_W = 3;
 
 const ASSET_PATHS = {
+  background: 'visuals/level_background.webp',
   secret: 'visuals/Level_graph/secret.webp',
   completed: 'visuals/Level_graph/completed_level.webp',
   completedSmall: 'visuals/Level_graph/completed_level_small.webp',
@@ -140,6 +141,8 @@ export class LevelMap {
     this._portraits = new Map();      // nodeId → Image
 
     this._overlay = null;
+    this._backgroundCanvas = null;
+    this._backgroundCtx = null;
     this._scrollEl = null;
     this._canvas = null;
     this._ctx = null;
@@ -164,7 +167,10 @@ export class LevelMap {
     if (!this.graph?.nodes?.length) return;
     this._loadAssets()
       .then(() => {
-        if (!this._disposed) this._render();
+        if (!this._disposed) {
+          this._renderBackground();
+          this._render();
+        }
       })
       .catch(error => console.warn('[level-map] Asset load failed', error));
     this._primeAssetsFromCache();
@@ -180,14 +186,43 @@ export class LevelMap {
     if (!overlay) return Promise.resolve();
 
     const fadeMs = Math.max(0, Number(options.fadeMs || 0));
+    const scrollUpMs = Math.max(0, Number(options.scrollUpMs || 0));
+    const scrollDirection = options.scrollDirection === 'down' ? 'down' : 'up';
     const cleanup = () => {
       if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
       if (this._overlay === overlay) {
         this._overlay = null;
+        this._backgroundCanvas = null;
+        this._backgroundCtx = null;
         this._canvas = null;
         this._ctx = null;
       }
     };
+
+    if (scrollUpMs > 0) {
+      return new Promise(resolve => {
+        let done = false;
+        const finish = () => {
+          if (done) return;
+          done = true;
+          cleanup();
+          resolve();
+        };
+        overlay.style.transition = `transform ${scrollUpMs}ms cubic-bezier(0.22, 1, 0.36, 1)`;
+        overlay.style.transform = 'translateY(0)';
+        overlay.style.pointerEvents = 'none';
+        overlay.style.willChange = 'transform';
+        overlay.classList.add('level-map-overlay--slide-up');
+        requestAnimationFrame(() => {
+          overlay.style.transform = scrollDirection === 'down' ? 'translateY(100%)' : 'translateY(-100%)';
+        });
+        const timer = setTimeout(finish, scrollUpMs + 80);
+        overlay.addEventListener('transitionend', () => {
+          clearTimeout(timer);
+          finish();
+        }, { once: true });
+      });
+    }
 
     if (fadeMs <= 0) {
       cleanup();
@@ -234,9 +269,12 @@ export class LevelMap {
 
     const { parentMap, nodeMap } = layout;
     const padX = Math.max(60, BIG_R + 20);
-    const { positions: rawPos, width, height: rawH } = toPixelPositions(
+    const { positions: rawPos, width: rawW, height: rawH } = toPixelPositions(
       layout, nodes, { rowH: ROW_GAP, colW: COL_GAP, padX, padY: PAD_TOP }
     );
+    const minCanvasW = Math.max(0, Math.round(this.boundsRect?.width || 0));
+    const width = Math.max(rawW, minCanvasW);
+    const xOffset = Math.round((width - rawW) / 2);
     const height = rawH + PAD_BOTTOM + BIG_R * 2;
 
     // Big vs small node determination
@@ -256,6 +294,7 @@ export class LevelMap {
       const pos = rawPos.get(n.id);
       if (pos) {
         pos.big = bigSet.has(n.id);
+        pos.x += xOffset;
         this.nodePositions.set(n.id, pos);
       }
     }
@@ -352,10 +391,18 @@ export class LevelMap {
       }
     });
 
+    this._backgroundCanvas = document.createElement('canvas');
+    this._backgroundCanvas.className = 'level-map-background';
+    this._backgroundCtx = this._backgroundCanvas.getContext('2d');
+    this._overlay.appendChild(this._backgroundCanvas);
+
     // Scroll container
     this._scrollEl = document.createElement('div');
     this._scrollEl.className = 'level-map-scroll';
     this._scrollEl.style.paddingTop = (10 + this.contentInsetTop) + 'px';
+    if (this.boundsRect?.width) {
+      this._scrollEl.style.setProperty('--level-map-content-width', Math.round(this.boundsRect.width) + 'px');
+    }
 
     // Canvas
     const dpr = window.devicePixelRatio || 1;
@@ -375,6 +422,7 @@ export class LevelMap {
     this._overlay.appendChild(this._scrollEl);
     parent.appendChild(this._overlay);
     this._overlay.classList.add('visible');
+    this._renderBackground();
   }
 
   // ─── Rendering ───────────────────────────────────────────
@@ -396,6 +444,55 @@ export class LevelMap {
     for (const node of sorted) {
       const pos = this.nodePositions.get(node.id);
       if (pos) this._drawNode(ctx, node, pos);
+    }
+  }
+
+  _renderBackground() {
+    const canvas = this._backgroundCanvas;
+    const ctx = this._backgroundCtx;
+    if (!canvas || !ctx) return;
+    const rect = this._overlay?.getBoundingClientRect?.() || this.boundsRect || {};
+    const w = Math.max(1, Math.ceil(rect.width || this.boundsRect?.width || this.canvasW || 1));
+    const h = Math.max(1, Math.ceil(rect.height || this.boundsRect?.height || this.canvasH || 1));
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
+    const pixelW = Math.max(1, Math.round(w * dpr));
+    const pixelH = Math.max(1, Math.round(h * dpr));
+    if (canvas.width !== pixelW || canvas.height !== pixelH) {
+      canvas.width = pixelW;
+      canvas.height = pixelH;
+      canvas.style.width = w + 'px';
+      canvas.style.height = h + 'px';
+    }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+
+    const img = this._assets.background;
+    if (!img) {
+      ctx.fillStyle = '#0E0E0E';
+      ctx.fillRect(0, 0, w, h);
+      return;
+    }
+
+    this._drawVerticalBackgroundTiles(ctx, img, w, h);
+  }
+
+  _drawVerticalBackgroundTiles(ctx, img, w, h) {
+    const sourceW = Math.max(1, img.naturalWidth || img.width || 1);
+    const sourceH = Math.max(1, img.naturalHeight || img.height || 1);
+    const tileW = Math.max(1, Math.ceil(w));
+    const tileH = Math.max(1, Math.ceil(tileW * sourceH / sourceW));
+    const x = Math.round((w - tileW) / 2);
+
+    const drawTile = (y, flipY) => {
+      ctx.save();
+      ctx.translate(x, y + (flipY ? tileH : 0));
+      ctx.scale(1, flipY ? -1 : 1);
+      ctx.drawImage(img, 0, 0, tileW, tileH);
+      ctx.restore();
+    };
+
+    for (let y = 0, row = 0; y < h; y += tileH, row++) {
+      drawTile(y, row % 2 === 1);
     }
   }
 
@@ -513,26 +610,25 @@ export class LevelMap {
     // Portrait
     const portrait = this._portraits.get(node.id);
     if (portrait) {
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(x, y, r - 3, 0, Math.PI * 2);
-      ctx.clip();
-
-      const pr = r - 3;
+      const maxW = r * 1.48;
+      const maxH = r * 1.86;
       const aspect = portrait.width / portrait.height;
-      let dw = pr * 2, dh = dw / aspect;
-      if (dh < pr * 2) { dh = pr * 2; dw = dh * aspect; }
-      ctx.drawImage(portrait, x - dw / 2, y - dh / 2, dw, dh);
+      let dw = maxW;
+      let dh = dw / aspect;
+      if (dh > maxH) {
+        dh = maxH;
+        dw = dh * aspect;
+      }
+      const bottom = y + r - 5;
+      ctx.drawImage(portrait, x - dw / 2, bottom - dh, dw, dh);
 
       // Darken for future levels
       if (state === 'next') {
         ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
         ctx.beginPath();
-        ctx.arc(x, y, pr, 0, Math.PI * 2);
+        ctx.arc(x, y, r - 3, 0, Math.PI * 2);
         ctx.fill();
       }
-
-      ctx.restore();
     }
 
     // Border ring

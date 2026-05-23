@@ -15,6 +15,10 @@ import {
   isBilliardPegType
 } from './billiard-mode.js';
 import {
+  DestructionPegSystem,
+  ensureLevelDestruction
+} from './destruction-mode.js';
+import {
   MULTIBALL_DEFAULT_SPAWN_COUNT,
   normalizeMultiballSpawnCount
 } from './multiball-settings.js';
@@ -63,10 +67,11 @@ const PERFORMANCE_CAP30_STABILITY_SPAN_MS = 4.5;
 const PERFORMANCE_CAP30_MAX_WORK_MS = 18;
 const PERFORMANCE_CAP30_MAX_WORK_RATIO = 0.68;
 const SURVIVAL_GAMBLE_BALLS_PER_PEG = 2;
-const LAST_PEG_SLOWMO_DROP_MS = 110;
-const LAST_PEG_SLOWMO_HOLD_MS = 90;
+const LAST_PEG_SLOWMO_DROP_MS = 140;
+const LAST_PEG_SLOWMO_HOLD_MS = 150;
 const LAST_PEG_SLOWMO_RECOVER_MS = 760;
-const LAST_PEG_SLOWMO_MIN_SCALE = 0.18;
+const LAST_PEG_SLOWMO_MIN_SCALE = 0.12;
+const LAST_PEG_SLOWMO_STRENGTH_BOOST = 1.35;
 const LAST_PEG_SLOWMO_TOTAL_MS = LAST_PEG_SLOWMO_DROP_MS + LAST_PEG_SLOWMO_HOLD_MS + LAST_PEG_SLOWMO_RECOVER_MS;
 const BILLIARD_SIDE_LAUNCH_POWER_SCALE = 1.75;
 const BILLIARD_BOTTOM_LAUNCH_POWER_SCALE = 2;
@@ -152,6 +157,7 @@ export class Game {
     this.hitPegTimedClearEnabled = false;
     this.hitPegClearDelayMs = normalizeHitPegClearDelayMs(undefined);
     this.pendingHitPegClears = new Map();
+    this.pendingDestructionPileClears = new Map();
     this.levelElapsedMs = 0;
     this.initialOrangePegs = 0;
     this.removedOrangePegs = 0;
@@ -203,6 +209,9 @@ export class Game {
     this.billiardLauncherIndex = 0;
     this.initialBilliardTargets = 0;
     this.billiardSystem = new BilliardPegSystem(this.billiardSettings);
+    this.destructionSettings = ensureLevelDestruction({});
+    this.destructionSystem = new DestructionPegSystem(this.destructionSettings);
+    this.syncDestructionContactSettings();
     this.debugDrag = {
       enabled: false,
       dragging: false
@@ -486,7 +495,11 @@ export class Game {
     const displayInitialBalls = survivalMode
       ? (waitingForSurvivalSpinBalls ? 0 : Math.max(this.initialGambleBallCount, this.gambleBalls, 0))
       : this.initialBallCount;
-    const state = this._pendingEndResult?.result || this.state;
+    const showPendingResult = !!(
+      this._pendingEndResult?.readyToResolve
+      && !this._isLastPegSlowmoActive()
+    );
+    const state = showPendingResult ? this._pendingEndResult.result : this.state;
     return {
       state,
       ballsLeft: displayBallsLeft,
@@ -576,7 +589,8 @@ export class Game {
 
   _getFinalPegSlowmoStrength() {
     const value = this.endSequenceConfig?.finalPegSlowmoStrength;
-    return clamp01(Number.isFinite(value) ? value : 1);
+    const baseStrength = Number.isFinite(value) ? value : 1;
+    return clamp01(baseStrength * LAST_PEG_SLOWMO_STRENGTH_BOOST);
   }
 
   _startLastPegSlowmo() {
@@ -1170,6 +1184,15 @@ export class Game {
     return !!this.billiardPhase;
   }
 
+  isDestructionMode() {
+    return !!(this.destructionSystem && this.destructionSystem.isEnabled());
+  }
+
+  syncDestructionContactSettings() {
+    if (!this.physics || typeof this.physics.setDestructionContactSettings !== 'function') return;
+    this.physics.setDestructionContactSettings(this.isDestructionMode() ? this.destructionSettings : null);
+  }
+
   getBilliardTargetsLeft() {
     if (!Array.isArray(this.pegs)) return 0;
     return this.pegs.filter(peg => isBilliardPegType(peg?.type)).length;
@@ -1461,6 +1484,32 @@ export class Game {
     }
     ball.yoyoEligible = false;
     ball.yoyoPerkBound = false;
+    this.clearYoyoLossProtection(ball);
+  }
+
+  clearYoyoLossProtection(ball) {
+    if (!ball || !ball._yoyoLossProtected) return;
+    ball.lossYMax = null;
+    delete ball._yoyoLossProtected;
+  }
+
+  syncYoyoLossProtection(retractStartY = null) {
+    if (!Array.isArray(this.balls)) return;
+    const baseLossY = Number.isFinite(this.physics?.ballLossY) ? this.physics.ballLossY : this.canvas.height + 50;
+    const triggerY = Number.isFinite(retractStartY) ? retractStartY : baseLossY;
+    const protectedLossY = Math.max(
+      baseLossY + 12,
+      triggerY + Math.max(180, this.canvas.height * 0.45)
+    );
+    for (const ball of this.balls) {
+      if (!ball) continue;
+      if (ball.active && ball.yoyoEligible === true) {
+        ball.lossYMax = protectedLossY;
+        ball._yoyoLossProtected = true;
+      } else {
+        this.clearYoyoLossProtection(ball);
+      }
+    }
   }
 
   consumeYoyoPerkUseOnBind(ball) {
@@ -1480,6 +1529,7 @@ export class Game {
       if (!ball || !ball.yoyoPerkBound) continue;
       ball.yoyoEligible = false;
       ball.yoyoPerkBound = false;
+      this.clearYoyoLossProtection(ball);
     }
   }
 
@@ -1502,6 +1552,7 @@ export class Game {
       ball.yoyoEligible = false;
       ball.yoyoPerkBound = false;
       ball.yoyoPerkConsumed = false;
+      this.clearYoyoLossProtection(ball);
       needsRefresh = true;
     }
 
@@ -1537,9 +1588,15 @@ export class Game {
 
   finishDeepFreezeShot() {
     const wasActive = this.deepFreezeShotActive || this.deepFreezeSystem.isActive();
+    const destructionWakeCount = wasActive && this.isDestructionMode()
+      ? this.destructionSystem.wakeDeepFreezeShiftedPegs(this.pegs)
+      : 0;
+    if (destructionWakeCount > 0) {
+      this.suspendDestructionPhysicsOwnedAnimations();
+    }
     const moved = wasActive ? this.deepFreezeSystem.finishShot(this.pegs) : false;
     this.deepFreezeShotActive = false;
-    return moved;
+    return moved || destructionWakeCount > 0;
   }
 
   armUltraAimForLaunch() {
@@ -1695,6 +1752,30 @@ export class Game {
     return activated;
   }
 
+  wakeDestructionPegFromUltraAimLaunch(peg, ball, angle, launchPower, anchorX, anchorY) {
+    if (!this.isDestructionMode() || !peg || !ball) return false;
+    const vx = Math.cos(angle) * launchPower;
+    const vy = Math.sin(angle) * launchPower;
+    this.destructionSystem.syncBodies(this.pegs, this.groups);
+    const woke = this.destructionSystem.applyBallImpact(
+      peg,
+      {
+        ...ball,
+        x: Number.isFinite(anchorX) ? anchorX : peg.x,
+        y: Number.isFinite(anchorY) ? anchorY : peg.y,
+        vx,
+        vy
+      },
+      {
+        vx,
+        vy,
+        speed: Math.hypot(vx, vy)
+      }
+    );
+    if (woke) this.suspendDestructionBodyAnimation(peg);
+    return woke;
+  }
+
   prepareUltraAimFollowUpBall(ball, anchorX, anchorY, anchorPeg = null) {
     if (!ball) return;
     this.armBombPerkForLaunch();
@@ -1730,6 +1811,7 @@ export class Game {
     const launchPower = this.getUltraAimLaunchPower(anchorY);
 
     this.activateUltraAimHeldPeg(ball, { allowMultiball: !qte.skipMultiballOnRelease });
+    this.wakeDestructionPegFromUltraAimLaunch(peg, ball, angle, launchPower, anchorX, anchorY);
 
     ball.ultraAimStuck = false;
     ball.ultraAimQteBall = false;
@@ -1794,6 +1876,18 @@ export class Game {
       spread: 3.2
     });
     if (!Array.isArray(shockwave.targets) || shockwave.targets.length === 0) return 0;
+
+    if (this.isDestructionMode()) {
+      this.destructionSystem.syncBodies(this.pegs, this.groups);
+      this.destructionSystem.applyShockwaveTargets(
+        shockwave.targets,
+        shockwave.centerX,
+        shockwave.centerY,
+        shockwave.radius,
+        sourceBall,
+        this.destructionSettings?.bombImpulse
+      );
+    }
 
     let activatedCount = 0;
     for (const peg of shockwave.targets) {
@@ -2030,8 +2124,13 @@ export class Game {
     ) {
       this.setEndSequenceConfig(levelData.visuals.endSequence);
     }
+    const destructionSettings = ensureLevelDestruction(levelData);
     const billiardSettings = ensureLevelBilliard(levelData);
-    if (billiardSettings.enabled) {
+    if (destructionSettings.enabled) {
+      levelData.survival = { ...(levelData.survival || {}), enabled: false };
+      levelData.billiard = { ...(levelData.billiard || {}), enabled: false };
+      billiardSettings.enabled = false;
+    } else if (billiardSettings.enabled) {
       levelData.survival = { ...(levelData.survival || {}), enabled: false };
     }
     const survivalSettings = ensureLevelSurvival(levelData, this.canvas.height);
@@ -2042,6 +2141,10 @@ export class Game {
     this.billiardSettings = billiardSettings;
     this.billiardSystem.configure(billiardSettings);
     this.billiardSystem.clear(this.pegs);
+    this.destructionSettings = destructionSettings;
+    this.destructionSystem.configure(destructionSettings);
+    this.destructionSystem.reset();
+    this.syncDestructionContactSettings();
     this.yoyoPerkUsesRemaining = 0;
     this.finishDeepFreezeShot();
     this.resetUltraAimRuntime();
@@ -2080,6 +2183,7 @@ export class Game {
     });
     this.physics.setPegs(this.pegs);
     this.animator.loadFromLevel(this.pegs, this.groups);
+    this.destructionSystem.reset(this.pegs, this.groups);
     this.billiardPhase = !!(billiardSettings.enabled && this.getBilliardTargetsLeft() > 0);
     this.billiardLauncherIndex = 0;
     this.initialBilliardTargets = this.billiardPhase ? this.getBilliardTargetsLeft() : 0;
@@ -2113,6 +2217,7 @@ export class Game {
     this.hitPegTimedClearEnabled = hitPegClearSettings.enabled;
     this.hitPegClearDelayMs = hitPegClearSettings.delayMs;
     this.pendingHitPegClears = new Map();
+    this.pendingDestructionPileClears = new Map();
     this.levelElapsedMs = 0;
     this.gambleBalls = 0;
     this.initialGambleBallCount = 0;
@@ -2157,6 +2262,11 @@ export class Game {
 
   hasActiveBalls() {
     return Array.isArray(this.balls) && this.balls.some(ball => ball && ball.active);
+  }
+
+  shouldDeferWinUntilTurnEnd() {
+    if (this.isSurvivalMode() || this.isBilliardPhase()) return false;
+    return this.state === 'playing' && this.hasActiveBalls();
   }
 
   getLauncherBall() {
@@ -2225,11 +2335,11 @@ export class Game {
       kind: 'victorySplash',
       x: peg.x,
       y: peg.y,
-      radius: Math.max(132, PHYSICS_CONFIG.pegRadius * 13.5),
-      strength: 3.4,
-      burst: 2.8,
+      radius: Math.max(156, PHYSICS_CONFIG.pegRadius * 15.5),
+      strength: 4.1,
+      burst: 3.25,
       swirl: 1.35,
-      spread: 3.6,
+      spread: 4.2,
       speed: Number.isFinite(sourceBall?.vx) || Number.isFinite(sourceBall?.vy)
         ? Utils.magnitude(sourceBall?.vx || 0, sourceBall?.vy || 0)
         : 0,
@@ -2420,6 +2530,53 @@ export class Game {
     return this.hasPegBeenActivated(peg.id);
   }
 
+  refreshDestructionAfterPegRemoval() {
+    if (!this.isDestructionMode()) return false;
+    this.animator.loadFromLevel(this.pegs, this.groups);
+    this.destructionSystem.markStructureDirty();
+    this.destructionSystem.syncBodies(this.pegs, this.groups);
+    this.destructionSystem.wakeDynamicBodies?.();
+    this.suspendDestructionPhysicsOwnedAnimations();
+    this.physics.markPegGridDirty?.();
+    return true;
+  }
+
+  suspendDestructionBodyAnimation(pegOrBody) {
+    if (!this.isDestructionMode() || !this.animator) return false;
+    const body = pegOrBody?.pegIds
+      ? pegOrBody
+      : this.destructionSystem.getBodyForPeg(pegOrBody);
+    if (!body || !Array.isArray(body.pegIds)) return false;
+    for (const pegId of body.pegIds) {
+      this.animator.suspendPeg(pegId);
+    }
+    return body.pegIds.length > 0;
+  }
+
+  suspendDestructionPhysicsOwnedAnimations() {
+    if (!this.isDestructionMode() || !this.animator) return false;
+    this.destructionSystem.syncBodies(this.pegs, this.groups);
+    const pegIds = this.destructionSystem.getPhysicsOwnedPegIds?.() || [];
+    if (pegIds.length === 0) return false;
+    for (const pegId of pegIds) {
+      this.animator.suspendPeg(pegId);
+    }
+    return true;
+  }
+
+  syncDestructionAnimatedBodies(dt) {
+    if (!this.isDestructionMode() || !this.animator) return false;
+    this.destructionSystem.syncBodies(this.pegs, this.groups);
+    const moved = this.destructionSystem.syncAnimatedBodies(
+      this.animator.getAnimatedPegIds(),
+      dt
+    );
+    if (moved) {
+      this.physics.markPegGridDirty?.();
+    }
+    return moved;
+  }
+
   processTimedHitPegClears() {
     if (!this.hitPegTimedClearEnabled) return false;
     if (!this.pendingHitPegClears || this.pendingHitPegClears.size === 0) return false;
@@ -2435,6 +2592,7 @@ export class Game {
     this.pegs = this.pegs.filter(peg => {
       if (!dueIds.has(peg.id)) return true;
       this.pendingHitPegClears.delete(peg.id);
+      this.pendingDestructionPileClears.delete(peg.id);
       if (!this.isPegTimedClearEligible(peg)) return true;
       if (this.isOrangePeg(peg)) {
         this.removedOrangePegs++;
@@ -2452,7 +2610,117 @@ export class Game {
     this.renderer.queuePegExitAnimations?.(removedPegs);
     this.physics.setPegs(this.pegs);
     this.syncPhysicsHitPegState();
+    this.refreshDestructionAfterPegRemoval();
     this.emitUiStateIfChanged(true, 'timed-hit-peg-clear');
+    return true;
+  }
+
+  scheduleDestructionPileClear(peg, delayMs = null) {
+    if (!this.isDestructionMode()) return false;
+    if (!peg?.id || !this.isPegTimedClearEligible(peg)) return false;
+    if (!(this.pendingDestructionPileClears instanceof Map)) {
+      this.pendingDestructionPileClears = new Map();
+    }
+    const rawDelay = Number.isFinite(delayMs)
+      ? delayMs
+      : (this.destructionSettings?.stuckPileClearDelayMs ?? 220);
+    const clearAtMs = this.levelElapsedMs + Math.max(0, rawDelay);
+    const current = this.pendingDestructionPileClears.get(peg.id);
+    if (!Number.isFinite(current) || clearAtMs < current) {
+      this.pendingDestructionPileClears.set(peg.id, clearAtMs);
+    }
+    return true;
+  }
+
+  maybeScheduleDestructionPileClear(ball, history, bounds) {
+    if (!this.isDestructionMode() || !ball || !bounds) return false;
+    if (!Array.isArray(history) || history.length < 2) return false;
+    const windowMs = history[history.length - 1].t - history[0].t;
+    if (windowMs < 650) return false;
+    if (bounds.maxX - bounds.minX > 78 || bounds.maxY - bounds.minY > 78) return false;
+
+    const touchedPegIds = ball.id ? this.ballContactPegIds.get(ball.id) : null;
+    const touchedGroupIds = new Set();
+    const touchedBezierGroupIds = new Set();
+    if (touchedPegIds && touchedPegIds.size > 0) {
+      for (const peg of this.pegs) {
+        if (!touchedPegIds.has(peg.id)) continue;
+        if (peg.groupId != null) touchedGroupIds.add(peg.groupId);
+        if (peg.bezierGroupId != null) touchedBezierGroupIds.add(peg.bezierGroupId);
+      }
+    }
+
+    const radius = 92;
+    const candidates = [];
+    for (const peg of this.pegs) {
+      if (!this.isPegTimedClearEligible(peg)) continue;
+      const dx = peg.x - ball.x;
+      const dy = peg.y - ball.y;
+      const distance = Math.hypot(dx, dy);
+      const touched = !!(touchedPegIds && (
+        touchedPegIds.has(peg.id)
+        || (peg.groupId != null && touchedGroupIds.has(peg.groupId))
+        || (peg.bezierGroupId != null && touchedBezierGroupIds.has(peg.bezierGroupId))
+      ));
+      if (!touched && distance > radius) continue;
+      candidates.push({ peg, distance, touched });
+    }
+
+    const touchedCount = candidates.reduce((sum, item) => sum + (item.touched ? 1 : 0), 0);
+    if (candidates.length < 3 && touchedCount === 0) return false;
+
+    candidates.sort((a, b) => {
+      if (a.touched !== b.touched) return a.touched ? -1 : 1;
+      return a.distance - b.distance;
+    });
+
+    const delay = this.destructionSettings?.stuckPileClearDelayMs ?? 220;
+    let scheduled = 0;
+    for (const item of candidates.slice(0, 8)) {
+      if (this.scheduleDestructionPileClear(item.peg, delay)) scheduled++;
+    }
+    return scheduled > 0;
+  }
+
+  processDestructionPileClears() {
+    if (!this.isDestructionMode()) return false;
+    if (!(this.pendingDestructionPileClears instanceof Map) || this.pendingDestructionPileClears.size === 0) return false;
+
+    const dueIds = new Set();
+    for (const [pegId, clearAtMs] of this.pendingDestructionPileClears) {
+      if (clearAtMs <= this.levelElapsedMs) dueIds.add(pegId);
+    }
+    if (dueIds.size === 0) return false;
+
+    let removed = false;
+    const removedPegs = [];
+    this.pegs = this.pegs.filter(peg => {
+      if (!dueIds.has(peg.id)) return true;
+      this.pendingDestructionPileClears.delete(peg.id);
+      this.pendingHitPegClears.delete(peg.id);
+      if (!this.isPegTimedClearEligible(peg)) return true;
+      if (this.isOrangePeg(peg)) this.removedOrangePegs++;
+      removedPegs.push(peg);
+      removed = true;
+      return false;
+    });
+
+    for (const id of dueIds) {
+      this.pendingDestructionPileClears.delete(id);
+    }
+    if (!removed) return false;
+
+    this.renderer.queuePegExitAnimations?.(removedPegs);
+    this.physics.setPegs(this.pegs);
+    this.syncPhysicsHitPegState();
+    this.refreshDestructionAfterPegRemoval();
+
+    if (!this.isSurvivalMode() && !this.isBilliardPhase() && this.getOrangePegsLeft() === 0) {
+      this._queuePendingEndResult('won', { readyToResolve: !this.shouldDeferWinUntilTurnEnd() });
+      this._maybeFinalizePendingEndResult();
+    }
+
+    this.emitUiStateIfChanged(true, 'destruction-pile-clear');
     return true;
   }
 
@@ -2716,6 +2984,7 @@ export class Game {
     this.shotsFired = 0;
     this._turnBucketCatchCount = 0;
     this.pendingHitPegClears.clear();
+    this.pendingDestructionPileClears.clear();
     this.removedOrangePegs = 0;
     this.initialOrangePegs = this.getTotalOrangePegs();
     this.bucketCatchLight = 0;
@@ -2813,6 +3082,7 @@ export class Game {
     this.hitPegIds = [...this.hitPegIds, ...this.turnHitPegIds];
     for (const id of this.turnHitPegIds) {
       this.pendingHitPegClears.delete(id);
+      this.pendingDestructionPileClears.delete(id);
     }
 
     // Count orange pegs about to be removed (for health bar tracking)
@@ -2837,6 +3107,7 @@ export class Game {
     this.renderer.queuePegExitAnimations?.(removedPegs);
     this.physics.setPegs(this.pegs);
     this.syncPhysicsHitPegState();
+    this.refreshDestructionAfterPegRemoval();
 
     if (this.isSurvivalMode()) {
       if (this.getSurvivalTargetsLeft(true) === 0) {
@@ -2940,6 +3211,131 @@ export class Game {
     return 0.22 + eased * 0.78;
   }
 
+  stepDestructionPegs(dt, worldHeight) {
+    if (!this.isDestructionMode()) return false;
+    if (this.state === 'won' || this.state === 'lost') return false;
+    if (this.deepFreezeSystem.isActive()) return false;
+
+    const result = this.destructionSystem.step(this.pegs, this.groups, dt, {
+      width: this.canvas.width,
+      height: worldHeight,
+      topY: Number.isFinite(this.physics.ballTopY) ? this.physics.ballTopY : 0,
+      lossY: Number.isFinite(this.physics.ballLossY) ? this.physics.ballLossY : worldHeight + 70,
+      bucket: this.physics.bucket,
+      bucketEnabled: this.physics.bucketEnabled,
+      flipperRects: typeof this.physics.getFlipperKinematicRects === 'function'
+        ? this.physics.getFlipperKinematicRects()
+        : []
+    });
+
+    if (result?.moved) {
+      this.physics.markPegGridDirty();
+    }
+    let changed = !!result?.moved;
+    if (result?.bumperHits?.length > 0) {
+      changed = this.handleDestructionBumperHits(result.bumperHits) || changed;
+    }
+    if (result?.portalHits?.length > 0) {
+      changed = this.handleDestructionPortalHits(result.portalHits) || changed;
+    }
+    if (result?.fallenPegs?.length > 0) {
+      changed = this.handleDestructionFallenPegs(result.fallenPegs) || changed;
+    }
+    return changed;
+  }
+
+  handleDestructionBumperHits(events = []) {
+    if (!Array.isArray(events) || events.length === 0) return false;
+    const seen = new Set();
+    let activatedAny = false;
+
+    for (const event of events) {
+      const peg = event?.peg;
+      if (!peg?.id || seen.has(peg.id)) continue;
+      seen.add(peg.id);
+      if (!this.pegs.includes(peg)) continue;
+      if (peg.type !== 'bumper') continue;
+
+      peg._bumperHitScale = 1.3;
+      this.animator.notifyHit(peg.id);
+      const activated = this.activatePeg(peg, null, { allowMultiball: true });
+      if (activated) {
+        activatedAny = true;
+        this.queueLiquidPegSplash(peg, event.impact);
+      }
+    }
+
+    if (activatedAny) {
+      this.emitUiStateIfChanged(true, 'destruction-bumper-hit');
+    }
+    return activatedAny;
+  }
+
+  handleDestructionPortalHits(events = []) {
+    if (!Array.isArray(events) || events.length === 0) return false;
+    let pulsed = false;
+    for (const event of events) {
+      const entry = event?.entry;
+      const exit = event?.exit;
+      if (entry) {
+        this.triggerPortalPulse(entry);
+        this.animator.notifyHit(entry.id);
+        pulsed = true;
+      }
+      if (exit) {
+        this.triggerPortalPulse(exit);
+        this.animator.notifyHit(exit.id);
+        pulsed = true;
+      }
+    }
+    return pulsed;
+  }
+
+  handleDestructionFallenPegs(fallenEvents = []) {
+    if (!Array.isArray(fallenEvents) || fallenEvents.length === 0) return false;
+    const removeIds = new Set();
+    const removedPegs = [];
+
+    for (const event of fallenEvents) {
+      const peg = event?.peg;
+      if (!peg || !peg.id || removeIds.has(peg.id)) continue;
+      if (!this.pegs.includes(peg)) continue;
+
+      const activated = this.activatePeg(peg, null, { allowMultiball: false });
+      if (activated) {
+        this.queueLiquidPegSplash(peg, {
+          vx: 0,
+          vy: Math.max(1, this.destructionSettings?.gravityY || 0),
+          speed: 0,
+          normalX: 0,
+          normalY: -1
+        });
+      }
+      if (this.isOrangePeg(peg)) {
+        this.removedOrangePegs++;
+      }
+      removeIds.add(peg.id);
+      removedPegs.push(peg);
+      this.pendingHitPegClears.delete(peg.id);
+      this.pendingDestructionPileClears.delete(peg.id);
+    }
+
+    if (removeIds.size === 0) return false;
+    this.pegs = this.pegs.filter(peg => !removeIds.has(peg.id));
+    this.renderer.queuePegExitAnimations?.(removedPegs);
+    this.physics.setPegs(this.pegs);
+    this.syncPhysicsHitPegState();
+    this.refreshDestructionAfterPegRemoval();
+
+    if (!this.isSurvivalMode() && !this.isBilliardPhase() && this.getOrangePegsLeft() === 0) {
+      this._queuePendingEndResult('won', { readyToResolve: !this.shouldDeferWinUntilTurnEnd() });
+      this._maybeFinalizePendingEndResult();
+    }
+
+    this.emitUiStateIfChanged(true, 'destruction-peg-fell');
+    return true;
+  }
+
   update(deltaTime) {
     // Animate pegs continuously (idle, aiming, playing) so the level feels alive
     const dt = Math.min((deltaTime || 16.67) / 1000, 0.1);
@@ -2949,7 +3345,9 @@ export class Game {
     }
     this.updatePortalPulses(dt);
     const worldHeight = this.isSurvivalMode() ? this.survivalRuntime.getWorldHeight() : this.canvas.height;
+    this.suspendDestructionPhysicsOwnedAnimations();
     this.animator.tick(this.pegs, dt, { width: this.canvas.width, height: worldHeight });
+    this.syncDestructionAnimatedBodies(dt);
     if (this.deepFreezeSystem.isActive()) {
       this.deepFreezeSystem.syncPegPositions(this.pegs, this.animator.getAnimatedPegIds());
     }
@@ -2967,6 +3365,7 @@ export class Game {
     const retractStartY = this.physics.bucketEnabled && this.physics.bucket
       ? this.physics.bucket.y - this.physics.bucket.height / 2 - getBallRadius() - 24
       : this.physics.ballLossY - Math.max(60, this.canvas.height * 0.12);
+    this.syncYoyoLossProtection(retractStartY);
 
     if (this.debugDrag.enabled) {
       // Debug mode: manual ball drag, no gravity/integration step.
@@ -2999,11 +3398,13 @@ export class Game {
       this.physics.updateBucket(dt);
       // Keep flippers at rest position when not playing
       this.physics.updateFlippers(dt);
+      this.stepDestructionPegs(dt, worldHeight);
       // Recalculate trajectory every frame during aiming so it reflects
       // animated peg positions in real-time (not just on mouse move)
       if (this.isAimingState()) {
         this.updateTrajectory();
       }
+      this.processDestructionPileClears();
       this.processTimedHitPegClears();
       this.checkSurvivalEndConditions();
       return;
@@ -3025,7 +3426,6 @@ export class Game {
         }
       }
     }
-    const bombContact = this.consumeBombPerkOnFirstContact(result.contactEvents);
     let capturedUltraAimBallId = null;
     let capturedUltraAimPegId = null;
     if (this.ultraAimShotActive && !this.isUltraAimQteActive()) {
@@ -3038,6 +3438,20 @@ export class Game {
         capturedUltraAimPegId = captureEvent.peg?.id || null;
       }
     }
+    if (this.isDestructionMode()) {
+      this.destructionSystem.syncBodies(this.pegs, this.groups);
+      for (const contact of result.contactEvents) {
+        const isCapturedUltraAimContact = capturedUltraAimBallId
+          && capturedUltraAimPegId
+          && contact.ball?.id === capturedUltraAimBallId
+          && contact.peg?.id === capturedUltraAimPegId;
+        if (isCapturedUltraAimContact) continue;
+        if (this.destructionSystem.applyBallImpact(contact.peg, contact.ball, contact.impact)) {
+          this.suspendDestructionBodyAnimation(contact.peg);
+        }
+      }
+    }
+    const bombContact = this.consumeBombPerkOnFirstContact(result.contactEvents);
 
     // Handle newly hit pegs
     for (const event of result.hitEvents) {
@@ -3103,6 +3517,7 @@ export class Game {
         this.triggerPegViaDeepFreeze(event.targetPeg, event.sourceBall);
       }
     }
+    this.stepDestructionPegs(dt, worldHeight);
     this.syncDynamicYoyoAnchors();
     const yoyoReleaseEvents = this.yoyoThread.step(this.balls, this.pegs, dt, { retractStartY });
     this.applyYoyoReleaseEvents(yoyoReleaseEvents);
@@ -3119,6 +3534,7 @@ export class Game {
     if (result.ballsRemaining > 0) {
       this.checkStuckBalls();
     }
+    this.processDestructionPileClears();
     this.processTimedHitPegClears();
 
     if (this.checkSurvivalEndConditions()) {
@@ -3185,11 +3601,15 @@ export class Game {
         history.shift();
       }
 
-      // Need at least 2.5 seconds of data
       if (history.length < 2) continue;
+      const bounds = this.getStuckBallHistoryBounds(history, ball);
+      if (this.isDestructionMode()) {
+        this.maybeScheduleDestructionPileClear(ball, history, bounds);
+      }
+
+      // Need at least 2.5 seconds of data for the older hard release fallback.
       if (now - history[0].t < 2500) continue;
 
-      const bounds = this.getStuckBallHistoryBounds(history, ball);
       if (bounds && bounds.maxX - bounds.minX < 180 && bounds.maxY - bounds.minY < 180) {
         const releasedPeg = this.releaseStuckBall(ball, history, releasedPegIds);
         if (releasedPeg) releasedPegIds.add(releasedPeg.id);
@@ -3338,6 +3758,8 @@ export class Game {
     this.pegs = this.pegs.filter(p => p.id !== lowestPeg.id);
     this.physics.setPegs(this.pegs);
     this.syncPhysicsHitPegState();
+    this.pendingDestructionPileClears.delete(lowestPeg.id);
+    this.refreshDestructionAfterPegRemoval();
 
     // Reset this ball's history — if still stuck, detection re-triggers after another 2.5s
     if (ball?.id) {
@@ -3570,7 +3992,8 @@ export class Game {
 
     const _t0 = performance.now();
 
-    const useFixedStep = this.state === 'playing';
+    const useFixedStep = this.state === 'playing'
+      || (this.isDestructionMode() && this.destructionSystem.needsFixedStep());
     let physicsSteps = 0;
     if (useFixedStep) {
       const maxAccum = this.fixedStepMs * this.maxFrameSteps;

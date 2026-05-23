@@ -3,7 +3,7 @@
 .level-map-overlay {
   position: absolute;
   inset: 0;
-  z-index: 1;
+  z-index: 600;
   background: #0E0E0E;
   border-radius: inherit;
   display: flex;
@@ -12,6 +12,21 @@
   opacity: 1;
   pointer-events: auto;
   transition: none;
+  overflow: hidden;
+}
+
+.level-map-background {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.level-map-overlay--slide-up {
+  -webkit-mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 76px), transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 76px), transparent 100%);
 }
 
 .level-map-overlay.visible {
@@ -20,15 +35,24 @@
 }
 
 .level-map-scroll {
+  position: relative;
+  z-index: 1;
   flex: 1;
   overflow-y: auto;
-  overflow-x: auto;
-  width: 100%;
+  overflow-x: hidden;
+  width: min(100%, var(--level-map-content-width, 100%));
   display: flex;
   justify-content: center;
   padding: 10px 0 20px;
-  scrollbar-gutter: stable both-edges;
+  scrollbar-gutter: auto;
   -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  overscroll-behavior: contain;
+}
+
+.level-map-scroll::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 .level-map-canvas {

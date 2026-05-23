@@ -337,6 +337,10 @@ export class Renderer {
     bucketImg.onload = () => { this._bucketImg = bucketImg; };
     bucketImg.src = 'visuals/bucket.webp';
 
+    // Bucket catch particle system
+    this._bucketParticles = [];
+    this._prevBucketFlash = 0;
+
     this._billiardCannonImages = {
       top: null,
       circle: null
@@ -2241,6 +2245,141 @@ export class Renderer {
     }
   }
 
+  _bucketMouthGeometry(bucket) {
+    const { x, y, width, height } = bucket;
+    const img = this._bucketImg;
+    const hasBucketAsset = Boolean(img && img.width > 0 && img.height > 0);
+    let mouthX = x, mouthY, mouthHalfW;
+    if (hasBucketAsset) {
+      const imgAspect = img.width / img.height;
+      const drawW = width;
+      const drawH = drawW / imgAspect;
+      const drawY = y + height / 2 - drawH;
+      mouthY = drawY + drawH * 0.72 - 12;
+      mouthHalfW = drawW * 0.43;
+    } else {
+      mouthY = y - height / 2 + 5 - 12;
+      mouthHalfW = width * 0.3;
+    }
+    // Guard against degenerate geometry
+    if (!Number.isFinite(mouthY)) mouthY = y - 20;
+    if (!Number.isFinite(mouthHalfW) || mouthHalfW <= 0) mouthHalfW = width * 0.3;
+    return { mouthX, mouthY, mouthHalfW };
+  }
+
+  _spawnBucketCatchParticles(bucket) {
+    const { mouthX, mouthY, mouthHalfW } = this._bucketMouthGeometry(bucket);
+
+    // Upward sparks
+    for (let i = 0; i < 11; i++) {
+      const spread = Math.PI * 0.8;
+      const angle = -Math.PI / 2 + (Math.random() - 0.5) * spread;
+      const speed = 45 + Math.random() * 85;
+      this._bucketParticles.push({
+        type: 'spark',
+        x: mouthX + (Math.random() - 0.5) * mouthHalfW * 1.2,
+        y: mouthY + (Math.random() - 0.5) * 3,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life: 1,
+        maxLife: 0.4 + Math.random() * 0.4,
+        size: 0.6 + Math.random() * 0.11,
+        gravity: 200,
+      });
+    }
+
+    // Expanding mouth rings
+    for (let i = 0; i < 2; i++) {
+      this._bucketParticles.push({
+        type: 'ring',
+        x: mouthX,
+        y: mouthY,
+        life: 1,
+        maxLife: 0.3 + i * 0.08,
+        mouthHalfW,
+      });
+    }
+
+    // Soft ambient glow bloom at the mouth — один мягкий засвет
+    this._bucketParticles.push({
+      type: 'glow',
+      x: mouthX,
+      y: mouthY - 6,
+      life: 1,
+      maxLife: 0.5,
+      radius: mouthHalfW * 4.8,
+    });
+  }
+
+  _updateBucketParticles(dt) {
+    for (let i = this._bucketParticles.length - 1; i >= 0; i--) {
+      const p = this._bucketParticles[i];
+      p.life -= dt / p.maxLife;
+      if (p.life <= 0) { this._bucketParticles.splice(i, 1); continue; }
+      if (p.type !== 'ring') {
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        if (p.gravity) p.vy += p.gravity * dt;
+      }
+    }
+  }
+
+  _drawBucketParticles(bucket = null) {
+    if (!this._bucketParticles.length) return;
+    const ctx = this.ctx;
+    ctx.save();
+    // source-over keeps white purely white regardless of background color
+    ctx.globalCompositeOperation = 'source-over';
+
+    for (const p of this._bucketParticles) {
+      const t = Math.max(0, p.life);
+      if (t <= 0) continue;
+
+      if (p.type === 'spark') {
+        // Solid dot only — no per-particle gradient (perf + no milky bleed)
+        const alpha = t * (t < 0.2 ? t / 0.2 : 1.0) * 0.65;
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size * (0.3 + t * 0.7), 0, Math.PI * 2);
+        ctx.fill();
+
+      } else if (p.type === 'ring') {
+        const cx = bucket ? bucket.x : p.x;
+        const progress = 1 - t;
+        const rx = p.mouthHalfW * (0.1 + progress * 0.9);
+        const ry = rx * 0.18;
+        if (!Number.isFinite(rx) || rx <= 0) continue;
+        const alpha = (progress < 0.15 ? progress / 0.15 : t) * 0.38;
+        ctx.globalAlpha = alpha;
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = Math.max(0.2, 1.4 - progress * 1.2);
+        ctx.beginPath();
+        ctx.ellipse(cx, p.y, rx, ry, 0, 0, Math.PI * 2);
+        ctx.stroke();
+
+      } else if (p.type === 'glow') {
+        const cx = bucket ? bucket.x : p.x;
+        const progress = 1 - t;
+        const r = p.radius * (0.25 + progress * 0.75);
+        if (!Number.isFinite(r) || r <= 0 || !Number.isFinite(p.y) || !Number.isFinite(cx)) continue;
+        const alpha = t * (1 - Math.pow(1 - t, 2)) * 0.28;
+        const grd = ctx.createRadialGradient(cx, p.y, 0, cx, p.y, r);
+        grd.addColorStop(0,    `rgba(255,255,255,${alpha})`);
+        grd.addColorStop(0.35, `rgba(255,255,255,${alpha * 0.5})`);
+        grd.addColorStop(1,   'rgba(255,255,255,0)');
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = grd;
+        ctx.beginPath();
+        ctx.arc(cx, p.y, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+
   drawBucket(bucket, flash = 0) {
     const ctx = this.ctx;
     const { x, y, width, height } = bucket;
@@ -3320,8 +3459,24 @@ export class Renderer {
       this.drawAimReticle(state.qteAimX, state.qteAimY, state.qteAimAngle);
     }
 
-    if (state.bucket) {
-      this.drawBucket(state.bucket, state.bucketFlash);
+    {
+      const dt = state.frameDeltaSeconds || 1 / 60;
+      if (state.bucket) {
+        const flash = state.bucketFlash || 0;
+        if (flash > this._prevBucketFlash + 0.08) {
+          this._spawnBucketCatchParticles(state.bucket);
+        }
+        this._prevBucketFlash = flash;
+        this._updateBucketParticles(dt);
+        this.drawBucket(state.bucket, state.bucketFlash);
+        this._drawBucketParticles(state.bucket);
+      } else {
+        this._prevBucketFlash = 0;
+        if (this._bucketParticles.length > 0) {
+          this._updateBucketParticles(dt);
+          this._drawBucketParticles(null);
+        }
+      }
     }
 
     if (state.flippers) {

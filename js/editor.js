@@ -27,6 +27,7 @@ import {
   PORTAL_DEFAULT_SCALE
 } from './portal-defaults.js';
 import { isBilliardPegType } from './billiard-mode.js';
+import { isDestructionStaticPeg } from './destruction-mode.js';
 import {
   PegAnimator,
   MIN_VISIBLE_RATIO,
@@ -2252,6 +2253,15 @@ export class Editor {
     if (peg.type === 'gamble') {
       Object.assign(pegData, normalizeSurvivalGamblePegProperties(peg));
     }
+    if (Object.prototype.hasOwnProperty.call(peg, 'destructionStatic')) {
+      pegData.destructionStatic = peg.destructionStatic;
+    }
+    if (Object.prototype.hasOwnProperty.call(peg, 'destructionPhysicsOnHit')) {
+      pegData.destructionPhysicsOnHit = peg.destructionPhysicsOnHit;
+    }
+    if (Object.prototype.hasOwnProperty.call(peg, 'destructionPhysicsOnHitBallOnly')) {
+      pegData.destructionPhysicsOnHitBallOnly = peg.destructionPhysicsOnHitBallOnly;
+    }
     return pegData;
   }
 
@@ -2813,6 +2823,123 @@ export class Editor {
       }
     }
     return null;
+  }
+
+  getSelectedDestructionProperties() {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level || this.selectedPegIds.size === 0) return null;
+    const selected = Array.from(this.selectedPegIds)
+      .map(id => level.pegs.find(peg => peg.id === id))
+      .filter(Boolean);
+    if (selected.length === 0) return null;
+
+    const staticValues = selected.map(peg => isDestructionStaticPeg(peg));
+    const hitValues = selected.map(peg => peg.destructionPhysicsOnHit === true);
+    const ballOnlyValues = selected.map(peg => peg.destructionPhysicsOnHitBallOnly === true);
+    const groupValues = selected.map(peg => {
+      if (peg.groupId == null) return false;
+      const group = level.groups.find(item => item.id === peg.groupId);
+      return group?.destructionBody === true;
+    });
+    const allSame = values => values.every(value => value === values[0]);
+
+    return {
+      static: staticValues[0],
+      staticMixed: !allSame(staticValues),
+      physicsOnHit: hitValues[0],
+      physicsOnHitMixed: !allSame(hitValues),
+      physicsOnHitBallOnly: ballOnlyValues[0],
+      physicsOnHitBallOnlyMixed: !allSame(ballOnlyValues),
+      grouped: groupValues[0],
+      groupedMixed: !allSame(groupValues),
+      canGroup: selected.length >= 2
+    };
+  }
+
+  setSelectedDestructionStatic(enabled) {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level || this.selectedPegIds.size === 0) return;
+    const next = !!enabled;
+    for (const pegId of this.selectedPegIds) {
+      const peg = level.pegs.find(p => p.id === pegId);
+      if (!peg) continue;
+      peg.destructionStatic = next;
+      if (next) {
+        peg.destructionPhysicsOnHit = false;
+        peg.destructionPhysicsOnHitBallOnly = false;
+      }
+    }
+    this.levelManager.save();
+  }
+
+  setSelectedDestructionPhysicsOnHit(enabled) {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level || this.selectedPegIds.size === 0) return;
+    const next = !!enabled;
+    for (const pegId of this.selectedPegIds) {
+      const peg = level.pegs.find(p => p.id === pegId);
+      if (!peg) continue;
+      peg.destructionPhysicsOnHit = next;
+      if (next) peg.destructionStatic = false;
+      else peg.destructionPhysicsOnHitBallOnly = false;
+    }
+    this.levelManager.save();
+  }
+
+  setSelectedDestructionPhysicsOnHitBallOnly(enabled) {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level || this.selectedPegIds.size === 0) return;
+    const next = !!enabled;
+    for (const pegId of this.selectedPegIds) {
+      const peg = level.pegs.find(p => p.id === pegId);
+      if (!peg) continue;
+      peg.destructionPhysicsOnHitBallOnly = next;
+      if (next) {
+        peg.destructionPhysicsOnHit = true;
+        peg.destructionStatic = false;
+      }
+    }
+    this.levelManager.save();
+  }
+
+  setSelectedDestructionGrouped(enabled) {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level || this.selectedPegIds.size === 0) return false;
+    const selectedIds = Array.from(this.selectedPegIds);
+
+    if (enabled) {
+      if (selectedIds.length < 2) return false;
+      const selectedPegs = selectedIds
+        .map(id => level.pegs.find(peg => peg.id === id))
+        .filter(Boolean);
+      if (selectedPegs.length < 2) return false;
+
+      let groupId = selectedPegs[0].groupId;
+      const shareGroup = groupId != null && selectedPegs.every(peg => peg.groupId === groupId);
+      let group = shareGroup ? level.groups.find(item => item.id === groupId) : null;
+      if (!group) {
+        group = this.levelManager.createGroup(selectedIds, 'Destruction Body', 'destruction');
+        groupId = group?.id || null;
+      }
+      if (!group) return false;
+      group.destructionBody = true;
+      for (const peg of selectedPegs) {
+        peg.groupId = group.id;
+      }
+      this.levelManager.save();
+      return true;
+    }
+
+    const selectedGroupIds = new Set();
+    for (const pegId of selectedIds) {
+      const peg = level.pegs.find(p => p.id === pegId);
+      if (peg?.groupId != null) selectedGroupIds.add(peg.groupId);
+    }
+    for (const group of level.groups) {
+      if (selectedGroupIds.has(group.id)) group.destructionBody = false;
+    }
+    this.levelManager.save();
+    return true;
   }
 
   // Callback for bumper panel sync

@@ -168,6 +168,98 @@
             <div class="survival-hint">Use red and yellow billiard pegs. Red merges only with yellow; blue pegs slide as neutral balls.</div>
           </div>
         </div>
+        <!-- Destruction properties panel (shows on top of left Destruction Mode window) -->
+        <div id="destructionPegPanel" class="survival-panel">
+          <div class="survival-panel-title" style="display: flex; align-items: center; justify-content: space-between;">
+            Destruction <button id="closeDestructionPegPanel" class="anim-close-btn">✕</button>
+          </div>
+          <div class="survival-controls">
+            <label class="anim-toggle"><input type="checkbox" id="destructionStaticToggle"> Static body</label>
+            <label class="anim-toggle"><input type="checkbox" id="destructionPhysicsOnHitToggle"> Physics on hit</label>
+            <label class="anim-toggle"><input type="checkbox" id="destructionPhysicsOnHitBallOnlyToggle"> Ball hit only</label>
+            <label class="anim-toggle"><input type="checkbox" id="destructionGroupToggle"> Group body</label>
+          </div>
+        </div>
+
+        <div id="destructionPanel" class="survival-panel destruction-panel">
+          <div class="survival-panel-title">Destruction Mode</div>
+          <label class="survival-toggle-row">
+            <span>Enable Destruction</span>
+            <input type="checkbox" id="destructionModeToggle">
+          </label>
+          <div id="destructionControls" class="survival-controls hidden">
+            <div class="survival-control">
+              <div class="survival-control-header">
+                <label for="destructionGravityYSlider">Peg Gravity Y</label>
+                <button type="button" class="destruction-default-btn" data-destruction-default="gravityY">Default</button>
+              </div>
+              <div class="survival-control-row">
+                <input type="range" id="destructionGravityYSlider" min="-20" max="120" step="1" value="12">
+                <input type="number" id="destructionGravityYInput" min="-0.2" max="1.2" step="0.01" value="0.12">
+              </div>
+            </div>
+            <div class="survival-control">
+              <div class="survival-control-header">
+                <label for="destructionGravityXSlider">Peg Gravity X</label>
+                <button type="button" class="destruction-default-btn" data-destruction-default="gravityX">Default</button>
+              </div>
+              <div class="survival-control-row">
+                <input type="range" id="destructionGravityXSlider" min="-80" max="80" step="1" value="0">
+                <input type="number" id="destructionGravityXInput" min="-0.8" max="0.8" step="0.01" value="0">
+              </div>
+            </div>
+            <div class="survival-control">
+              <div class="survival-control-header">
+                <label for="destructionBounceSlider">Peg Bounce</label>
+                <button type="button" class="destruction-default-btn" data-destruction-default="restitution">Default</button>
+              </div>
+              <div class="survival-control-row">
+                <input type="range" id="destructionBounceSlider" min="0" max="125" step="1" value="34">
+                <input type="number" id="destructionBounceInput" min="0" max="1.25" step="0.01" value="0.34">
+              </div>
+            </div>
+            <div class="survival-control">
+              <div class="survival-control-header">
+                <label for="destructionBallBounceSlider">Ball vs Physics Pegs</label>
+                <button type="button" class="destruction-default-btn" data-destruction-default="dynamicPegBallBounce">Default</button>
+              </div>
+              <div class="survival-control-row">
+                <input type="range" id="destructionBallBounceSlider" min="0" max="125" step="1" value="45">
+                <input type="number" id="destructionBallBounceInput" min="0" max="1.25" step="0.01" value="0.45">
+              </div>
+            </div>
+            <div class="survival-control">
+              <div class="survival-control-header">
+                <label for="destructionBombSlider">Bomb Force</label>
+                <button type="button" class="destruction-default-btn" data-destruction-default="bombImpulse">Default</button>
+              </div>
+              <div class="survival-control-row">
+                <input type="range" id="destructionBombSlider" min="0" max="32" step="1" value="12">
+                <input type="number" id="destructionBombInput" min="0" max="32" step="0.5" value="12">
+              </div>
+            </div>
+            <div class="survival-control">
+              <div class="survival-control-header">
+                <label for="destructionGripSlider">Surface Grip</label>
+                <button type="button" class="destruction-default-btn" data-destruction-default="surfaceGrip">Default</button>
+              </div>
+              <div class="survival-control-row">
+                <input type="range" id="destructionGripSlider" min="0" max="100" step="1" value="18">
+                <input type="number" id="destructionGripInput" min="0" max="1" step="0.01" value="0.18">
+              </div>
+            </div>
+            <div class="survival-control">
+              <div class="survival-control-header">
+                <label for="destructionPileClearSlider">Stuck Pile Clear</label>
+                <button type="button" class="destruction-default-btn" data-destruction-default="stuckPileClearDelayMs">Default</button>
+              </div>
+              <div class="survival-control-row">
+                <input type="range" id="destructionPileClearSlider" min="0" max="2000" step="25" value="220">
+                <input type="number" id="destructionPileClearInput" min="0" max="2" step="0.05" value="0.22">
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
       <!-- Aim length slider -->
       <div id="aimLengthPanel" class="aim-length-panel">
@@ -325,6 +417,7 @@
           </div>
         </div>
       </div>
+
     </div>
 
     <!-- Status Bar -->

@@ -204,6 +204,92 @@ function circleRectCollision(ball, brick) {
   };
 }
 
+function hasCurveSlices(peg) {
+  return !!(peg?.shape === 'brick' && Array.isArray(peg.curveSlices) && peg.curveSlices.length >= 2);
+}
+
+function getCurveSliceShift(peg, pose = null) {
+  return {
+    x: Number.isFinite(pose?.x) ? pose.x - peg.x : 0,
+    y: Number.isFinite(pose?.y) ? pose.y - peg.y : 0
+  };
+}
+
+function getCurveBrickBounds(peg, pose = null) {
+  if (!hasCurveSlices(peg)) return null;
+  const halfH = (Number.isFinite(peg.height) ? peg.height : PHYSICS_CONFIG.brickHeight) * 0.5;
+  const shift = getCurveSliceShift(peg, pose);
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+
+  for (const slice of peg.curveSlices) {
+    if (!slice || !Number.isFinite(slice.x) || !Number.isFinite(slice.y)) continue;
+    const nx = Number.isFinite(slice.nx) ? slice.nx : 0;
+    const ny = Number.isFinite(slice.ny) ? slice.ny : 1;
+    const x = slice.x + shift.x;
+    const y = slice.y + shift.y;
+    const x1 = x + nx * halfH;
+    const x2 = x - nx * halfH;
+    const y1 = y + ny * halfH;
+    const y2 = y - ny * halfH;
+    minX = Math.min(minX, x1, x2);
+    maxX = Math.max(maxX, x1, x2);
+    minY = Math.min(minY, y1, y2);
+    maxY = Math.max(maxY, y1, y2);
+  }
+
+  if (!Number.isFinite(minX)) return null;
+  const poseX = Number.isFinite(pose?.x) ? pose.x : peg.x;
+  const poseY = Number.isFinite(pose?.y) ? pose.y : peg.y;
+  return {
+    minX,
+    maxX,
+    minY,
+    maxY,
+    radius: Math.max(
+      PHYSICS_CONFIG.pegRadius,
+      Math.hypot(maxX - poseX, maxY - poseY),
+      Math.hypot(maxX - poseX, minY - poseY),
+      Math.hypot(minX - poseX, maxY - poseY),
+      Math.hypot(minX - poseX, minY - poseY)
+    )
+  };
+}
+
+function getCurveBrickCollision(ball, peg, pose = null) {
+  if (!hasCurveSlices(peg)) return null;
+  const shift = getCurveSliceShift(peg, pose);
+  const height = Number.isFinite(peg.height) ? peg.height : PHYSICS_CONFIG.brickHeight;
+  let best = null;
+
+  for (let i = 0; i < peg.curveSlices.length - 1; i++) {
+    const a = peg.curveSlices[i];
+    const b = peg.curveSlices[i + 1];
+    if (!a || !b) continue;
+    const ax = a.x + shift.x;
+    const ay = a.y + shift.y;
+    const bx = b.x + shift.x;
+    const by = b.y + shift.y;
+    const dx = bx - ax;
+    const dy = by - ay;
+    const width = Math.hypot(dx, dy);
+    if (!Number.isFinite(width) || width <= 0.001) continue;
+    const collision = circleRectCollision(ball, {
+      x: (ax + bx) * 0.5,
+      y: (ay + by) * 0.5,
+      angle: Math.atan2(dy, dx),
+      width,
+      height
+    });
+    if (!collision) continue;
+    if (!best || collision.depth > best.depth) best = collision;
+  }
+
+  return best;
+}
+
 // Overlap test for circle vs rotated rectangle — like circleRectCollision
 // but does NOT reject based on velocity direction. Returns { normal, depth }
 // whenever shapes overlap, regardless of ball movement direction.
@@ -282,6 +368,7 @@ export class PhysicsEngine {
     this._pegGridStampId = 1;
     this._pegGridCandidates = [];
     this._maxPegCollisionRadius = PHYSICS_CONFIG.pegRadius;
+    this.destructionContactSettings = null;
   }
 
   setBall(ball) {
@@ -326,6 +413,20 @@ export class PhysicsEngine {
   setBallTopY(topY) {
     if (!Number.isFinite(topY)) return;
     this.ballTopY = topY;
+  }
+
+  setDestructionContactSettings(settings = null) {
+    if (!settings || settings.enabled === false) {
+      this.destructionContactSettings = null;
+      return;
+    }
+    const surfaceGrip = Number.isFinite(settings.surfaceGrip)
+      ? Utils.clamp(settings.surfaceGrip, 0, 1)
+      : 0.18;
+    const dynamicPegBallBounce = Number.isFinite(settings.dynamicPegBallBounce)
+      ? Utils.clamp(settings.dynamicPegBallBounce, 0, 1.25)
+      : 0.45;
+    this.destructionContactSettings = { surfaceGrip, dynamicPegBallBounce };
   }
 
   isPortalPeg(peg) {
@@ -377,6 +478,8 @@ export class PhysicsEngine {
     const pegX = Number.isFinite(pose?.x) ? pose.x : peg.x;
     const pegY = Number.isFinite(pose?.y) ? pose.y : peg.y;
     if (peg.shape === 'brick') {
+      const curveBounds = getCurveBrickBounds(peg, pose);
+      if (curveBounds) return curveBounds;
       const w = Number.isFinite(peg.width) ? peg.width : PHYSICS_CONFIG.brickWidth;
       const h = Number.isFinite(peg.height) ? peg.height : PHYSICS_CONFIG.brickHeight;
       const hw = w / 2;
@@ -415,7 +518,9 @@ export class PhysicsEngine {
     for (const pose of poses) {
       let collision;
       if (peg.shape === 'brick') {
-        collision = circleRectCollision(ball, { ...peg, x: pose.x, y: pose.y });
+        collision = hasCurveSlices(peg)
+          ? getCurveBrickCollision(ball, peg, pose)
+          : circleRectCollision(ball, { ...peg, x: pose.x, y: pose.y });
       } else {
         collision = Utils.circleCollision(ball, {
           x: pose.x,
@@ -1045,9 +1150,23 @@ export class PhysicsEngine {
 
   resolveCollision(ball, collision, peg = null) {
     const { normal, depth, relativeVelocityNormal } = collision;
+    const surfaceSlide = this.getDestructionSurfaceSlide(ball, normal, peg);
+    const impactSpeed = Math.max(0, -relativeVelocityNormal);
+    const ballSpeed = Utils.magnitude(ball.vx, ball.vy);
+    const dynamicDestructionPeg = !!(peg && (peg._destructionAwake || peg._destructionFalling));
+    const gentleSurfaceSlide = !!surfaceSlide
+      && !dynamicDestructionPeg
+      && impactSpeed < 0.85
+      && ballSpeed < 4.2;
     // Use bumper's custom bounce if available
-    const bounce = (peg && peg.type === 'bumper' && peg.bumperBounce != null)
-      ? peg.bumperBounce : PHYSICS_CONFIG.bounce;
+    const rawBounce = (peg && peg.type === 'bumper' && peg.bumperBounce != null)
+      ? peg.bumperBounce
+      : dynamicDestructionPeg && Number.isFinite(this.destructionContactSettings?.dynamicPegBallBounce)
+      ? this.destructionContactSettings.dynamicPegBallBounce
+      : PHYSICS_CONFIG.bounce;
+    const bounce = gentleSurfaceSlide
+      ? Math.min(rawBounce, 0.2 + (1 - surfaceSlide.support) * 0.18)
+      : rawBounce;
 
     // Separate ball from peg
     ball.x += normal.x * (depth + 0.5);
@@ -1058,9 +1177,54 @@ export class PhysicsEngine {
     ball.vy -= (1 + bounce) * relativeVelocityNormal * normal.y;
 
     // Add slight randomness to prevent perfect loops
-    ball.vx += (Math.random() - 0.5) * 0.3;
-    ball.vy += (Math.random() - 0.5) * 0.3;
+    const jitter = gentleSurfaceSlide ? 0.035 : 0.3;
+    ball.vx += (Math.random() - 0.5) * jitter;
+    ball.vy += (Math.random() - 0.5) * jitter;
+    if (surfaceSlide) {
+      this.applyDestructionSurfaceSlide(ball, surfaceSlide);
+    }
     this.clampBallSpeed(ball);
+  }
+
+  getDestructionSurfaceSlide(ball, normal, peg = null) {
+    if (!this.destructionContactSettings || !ball || !normal) return null;
+    if (peg && this.isPortalPeg(peg)) return null;
+    const gx = getGravityX(ball);
+    const gy = getGravityY(ball);
+    const gravityMag = Math.hypot(gx, gy);
+    if (gravityMag <= 0.0001) return null;
+    const gnx = gx / gravityMag;
+    const gny = gy / gravityMag;
+    const gDotN = gnx * normal.x + gny * normal.y;
+    const support = -gDotN;
+    if (support <= 0.35) return null;
+    const tangentX = gnx - normal.x * gDotN;
+    const tangentY = gny - normal.y * gDotN;
+    const tangentMag = Math.hypot(tangentX, tangentY);
+    if (tangentMag <= 0.0001) return null;
+    return {
+      tx: tangentX / tangentMag,
+      ty: tangentY / tangentMag,
+      tangentMag,
+      gravityMag,
+      support,
+      grip: this.destructionContactSettings.surfaceGrip
+    };
+  }
+
+  applyDestructionSurfaceSlide(ball, slide) {
+    const slideFactor = 0.18 + (1 - slide.grip) * 0.92;
+    const accel = slide.gravityMag * slide.tangentMag * slide.support * slideFactor;
+    const tangentSpeed = ball.vx * slide.tx + ball.vy * slide.ty;
+    const maxTangentSpeed = PHYSICS_CONFIG.maxVelocity * 0.72;
+    if (tangentSpeed < maxTangentSpeed) {
+      ball.vx += slide.tx * accel;
+      ball.vy += slide.ty * accel;
+    }
+    if (Math.abs(tangentSpeed) < 0.28 && slide.tangentMag > 0.08) {
+      ball.stuckFrames = Math.max(0, (ball.stuckFrames || 0) - 6);
+      ball.stuck = false;
+    }
   }
 
   clampBallSpeed(ball, maxSpeedOverride = null) {
@@ -1285,11 +1449,11 @@ export class PhysicsEngine {
     this.clampBallSpeed(ball);
   }
 
-  getFlipperRects() {
+  _getFlipperRectsAtT(tOverride = null) {
     if (!this.flippers || !this.flippers.enabled) return [];
     const f = this.flippers;
     const centerX = this.width / 2;
-    const t = f._flipperT || 0;
+    const t = Number.isFinite(tOverride) ? tOverride : (f._flipperT || 0);
     const restRad = (Number.isFinite(f.restAngle) ? f.restAngle : 23) * Math.PI / 180;
     const flipRad = (Number.isFinite(f.flipAngle) ? f.flipAngle : 30) * Math.PI / 180;
     const sc = Number.isFinite(f.scale) ? f.scale : 1.8;
@@ -1304,9 +1468,30 @@ export class PhysicsEngine {
     const rightAngle = Math.PI - leftAngle;
 
     return [
-      { x: leftPivotX + Math.cos(leftAngle) * length / 2, y: y + Math.sin(leftAngle) * length / 2, angle: leftAngle, width: length, height: w },
-      { x: rightPivotX + Math.cos(rightAngle) * length / 2, y: y + Math.sin(rightAngle) * length / 2, angle: rightAngle, width: length, height: w }
+      { id: 'left', x: leftPivotX + Math.cos(leftAngle) * length / 2, y: y + Math.sin(leftAngle) * length / 2, angle: leftAngle, width: length, height: w },
+      { id: 'right', x: rightPivotX + Math.cos(rightAngle) * length / 2, y: y + Math.sin(rightAngle) * length / 2, angle: rightAngle, width: length, height: w }
     ];
+  }
+
+  getFlipperRects() {
+    return this._getFlipperRectsAtT();
+  }
+
+  getFlipperKinematicRects() {
+    if (!this.flippers || !this.flippers.enabled) return [];
+    const f = this.flippers;
+    const prevT = f._prevT ?? (f._flipperT || 0);
+    const curT = f._flipperT || 0;
+    const prev = this._getFlipperRectsAtT(prevT);
+    const current = this._getFlipperRectsAtT(curT);
+    return current.map((rect, index) => {
+      const prevRect = prev[index] || rect;
+      return {
+        ...rect,
+        vx: rect.x - prevRect.x,
+        vy: rect.y - prevRect.y
+      };
+    });
   }
 
   getHitPegIds() {

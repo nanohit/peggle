@@ -110,7 +110,7 @@ export const DEFAULT_SHOCKWAVE_VICTORY_SETTINGS = Object.freeze({
   radius: 1.2,
   strength: 2.8,
   width: 2.4,
-  duration: 0.72,
+  duration: 0.86,
   ripple: 0,
   opacity: 0.22
 });
@@ -277,10 +277,10 @@ export class ShockwaveEffectRenderer {
       ? 'victorySplash'
       : (event.kind === 'bombTargetSplash' ? 'bombTargetSplash' : 'bombSplash');
     const strengthScale = kind === 'victorySplash'
-      ? 1.36
+      ? 1.48
       : (kind === 'bombTargetSplash' ? 0.56 : 1);
     const durationScale = kind === 'victorySplash'
-      ? 1.18
+      ? 1.45
       : (kind === 'bombTargetSplash' ? 0.84 : 1);
     const weightScale = kind === 'bombTargetSplash' ? 0.72 : 1;
     this.waves.push({

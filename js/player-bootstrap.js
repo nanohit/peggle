@@ -1204,6 +1204,7 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     if (game.isEndSequenceActive?.() || game.state === 'won' || game.state === 'lost') return;
     ensurePauseAssetsLoaded();
     paused = true;
+    setHudLockedByMap(false);
     game.pause();
     portraitReactionController.setPaused(true);
     pauseOverlay.classList.remove('pause-overlay--map-mode');
@@ -1219,6 +1220,7 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     const fromMap = !!options.fromMap;
     if (!paused) return;
     paused = false;
+    setHudLockedByMap(false);
     if (fromMap) pauseOverlay.classList.add('pause-overlay--instant');
     pauseOverlay.classList.remove('visible');
     pauseOverlay.classList.remove('pause-overlay--map-mode');
@@ -1284,6 +1286,10 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     }
   }
 
+  function setLevelMapExiting(active) {
+    visualLayout?.frame?.classList.toggle('visual-frame--level-map-exiting', !!active);
+  }
+
   function setLevelMapExitVisual(active) {
     const leftCircleEl = visualLayout.slotElements?.leftCircle;
     if (!leftCircleEl) return;
@@ -1308,9 +1314,9 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     if (leftCol && rightCol) {
       const leftRect = leftCol.getBoundingClientRect();
       const rightRect = rightCol.getBoundingClientRect();
-      const inset = 2;
-      const left = Math.max(0, Math.round(leftRect.right - frameRect.left) + inset);
-      const right = Math.min(Math.round(frameRect.width), Math.round(rightRect.left - frameRect.left) - inset);
+      const bleed = 12;
+      const left = Math.max(0, Math.round(leftRect.right - frameRect.left) - bleed);
+      const right = Math.min(Math.round(frameRect.width), Math.round(rightRect.left - frameRect.left) + bleed);
       const width = Math.max(0, right - left);
       if (width > 0) {
         return { left, top: 0, width, height: Math.round(frameRect.height) };
@@ -1348,14 +1354,23 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
 
   function closeLevelMapToPause() {
     if (!activeLevelMap || !activeLevelMapAllowClose) return;
-    // Return straight to pause menu with no intermediate dark fade.
+    const closingMap = activeLevelMap;
     showPauseOverlayInstant();
-    activeLevelMap.hide();
+    closingMap.hide();
     activeLevelMap = null;
     activeLevelMapAllowClose = false;
+    setLevelMapExiting(false);
     setLevelMapMode(false);
     setLevelMapExitVisual(false);
     setHudLockedByMap(false);
+  }
+
+  async function hideSelectedLevelMap(closingMap, options = {}) {
+    if (!closingMap) return;
+    await closingMap.hide({
+      scrollUpMs: LEVEL_MAP_SCROLL_MS,
+      scrollDirection: options.direction || 'up'
+    });
   }
 
   async function showLevelMap(onSelectOverride, options = {}) {
@@ -1414,6 +1429,13 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     }
     if (activeLevelMap) return;
 
+    try {
+      const mod = await getLevelMapModule();
+      await mod.prewarmLevelMapAssets?.(levels, campaignGraph, { includePortraits: false });
+    } catch (error) {
+      console.warn('[player] Level map shell prewarm failed', error);
+    }
+
     const boundsRect = getLevelMapBoundsRect();
     const mapInstance = new LevelMapCtor({
       levels,
@@ -1428,7 +1450,6 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
         const isCurrent = String(nodeId) === String(currentNodeId);
         if (isCurrent && allowClose) {
           // Resume current run without restart.
-          // Hide pause instantly first, then fade map out as a visual bridge.
           const closingMap = activeLevelMap;
           if (!closingMap) return;
           pauseOverlay.classList.add('pause-overlay--instant');
@@ -1438,12 +1459,16 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
           paused = false;
           portraitReactionController.setPaused(false);
           if (game) game.resume();
-          await closingMap.hide({ fadeMs: 120 });
+          setLevelMapMode(true);
+          setHudLockedByMap(true);
+          prepareGameplayHudEnter(canvas.getBoundingClientRect().height);
+          playGameplayHudEnter();
+          await hideSelectedLevelMap(closingMap);
           activeLevelMap = null;
           activeLevelMapAllowClose = false;
           setLevelMapMode(false);
+          setLevelMapExiting(false);
           setLevelMapExitVisual(false);
-          setHudLockedByMap(false);
           requestAnimationFrame(() => {
             pauseOverlay.classList.remove('pause-overlay--instant');
           });
@@ -1451,19 +1476,23 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
         }
         const closingMap = activeLevelMap;
         if (!closingMap) return;
-        await closingMap.hide();
-        activeLevelMap = null;
-        activeLevelMapAllowClose = false;
-        setLevelMapMode(false);
-        setLevelMapExitVisual(false);
-        setHudLockedByMap(false);
         paused = false;
         if (nodeId !== currentNodeId) {
           currentNodeId = nodeId;
           mirrorState = false;
           saveProgress();
         }
-        startLevel(currentNodeId);
+        startLevel(currentNodeId, { suppressInputMs: LEVEL_SCROLL_MS + 220 });
+        setLevelMapMode(true);
+        setHudLockedByMap(true);
+        prepareGameplayHudEnter(canvas.getBoundingClientRect().height);
+        playGameplayHudEnter();
+        await hideSelectedLevelMap(closingMap);
+        activeLevelMap = null;
+        activeLevelMapAllowClose = false;
+        setLevelMapMode(false);
+        setLevelMapExiting(false);
+        setLevelMapExitVisual(false);
       }),
       onClose: () => {
         if (!allowClose) return;
@@ -1645,9 +1674,12 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
 
   // --- Transition animation (level complete -> next level) ---
   const LEVEL_SCROLL_MS = 760;
-  const PORTRAIT_SCROLL_SLOTS = ['character', 'characterCircle', 'healthCharCircle'];
+  const LEVEL_MAP_SCROLL_MS = LEVEL_SCROLL_MS;
+  const HUD_ENTER_MS = 320;
+  const PORTRAIT_SCROLL_SLOTS = ['character', 'characterCircle', 'healthCircle', 'healthCharCircle'];
   let transitionOverlay = null;
   let transitionTimer = null;
+  let hudEnterTimer = null;
 
   function clearPortraitScrollFx() {
     if (!visualLayout) return;
@@ -1669,6 +1701,10 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
       clearTimeout(transitionTimer);
       transitionTimer = null;
     }
+    if (hudEnterTimer) {
+      clearTimeout(hudEnterTimer);
+      hudEnterTimer = null;
+    }
     if (transitionOverlay?.parentNode) {
       transitionOverlay.parentNode.removeChild(transitionOverlay);
     }
@@ -1676,9 +1712,47 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     canvas.style.transition = '';
     canvas.style.transform = '';
     clearPortraitScrollFx();
+    const gambleRoot = gambleSystem?.ui?.root;
+    if (gambleRoot) {
+      gambleRoot.style.transition = '';
+      gambleRoot.style.transform = '';
+      gambleRoot.style.willChange = '';
+    }
   }
 
-  function transitionToLevel(nodeId) {
+  function prepareGameplayHudEnter(canvasHeight) {
+    const distance = Math.max(1, Math.round(canvasHeight || visualLayout?.frame?.getBoundingClientRect?.().height || 0));
+    setLevelMapExiting(true);
+    setLevelMapExitVisual(false);
+    setHudLockedByMap(false);
+    const gambleRoot = gambleSystem?.ui?.root;
+    if (gambleRoot) {
+      gambleRoot.style.transition = 'none';
+      gambleRoot.style.transform = `translateY(${distance}px)`;
+      gambleRoot.style.willChange = 'transform';
+    }
+  }
+
+  function playGameplayHudEnter() {
+    setHudLockedByMap(false);
+    requestAnimationFrame(() => {
+      const gambleRoot = gambleSystem?.ui?.root;
+      if (gambleRoot) {
+        gambleRoot.style.transition = `transform ${HUD_ENTER_MS}ms cubic-bezier(0.22, 1, 0.36, 1)`;
+        gambleRoot.style.transform = '';
+      }
+      hudEnterTimer = setTimeout(() => {
+        hudEnterTimer = null;
+        if (gambleRoot) {
+          gambleRoot.style.transition = '';
+          gambleRoot.style.willChange = '';
+        }
+      }, HUD_ENTER_MS + 80);
+    });
+  }
+
+  function transitionToLevel(nodeId, options = {}) {
+    const direction = options.direction === 'down' ? 'down' : 'up';
     const frame = visualLayout.frame;
     if (!frame) {
       startLevel(nodeId, { suppressInputMs: 650 });
@@ -1725,9 +1799,12 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     frame.appendChild(overlay);
     transitionOverlay = overlay;
 
+    const incomingStart = direction === 'down' ? '-100%' : '100%';
+    const outgoingEnd = direction === 'down' ? '100%' : '-100%';
+
     canvas.style.transition = 'none';
-    canvas.style.transform = 'translateY(100%)';
-    setPortraitScrollFx(canvasRect.height);
+    canvas.style.transform = `translateY(${incomingStart})`;
+    setPortraitScrollFx(direction === 'down' ? -canvasRect.height : canvasRect.height);
 
     const started = startLevel(nodeId, { clearTransition: false, suppressInputMs: LEVEL_SCROLL_MS + 220 });
     if (!started) {
@@ -1738,7 +1815,7 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     requestAnimationFrame(() => {
       canvas.style.transition = `transform ${LEVEL_SCROLL_MS}ms cubic-bezier(0.22, 1, 0.36, 1)`;
       canvas.style.transform = 'translateY(0)';
-      outgoingCanvas.style.transform = 'translateY(-100%)';
+      outgoingCanvas.style.transform = `translateY(${outgoingEnd})`;
       setPortraitScrollFx(0);
     });
 
@@ -1775,6 +1852,7 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     if (game) { game.stop(); }
     paused = false;
     activeLevelMapAllowClose = false;
+    setLevelMapExiting(false);
     setLevelMapMode(false);
     setLevelMapExitVisual(false);
     pauseOverlay.classList.remove('pause-overlay--map-mode');
@@ -1870,12 +1948,13 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
 
     game.onGameEnd = (result, score) => {
       const endedGame = game;
-      const bindDelayMs = endedGame?.getEndOverlayInteractDelayMs?.() ?? 1000;
+      const shouldAutoContinueWin = result === 'won' && !activeCpuDuelMode && !pvp.enabled;
+      const bindDelayMs = shouldAutoContinueWin ? 0 : (endedGame?.getEndOverlayInteractDelayMs?.() ?? 1000);
       setTimeout(async () => {
         if (!endedGame || game !== endedGame) return;
         // Guard: only fire once (touchstart + click can both trigger on mobile)
         let fired = false;
-        const onceAction = (action) => {
+        const onceAction = (action, options = {}) => {
           const guarded = (event) => {
             if (fired) return;
             fired = true;
@@ -1889,6 +1968,10 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
               action();
             }
           };
+          if (options.auto === true) {
+            guarded();
+            return;
+          }
           canvas.addEventListener('click', guarded, { once: true });
           canvas.addEventListener('touchstart', guarded, { once: true, passive: false });
         };
@@ -1935,28 +2018,32 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
               currentNodeId = outcome.nodeId;
               saveProgress();
               transitionToLevel(currentNodeId);
-            });
+            }, { auto: true });
           } else if (outcome.action === 'choose') {
             const allowed = new Set(outcome.choices);
             onceAction(() => {
               saveProgress();
               paused = true;
-              showLevelMap((nodeId) => {
+              showLevelMap(async (nodeId) => {
                 if (!allowed.has(nodeId) || !nodeIdToLevelIndex.has(nodeId)) return;
                 const closingMap = activeLevelMap;
-                if (closingMap) closingMap.hide();
-                activeLevelMap = null;
-                activeLevelMapAllowClose = false;
-                setLevelMapMode(false);
-                setLevelMapExitVisual(false);
-                setHudLockedByMap(false);
                 paused = false;
                 currentNodeId = nodeId;
                 mirrorState = false;
                 saveProgress();
-                transitionToLevel(currentNodeId);
+                startLevel(currentNodeId, { suppressInputMs: LEVEL_SCROLL_MS + 220 });
+                setLevelMapMode(true);
+                setHudLockedByMap(true);
+                prepareGameplayHudEnter(canvas.getBoundingClientRect().height);
+                playGameplayHudEnter();
+                await hideSelectedLevelMap(closingMap);
+                activeLevelMap = null;
+                activeLevelMapAllowClose = false;
+                setLevelMapMode(false);
+                setLevelMapExiting(false);
+                setLevelMapExitVisual(false);
               }, { allowClose: false, fallbackNodeId: outcome.choices[0] });
-            });
+            }, { auto: true });
           } else {
             // Campaign complete — tap to replay
             onceAction(() => {
@@ -1965,14 +2052,14 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
               currentNodeId = playableOrder[0];
               saveProgress();
               transitionToLevel(currentNodeId);
-            });
+            }, { auto: true });
           }
         } else if (pvp.enabled) {
           onceAction(() => startLevel(currentNodeId, { suppressInputMs: 650 }));
         } else {
           // Defeat — toggle mirror and restart same level
           mirrorState = !mirrorState;
-          onceAction(() => startLevel(currentNodeId, { suppressInputMs: 650 }));
+          onceAction(() => transitionToLevel(currentNodeId, { direction: 'down' }));
         }
       }, bindDelayMs);
     };

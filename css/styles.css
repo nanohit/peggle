@@ -211,6 +211,20 @@ html, body {
   color: var(--text-dim);
 }
 
+.survival-control-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.survival-control-header label {
+  display: block;
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-bottom: 0;
+}
+
 .survival-control-row {
   display: flex;
   align-items: center;
@@ -253,6 +267,22 @@ html, body {
 .survival-control-row input[type="number"]::-webkit-outer-spin-button {
   -webkit-appearance: none;
   margin: 0;
+}
+
+.destruction-default-btn {
+  flex: 0 0 auto;
+  padding: 3px 6px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-dim);
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.destruction-default-btn:hover {
+  color: var(--text-primary);
+  border-color: var(--accent);
 }
 
 .hit-clear-toggle {
@@ -1541,7 +1571,7 @@ html, body {
   background: rgba(22, 27, 34, 0.92);
   border: 1px solid var(--border);
   border-radius: 10px;
-  z-index: 20;
+  z-index: 240;
   display: none;
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
@@ -1737,7 +1767,7 @@ html, body {
   background: rgba(22, 27, 34, 0.92);
   border: 1px solid var(--border);
   border-radius: 10px;
-  z-index: 20;
+  z-index: 240;
   display: none;
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
@@ -1746,6 +1776,7 @@ html, body {
 .bumper-panel.visible {
   display: block;
 }
+
 
 .bumper-panel-title {
   display: flex;

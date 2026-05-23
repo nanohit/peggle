@@ -928,18 +928,35 @@
   box-sizing: border-box;
 }
 
-/* Level-map mode: hide the live character stack in HUD */
-.visual-frame--level-map-open .visual-slot[data-slot-id="character"],
-.visual-frame--level-map-open .visual-slot[data-slot-id="characterCircle"],
-.visual-frame--level-map-open .visual-slot[data-slot-id="healthCircle"],
-.visual-frame--level-map-open .visual-slot[data-slot-id="healthCharCircle"] {
+/* Level-map mode: hide the live character stack until the map is exiting. */
+.visual-frame--level-map-open:not(.visual-frame--level-map-exiting) .visual-slot[data-slot-id="character"],
+.visual-frame--level-map-open:not(.visual-frame--level-map-exiting) .visual-slot[data-slot-id="characterCircle"],
+.visual-frame--level-map-open:not(.visual-frame--level-map-exiting) .visual-slot[data-slot-id="healthCircle"],
+.visual-frame--level-map-open:not(.visual-frame--level-map-exiting) .visual-slot[data-slot-id="healthCharCircle"] {
   display: none !important;
 }
 
-/* Keep top-left controls clickable above level-map overlay */
+/* Keep the decorative frame and map exit controls above level-map overlay. */
+.visual-frame--level-map-open .visual-slot[data-slot-id="columnLeft"],
+.visual-frame--level-map-open .visual-slot[data-slot-id="columnRight"],
+.visual-frame--level-map-open .visual-slot[data-slot-id="top"],
+.visual-frame--level-map-open .visual-slot[data-slot-id="topRight"],
 .visual-frame--level-map-open .visual-slot[data-slot-id="leftCircle"],
 .visual-frame--level-map-open .visual-slot[data-slot-id="topLeft"] {
   z-index: 701 !important;
+}
+
+.visual-frame--level-map-exiting .visual-slot[data-slot-id="rightCircle"],
+.visual-frame--level-map-exiting .visual-slot[data-slot-id="ballCounter"],
+.visual-frame--level-map-exiting .visual-slot[data-slot-id="character"],
+.visual-frame--level-map-exiting .visual-slot[data-slot-id="characterCircle"],
+.visual-frame--level-map-exiting .visual-slot[data-slot-id="healthCircle"],
+.visual-frame--level-map-exiting .visual-slot[data-slot-id="healthCharCircle"] {
+  z-index: 701 !important;
+}
+
+.visual-frame--level-map-open .visual-slot[data-slot-id="leftCircle"],
+.visual-frame--level-map-open .visual-slot[data-slot-id="topLeft"] {
   pointer-events: auto !important;
 }
 

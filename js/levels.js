@@ -16,6 +16,10 @@ import { normalizeLevelCharacterAssignment } from './character-config.js';
 import { normalizeLevelHitPegClearSettings } from './hit-peg-clear-settings.js';
 import { isPortalType, normalizePortalPegProperties } from './portal-defaults.js';
 import { ensureLevelBilliard, isBilliardPegType } from './billiard-mode.js';
+import {
+  ensureLevelDestruction,
+  normalizeDestructionPegProperties
+} from './destruction-mode.js';
 
 const STORAGE_KEY = 'peggle_levels';
 const TRAINING_KEY = 'peggle_training_data';
@@ -51,7 +55,12 @@ export function normalizeLevelData(level) {
   const survival = ensureLevelSurvival(level, 600);
   const pvp = ensureLevelPvp(level);
   const billiard = ensureLevelBilliard(level);
-  if (billiard.enabled) {
+  const destruction = ensureLevelDestruction(level);
+  if (destruction.enabled) {
+    survival.enabled = false;
+    pvp.enabled = false;
+    billiard.enabled = false;
+  } else if (billiard.enabled) {
     survival.enabled = false;
     pvp.enabled = false;
   } else if (pvp.enabled && survival.enabled) {
@@ -85,6 +94,7 @@ export function normalizeLevelData(level) {
       delete peg.height;
       delete peg.curveSlices;
     }
+    normalizeDestructionPegProperties(peg);
   }
 
   level.metadata = level.metadata || {};
@@ -141,6 +151,7 @@ export class LevelManager {
       survival: ensureLevelSurvival({}, 600),
       pvp: normalizePvpSettings(null),
       billiard: ensureLevelBilliard({}),
+      destruction: ensureLevelDestruction({}),
       visuals: normalizeVisuals(null),
       character: normalizeLevelCharacterAssignment(null),
       dialogue: normalizeDialogueConfig(null),
@@ -200,7 +211,12 @@ export class LevelManager {
       ensureLevelPvp(level);
     }
     ensureLevelBilliard(level);
-    if (level.billiard.enabled) {
+    ensureLevelDestruction(level);
+    if (level.destruction.enabled) {
+      level.survival.enabled = false;
+      level.pvp.enabled = false;
+      level.billiard.enabled = false;
+    } else if (level.billiard.enabled) {
       level.survival.enabled = false;
       level.pvp.enabled = false;
     } else if (level.pvp.enabled && level.survival.enabled) {
@@ -277,6 +293,16 @@ export class LevelManager {
     if (peg.type === 'gamble') {
       Object.assign(newPeg, normalizeSurvivalGamblePegProperties(peg));
     }
+    if (Object.prototype.hasOwnProperty.call(peg, 'destructionStatic')) {
+      newPeg.destructionStatic = peg.destructionStatic;
+    }
+    if (Object.prototype.hasOwnProperty.call(peg, 'destructionPhysicsOnHit')) {
+      newPeg.destructionPhysicsOnHit = peg.destructionPhysicsOnHit;
+    }
+    if (Object.prototype.hasOwnProperty.call(peg, 'destructionPhysicsOnHitBallOnly')) {
+      newPeg.destructionPhysicsOnHitBallOnly = peg.destructionPhysicsOnHitBallOnly;
+    }
+    normalizeDestructionPegProperties(newPeg);
     if (isBilliardPegType(peg.type)) {
       newPeg.shape = 'circle';
       delete newPeg.width;
