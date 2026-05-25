@@ -12,8 +12,28 @@
       "destination": "/player.html"
     },
     {
+      "source": "/:room(\\d{4})",
+      "has": [{ "type": "host", "value": "alea.sh" }],
+      "destination": "/player.html"
+    },
+    {
+      "source": "/:room(\\d{4})",
+      "has": [{ "type": "host", "value": "www.alea.sh" }],
+      "destination": "/player.html"
+    },
+    {
       "source": "/",
       "has": [{ "type": "host", "value": "al3a.vercel.app" }],
+      "destination": "/player.html"
+    },
+    {
+      "source": "/",
+      "has": [{ "type": "host", "value": "alea.sh" }],
+      "destination": "/player.html"
+    },
+    {
+      "source": "/",
+      "has": [{ "type": "host", "value": "www.alea.sh" }],
       "destination": "/player.html"
     },
     {

@@ -1,7 +1,7 @@
 import { api } from './api.js';
 
 const CLIENT_STORAGE_KEY = 'alea_pvp_duel_client_id';
-const DUEL_PROD_ORIGIN = 'https://al3a.vercel.app';
+const DUEL_PROD_ORIGIN = 'https://alea.sh';
 const INITIAL_POLL_MS = 1200;
 const WAITING_POLL_MS = 3000;
 const SUBMITTED_AIM_POLL_MS = 750;

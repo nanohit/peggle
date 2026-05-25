@@ -277,7 +277,7 @@ async function fetchCharacterRegistryWithFallback() {
 
 /*
  * Player data uses the same shared API as the editor, with static JSON as a
- * seed/fallback. That keeps peggle.vercel.app editing and al3a.vercel.app play
+ * seed/fallback. That keeps peggle.vercel.app editing and alea.sh/al3a.vercel.app play
  * pointed at one campaign source instead of each browser's local cache.
  */
 
