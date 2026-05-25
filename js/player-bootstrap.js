@@ -1676,10 +1676,16 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
   const LEVEL_SCROLL_MS = 760;
   const LEVEL_MAP_SCROLL_MS = LEVEL_SCROLL_MS;
   const HUD_ENTER_MS = 320;
+  const PEG_INTRO_BLANK_MS = 58;
+  const PEG_INTRO_STAGGER_MS = 12;
+  const PEG_INTRO_MAX_SPREAD_MS = 520;
+  const PEG_INTRO_DURATION_MS = 320;
+  const PEG_INTRO_DIALOGUE_PAD_MS = 80;
   const PORTRAIT_SCROLL_SLOTS = ['character', 'characterCircle', 'healthCircle', 'healthCharCircle'];
   let transitionOverlay = null;
   let transitionTimer = null;
   let hudEnterTimer = null;
+  let levelStartDialogueTimer = null;
 
   function clearPortraitScrollFx() {
     if (!visualLayout) return;
@@ -1751,6 +1757,15 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     });
   }
 
+  function createPegIntroOptions(delayMs = PEG_INTRO_BLANK_MS) {
+    return {
+      delayMs,
+      staggerMs: PEG_INTRO_STAGGER_MS,
+      maxSpreadMs: PEG_INTRO_MAX_SPREAD_MS,
+      durationMs: PEG_INTRO_DURATION_MS
+    };
+  }
+
   function transitionToLevel(nodeId, options = {}) {
     const direction = options.direction === 'down' ? 'down' : 'up';
     const frame = visualLayout.frame;
@@ -1801,12 +1816,18 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
 
     const incomingStart = direction === 'down' ? '-100%' : '100%';
     const outgoingEnd = direction === 'down' ? '100%' : '-100%';
+    const pegIntro = createPegIntroOptions(LEVEL_SCROLL_MS + PEG_INTRO_BLANK_MS);
+    const pegIntroMinMs = pegIntro.delayMs + PEG_INTRO_DURATION_MS;
 
     canvas.style.transition = 'none';
     canvas.style.transform = `translateY(${incomingStart})`;
     setPortraitScrollFx(direction === 'down' ? -canvasRect.height : canvasRect.height);
 
-    const started = startLevel(nodeId, { clearTransition: false, suppressInputMs: LEVEL_SCROLL_MS + 220 });
+    const started = startLevel(nodeId, {
+      clearTransition: false,
+      suppressInputMs: pegIntroMinMs + 120,
+      pegIntro
+    });
     if (!started) {
       clearLevelTransitionArtifacts();
       return;
@@ -1829,6 +1850,10 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
   function startLevel(nodeId, options = {}) {
     const clearTransition = options.clearTransition !== false;
     if (clearTransition) clearLevelTransitionArtifacts();
+    if (levelStartDialogueTimer) {
+      clearTimeout(levelStartDialogueTimer);
+      levelStartDialogueTimer = null;
+    }
     const preparedLevel = options.levelData && Array.isArray(options.levelData.pegs)
       ? options.levelData
       : null;
@@ -1899,6 +1924,11 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     game.setEndSequenceConfig?.(visuals.endSequence);
 
     game.loadLevel(levelData);
+    let pegIntroMs = 0;
+    if (options.pegIntro) {
+      pegIntroMs = game.queuePegEntryAnimations?.(options.pegIntro) || 0;
+      if (pegIntroMs > 0) game.suppressInputFor?.(pegIntroMs + 80);
+    }
     if (pvp.enabled) {
       if (gambleSystem) {
         gambleSystem.dispose?.();
@@ -1926,9 +1956,19 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
       game,
       gambleSystem,
       persistSeen: true,
-      live: true
+      live: true,
+      triggerLevelStart: pegIntroMs <= 0
     });
     dialogueController.setLanguage(currentLanguage);
+    if (pegIntroMs > 0) {
+      const introGame = game;
+      const introLevel = levelData;
+      levelStartDialogueTimer = setTimeout(() => {
+        levelStartDialogueTimer = null;
+        if (game !== introGame || activeLevelData !== introLevel) return;
+        dialogueController.evaluateEvent('levelStart', { level: introLevel });
+      }, pegIntroMs + PEG_INTRO_DIALOGUE_PAD_MS);
+    }
 
     // Subscribe to UI state for ball counter + health bar
     unsubUiState = game.subscribeUiState((snapshot) => {
@@ -2059,7 +2099,7 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
         } else {
           // Defeat — toggle mirror and restart same level
           mirrorState = !mirrorState;
-          onceAction(() => transitionToLevel(currentNodeId, { direction: 'down' }));
+          onceAction(() => transitionToLevel(currentNodeId));
         }
       }, bindDelayMs);
     };
@@ -2075,6 +2115,6 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
   }
 
   ensureGambleSystem();
-  startLevel(currentNodeId);
+  startLevel(currentNodeId, campaignName ? { pegIntro: createPegIntroOptions() } : {});
   requestAnimationFrame(() => schedulePauseAssetsWarmup());
 }

@@ -254,6 +254,43 @@ const END_MESSAGE_FADE_IN_MS = 260;
 const END_MESSAGE_FADE_OUT_MS = 190;
 const END_MESSAGE_LIFT_PX = 18;
 const PEG_EXIT_SHRINK_MS = 180;
+const PEG_ENTRY_SWEEP_BEZIER = Object.freeze({ x1: 0.42, y1: 0, x2: 0.58, y2: 1 });
+const PEG_ENTRY_SCALE_BEZIER = Object.freeze({ x1: 0.4, y1: 0, x2: 0.2, y2: 1 });
+
+function clamp01(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(1, n));
+}
+
+function cubicBezierCoordinate(t, p1, p2) {
+  const inv = 1 - t;
+  return 3 * inv * inv * t * p1 + 3 * inv * t * t * p2 + t * t * t;
+}
+
+function cubicBezierEase(x, curve = PEG_ENTRY_SCALE_BEZIER) {
+  const target = clamp01(x);
+  let lo = 0;
+  let hi = 1;
+  for (let i = 0; i < 12; i++) {
+    const mid = (lo + hi) * 0.5;
+    if (cubicBezierCoordinate(mid, curve.x1, curve.x2) < target) lo = mid;
+    else hi = mid;
+  }
+  return cubicBezierCoordinate((lo + hi) * 0.5, curve.y1, curve.y2);
+}
+
+function cubicBezierTimeForProgress(progress, curve = PEG_ENTRY_SWEEP_BEZIER) {
+  const target = clamp01(progress);
+  let lo = 0;
+  let hi = 1;
+  for (let i = 0; i < 12; i++) {
+    const mid = (lo + hi) * 0.5;
+    if (cubicBezierCoordinate(mid, curve.y1, curve.y2) < target) lo = mid;
+    else hi = mid;
+  }
+  return cubicBezierCoordinate((lo + hi) * 0.5, curve.x1, curve.x2);
+}
 
 export class Renderer {
   constructor(canvas) {
@@ -313,6 +350,7 @@ export class Renderer {
     this._survivalBgImage = null;
     this._survivalBgImageSrc = '';
     this._pegExitAnimations = new Map();
+    this._pegEntryAnimations = new Map();
     this.onVerticalProgress = null;
     this._endMessage = {
       key: '',
@@ -1796,6 +1834,41 @@ export class Renderer {
     this._pegExitAnimations.clear();
   }
 
+  queuePegEntryAnimations(pegs, options = {}) {
+    const list = (Array.isArray(pegs) ? pegs : [pegs]).filter(peg => peg && peg.id);
+    if (!list.length) return 0;
+    const nowMs = typeof performance !== 'undefined'
+      ? performance.now()
+      : (this._renderTimeSeconds || 0) * 1000;
+    const baseDelayMs = Math.max(0, Number(options.delayMs) || 0);
+    const staggerMs = Math.max(0, Number(options.staggerMs) || 16);
+    const durationMs = Math.max(120, Number(options.durationMs) || PEG_EXIT_SHRINK_MS);
+    const maxSpreadMs = Math.max(0, Number(options.maxSpreadMs) || 560);
+    const ordered = [...list].sort((a, b) => {
+      const ay = Number.isFinite(a.y) ? a.y : 0;
+      const by = Number.isFinite(b.y) ? b.y : 0;
+      return by - ay;
+    });
+    const spreadMs = Math.min(maxSpreadMs, Math.max(0, ordered.length - 1) * staggerMs);
+
+    this._pegEntryAnimations.clear();
+    for (let i = 0; i < ordered.length; i++) {
+      const peg = ordered[i];
+      const rank = ordered.length > 1 ? i / (ordered.length - 1) : 0;
+      const delayMs = baseDelayMs + cubicBezierTimeForProgress(rank) * spreadMs;
+      this._pegEntryAnimations.set(peg.id, {
+        peg: this._clonePegForExitAnimation(peg),
+        startMs: nowMs + delayMs,
+        durationMs
+      });
+    }
+    return baseDelayMs + spreadMs + durationMs;
+  }
+
+  clearPegEntryAnimations() {
+    this._pegEntryAnimations.clear();
+  }
+
   drawPegScaled(peg, isHit = false, isSelected = false, scale = 1, alpha = 1) {
     if (!peg || scale <= 0.001 || alpha <= 0.001) return;
     if (Math.abs(scale - 1) < 0.001 && alpha >= 0.999) {
@@ -1833,6 +1906,31 @@ export class Renderer {
       const alpha = t < 0.68 ? 1 : Math.max(0, (1 - t) / 0.32);
       this.drawPegScaled(anim.peg, true, false, scale, alpha);
     }
+  }
+
+  drawPegEntryAnimation(peg, isHit = false, isSelected = false) {
+    const anim = this._pegEntryAnimations?.get(peg?.id);
+    if (!anim) return false;
+    const nowMs = typeof performance !== 'undefined'
+      ? performance.now()
+      : (this._renderTimeSeconds || 0) * 1000;
+    const elapsed = nowMs - anim.startMs;
+    if (elapsed < 0) return true;
+
+    const durationMs = Math.max(1, anim.durationMs || PEG_EXIT_SHRINK_MS);
+    const t = Math.max(0, Math.min(1, elapsed / durationMs));
+    if (t >= 1) {
+      this._pegEntryAnimations.delete(peg.id);
+      return false;
+    }
+
+    const eased = cubicBezierEase(t);
+    const scaleBase = Math.pow(eased, 2.25);
+    const pop = eased > 0.84 ? 1 + Math.sin(((1 - eased) / 0.16) * Math.PI) * 0.045 : 1;
+    const scale = scaleBase * pop;
+    const alpha = eased > 0.32 ? 1 : Math.max(0, eased / 0.32);
+    this.drawPegScaled(anim.peg, isHit, isSelected, scale, alpha);
+    return true;
   }
 
   getWrapCopyOffsets(peg) {
@@ -1887,6 +1985,7 @@ export class Renderer {
     for (const peg of pegs) {
       const isHit = hitSet.has(peg.id);
       const isSelected = selectedIds.has(peg.id);
+      if (this.drawPegEntryAnimation(peg, isHit, isSelected)) continue;
 
       // When wrapping through walls, hide the main peg (which teleports)
       // and draw only the raw-position copies (which move continuously).

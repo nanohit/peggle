@@ -2253,11 +2253,16 @@ export class Game {
     this._levelClearEmitted = false;
     this._frozenSurvivalTrackerState = null;
     this.renderer.clearPegExitAnimations?.();
+    this.renderer.clearPegEntryAnimations?.();
 
     this.updateLaunchPosition();
     this.clearDynamicYoyoAnchors();
     this.yoyoThread.setLaunchAnchor(this.launchX, this.launchY);
     this.resetBall();
+  }
+
+  queuePegEntryAnimations(options = {}) {
+    return this.renderer.queuePegEntryAnimations?.(this.pegs, options) || 0;
   }
 
   hasActiveBalls() {

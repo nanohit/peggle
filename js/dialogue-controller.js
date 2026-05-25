@@ -140,7 +140,15 @@ export class DialogueController {
     this.refreshLayout();
   }
 
-  setContext({ level, scopeKey = 'single', game = null, gambleSystem = null, persistSeen = this.persistSeen, live = true } = {}) {
+  setContext({
+    level,
+    scopeKey = 'single',
+    game = null,
+    gambleSystem = null,
+    persistSeen = this.persistSeen,
+    live = true,
+    triggerLevelStart = true
+  } = {}) {
     this.mount();
     this._detachGame();
     this._detachGambleSystem();
@@ -161,7 +169,7 @@ export class DialogueController {
     if (gambleSystem) this._attachGambleSystem(gambleSystem);
     this.refreshLayout();
 
-    if (this.live && this.level) {
+    if (triggerLevelStart !== false && this.live && this.level) {
       this.evaluateEvent('levelStart', { level: this.level });
     }
   }
