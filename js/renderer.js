@@ -1929,7 +1929,7 @@ export class Renderer {
     const pop = eased > 0.84 ? 1 + Math.sin(((1 - eased) / 0.16) * Math.PI) * 0.045 : 1;
     const scale = scaleBase * pop;
     const alpha = eased > 0.32 ? 1 : Math.max(0, eased / 0.32);
-    this.drawPegScaled(anim.peg, isHit, isSelected, scale, alpha);
+    this.drawPegScaled(peg, isHit, isSelected, scale, alpha);
     return true;
   }
 

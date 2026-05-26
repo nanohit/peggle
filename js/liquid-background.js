@@ -1018,8 +1018,9 @@ export class LiquidBackground {
         ? 0.72
         : (peg.shape === 'brick' ? 1.18 : 0.88);
       const speedNorm = Math.min(3.4, worldDist / 2.4);
-      const force = (0.05 + speedNorm * 0.12) * typeForce * (0.72 + reactionCurve * 0.34);
-      const radius = this._toGridRadius((peg.shape === 'brick' ? 11 : 7) + speedNorm * 2.8);
+      const force = (0.045 + speedNorm * 0.11) * typeForce * (0.72 + reactionCurve * 0.34);
+      const visibleEdgeRadius = peg.shape === 'brick' ? 22 : 18;
+      const radius = this._toGridRadius(visibleEdgeRadius + speedNorm * 3.6);
 
       for (let step = 0; step < steps; step++) {
         const t = (step + 1) / steps;
@@ -1044,11 +1045,22 @@ export class LiquidBackground {
           py,
           vx * 0.18,
           vy * 0.18,
-          radius * 1.2,
-          force * 0.34,
-          0.02,
-          0.02,
-          0.03
+          radius * 1.42,
+          force * 0.28,
+          0.035,
+          0.035,
+          0.035
+        );
+        this._stampImpulse(
+          px,
+          py,
+          vx * 0.06,
+          vy * 0.06,
+          radius * 1.86,
+          force * 0.105,
+          0.012,
+          0.018,
+          0.025
         );
       }
     }

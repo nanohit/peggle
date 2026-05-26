@@ -1236,12 +1236,13 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
   }
 
   function restartFromPause() {
+    const introOptions = createPegIntroStartOptions({ suppressInputMs: 650 });
     if (activeCpuDuelMode) {
-      startRandomCpuDuelLevel({ suppressInputMs: 650 });
+      startRandomCpuDuelLevel(introOptions);
       return;
     }
     hidePause();
-    startLevel(currentNodeId);
+    startLevel(currentNodeId, introOptions);
   }
 
   function goToMenu() {
@@ -1482,7 +1483,10 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
           mirrorState = false;
           saveProgress();
         }
-        startLevel(currentNodeId, { suppressInputMs: LEVEL_SCROLL_MS + 220 });
+        startLevel(currentNodeId, createPegIntroStartOptions(
+          { suppressInputMs: LEVEL_SCROLL_MS + 220 },
+          LEVEL_MAP_SCROLL_MS + PEG_INTRO_BLANK_MS
+        ));
         setLevelMapMode(true);
         setHudLockedByMap(true);
         prepareGameplayHudEnter(canvas.getBoundingClientRect().height);
@@ -1558,7 +1562,8 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
       return startLevel(currentNodeId, {
         levelData: level,
         cpuDuel: true,
-        suppressInputMs: Number.isFinite(options.suppressInputMs) ? options.suppressInputMs : 250
+        suppressInputMs: Number.isFinite(options.suppressInputMs) ? options.suppressInputMs : 250,
+        pegIntro: options.pegIntro || null
       });
     })().finally(() => {
       pvpCpuDuelLaunchPromise = null;
@@ -1763,6 +1768,13 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
       staggerMs: PEG_INTRO_STAGGER_MS,
       maxSpreadMs: PEG_INTRO_MAX_SPREAD_MS,
       durationMs: PEG_INTRO_DURATION_MS
+    };
+  }
+
+  function createPegIntroStartOptions(options = {}, delayMs = PEG_INTRO_BLANK_MS) {
+    return {
+      ...options,
+      pegIntro: options.pegIntro || createPegIntroOptions(delayMs)
     };
   }
 
@@ -2071,7 +2083,10 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
                 currentNodeId = nodeId;
                 mirrorState = false;
                 saveProgress();
-                startLevel(currentNodeId, { suppressInputMs: LEVEL_SCROLL_MS + 220 });
+                startLevel(currentNodeId, createPegIntroStartOptions(
+                  { suppressInputMs: LEVEL_SCROLL_MS + 220 },
+                  LEVEL_MAP_SCROLL_MS + PEG_INTRO_BLANK_MS
+                ));
                 setLevelMapMode(true);
                 setHudLockedByMap(true);
                 prepareGameplayHudEnter(canvas.getBoundingClientRect().height);
