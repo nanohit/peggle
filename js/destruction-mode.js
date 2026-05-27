@@ -43,6 +43,28 @@ const PORTAL_BODY_COOLDOWN_STEPS = 8;
 const PORTAL_BODY_EXIT_PADDING = 1.2;
 const TAU = Math.PI * 2;
 
+// Contact solver relaxation. A single resolution pass per substep cannot propagate
+// the support reaction up a stack, so loaded bricks sink through the ones beneath
+// them. Iterating the contact list (Gauss-Seidel) lets the "stop" travel through
+// the whole stack each substep, which is what makes resting towers stable.
+const STACK_SOLVER_ITERATIONS = 8;
+// Penetration left untouched so resting contacts stay "live" (keeps support marked)
+// without visible overlap, and so position correction doesn't fight itself to zero.
+const CONTACT_SLOP = 0.3;
+// Fraction of the excess penetration removed positionally per iteration. The iterations
+// re-read the overlap, so a value near 1 removes the excess quickly while the support
+// contact lifts the body back out — this keeps tall stacks from visibly sagging.
+const POSITION_CORRECTION_PERCENT = 1.0;
+const MAX_POSITION_CORRECTION = 18;
+// Soft Baumgarte bias: bleeds residual penetration off as a tiny separating velocity.
+// This is what lets a brick resting on another *falling* brick stop sinking — plain
+// restitution never fires there because the closing velocity is ~0.
+const BAUMGARTE_BETA = 0.12;
+const MAX_BIAS_VELOCITY = 2.5;
+// Below this closing speed a contact is treated as resting: no restitution bounce, so
+// stacks settle to true rest and sleep instead of micro-bouncing forever.
+const RESTITUTION_VELOCITY_THRESHOLD = 0.6;
+
 function clampNumber(value, min, max, fallback) {
   const n = Number(value);
   if (!Number.isFinite(n)) return fallback;
@@ -720,6 +742,7 @@ export class DestructionPegSystem {
     this.pegToBody = new Map();
     this._pegById = new Map();
     this._pairKeys = new Set();
+    this._contactPairs = [];
     this._grid = new Map();
     this._gridBucketPool = [];
     this._colliders = [];
@@ -2405,6 +2428,11 @@ export class DestructionPegSystem {
     this._pairKeys.clear();
     const collisionAngularDamping = Math.pow(0.92, subScale);
 
+    // Broad phase: gather each candidate contact pair exactly once (deduped across
+    // grid cells). Positions shift during resolution, but the candidate set stays
+    // valid at the slop scale, so we collect once and relax it repeatedly below.
+    const pairs = this._contactPairs;
+    let pairCount = 0;
     for (const bucket of this._grid.values()) {
       for (let aIndex = 0; aIndex < bucket.length; aIndex++) {
         const i = bucket[aIndex];
@@ -2426,10 +2454,29 @@ export class DestructionPegSystem {
           if (!aActive && !bActive && !aKinematic && !bKinematic) continue;
           if (!this.aabbOverlap(a.aabb, b.aabb)) continue;
 
-          const overlap = colliderOverlap(a, b, this._overlap, this._projectionA, this._projectionB);
-          if (!overlap || overlap.depth <= 0) continue;
-          this.resolveBodyCollision(a, b, overlap, collisionAngularDamping, subScale);
+          pairs[pairCount++] = i;
+          pairs[pairCount++] = j;
         }
+      }
+    }
+    if (pairCount === 0) return;
+
+    // Relaxation: re-evaluate and resolve every contact several times so the support
+    // reaction propagates through the whole stack within this substep. One-shot side
+    // effects (waking, bumper/fracture events) run on the first iteration off the true
+    // impact velocity; slope-slide support marking runs on the last so its per-contact
+    // acceleration isn't multiplied by the iteration count.
+    const iterations = STACK_SOLVER_ITERATIONS;
+    for (let iter = 0; iter < iterations; iter++) {
+      const firstIter = iter === 0;
+      const lastIter = iter === iterations - 1;
+      for (let p = 0; p < pairCount; p += 2) {
+        const a = colliders[pairs[p]];
+        const b = colliders[pairs[p + 1]];
+        if (!a || !b) continue;
+        const overlap = colliderOverlap(a, b, this._overlap, this._projectionA, this._projectionB);
+        if (!overlap || overlap.depth <= 0) continue;
+        this.resolveBodyCollision(a, b, overlap, collisionAngularDamping, subScale, firstIter, lastIter);
       }
     }
   }
@@ -2502,13 +2549,16 @@ export class DestructionPegSystem {
     return this.wakeBody(body, impulseX, impulseY, contactPeg, null, null, 'collision');
   }
 
-  resolveBodyCollision(a, b, overlap, collisionAngularDamping = 1, subScale = 1) {
+  resolveBodyCollision(a, b, overlap, collisionAngularDamping = 1, subScale = 1, firstIter = true, lastIter = true) {
     const bodyA = a.body;
     const bodyB = b.body;
     let activeA = this.isActiveDynamic(bodyA);
     let activeB = this.isActiveDynamic(bodyB);
-    if (!activeA && this.wakeSleepingBodyFromKinematic(bodyA, b, a.peg)) activeA = true;
-    if (!activeB && this.wakeSleepingBodyFromKinematic(bodyB, a, b.peg)) activeB = true;
+    if (firstIter) {
+      // Wake only on the first iteration; once awake the body joins the relaxation.
+      if (!activeA && this.wakeSleepingBodyFromKinematic(bodyA, b, a.peg)) activeA = true;
+      if (!activeB && this.wakeSleepingBodyFromKinematic(bodyB, a, b.peg)) activeB = true;
+    }
     const invA = activeA ? bodyA.invMass : 0;
     const invB = activeB ? bodyB.invMass : 0;
     const invTotal = invA + invB;
@@ -2516,29 +2566,56 @@ export class DestructionPegSystem {
 
     const nx = overlap.nx;
     const ny = overlap.ny;
-    const depth = Math.min(overlap.depth + 0.12, 18);
+    const penetration = overlap.depth;
 
-    if (activeA) {
-      bodyA.x -= nx * depth * (invA / invTotal);
-      bodyA.y -= ny * depth * (invA / invTotal);
-      this.markBodyTransformDirty(bodyA);
-      this.applyBodyToPegs(bodyA);
-      this.refreshColliderForBody(bodyA);
-    }
-    if (activeB) {
-      bodyB.x += nx * depth * (invB / invTotal);
-      bodyB.y += ny * depth * (invB / invTotal);
-      this.markBodyTransformDirty(bodyB);
-      this.applyBodyToPegs(bodyB);
-      this.refreshColliderForBody(bodyB);
+    // Positional correction: only resolve penetration beyond the slop, and only a
+    // fraction per iteration, so the relaxation converges without shoving the stack
+    // apart. Position changes are pure teleports (no energy injected); the iterations
+    // re-read the overlap, so the contact settles to ~slop overlap and stays "live".
+    const correctionMag = Math.min(
+      Math.max(penetration - CONTACT_SLOP, 0) * POSITION_CORRECTION_PERCENT,
+      MAX_POSITION_CORRECTION
+    );
+    if (correctionMag > 0) {
+      if (activeA) {
+        bodyA.x -= nx * correctionMag * (invA / invTotal);
+        bodyA.y -= ny * correctionMag * (invA / invTotal);
+        this.markBodyTransformDirty(bodyA);
+        this.applyBodyToPegs(bodyA);
+        this.refreshColliderForBody(bodyA);
+      }
+      if (activeB) {
+        bodyB.x += nx * correctionMag * (invB / invTotal);
+        bodyB.y += ny * correctionMag * (invB / invTotal);
+        this.markBodyTransformDirty(bodyB);
+        this.applyBodyToPegs(bodyB);
+        this.refreshColliderForBody(bodyB);
+      }
     }
 
     const rvx = (bodyB.vx || 0) - (bodyA.vx || 0);
     const rvy = (bodyB.vy || 0) - (bodyA.vy || 0);
     const relN = rvx * nx + rvy * ny;
 
-    if (relN < 0) {
-      const impulse = -(1 + this.getCollisionRestitution(a, b)) * relN / invTotal;
+    // Unified normal solve. Drive the relative normal velocity up to the larger of:
+    //  - the restitution bounce (only for genuine impacts, gated by a velocity
+    //    threshold so resting contacts don't micro-bounce and can sleep), and
+    //  - a small Baumgarte separation bias derived from the residual penetration.
+    // The bias is the key fix for loaded stacks: a brick resting on another *falling*
+    // brick has relN ~ 0, so the old restitution-only impulse never fired and the
+    // brick sank through. Now any penetrating resting contact gets nudged apart, which
+    // bleeds off the gravity velocity that was accumulating down the stack. When
+    // relN is already a closing velocity (relN < 0), target 0 makes this a clean
+    // resting constraint that simply cancels the closing motion.
+    const restitution = this.getCollisionRestitution(a, b);
+    const bounceTarget = relN < -RESTITUTION_VELOCITY_THRESHOLD ? -restitution * relN : 0;
+    const biasTarget = Math.min(
+      (BAUMGARTE_BETA * Math.max(penetration - CONTACT_SLOP, 0)) / Math.max(subScale, 1e-4),
+      MAX_BIAS_VELOCITY
+    );
+    const target = Math.max(bounceTarget, biasTarget);
+    if (relN < target) {
+      const impulse = (target - relN) / invTotal;
       if (activeA) {
         bodyA.vx -= impulse * invA * nx;
         bodyA.vy -= impulse * invA * ny;
@@ -2564,25 +2641,34 @@ export class DestructionPegSystem {
       bodyB.av *= collisionAngularDamping;
     }
 
-    const supportDot = nx * this._gravityNormX + ny * this._gravityNormY;
-    if (activeA && supportDot > 0.45) {
-      this.markBodySupported(bodyA, nx, ny, supportDot, subScale, bodyB);
-    }
-    if (activeB && supportDot < -0.45) {
-      this.markBodySupported(bodyB, -nx, -ny, -supportDot, subScale, bodyA);
+    // Support classification (and its slope-slide acceleration) runs once, on the last
+    // iteration, so the contact has settled and the slide accel isn't applied N times.
+    if (lastIter) {
+      const supportDot = nx * this._gravityNormX + ny * this._gravityNormY;
+      if (activeA && supportDot > 0.45) {
+        this.markBodySupported(bodyA, nx, ny, supportDot, subScale, bodyB);
+      }
+      if (activeB && supportDot < -0.45) {
+        this.markBodySupported(bodyB, -nx, -ny, -supportDot, subScale, bodyA);
+      }
     }
 
-    this.maybeWakeSleepingCollisionBody(bodyA, bodyB, relN);
-    this.maybeWakeSleepingCollisionBody(bodyB, bodyA, -relN);
     if (activeA) this.clampBodySpeed(bodyA);
     if (activeB) this.clampBodySpeed(bodyB);
-    const collisionStrength = Math.abs(relN) + depth * 0.22;
-    this.maybeQueueBumperHit(a, b, activeA, activeB, collisionStrength, nx, ny);
-    if (collisionStrength >= GROUP_FRACTURE_IMPULSE) {
-      const contactX = ((a.x || bodyA.x || 0) + (b.x || bodyB.x || 0)) * 0.5;
-      const contactY = ((a.y || bodyA.y || 0) + (b.y || bodyB.y || 0)) * 0.5;
-      this.queueBodyFracture(bodyA, contactX, contactY, collisionStrength, -nx, -ny);
-      this.queueBodyFracture(bodyB, contactX, contactY, collisionStrength, nx, ny);
+
+    // Impact-driven events use the true pre-relaxation relative velocity, so they run
+    // once on the first iteration.
+    if (firstIter) {
+      this.maybeWakeSleepingCollisionBody(bodyA, bodyB, relN);
+      this.maybeWakeSleepingCollisionBody(bodyB, bodyA, -relN);
+      const collisionStrength = Math.abs(relN) + penetration * 0.22;
+      this.maybeQueueBumperHit(a, b, activeA, activeB, collisionStrength, nx, ny);
+      if (collisionStrength >= GROUP_FRACTURE_IMPULSE) {
+        const contactX = ((a.x || bodyA.x || 0) + (b.x || bodyB.x || 0)) * 0.5;
+        const contactY = ((a.y || bodyA.y || 0) + (b.y || bodyB.y || 0)) * 0.5;
+        this.queueBodyFracture(bodyA, contactX, contactY, collisionStrength, -nx, -ny);
+        this.queueBodyFracture(bodyB, contactX, contactY, collisionStrength, nx, ny);
+      }
     }
   }
 
