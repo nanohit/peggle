@@ -442,10 +442,14 @@ class PeggleApp {
     const vpRect = viewport.getBoundingClientRect();
     if (!vpRect.width || !vpRect.height) return;
 
-    const margin = vpRect.width < 520 ? 6 : 12;
+    const margin = vpRect.width < 520 ? 6 : 8;
     const anchors = ['visualFrame', 'themePanel', 'adminPanel']
       .map(id => document.getElementById(id))
-      .filter(el => el && el.offsetParent !== null);
+      .filter(el => {
+        if (!el || el.offsetParent === null) return false;
+        const rect = el.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      });
 
     let contentRight = 0;
     for (const anchor of anchors) {
@@ -453,24 +457,12 @@ class PeggleApp {
       contentRight = Math.max(contentRight, rect.right - vpRect.left);
     }
 
-    const maxWidth = Math.max(260, Math.min(360, vpRect.width - margin * 2));
-    let width = maxWidth;
-    let left = Math.max(margin, vpRect.width - width - margin);
-    let docked = false;
+    const left = contentRight + margin;
+    const width = Math.max(180, vpRect.width - left - margin);
+    const top = 0;
+    const bottom = 0;
 
-    if (contentRight > 0) {
-      const rightGap = vpRect.width - contentRight - margin;
-      const dockWidth = Math.min(maxWidth, rightGap - margin);
-      if (dockWidth >= 280) {
-        width = dockWidth;
-        left = contentRight + margin;
-        docked = true;
-      }
-    }
-
-    const top = margin;
-    const bottom = margin;
-    layer.dataset.docked = docked ? 'true' : 'false';
+    layer.dataset.docked = 'right';
 
     for (const id of this._editorSideSheetIds) {
       const el = document.getElementById(id);
@@ -480,7 +472,7 @@ class PeggleApp {
       el.style.top = `${Math.round(top)}px`;
       el.style.bottom = `${Math.round(bottom)}px`;
       el.style.width = `${Math.round(width)}px`;
-      el.classList.toggle('editor-side-sheet--docked', docked);
+      el.classList.add('editor-side-sheet--docked');
     }
   }
 
@@ -1205,6 +1197,11 @@ class PeggleApp {
   }
 
   showPhysicsSettings() {
+    this.closeLevelList();
+    this.closeCampaignList();
+    this.closeCampaignEditor();
+    this.closePvpDuelLevels();
+    this.closeCharacterEditor();
     this.closeDialogueEditor();
     // Update slider values to current settings
     document.getElementById('gravitySlider').value = PHYSICS_CONFIG.gravity * 100;
@@ -3834,6 +3831,10 @@ class PeggleApp {
   }
 
   showLevelList() {
+    this.closeCampaignList();
+    this.closeCampaignEditor();
+    this.closePvpDuelLevels();
+    this.closeCharacterEditor();
     this.closeDialogueEditor();
     const levels = this.levelManager.getAllLevels();
     const list = document.getElementById('levelItems');
@@ -4120,6 +4121,10 @@ class PeggleApp {
 
   showCharacterEditor() {
     this.closeLevelList();
+    this.closeCampaignList();
+    this.closeCampaignEditor();
+    this.closePvpDuelLevels();
+    this.closePhysicsSettings();
     this.closeDialogueEditor();
     this.characterRegistry = loadCharacterRegistry();
     const selectedId = makeCharacterId(this._selectedCharacterEditorId || this.characterRegistry.selectedId || DEFAULT_CHARACTER_ID);
@@ -4614,6 +4619,13 @@ class PeggleApp {
         <div class="dialogue-toolbar-spacer"></div>
         <button class="dialogue-chip-btn" type="button" data-character-assign-current>Assign to Level</button>
       </div>
+      <div class="dialogue-card-block character-panel-block character-picker-block">
+        <div class="dialogue-block-title">Character</div>
+        <label class="dialogue-field">
+          <span class="dialogue-field-label">Editing character</span>
+          <select id="characterEditorSelect" class="dialogue-field-select">${editorOptions}</select>
+        </label>
+      </div>
       <div class="dialogue-editor-note">Characters auto-sync through the shared server registry. Push/Pull is only for forcing a refresh.</div>
 
       <div class="dialogue-card-block character-panel-block">
@@ -4629,11 +4641,7 @@ class PeggleApp {
       </div>
 
       <div class="dialogue-card-block character-panel-block">
-        <div class="dialogue-block-title">Character</div>
-        <label class="dialogue-field">
-          <span class="dialogue-field-label">Editing character</span>
-          <select id="characterEditorSelect" class="dialogue-field-select">${editorOptions}</select>
-        </label>
+        <div class="dialogue-block-title">Character Details</div>
         <div class="dialogue-inline-grid">
           <label class="dialogue-field">
             <span class="dialogue-field-label">ID</span>
@@ -5601,6 +5609,7 @@ class PeggleApp {
     this.closeCampaignEditor();
     this.closePvpDuelLevels();
     this.closePhysicsSettings();
+    this.closeCharacterEditor();
 
     const config = this._getCurrentDialogueConfig();
     if (!this._dialogueSelectedEntryId && config.entries.length > 0) {
@@ -5818,6 +5827,84 @@ class PeggleApp {
     return snapshot;
   }
 
+  _isLocalStorageQuotaError(error) {
+    return !!error && (
+      error.name === 'QuotaExceededError'
+      || error.name === 'NS_ERROR_DOM_QUOTA_REACHED'
+      || error.code === 22
+      || error.code === 1014
+    );
+  }
+
+  _getLocalStorageEvictionCandidates(protectedKey = '') {
+    const candidates = [];
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (!key || key === protectedKey) continue;
+        const isCampaignCache = key.startsWith('campaign:') || key.startsWith('campaign_ts:');
+        const isBakedCache = key.startsWith('baked:');
+        if (!isCampaignCache && !isBakedCache) continue;
+        const value = localStorage.getItem(key) || '';
+        candidates.push({
+          key,
+          bytes: key.length + value.length,
+          priority: isCampaignCache ? 0 : 1
+        });
+      }
+    } catch {
+      return [];
+    }
+    return candidates.sort((a, b) => (a.priority - b.priority) || (b.bytes - a.bytes));
+  }
+
+  _setLocalStorageItemWithCleanup(key, value, label = key, options = {}) {
+    if (typeof localStorage === 'undefined' || typeof localStorage.setItem !== 'function') return false;
+    try {
+      localStorage.setItem(key, value);
+      return true;
+    } catch (error) {
+      if (!this._isLocalStorageQuotaError(error)) {
+        console.warn(`[storage] Failed to write ${label}:`, error);
+        return false;
+      }
+    }
+
+    if (options.removeCurrent !== false) {
+      try {
+        localStorage.removeItem(key);
+        localStorage.setItem(key, value);
+        return true;
+      } catch (error) {
+        if (!this._isLocalStorageQuotaError(error)) {
+          console.warn(`[storage] Failed to write ${label}:`, error);
+          return false;
+        }
+      }
+    }
+
+    const evicted = [];
+    for (const candidate of this._getLocalStorageEvictionCandidates(key)) {
+      try {
+        localStorage.removeItem(candidate.key);
+        evicted.push(candidate.key);
+        localStorage.setItem(key, value);
+        if (evicted.length > 0) {
+          console.warn(`[storage] Freed local cache for ${label} by evicting:`, evicted);
+        }
+        return true;
+      } catch (error) {
+        if (!this._isLocalStorageQuotaError(error)) {
+          console.warn(`[storage] Failed while freeing cache for ${label}:`, error);
+          return false;
+        }
+      }
+    }
+
+    console.warn(`[storage] Skipped local cache for ${label}; browser quota is still full after cleanup.`);
+    return false;
+  }
+
   _readBakedLevelSnapshot(bakedName) {
     const raw = localStorage.getItem('baked:' + bakedName);
     if (!raw) return null;
@@ -5826,7 +5913,12 @@ class PeggleApp {
       if (!snapshot) return null;
       const normalizedRaw = JSON.stringify(snapshot);
       if (normalizedRaw !== raw) {
-        localStorage.setItem('baked:' + bakedName, normalizedRaw);
+        this._setLocalStorageItemWithCleanup(
+          'baked:' + bakedName,
+          normalizedRaw,
+          `baked level "${bakedName}"`,
+          { removeCurrent: false }
+        );
       }
       return snapshot;
     } catch {
@@ -5837,14 +5929,22 @@ class PeggleApp {
   _writeBakedLevelSnapshot(bakedName, snapshot) {
     const normalized = this._cloneLevelSnapshot(snapshot);
     if (!normalized) return null;
-    localStorage.setItem('baked:' + bakedName, JSON.stringify(normalized));
+    this._setLocalStorageItemWithCleanup(
+      'baked:' + bakedName,
+      JSON.stringify(normalized),
+      `baked level "${bakedName}"`
+    );
     return normalized;
   }
 
   async _writeBakedLevelSnapshotForStorage(bakedName, snapshot) {
     const normalized = await this._cloneLevelSnapshotForStorage(snapshot);
     if (!normalized) return null;
-    localStorage.setItem('baked:' + bakedName, JSON.stringify(normalized));
+    this._setLocalStorageItemWithCleanup(
+      'baked:' + bakedName,
+      JSON.stringify(normalized),
+      `baked level "${bakedName}"`
+    );
     return normalized;
   }
 
@@ -6200,6 +6300,7 @@ class PeggleApp {
     this.closeCampaignEditor();
     this.closeDialogueEditor();
     this.closePhysicsSettings();
+    this.closeCharacterEditor();
     this._positionEditorSideSheets();
     this._renderPvpDuelLevels();
     document.getElementById('pvpLevelsOverlay')?.classList.add('visible');
@@ -6377,6 +6478,9 @@ class PeggleApp {
   }
 
   showCampaignList() {
+    this.closeLevelList();
+    this.closeCampaignEditor();
+    this.closeCharacterEditor();
     this.closeDialogueEditor();
     this.closePvpDuelLevels();
     this._positionEditorSideSheets();
@@ -6402,6 +6506,9 @@ class PeggleApp {
 
     this.closeCampaignList();
     this.closePvpDuelLevels();
+    this.closeCharacterEditor();
+    this.closeDialogueEditor();
+    this.closePhysicsSettings();
 
     const nameInput = document.getElementById('campaignNameInput');
     nameInput.value = campaign.name;
@@ -6601,12 +6708,25 @@ class PeggleApp {
   _graphMoveSelected(campaignId, direction) {
     if (this._selectedGraphNode === null) return;
     const nodeId = this._selectedGraphNode;
+    const campaign = this.campaignManager.getById(campaignId);
+    const graph = campaign?.graph;
+    let movedLevelNodeId = nodeId;
+    if (graph && direction === 'up') {
+      const parents = graph.nodes.filter(n => Array.isArray(n.children) && n.children.includes(nodeId));
+      if (parents.length === 1 && parents[0].children.length === 1) movedLevelNodeId = parents[0].id;
+    } else if (graph && direction === 'down') {
+      const node = graph.nodes.find(n => n.id === nodeId);
+      if (node && Array.isArray(node.children) && node.children.length === 1) movedLevelNodeId = node.children[0];
+    }
     let ok = false;
     if (direction === 'up') ok = this.campaignManager.moveGraphNodeUp(campaignId, nodeId);
     else if (direction === 'down') ok = this.campaignManager.moveGraphNodeDown(campaignId, nodeId);
     else if (direction === 'left') ok = this.campaignManager.moveGraphBranchSibling(campaignId, nodeId, -1);
     else if (direction === 'right') ok = this.campaignManager.moveGraphBranchSibling(campaignId, nodeId, 1);
-    if (ok) this._refreshCampaignEditor(campaignId);
+    if (ok) {
+      this._selectedGraphNode = movedLevelNodeId;
+      this._refreshCampaignEditor(campaignId);
+    }
   }
 
   // ─── Graph editing actions ───────────────────────────────
