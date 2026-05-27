@@ -7,6 +7,8 @@ import { PHYSICS_CONFIG } from './physics.js';
 import { FLIPPER_DEFAULTS, createDefaultFlipperConfig, normalizeFlipperConfig } from './flipper-defaults.js';
 import {
   ensureLevelSurvival,
+  GAMBLE_LUCK_BONUS_MAX,
+  GAMBLE_LUCK_BONUS_MIN,
   getSurvivalSpeedCurvePreset,
   normalizeSurvivalGamblePegProperties,
   normalizeSurvivalSettings,
@@ -916,13 +918,11 @@ class PeggleApp {
         const cameraY = this.editor?.getCameraY?.() || 0;
         const normalized = normalizeFlipperConfig(level.flippers, {
           canvasHeight: this.canvas.height,
-          cameraY,
-          bounce: PHYSICS_CONFIG.bounce
+          cameraY
         });
         level.flippers = normalized || createDefaultFlipperConfig({
           canvasHeight: this.canvas.height,
           cameraY,
-          bounce: PHYSICS_CONFIG.bounce,
           enabled: true
         });
         level.flippers.enabled = true;
@@ -1649,6 +1649,8 @@ class PeggleApp {
     const countInput = document.getElementById('multiballCountInput');
     const gambleBallSlider = document.getElementById('gamblePegBallCountSlider');
     const gambleBallInput = document.getElementById('gamblePegBallCountInput');
+    const gambleLuckSlider = document.getElementById('gamblePegLuckBonusSlider');
+    const gambleLuckInput = document.getElementById('gamblePegLuckBonusInput');
     const gambleKnockbackToggle = document.getElementById('gamblePegKnockbackToggle');
     const gambleKnockbackSlider = document.getElementById('gamblePegKnockbackDistanceSlider');
     const gambleKnockbackInput = document.getElementById('gamblePegKnockbackDistanceInput');
@@ -1664,6 +1666,12 @@ class PeggleApp {
       gambleBallSlider.max = String(SURVIVAL_GAMBLE_BALL_COUNT_MAX);
       gambleBallInput.min = String(SURVIVAL_GAMBLE_BALL_COUNT_MIN);
       gambleBallInput.max = String(SURVIVAL_GAMBLE_BALL_COUNT_MAX);
+    }
+    if (gambleLuckSlider && gambleLuckInput) {
+      gambleLuckSlider.min = String(GAMBLE_LUCK_BONUS_MIN);
+      gambleLuckSlider.max = String(GAMBLE_LUCK_BONUS_MAX);
+      gambleLuckInput.min = String(GAMBLE_LUCK_BONUS_MIN);
+      gambleLuckInput.max = String(GAMBLE_LUCK_BONUS_MAX);
     }
     if (gambleKnockbackSlider && gambleKnockbackInput) {
       gambleKnockbackSlider.min = String(SURVIVAL_GAMBLE_KNOCKBACK_DISTANCE_MIN);
@@ -1710,6 +1718,18 @@ class PeggleApp {
       };
       gambleBallSlider.addEventListener('input', () => applyGambleBallCount(gambleBallSlider.value));
       gambleBallInput.addEventListener('input', () => applyGambleBallCount(gambleBallInput.value));
+    }
+
+    if (gambleLuckSlider && gambleLuckInput) {
+      const applyGambleLuckBonus = (rawValue) => {
+        if (!this.editor) return;
+        const normalized = normalizeSurvivalGamblePegProperties({ gambleLuckBonus: rawValue });
+        gambleLuckSlider.value = normalized.gambleLuckBonus;
+        gambleLuckInput.value = normalized.gambleLuckBonus;
+        this.editor.setSelectedGambleLuckBonus(normalized.gambleLuckBonus);
+      };
+      gambleLuckSlider.addEventListener('input', () => applyGambleLuckBonus(gambleLuckSlider.value));
+      gambleLuckInput.addEventListener('input', () => applyGambleLuckBonus(gambleLuckInput.value));
     }
 
     if (gambleKnockbackToggle && gambleKnockbackSlider && gambleKnockbackInput) {
@@ -1777,6 +1797,8 @@ class PeggleApp {
       if (gambleSettings) gambleSettings.classList.remove('hidden');
       const ballSlider = document.getElementById('gamblePegBallCountSlider');
       const ballInput = document.getElementById('gamblePegBallCountInput');
+      const luckSlider = document.getElementById('gamblePegLuckBonusSlider');
+      const luckInput = document.getElementById('gamblePegLuckBonusInput');
       const knockbackToggle = document.getElementById('gamblePegKnockbackToggle');
       const knockbackSlider = document.getElementById('gamblePegKnockbackDistanceSlider');
       const knockbackInput = document.getElementById('gamblePegKnockbackDistanceInput');
@@ -1784,6 +1806,8 @@ class PeggleApp {
       const knockbackSmoothInput = document.getElementById('gamblePegKnockbackSmoothInput');
       if (ballSlider) ballSlider.value = props.gambleBallCount;
       if (ballInput) ballInput.value = props.gambleBallCount;
+      if (luckSlider) luckSlider.value = props.gambleLuckBonus;
+      if (luckInput) luckInput.value = props.gambleLuckBonus;
       if (knockbackToggle) knockbackToggle.checked = !!props.gambleKnockbackEnabled;
       if (knockbackSlider) {
         knockbackSlider.value = props.gambleKnockbackDistance;
@@ -2865,12 +2889,10 @@ class PeggleApp {
     const cameraY = this.editor?.getCameraY?.() || 0;
     const base = normalizeFlipperConfig(level.flippers, {
       canvasHeight: this.canvas.height,
-      cameraY,
-      bounce: PHYSICS_CONFIG.bounce
+      cameraY
     }) || createDefaultFlipperConfig({
       canvasHeight: this.canvas.height,
       cameraY,
-      bounce: PHYSICS_CONFIG.bounce,
       enabled: true
     });
     level.flippers = { ...base, [prop]: value, enabled: true };
@@ -2881,8 +2903,7 @@ class PeggleApp {
     const cameraY = this.editor?.getCameraY?.() || 0;
     const f = normalizeFlipperConfig(this.levelManager.getFlippers(), {
       canvasHeight: this.canvas.height,
-      cameraY,
-      bounce: PHYSICS_CONFIG.bounce
+      cameraY
     });
     if (!f) return;
 

@@ -741,6 +741,12 @@ html, body {
   transform: translate(-50%, 0) scale(0.96);
 }
 
+.gamble-hud.gamble-hud--luck-ready .gamble-toggle-handle {
+  filter: drop-shadow(0 10px 14px rgba(0, 0, 0, 0.42))
+          drop-shadow(0 0 4px rgba(151, 255, 70, 0.20))
+          drop-shadow(0 0 12px rgba(68, 255, 169, 0.10));
+}
+
 .gamble-board-layer {
   position: absolute;
   left: 50%;
@@ -933,6 +939,7 @@ html, body {
 }
 
 .gamble-btn {
+  position: relative;
   width: min(68%, calc(246px * var(--s)));
   max-width: calc(246px * var(--s));
   max-height: 0;
@@ -952,6 +959,80 @@ html, body {
   transition: opacity 0.22s ease, max-height 0.22s ease, transform 0.18s ease, filter 0.18s ease;
 }
 
+.gamble-hud.gamble-hud--luck-ready .gamble-btn {
+  filter: drop-shadow(0 10px 20px rgba(0, 0, 0, 0.4))
+          drop-shadow(0 0 4px rgba(151, 255, 70, 0.20))
+          drop-shadow(0 0 13px rgba(68, 255, 169, 0.11));
+}
+
+.gamble-luck-boost-toast {
+  position: absolute;
+  left: 50%;
+  bottom: calc(74px * var(--s) * var(--hud-squeeze));
+  transform: translate(-50%, 14px) scale(0.96);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 2;
+  padding: calc(4px * var(--s)) calc(10px * var(--s));
+  border: 1px solid rgba(196, 255, 92, 0.34);
+  border-radius: calc(999px * var(--s));
+  background: rgba(9, 18, 6, 0.76);
+  color: #dfff8a;
+  font-size: calc(11px * var(--s));
+  line-height: 1.1;
+  text-shadow: 0 0 8px rgba(140, 255, 0, 0.72);
+  box-shadow: 0 0 18px rgba(140, 255, 0, 0.22);
+  white-space: nowrap;
+}
+
+.gamble-hud.gamble-hud--luck-pulse .gamble-luck-boost-toast {
+  animation: gambleLuckBoostToast 2.3s ease both;
+}
+
+.gamble-hud.gamble-hud--luck-pulse .gamble-btn {
+  animation: gambleLuckBoostButton 1.4s ease both;
+}
+
+.gamble-hud.gamble-hud--luck-pulse .gamble-toggle-handle {
+  animation: gambleLuckBoostToggle 1.4s ease both;
+}
+
+@keyframes gambleLuckBoostToast {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 18px) scale(0.94);
+  }
+  14%,
+  72% {
+    opacity: 1;
+    transform: translate(-50%, -8px) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -18px) scale(0.98);
+  }
+}
+
+@keyframes gambleLuckBoostButton {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  28% {
+    transform: translateY(-1px) scale(1.025);
+  }
+}
+
+@keyframes gambleLuckBoostToggle {
+  0%,
+  100% {
+    transform: translate(-50%, 0) scale(1);
+  }
+  28% {
+    transform: translate(-50%, -1px) scale(1.035);
+  }
+}
+
 .gamble-hud.expanded .gamble-btn {
   opacity: 1;
   max-height: calc(96px * var(--s) * var(--hud-squeeze));
@@ -962,6 +1043,12 @@ html, body {
   opacity: 0.38;
   filter: grayscale(0.45) saturate(0.7);
   cursor: not-allowed;
+}
+
+.gamble-hud.gamble-hud--luck-ready .gamble-btn:disabled {
+  opacity: 0.46;
+  filter: grayscale(0.2) saturate(1.05)
+          drop-shadow(0 0 5px rgba(151, 255, 70, 0.14));
 }
 
 .gamble-btn:not(:disabled):active {

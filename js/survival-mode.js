@@ -1,5 +1,6 @@
 import { Utils } from './utils.js';
 import { isPortalType } from './portal-defaults.js';
+import { MAX_LUCK } from './slots-math.js';
 
 const MIN_SPEED_CURVE_Y = 0.05;
 const MAX_SPEED_CURVE_Y = 3;
@@ -18,6 +19,9 @@ export const SURVIVAL_GAMBLE_KNOCKBACK_DISTANCE_MAX = MAX_KNOCKBACK_DISTANCE;
 export const SURVIVAL_GAMBLE_KNOCKBACK_SMOOTH_DEFAULT_MS = 180;
 export const SURVIVAL_GAMBLE_KNOCKBACK_SMOOTH_MIN_MS = MIN_KNOCKBACK_SMOOTH_MS;
 export const SURVIVAL_GAMBLE_KNOCKBACK_SMOOTH_MAX_MS = MAX_KNOCKBACK_SMOOTH_MS;
+export const GAMBLE_LUCK_BONUS_DEFAULT = 6;
+export const GAMBLE_LUCK_BONUS_MIN = 0;
+export const GAMBLE_LUCK_BONUS_MAX = MAX_LUCK;
 
 export const SURVIVAL_SPEED_CURVE_PRESETS = Object.freeze({
   linear: Object.freeze({
@@ -188,6 +192,14 @@ export function normalizeSurvivalGamblePegProperties(rawPeg = null, fallbackSett
     SURVIVAL_GAMBLE_BALL_COUNT_MIN,
     SURVIVAL_GAMBLE_BALL_COUNT_MAX
   );
+  const luckBonus = Utils.clamp(
+    Math.round(toFiniteNumber(
+      raw.gambleLuckBonus ?? raw.luckBonus ?? raw.slotLuckBonus,
+      GAMBLE_LUCK_BONUS_DEFAULT
+    )),
+    GAMBLE_LUCK_BONUS_MIN,
+    GAMBLE_LUCK_BONUS_MAX
+  );
   const fallbackDistance = fallback.knockbackDistance
     ?? fallback.knockbackStrength
     ?? SURVIVAL_GAMBLE_KNOCKBACK_DISTANCE_DEFAULT;
@@ -218,6 +230,7 @@ export function normalizeSurvivalGamblePegProperties(rawPeg = null, fallbackSett
   );
   return {
     gambleBallCount: ballCount,
+    gambleLuckBonus: luckBonus,
     gambleKnockbackEnabled: !!(
       raw.gambleKnockbackEnabled
         ?? raw.knockbackEnabled

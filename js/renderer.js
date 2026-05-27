@@ -12,6 +12,12 @@ import {
   normalizeShockwaveConfig
 } from './shockwave-effect.js';
 import { getPortalScale, isPortalType } from './portal-defaults.js';
+import { FLIPPER_DEFAULTS } from './flipper-defaults.js';
+
+const FLIPPER_ASSET_SRC = 'visuals/assets_webtp/flipper.webp';
+const FLIPPER_ASSET_PIVOT_X_RATIO = 26.5 / 267;
+const FLIPPER_ASSET_OPAQUE_TOP_RATIO = 1 / 53;
+const FLIPPER_ASSET_OPAQUE_BOTTOM_RATIO = 51 / 53;
 
 // Color palette
 const COLORS = {
@@ -374,6 +380,11 @@ export class Renderer {
     const bucketImg = new Image();
     bucketImg.onload = () => { this._bucketImg = bucketImg; };
     bucketImg.src = 'visuals/bucket.webp';
+
+    this._flipperImg = null;
+    const flipperImg = new Image();
+    flipperImg.onload = () => { this._flipperImg = flipperImg; };
+    flipperImg.src = FLIPPER_ASSET_SRC;
 
     // Bucket catch particle system
     this._bucketParticles = [];
@@ -2592,27 +2603,31 @@ export class Renderer {
     const ctx = this.ctx;
     const centerX = canvasWidth / 2;
     const t = flippers._flipperT || 0;
-    const restRad = (Number.isFinite(flippers.restAngle) ? flippers.restAngle : 23) * Math.PI / 180;
-    const flipRad = (Number.isFinite(flippers.flipAngle) ? flippers.flipAngle : 30) * Math.PI / 180;
+    const restRad = (Number.isFinite(flippers.restAngle) ? flippers.restAngle : FLIPPER_DEFAULTS.restAngle) * Math.PI / 180;
+    const flipRad = (Number.isFinite(flippers.flipAngle) ? flippers.flipAngle : FLIPPER_DEFAULTS.flipAngle) * Math.PI / 180;
 
-    const sc = Number.isFinite(flippers.scale) ? flippers.scale : 1.8;
-    const len = (Number.isFinite(flippers.length) ? flippers.length : 60) * sc;
-    const w = (Number.isFinite(flippers.width) ? flippers.width : 8) * sc;
-    const xOffset = Number.isFinite(flippers.xOffset) ? flippers.xOffset : 196;
+    const sc = Number.isFinite(flippers.scale) ? flippers.scale : FLIPPER_DEFAULTS.scale;
+    const len = (Number.isFinite(flippers.length) ? flippers.length : FLIPPER_DEFAULTS.length) * sc;
+    const w = (Number.isFinite(flippers.width) ? flippers.width : FLIPPER_DEFAULTS.width) * sc;
+    const xOffset = Number.isFinite(flippers.xOffset) ? flippers.xOffset : FLIPPER_DEFAULTS.xOffset;
     const y = Number.isFinite(flippers.y) ? flippers.y : (this.height - 55);
 
     // Left flipper: rest points down-right, flip points up-right
     const leftPivotX = centerX - xOffset;
     const leftAngle = restRad - t * (restRad + flipRad);
-    this.drawSingleFlipper(leftPivotX, y, leftAngle, len, w, t, selected);
+    this.drawSingleFlipper(leftPivotX, y, leftAngle, len, w, t, selected, false);
 
     // Right flipper: mirrored
     const rightPivotX = centerX + xOffset;
     const rightAngle = Math.PI - leftAngle;
-    this.drawSingleFlipper(rightPivotX, y, rightAngle, len, w, t, selected);
+    this.drawSingleFlipper(rightPivotX, y, rightAngle, len, w, t, selected, true);
   }
 
-  drawSingleFlipper(pivotX, pivotY, angle, length, width, t, selected) {
+  drawSingleFlipper(pivotX, pivotY, angle, length, width, t, selected, flipAssetY = false) {
+    if (this._drawFlipperAsset(pivotX, pivotY, angle, length, width, t, selected, flipAssetY)) {
+      return;
+    }
+
     const ctx = this.ctx;
     ctx.save();
     ctx.translate(pivotX, pivotY);
@@ -2653,6 +2668,51 @@ export class Renderer {
     ctx.fill();
 
     ctx.restore();
+  }
+
+  _drawFlipperAsset(pivotX, pivotY, angle, length, width, t, selected, flipAssetY) {
+    const img = this._flipperImg;
+    if (!img || !img.complete || !img.naturalWidth || !img.naturalHeight) return false;
+
+    const ctx = this.ctx;
+    const pivotSrcX = img.naturalWidth * FLIPPER_ASSET_PIVOT_X_RATIO;
+    const sourceTopLength = Math.max(1, img.naturalWidth - pivotSrcX);
+    const drawScale = Math.max(0.01, length / sourceTopLength);
+    const drawW = img.naturalWidth * drawScale;
+    const drawH = img.naturalHeight * drawScale;
+    const drawX = -pivotSrcX * drawScale;
+    const opaqueTopY = img.naturalHeight * FLIPPER_ASSET_OPAQUE_TOP_RATIO * drawScale;
+    const opaqueBottomY = img.naturalHeight * FLIPPER_ASSET_OPAQUE_BOTTOM_RATIO * drawScale;
+    const topSurfaceY = -width * 0.5;
+    // Align the visible top edge with the physical capsule surface, while keeping the image proportional.
+    const drawY = flipAssetY
+      ? -topSurfaceY - opaqueBottomY
+      : topSurfaceY - opaqueTopY;
+
+    ctx.save();
+    ctx.translate(pivotX, pivotY);
+    ctx.rotate(angle);
+    if (flipAssetY) ctx.scale(1, -1);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.globalAlpha = 0.94 + Math.min(0.06, Math.max(0, t) * 0.06);
+    ctx.drawImage(img, drawX, drawY, drawW, drawH);
+
+    if (selected) {
+      const r = width * 0.5;
+      ctx.beginPath();
+      ctx.arc(0, 0, r, -Math.PI / 2, Math.PI / 2, true);
+      ctx.lineTo(length - r, r);
+      ctx.arc(length - r, 0, r, Math.PI / 2, -Math.PI / 2, true);
+      ctx.lineTo(0, -r);
+      ctx.closePath();
+      ctx.strokeStyle = COLORS.selection;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+
+    ctx.restore();
+    return true;
   }
 
   drawScore(score, ballsLeft, orangePegsLeft, totalOrangePegs, centerLabel = null) {

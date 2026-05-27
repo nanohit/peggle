@@ -132,6 +132,15 @@ function formatRewardSummary(rewardMap, perkDefinitions) {
   return parts.length > 0 ? parts.join('  ') : 'No reward';
 }
 
+function formatLuckBreakdown(luck) {
+  const manual = Math.round(luck?.manual || 0);
+  const auto = Math.round(luck?.auto || 0);
+  const boost = Math.round(luck?.boost || 0);
+  return boost > 0
+    ? `M${manual} + A${auto} + L${boost}`
+    : `M${manual} + A${auto}`;
+}
+
 export class GambleSystem {
   constructor({ game, levelManager, statusBar, pegCountEl, selectionCountEl, host, visualLayout, onLayoutChange, allowSettings = true }) {
     this.game = game;
@@ -163,7 +172,7 @@ export class GambleSystem {
 
     this.lastSpinGrid = this.createInitialSpinGrid();
     this.lastWinningCells = new Set();
-    this.lastMessage = 'Shoot to unlock Spin.';
+    this.lastMessage = 'Spin ready.';
     this.lastMessageType = 'info';
     this._reelAnimation = null;
     this.eventListeners = new Set();
@@ -173,6 +182,7 @@ export class GambleSystem {
     this.handleResize = null;
     this._themeAssetKey = '';
     this._themeAssetRoot = null;
+    this._luckBoostFxTimer = null;
   }
 
   mount() {
@@ -198,6 +208,10 @@ export class GambleSystem {
 
   dispose() {
     this._cancelReelAnimation();
+    if (this._luckBoostFxTimer) {
+      clearTimeout(this._luckBoostFxTimer);
+      this._luckBoostFxTimer = null;
+    }
     this.game?.setGambleOverlayOpen?.(false);
     this._unbindGameState();
     this.visualLayout?.setGambleOverlayState?.({ open: false });
@@ -224,7 +238,12 @@ export class GambleSystem {
   _bindGameState() {
     this._unbindGameState();
     if (typeof this.game?.subscribeUiState !== 'function') return;
-    this.unsubscribeGameState = this.game.subscribeUiState(() => this.refreshUi());
+    this.unsubscribeGameState = this.game.subscribeUiState((_snapshot, reason) => {
+      if (reason === 'gamble-luck-boost-granted') {
+        this.showLuckBoostFx();
+      }
+      this.refreshUi();
+    });
   }
 
   _unbindGameState() {
@@ -237,7 +256,7 @@ export class GambleSystem {
     this._cancelReelAnimation();
     this.lastWinningCells = new Set();
     this.lastSpinGrid = this.createInitialSpinGrid();
-    this.lastMessage = 'Shoot to unlock Spin.';
+    this.lastMessage = 'Spin ready.';
     this.lastMessageType = 'info';
     for (const perk of this.perkDefinitions) {
       this.inventory[perk.id] = 0;
@@ -595,6 +614,11 @@ export class GambleSystem {
     spinButton.addEventListener('click', () => this.spin());
     dock.appendChild(spinButton);
 
+    const luckBoostToast = document.createElement('div');
+    luckBoostToast.className = 'gamble-luck-boost-toast';
+    luckBoostToast.textContent = 'Шансы увеличены';
+    dock.appendChild(luckBoostToast);
+
     const addNumberControl = ({ label, min, max, step, value, onChange }) => {
       if (!settingsPanel) return null;
       const wrapper = document.createElement('div');
@@ -757,6 +781,7 @@ export class GambleSystem {
       dock,
       toggleButton,
       spinButton,
+      luckBoostToast,
       luckLabel,
       settingsButton,
       gridCells,
@@ -785,6 +810,21 @@ export class GambleSystem {
     }
     this.syncOverlayLayout();
     requestAnimationFrame(() => this.syncOverlayLayout());
+  }
+
+  showLuckBoostFx() {
+    if (!this.ui?.root) return;
+    if (this._luckBoostFxTimer) {
+      clearTimeout(this._luckBoostFxTimer);
+      this._luckBoostFxTimer = null;
+    }
+    this.ui.root.classList.remove('gamble-hud--luck-pulse');
+    void this.ui.root.offsetWidth;
+    this.ui.root.classList.add('gamble-hud--luck-pulse');
+    this._luckBoostFxTimer = setTimeout(() => {
+      this.ui?.root?.classList.remove('gamble-hud--luck-pulse');
+      this._luckBoostFxTimer = null;
+    }, 2400);
   }
 
   applyThemeAssets() {
@@ -907,10 +947,17 @@ export class GambleSystem {
   getEffectiveLuck() {
     const manual = Math.round(clampNumber(this.settings.manualLuck, 0, MAX_LUCK, 0));
     const auto = Math.round(clampNumber(this.getAutoLuck(), 0, MAX_LUCK, 0));
+    const boost = Math.round(clampNumber(
+      this.game?.getPendingGambleLuckBonus?.() ?? 0,
+      0,
+      MAX_LUCK,
+      0
+    ));
     return {
       manual,
       auto,
-      total: Math.min(MAX_LUCK, manual + auto)
+      boost,
+      total: Math.min(MAX_LUCK, manual + auto + boost)
     };
   }
 
@@ -926,7 +973,6 @@ export class GambleSystem {
 
   canSpin() {
     if (this._reelAnimation) return false;
-    if (!this.game?.hasShotInCurrentLevel?.()) return false;
     return this.canInteract() && !!this.game?.canGamble?.(this.settings.ballCost);
   }
 
@@ -943,7 +989,7 @@ export class GambleSystem {
     if (this._reelAnimation) return;
     if (!this.canSpin()) {
       const currency = this.game?.isSurvivalMode?.() ? 'spin balls' : 'balls';
-      this.setMessage(`Cannot gamble while locked or ${currency} are too low.`, 'warn');
+      this.setMessage(`Cannot gamble while ${currency} are too low or a ball is in flight.`, 'warn');
       this.refreshUi();
       return;
     }
@@ -957,6 +1003,7 @@ export class GambleSystem {
     }
 
     const luck = this.getEffectiveLuck();
+    this.game?.consumePendingGambleLuckBonus?.();
     this.applyProbabilitySettings();
     const { grid, wins } = this.engine.spin(luck.total);
     this.emitEvent('spin-start', {
@@ -1156,7 +1203,7 @@ export class GambleSystem {
     this.addRewards(rewards);
 
     if (Object.keys(rewards).length === 0) {
-      this.setMessage(`No win. Luck ${luck.total} (M${luck.manual} + A${luck.auto}).`, 'info');
+      this.setMessage(`No win. Luck ${luck.total} (${formatLuckBreakdown(luck)}).`, 'info');
     } else if (jackpot) {
       this.setMessage(`JACKPOT! ${formatRewardSummary(rewards, this.perkDefinitions)}`, 'win');
     } else {
@@ -1316,12 +1363,11 @@ export class GambleSystem {
     }
 
     const interactionAllowed = this.canInteract();
-    const spinUnlocked = !!this.game?.hasShotInCurrentLevel?.();
     const canSpin = this.canSpin();
     const isSurvival = !!this.game?.isSurvivalMode?.();
     const currencySingular = isSurvival ? 'spin ball' : 'ball';
     const currencyPlural = isSurvival ? 'spin balls' : 'balls';
-    this.ui.spinButton.style.display = spinUnlocked ? '' : 'none';
+    this.ui.spinButton.style.display = '';
     this.ui.spinButton.disabled = !canSpin;
     this.ui.spinButton.textContent = 'Spin';
     this.ui.spinButton.title = `Spin slots (-${this.settings.ballCost} ${this.settings.ballCost === 1 ? currencySingular : currencyPlural})`;
@@ -1330,7 +1376,8 @@ export class GambleSystem {
     }
 
     const luck = this.getEffectiveLuck();
-    this.ui.luckLabel.textContent = `Luck ${luck.total} (M${luck.manual} + A${luck.auto}) · Cost ${this.settings.ballCost} ${this.settings.ballCost === 1 ? currencySingular : currencyPlural}`;
+    this.ui.root.classList.toggle('gamble-hud--luck-ready', luck.boost > 0);
+    this.ui.luckLabel.textContent = `Luck ${luck.total} (${formatLuckBreakdown(luck)}) · Cost ${this.settings.ballCost} ${this.settings.ballCost === 1 ? currencySingular : currencyPlural}`;
 
     // Skip grid cell updates while reel animation is running
     if (!this._reelAnimation) {

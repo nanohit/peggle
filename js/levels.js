@@ -80,6 +80,8 @@ export function normalizeLevelData(level) {
       delete peg.gambleKnockbackStrength;
       delete peg.gambleKnockbackSmooth;
       delete peg.knockbackEnabled;
+      delete peg.luckBonus;
+      delete peg.slotLuckBonus;
       delete peg.knockbackDistance;
       delete peg.knockbackStrength;
       delete peg.knockbackSmooth;

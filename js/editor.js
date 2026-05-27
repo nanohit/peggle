@@ -4,7 +4,7 @@ import { Renderer } from './renderer.js';
 import { LevelManager } from './levels.js';
 import { Utils } from './utils.js';
 import { PHYSICS_CONFIG } from './physics.js';
-import { normalizeFlipperConfig } from './flipper-defaults.js';
+import { FLIPPER_DEFAULTS, normalizeFlipperConfig } from './flipper-defaults.js';
 import { SurvivalRuntime } from './survival-runtime.js';
 import { ensureLevelSurvival, normalizeSurvivalGamblePegProperties } from './survival-mode.js';
 import {
@@ -1965,6 +1965,7 @@ export class Editor {
           delete peg.portalOneWayFlip;
           delete peg.multiballSpawnCount;
           delete peg.gambleBallCount;
+          delete peg.gambleLuckBonus;
           delete peg.gambleKnockbackEnabled;
           delete peg.gambleKnockbackDistance;
           delete peg.gambleKnockbackSmoothMs;
@@ -1981,6 +1982,7 @@ export class Editor {
           delete peg._bumperHitScale;
           delete peg.multiballSpawnCount;
           delete peg.gambleBallCount;
+          delete peg.gambleLuckBonus;
           delete peg.gambleKnockbackEnabled;
           delete peg.gambleKnockbackDistance;
           delete peg.gambleKnockbackSmoothMs;
@@ -1991,6 +1993,7 @@ export class Editor {
           delete peg.curveSlices;
           delete peg.multiballSpawnCount;
           delete peg.gambleBallCount;
+          delete peg.gambleLuckBonus;
           delete peg.gambleKnockbackEnabled;
           delete peg.gambleKnockbackDistance;
           delete peg.gambleKnockbackSmoothMs;
@@ -2005,6 +2008,7 @@ export class Editor {
         } else if (type === 'multi') {
           peg.multiballSpawnCount = normalizeMultiballSpawnCount(peg.multiballSpawnCount);
           delete peg.gambleBallCount;
+          delete peg.gambleLuckBonus;
           delete peg.gambleKnockbackEnabled;
           delete peg.gambleKnockbackDistance;
           delete peg.gambleKnockbackSmoothMs;
@@ -2039,6 +2043,7 @@ export class Editor {
           delete peg.portalOneWayFlip;
           delete peg.multiballSpawnCount;
           delete peg.gambleBallCount;
+          delete peg.gambleLuckBonus;
           delete peg.gambleKnockbackEnabled;
           delete peg.gambleKnockbackDistance;
           delete peg.gambleKnockbackSmoothMs;
@@ -2771,6 +2776,19 @@ export class Editor {
     this.levelManager.save();
   }
 
+  setSelectedGambleLuckBonus(luckBonus) {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level) return;
+    const normalized = normalizeSurvivalGamblePegProperties({ gambleLuckBonus: luckBonus });
+    for (const pegId of this.selectedPegIds) {
+      const peg = level.pegs.find(p => p.id === pegId);
+      if (peg && peg.type === 'gamble') {
+        peg.gambleLuckBonus = normalized.gambleLuckBonus;
+      }
+    }
+    this.levelManager.save();
+  }
+
   setSelectedGambleKnockbackEnabled(enabled) {
     const level = this.levelManager.getCurrentLevel();
     if (!level) return;
@@ -2950,17 +2968,16 @@ export class Editor {
   isNearFlipper(pos) {
     const f = normalizeFlipperConfig(this.levelManager.getFlippers(), {
       canvasHeight: this.canvas.height,
-      cameraY: this.getCameraY(),
-      bounce: PHYSICS_CONFIG.bounce
+      cameraY: this.getCameraY()
     });
     if (!f || !f.enabled) return false;
     const cx = this.canvas.width / 2;
-    const sc = Number.isFinite(f.scale) ? f.scale : 1.8;
-    const len = (Number.isFinite(f.length) ? f.length : 60) * sc;
+    const sc = Number.isFinite(f.scale) ? f.scale : FLIPPER_DEFAULTS.scale;
+    const len = (Number.isFinite(f.length) ? f.length : FLIPPER_DEFAULTS.length) * sc;
 
     for (const side of [-1, 1]) {
       const px = cx + side * f.xOffset;
-      const restRad = (Number.isFinite(f.restAngle) ? f.restAngle : 23) * Math.PI / 180;
+      const restRad = (Number.isFinite(f.restAngle) ? f.restAngle : FLIPPER_DEFAULTS.restAngle) * Math.PI / 180;
       const angle = (side === -1) ? restRad : (Math.PI - restRad);
       const tipX = px + Math.cos(angle) * len;
       const tipY = f.y + Math.sin(angle) * len;

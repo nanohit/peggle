@@ -23,6 +23,8 @@ import {
   normalizeMultiballSpawnCount
 } from './multiball-settings.js';
 import {
+  GAMBLE_LUCK_BONUS_DEFAULT,
+  GAMBLE_LUCK_BONUS_MAX,
   countSurvivalTargets,
   ensureLevelSurvival,
   getPegVerticalExtent,
@@ -150,6 +152,7 @@ export class Game {
     this.initialBallCount = 10;
     this.gambleBalls = 0;
     this.initialGambleBallCount = 0;
+    this.pendingGambleLuckBonus = 0;
     this.survivalAntiCooldownMs = 0;
     this.survivalShotCooldownRemainingMs = 0;
     this.survivalGambleOverlayOpen = false;
@@ -505,6 +508,7 @@ export class Game {
       ballsLeft: displayBallsLeft,
       initialBallCount: displayInitialBalls,
       gambleBalls: this.gambleBalls,
+      gambleLuckBonus: this.getPendingGambleLuckBonus(),
       showFullTrajectory: !!this.showFullTrajectory,
       orangePegsLeft: orangeLeft,
       totalOrangePegs: billiardPhase
@@ -517,7 +521,7 @@ export class Game {
 
   getUiStateSignature() {
     const snapshot = this.getUiStateSnapshot();
-    return `${snapshot.state}|${snapshot.ballsLeft}|${snapshot.initialBallCount}|${snapshot.showFullTrajectory ? 1 : 0}|${snapshot.orangePegsLeft}|${snapshot.totalOrangePegs}|${snapshot.billiardPhase ? 1 : 0}|${snapshot.billiardLauncherIndex ?? ''}`;
+    return `${snapshot.state}|${snapshot.ballsLeft}|${snapshot.initialBallCount}|${snapshot.gambleLuckBonus}|${snapshot.showFullTrajectory ? 1 : 0}|${snapshot.orangePegsLeft}|${snapshot.totalOrangePegs}|${snapshot.billiardPhase ? 1 : 0}|${snapshot.billiardLauncherIndex ?? ''}`;
   }
 
   subscribeUiState(listener) {
@@ -1963,7 +1967,6 @@ export class Game {
     return createDefaultFlipperConfig({
       canvasHeight: this.canvas.height,
       cameraY: this.getCameraY(),
-      bounce: PHYSICS_CONFIG.bounce,
       enabled: true
     });
   }
@@ -2195,8 +2198,7 @@ export class Game {
 
     // Load flippers
     const normalizedFlippers = normalizeFlipperConfig(levelData.flippers, {
-      canvasHeight: this.canvas.height,
-      bounce: PHYSICS_CONFIG.bounce
+      canvasHeight: this.canvas.height
     });
     this.baseFlipperConfig = (normalizedFlippers && normalizedFlippers.enabled)
       ? { ...normalizedFlippers, enabled: true }
@@ -2221,6 +2223,7 @@ export class Game {
     this.levelElapsedMs = 0;
     this.gambleBalls = 0;
     this.initialGambleBallCount = 0;
+    this.pendingGambleLuckBonus = 0;
     this.ballsLeft = this.isSurvivalMode() ? Number.POSITIVE_INFINITY : 10;
     this.initialBallCount = Number.isFinite(this.ballsLeft) ? this.ballsLeft : 10;
     this.hitPegIds = [];
@@ -2789,10 +2792,13 @@ export class Game {
       const spawnCount = normalizeMultiballSpawnCount(peg.multiballSpawnCount);
       this.spawnMultiballs(sourceBall, spawnCount);
     }
-    if (this.isSurvivalMode() && peg.type === 'gamble') {
+    if (peg.type === 'gamble') {
       const gamblePeg = normalizeSurvivalGamblePegProperties(peg, this.survivalRuntime.getGamblePegSettings());
-      this.grantSurvivalGambleBalls(gamblePeg.gambleBallCount);
-      if (gamblePeg.gambleKnockbackEnabled) {
+      this.grantGambleLuckBonus(gamblePeg.gambleLuckBonus);
+      if (this.isSurvivalMode()) {
+        this.grantSurvivalGambleBalls(gamblePeg.gambleBallCount);
+      }
+      if (this.isSurvivalMode() && gamblePeg.gambleKnockbackEnabled) {
         this.survivalRuntime.applyGambleKnockback(
           gamblePeg.gambleKnockbackDistance,
           gamblePeg.gambleKnockbackSmoothMs
@@ -2984,6 +2990,7 @@ export class Game {
     this.initialBallCount = mainPhaseBalls;
     this.gambleBalls = 0;
     this.initialGambleBallCount = 0;
+    this.pendingGambleLuckBonus = 0;
     this.hitPegIds = [];
     this.turnHitPegIds = [];
     this.shotsFired = 0;
@@ -3079,8 +3086,17 @@ export class Game {
     this.resetUltraAimRuntime();
 
     if (!this.baseFlipperConfig && this.temporaryFlipperActive) {
-      this.temporaryFlipperActive = false;
-      this.refreshFlipperState();
+      if (this.temporaryFlipperTurns > 0) {
+        this.temporaryFlipperTurns = Math.max(0, this.temporaryFlipperTurns - 1);
+        if (this.flippers) {
+          this.flippers._flipperActivated = false;
+        } else {
+          this.refreshFlipperState();
+        }
+      } else {
+        this.temporaryFlipperActive = false;
+        this.refreshFlipperState();
+      }
     }
 
     // Add turn hit pegs to total hit pegs (they disappear now)
@@ -4154,6 +4170,30 @@ export class Game {
     this.initialGambleBallCount = Math.max(this.initialGambleBallCount, this.gambleBalls);
     this.emitUiStateIfChanged(true, 'survival-gamble-balls-granted');
     return this.gambleBalls;
+  }
+
+  getPendingGambleLuckBonus() {
+    const value = Math.floor(Number(this.pendingGambleLuckBonus) || 0);
+    return Math.max(0, Math.min(GAMBLE_LUCK_BONUS_MAX, value));
+  }
+
+  grantGambleLuckBonus(amount = GAMBLE_LUCK_BONUS_DEFAULT) {
+    const gain = Math.max(0, Math.floor(Number(amount) || 0));
+    if (gain <= 0) return this.getPendingGambleLuckBonus();
+    this.pendingGambleLuckBonus = Math.min(
+      GAMBLE_LUCK_BONUS_MAX,
+      this.getPendingGambleLuckBonus() + gain
+    );
+    this.emitUiStateIfChanged(true, 'gamble-luck-boost-granted');
+    return this.getPendingGambleLuckBonus();
+  }
+
+  consumePendingGambleLuckBonus() {
+    const consumed = this.getPendingGambleLuckBonus();
+    if (consumed <= 0) return 0;
+    this.pendingGambleLuckBonus = 0;
+    this.emitUiStateIfChanged(true, 'gamble-luck-boost-consumed');
+    return consumed;
   }
 
   getGambleAutoLuckRatio() {

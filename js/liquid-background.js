@@ -1,3 +1,5 @@
+import { FLIPPER_DEFAULTS } from './flipper-defaults.js';
+
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
@@ -1136,12 +1138,12 @@ export class LiquidBackground {
 
     const centerX = this.viewWidth / 2;
     const t = flippers._flipperT || 0;
-    const restRad = (Number.isFinite(flippers.restAngle) ? flippers.restAngle : 23) * Math.PI / 180;
-    const flipRad = (Number.isFinite(flippers.flipAngle) ? flippers.flipAngle : 30) * Math.PI / 180;
-    const sc = Number.isFinite(flippers.scale) ? flippers.scale : 1.8;
-    const len = (Number.isFinite(flippers.length) ? flippers.length : 60) * sc;
-    const width = (Number.isFinite(flippers.width) ? flippers.width : 8) * sc;
-    const xOffset = Number.isFinite(flippers.xOffset) ? flippers.xOffset : 196;
+    const restRad = (Number.isFinite(flippers.restAngle) ? flippers.restAngle : FLIPPER_DEFAULTS.restAngle) * Math.PI / 180;
+    const flipRad = (Number.isFinite(flippers.flipAngle) ? flippers.flipAngle : FLIPPER_DEFAULTS.flipAngle) * Math.PI / 180;
+    const sc = Number.isFinite(flippers.scale) ? flippers.scale : FLIPPER_DEFAULTS.scale;
+    const len = (Number.isFinite(flippers.length) ? flippers.length : FLIPPER_DEFAULTS.length) * sc;
+    const width = (Number.isFinite(flippers.width) ? flippers.width : FLIPPER_DEFAULTS.width) * sc;
+    const xOffset = Number.isFinite(flippers.xOffset) ? flippers.xOffset : FLIPPER_DEFAULTS.xOffset;
     const y = Number.isFinite(flippers.y) ? flippers.y : (this.viewHeight - 55);
 
     const leftAngle = restRad - t * (restRad + flipRad);

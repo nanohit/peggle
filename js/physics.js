@@ -2,6 +2,7 @@
 
 import { Utils } from './utils.js';
 import { getPortalScale, isPortalType } from './portal-defaults.js';
+import { FLIPPER_DEFAULTS } from './flipper-defaults.js';
 
 // Default physics config - can be modified at runtime
 export const PHYSICS_CONFIG = {
@@ -960,10 +961,10 @@ export class PhysicsEngine {
         const curT = f._flipperT || 0;
         const tDelta = Math.abs(curT - prevT);
         if (tDelta > 0.001) {
-          const sc = Number.isFinite(f.scale) ? f.scale : 1.8;
-          const len = (Number.isFinite(f.length) ? f.length : 60) * sc;
-          const restRad = (Number.isFinite(f.restAngle) ? f.restAngle : 23) * Math.PI / 180;
-          const flipRad = (Number.isFinite(f.flipAngle) ? f.flipAngle : 30) * Math.PI / 180;
+          const sc = Number.isFinite(f.scale) ? f.scale : FLIPPER_DEFAULTS.scale;
+          const len = (Number.isFinite(f.length) ? f.length : FLIPPER_DEFAULTS.length) * sc;
+          const restRad = (Number.isFinite(f.restAngle) ? f.restAngle : FLIPPER_DEFAULTS.restAngle) * Math.PI / 180;
+          const flipRad = (Number.isFinite(f.flipAngle) ? f.flipAngle : FLIPPER_DEFAULTS.flipAngle) * Math.PI / 180;
           const angleRange = restRad + flipRad;
           // Tip sweep distance = length * angular change (in radians)
           const tipSweep = len * tDelta * angleRange;
@@ -1357,13 +1358,13 @@ export class PhysicsEngine {
     // This way, if the flipper sweeps from angle A to B in one frame, each sub-step
     // checks the flipper at an intermediate angle — preventing sweep-through tunneling.
     const t = prevT + (curT - prevT) * sampleFrac;
-    const restRad = (Number.isFinite(f.restAngle) ? f.restAngle : 23) * Math.PI / 180;
-    const flipRad = (Number.isFinite(f.flipAngle) ? f.flipAngle : 30) * Math.PI / 180;
+    const restRad = (Number.isFinite(f.restAngle) ? f.restAngle : FLIPPER_DEFAULTS.restAngle) * Math.PI / 180;
+    const flipRad = (Number.isFinite(f.flipAngle) ? f.flipAngle : FLIPPER_DEFAULTS.flipAngle) * Math.PI / 180;
     const angleRange = restRad + flipRad;
-    const sc = Number.isFinite(f.scale) ? f.scale : 1.8;
-    const length = (Number.isFinite(f.length) ? f.length : 60) * sc;
-    const w = (Number.isFinite(f.width) ? f.width : 8) * sc;
-    const xOffset = Number.isFinite(f.xOffset) ? f.xOffset : 196;
+    const sc = Number.isFinite(f.scale) ? f.scale : FLIPPER_DEFAULTS.scale;
+    const length = (Number.isFinite(f.length) ? f.length : FLIPPER_DEFAULTS.length) * sc;
+    const w = (Number.isFinite(f.width) ? f.width : FLIPPER_DEFAULTS.width) * sc;
+    const xOffset = Number.isFinite(f.xOffset) ? f.xOffset : FLIPPER_DEFAULTS.xOffset;
     const y = Number.isFinite(f.y) ? f.y : (this.height - 55);
     const subTDelta = (curT - prevT) * safeStepSize;
     const bounce = f.bounce ?? PHYSICS_CONFIG.bounce;
@@ -1454,12 +1455,12 @@ export class PhysicsEngine {
     const f = this.flippers;
     const centerX = this.width / 2;
     const t = Number.isFinite(tOverride) ? tOverride : (f._flipperT || 0);
-    const restRad = (Number.isFinite(f.restAngle) ? f.restAngle : 23) * Math.PI / 180;
-    const flipRad = (Number.isFinite(f.flipAngle) ? f.flipAngle : 30) * Math.PI / 180;
-    const sc = Number.isFinite(f.scale) ? f.scale : 1.8;
-    const length = (Number.isFinite(f.length) ? f.length : 60) * sc;
-    const w = (Number.isFinite(f.width) ? f.width : 8) * sc;
-    const xOffset = Number.isFinite(f.xOffset) ? f.xOffset : 196;
+    const restRad = (Number.isFinite(f.restAngle) ? f.restAngle : FLIPPER_DEFAULTS.restAngle) * Math.PI / 180;
+    const flipRad = (Number.isFinite(f.flipAngle) ? f.flipAngle : FLIPPER_DEFAULTS.flipAngle) * Math.PI / 180;
+    const sc = Number.isFinite(f.scale) ? f.scale : FLIPPER_DEFAULTS.scale;
+    const length = (Number.isFinite(f.length) ? f.length : FLIPPER_DEFAULTS.length) * sc;
+    const w = (Number.isFinite(f.width) ? f.width : FLIPPER_DEFAULTS.width) * sc;
+    const xOffset = Number.isFinite(f.xOffset) ? f.xOffset : FLIPPER_DEFAULTS.xOffset;
     const y = Number.isFinite(f.y) ? f.y : (this.height - 55);
 
     const leftPivotX = centerX - xOffset;
