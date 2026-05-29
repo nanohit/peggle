@@ -2,7 +2,6 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "esbuild js/player-bootstrap.js --bundle --format=esm --splitting --outdir=dist",
     "check": "node --check api/*.js && node --check scripts/*.mjs && node --check js/main.js && node --check js/editor.js && node --check js/physics.js && node --check js/destruction-mode.js && node --check js/player-bootstrap.js && node --check js/image-compression.js && node --check js/visual-layout.js && node --check js/character-config.js",
     "test:destruction": "node scripts/destruction-smoke.mjs"
   },
