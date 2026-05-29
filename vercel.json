@@ -1,5 +1,5 @@
 {
-  "buildCommand": null,
+  "buildCommand": "npm run build",
   "functions": {
     "api/*.js": {
       "includeFiles": "data/player/**"

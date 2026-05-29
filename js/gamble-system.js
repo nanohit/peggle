@@ -3,14 +3,14 @@ import { lightTap } from './haptics.js';
 import { DEEP_FREEZE_SHOTS_PER_USE } from './perk-deep-freeze.js';
 
 const STORAGE_KEY = 'peggle_gamble_settings_v1';
-const SLOTS_BOARD_ASSET = 'visuals/slots_background.webp';
-const SPIN_BUTTON_ASSET = 'visuals/spin_button.webp';
-const SPIN_BUTTON_PRESSED_ASSET = 'visuals/spin_button_pressed.webp';
-const ARROW_UP_ASSET = 'visuals/arrow_up.webp';
-const ARROW_DOWN_ASSET = 'visuals/arrow_down.webp';
-const PERK_SLOT_ASSET_DIR = 'visuals/perks/slots/webp';
-const PERK_IDLE_ASSET_DIR = 'visuals/perks/idle/webp';
-const PERK_ACTIVE_ASSET_DIR = 'visuals/perks/active/webp';
+const SLOTS_BOARD_ASSET = '/visuals/slots_background.webp';
+const SPIN_BUTTON_ASSET = '/visuals/spin_button.webp';
+const SPIN_BUTTON_PRESSED_ASSET = '/visuals/spin_button_pressed.webp';
+const ARROW_UP_ASSET = '/visuals/arrow_up.webp';
+const ARROW_DOWN_ASSET = '/visuals/arrow_down.webp';
+const PERK_SLOT_ASSET_DIR = '/visuals/perks/slots/webp';
+const PERK_IDLE_ASSET_DIR = '/visuals/perks/idle/webp';
+const PERK_ACTIVE_ASSET_DIR = '/visuals/perks/active/webp';
 const CHIP_ACTIVE_ANIMATION_MS = 260;
 const PRELOADED_UI_ASSETS = new Set();
 
