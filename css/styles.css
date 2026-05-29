@@ -816,6 +816,8 @@ html, body {
 }
 
 .gamble-cell {
+  position: relative;
+  isolation: isolate;
   width: 100%;
   height: 100%;
   margin: 0;
@@ -824,24 +826,69 @@ html, body {
   align-items: center;
   justify-content: center;
   color: var(--cell-color, #e6edf6);
-  font-size: calc(28px * var(--s));
   line-height: 1;
-  text-shadow: 0 0 14px rgba(0, 0, 0, 0.68);
+  overflow: visible;
   transition: transform 0.22s ease, filter 0.22s ease, opacity 0.22s ease;
 }
 
+.gamble-cell::before {
+  content: "";
+  position: absolute;
+  inset: 12% 14%;
+  z-index: 0;
+  border-radius: 999px;
+  background: radial-gradient(circle, var(--cell-glow-soft, rgba(255, 255, 255, 0.16)) 0%, rgba(255, 255, 255, 0) 64%);
+  opacity: 0;
+  transform: scale(0.78);
+  filter: blur(calc(1px * var(--s)));
+  pointer-events: none;
+  transition: opacity 0.22s ease, transform 0.22s ease;
+}
+
 .gamble-cell.placeholder {
-  font-size: calc(10px * var(--s));
-  letter-spacing: 0.5px;
   opacity: 0.45;
-  font-weight: 700;
   color: #8b949e;
 }
 
+.gamble-cell.placeholder::before {
+  display: none;
+}
+
 .gamble-cell.winning {
-  transform: scale(1.12);
-  filter: drop-shadow(0 0 8px var(--cell-color, #fff))
-          drop-shadow(0 0 18px rgba(255, 255, 255, 0.22));
+  transform: scale(1.1);
+  filter: none;
+}
+
+.gamble-cell.winning::before {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.gamble-perk-symbol {
+  display: block;
+  object-fit: contain;
+  object-position: center;
+  pointer-events: none;
+  user-select: none;
+  background: transparent;
+}
+
+.gamble-perk-symbol--slot {
+  position: relative;
+  z-index: 1;
+  width: min(58%, calc(40px * var(--s)));
+  height: min(58%, calc(40px * var(--s)));
+  filter: none;
+}
+
+.gamble-cell.winning .gamble-perk-symbol--slot {
+  filter: drop-shadow(0 0 4px var(--cell-glow, #ffffff))
+          drop-shadow(0 0 9px var(--cell-glow-soft, rgba(255, 255, 255, 0.16)));
+}
+
+.gamble-reel-symbol .gamble-perk-symbol--slot {
+  width: min(58%, calc(40px * var(--s)));
+  height: min(58%, calc(40px * var(--s)));
 }
 
 .gamble-dock {
@@ -888,8 +935,7 @@ html, body {
   align-items: center;
   gap: calc(4px * var(--s));
   min-width: 0;
-  /* Allow chips to shrink so they never overflow the frame */
-  overflow: hidden;
+  overflow: visible;
 }
 
 .gamble-perk-group--left {
@@ -1059,30 +1105,73 @@ html, body {
 .gamble-perk-chip {
   position: relative;
   width: calc(66px * var(--s));
-  height: calc(66px * var(--s));
+  height: auto;
+  aspect-ratio: 1;
   border: 0;
   outline: none;
   background: transparent;
-  background-image: var(--gamble-item-asset);
-  background-position: center;
-  background-repeat: no-repeat;
-  background-size: contain;
-  color: #f6f6f9;
-  font-size: calc(28px * var(--s));
+  color: transparent;
+  font-size: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0 0 calc(2px * var(--s));
+  padding: 0;
   cursor: pointer;
-  flex-shrink: 1;
+  flex: 1 1 0;
+  max-width: calc(66px * var(--s));
   min-width: calc(44px * var(--s));
-  filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.35));
-  transition: transform 0.18s ease, opacity 0.18s ease, filter 0.18s ease;
+  min-height: calc(44px * var(--s));
+  overflow: visible;
+  filter: none;
+  transition: transform 0.18s ease, opacity 0.18s ease;
+}
+
+.gamble-perk-symbol--chip {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  filter: none;
+}
+
+.gamble-perk-chip--idle .gamble-perk-symbol--chip {
+  filter: brightness(0.48) saturate(0.72);
+}
+
+.gamble-perk-symbol--chip-enter {
+  animation: gamblePerkChipFadeIn 160ms ease-out both;
+}
+
+.gamble-perk-symbol--chip-exit {
+  animation: gamblePerkChipFadeOut 130ms ease-out both;
+}
+
+.gamble-perk-chip--activating {
+  animation: gamblePerkChipPop 230ms cubic-bezier(0.2, 0.9, 0.28, 1.25) both;
+}
+
+@keyframes gamblePerkChipFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes gamblePerkChipFadeOut {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes gamblePerkChipPop {
+  0% { transform: scale(1); }
+  45% { transform: scale(1.08); }
+  100% { transform: scale(1); }
 }
 
 .gamble-perk-chip::after {
   content: attr(data-count);
   position: absolute;
+  z-index: 2;
   right: calc(-2px * var(--s));
   bottom: calc(-2px * var(--s));
   min-width: calc(22px * var(--s));
@@ -1102,8 +1191,8 @@ html, body {
 }
 
 .gamble-perk-chip:disabled {
-  opacity: 0.38;
-  filter: grayscale(0.4) saturate(0.7);
+  opacity: 1;
+  filter: none;
   cursor: not-allowed;
 }
 

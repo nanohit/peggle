@@ -8,50 +8,73 @@ const SPIN_BUTTON_ASSET = 'visuals/spin_button.webp';
 const SPIN_BUTTON_PRESSED_ASSET = 'visuals/spin_button_pressed.webp';
 const ARROW_UP_ASSET = 'visuals/arrow_up.webp';
 const ARROW_DOWN_ASSET = 'visuals/arrow_down.webp';
-const DEFAULT_ITEM_ASSET = 'visuals/assets_webtp/item_cirlce.webp';
+const PERK_SLOT_ASSET_DIR = 'visuals/perks/slots/webp';
+const PERK_IDLE_ASSET_DIR = 'visuals/perks/idle/webp';
+const PERK_ACTIVE_ASSET_DIR = 'visuals/perks/active/webp';
+const CHIP_ACTIVE_ANIMATION_MS = 260;
 const PRELOADED_UI_ASSETS = new Set();
+
+function perkAssets(fileName) {
+  return {
+    slot: `${PERK_SLOT_ASSET_DIR}/${fileName}.webp`,
+    idle: `${PERK_IDLE_ASSET_DIR}/${fileName}.webp`,
+    active: `${PERK_ACTIVE_ASSET_DIR}/${fileName}.webp`
+  };
+}
 
 export const PERK_DEFINITIONS = [
   {
     id: 'perk_multi',
-    name: 'Tri Multi',
-    icon: '🎱',
-    color: '#ff4d9d',
+    name: 'Multiball',
+    assets: perkAssets('multiball'),
+    color: '#a855f7',
+    glowColor: '#9270d8',
+    glowSoft: 'rgba(146, 112, 216, 0.2)',
     defaultProbability: 20
   },
   {
     id: 'perk_aim',
     name: 'Ultra Aim',
-    icon: '🎯',
-    color: '#58a6ff',
+    assets: perkAssets('ultraaim'),
+    color: '#45a3ff',
+    glowColor: '#78b5e8',
+    glowSoft: 'rgba(120, 181, 232, 0.2)',
     defaultProbability: 20
   },
   {
     id: 'perk_flippers',
     name: 'Flippers',
-    icon: '⌐⌐',
-    color: '#c0c0c0',
+    assets: perkAssets('flippers'),
+    color: '#b8bec8',
+    glowColor: '#aeb4bc',
+    glowSoft: 'rgba(174, 180, 188, 0.18)',
     defaultProbability: 20
   },
   {
     id: 'perk_yoyo',
     name: 'Yo-yo Thread',
-    icon: '🪀',
-    color: '#f2cc60',
+    assets: perkAssets('yoyo'),
+    color: '#55df7a',
+    glowColor: '#75c88b',
+    glowSoft: 'rgba(117, 200, 139, 0.2)',
     defaultProbability: 20
   },
   {
     id: 'perk_bomb',
     name: 'Bomb Shockwave',
-    icon: '💣',
-    color: '#ff9b54',
+    assets: perkAssets('bomb'),
+    color: '#ff982f',
+    glowColor: '#df9a58',
+    glowSoft: 'rgba(223, 154, 88, 0.22)',
     defaultProbability: 20
   },
   {
     id: 'perk_freeze',
     name: 'Deep Freeze',
-    icon: '❄️',
-    color: '#8ad7ff',
+    assets: perkAssets('deep_freeze'),
+    color: '#a7ecff',
+    glowColor: '#bde7f2',
+    glowSoft: 'rgba(189, 231, 242, 0.2)',
     defaultProbability: 20
   }
 ];
@@ -96,6 +119,70 @@ function preloadUiAsset(url) {
   img.src = url;
 }
 
+function preloadPerkAssets(perkDefinitions) {
+  for (const perk of perkDefinitions || []) {
+    for (const asset of Object.values(perk.assets || {})) {
+      preloadUiAsset(resolveUiAssetUrl(asset));
+    }
+  }
+}
+
+function setPerkVisualVars(element, perk) {
+  element.style.setProperty('--cell-color', perk?.color || '#6e7681');
+  element.style.setProperty('--cell-glow', perk?.glowColor || perk?.color || '#ffffff');
+  element.style.setProperty('--cell-glow-soft', perk?.glowSoft || 'rgba(255, 255, 255, 0.28)');
+}
+
+function createPerkImage(perk, assetState, className, alt = '') {
+  const asset = perk?.assets?.[assetState];
+  if (!asset) return null;
+
+  const img = document.createElement('img');
+  img.className = className;
+  img.src = resolveUiAssetUrl(asset);
+  img.alt = alt;
+  img.decoding = 'async';
+  img.draggable = false;
+  if (!alt) img.setAttribute('aria-hidden', 'true');
+  return img;
+}
+
+function renderPerkAsset(element, perk, assetState, className, alt = '') {
+  const img = createPerkImage(perk, assetState, className, alt);
+  element.replaceChildren(...(img ? [img] : []));
+}
+
+function renderPerkChipAsset(button, perk, assetState, animateActivation = false) {
+  if (button._perkAssetTimer) {
+    clearTimeout(button._perkAssetTimer);
+    button._perkAssetTimer = null;
+  }
+  button.classList.remove('gamble-perk-chip--activating');
+
+  const baseClass = 'gamble-perk-symbol gamble-perk-symbol--chip';
+  const nextImg = createPerkImage(perk, assetState, baseClass);
+  if (!nextImg) {
+    button.replaceChildren();
+    return;
+  }
+
+  if (!animateActivation) {
+    button.replaceChildren(nextImg);
+    return;
+  }
+
+  const previousImg = createPerkImage(perk, 'idle', `${baseClass} gamble-perk-symbol--chip-exit`);
+  nextImg.className = `${baseClass} gamble-perk-symbol--chip-enter`;
+  button.replaceChildren(...(previousImg ? [previousImg, nextImg] : [nextImg]));
+  button.classList.add('gamble-perk-chip--activating');
+  button._perkAssetTimer = setTimeout(() => {
+    button.classList.remove('gamble-perk-chip--activating');
+    button._perkAssetTimer = null;
+    if (button.dataset.perkId !== perk.id || button.dataset.assetState !== assetState) return;
+    renderPerkChipAsset(button, perk, assetState, false);
+  }, CHIP_ACTIVE_ANIMATION_MS);
+}
+
 function normalizeProbabilityMap(map, perkDefinitions) {
   const next = {};
   let total = 0;
@@ -127,7 +214,7 @@ function formatRewardSummary(rewardMap, perkDefinitions) {
   for (const perk of perkDefinitions) {
     const amount = rewardMap[perk.id] || 0;
     if (amount <= 0) continue;
-    parts.push(`${perk.icon} +${amount}`);
+    parts.push(`${perk.name} +${amount}`);
   }
   return parts.length > 0 ? parts.join('  ') : 'No reward';
 }
@@ -459,13 +546,17 @@ export class GambleSystem {
   renderCellSymbol(cell, perk) {
     if (!cell) return;
     if (perk) {
-      cell.textContent = perk.icon;
-      cell.style.setProperty('--cell-color', perk.color);
+      renderPerkAsset(cell, perk, 'slot', 'gamble-perk-symbol gamble-perk-symbol--slot', perk.name);
+      setPerkVisualVars(cell, perk);
+      cell.dataset.perkId = perk.id;
       cell.classList.remove('placeholder');
       return;
     }
-    cell.textContent = '';
+    cell.replaceChildren();
     cell.style.setProperty('--cell-color', '#6e7681');
+    cell.style.setProperty('--cell-glow', '#ffffff');
+    cell.style.setProperty('--cell-glow-soft', 'rgba(255, 255, 255, 0.18)');
+    delete cell.dataset.perkId;
     cell.classList.add('placeholder');
   }
 
@@ -745,7 +836,7 @@ export class GambleSystem {
 
       for (const perk of this.perkDefinitions) {
         probabilityControls[perk.id] = addNumberControl({
-          label: `${perk.icon} ${perk.name} Probability`,
+          label: `${perk.name} Probability`,
           min: 0,
           max: 100,
           step: 0.1,
@@ -831,14 +922,12 @@ export class GambleSystem {
     if (!this.ui?.root) return;
     const arrowUpAsset = resolveUiAssetUrl(ARROW_UP_ASSET);
     const arrowDownAsset = resolveUiAssetUrl(ARROW_DOWN_ASSET);
-    const itemAsset = resolveUiAssetUrl(this.visualLayout?.getSlotAssetUrl?.('itemCircle') || DEFAULT_ITEM_ASSET);
     const boardAsset = resolveUiAssetUrl(SLOTS_BOARD_ASSET);
     const spinAsset = resolveUiAssetUrl(SPIN_BUTTON_ASSET);
     const spinPressedAsset = resolveUiAssetUrl(SPIN_BUTTON_PRESSED_ASSET);
     const assetKey = [
       arrowUpAsset,
       arrowDownAsset,
-      itemAsset,
       boardAsset,
       spinAsset,
       spinPressedAsset
@@ -846,7 +935,6 @@ export class GambleSystem {
     if (this._themeAssetRoot !== this.ui.root || this._themeAssetKey !== assetKey) {
       this.ui.root.style.setProperty('--gamble-arrow-asset', `url("${arrowUpAsset}")`);
       this.ui.root.style.setProperty('--gamble-arrow-down-asset', `url("${arrowDownAsset}")`);
-      this.ui.root.style.setProperty('--gamble-item-asset', `url("${itemAsset}")`);
       this.ui.root.style.setProperty('--gamble-board-asset', `url("${boardAsset}")`);
       this.ui.root.style.setProperty('--gamble-spin-asset', `url("${spinAsset}")`);
       this.ui.root.style.setProperty('--gamble-spin-pressed-asset', `url("${spinPressedAsset}")`);
@@ -855,10 +943,10 @@ export class GambleSystem {
     }
     preloadUiAsset(arrowUpAsset);
     preloadUiAsset(arrowDownAsset);
-    preloadUiAsset(itemAsset);
     preloadUiAsset(boardAsset);
     preloadUiAsset(spinAsset);
     preloadUiAsset(spinPressedAsset);
+    preloadPerkAssets(this.perkDefinitions);
   }
 
   syncOverlayLayout() {
@@ -1057,22 +1145,18 @@ export class GambleSystem {
       this.refreshUi();
       return;
     }
-    const cellFontSize = getComputedStyle(this.ui.gridCells[0]).fontSize;
     const gridRect = grid.getBoundingClientRect();
     const cellHeightPx = gridRect.height > 0 ? (gridRect.height / SLOT_ROWS) : 1;
 
     // Snapshot what's currently on screen so the strip starts seamlessly.
-    // If a cell has no real symbol (placeholder), use a random perk icon
-    // so the strip is NEVER empty — always shows real symbols.
+    // If a cell has no real symbol (placeholder), use a random perk asset
+    // so the strip is never empty.
     const curContent = [];
     for (let col = 0; col < SLOT_COLS; col++) {
       curContent[col] = [];
       for (let row = 0; row < SLOT_ROWS; row++) {
         const perk = this.ensureCellPerk(row, col);
-        curContent[col][row] = {
-          text: perk ? perk.icon : '',
-          color: perk ? perk.color : '#6e7681'
-        };
+        curContent[col][row] = perk ? perk.id : null;
       }
     }
 
@@ -1108,26 +1192,27 @@ export class GambleSystem {
 
       for (let i = 0; i < TOTAL; i++) {
         const sym = document.createElement('div');
+        sym.className = 'gamble-reel-symbol';
         sym.style.cssText =
           `flex:0 0 ${cellHeightPx}px;height:${cellHeightPx}px;display:flex;align-items:center;` +
-          `justify-content:center;font-size:${cellFontSize};line-height:1;` +
-          `text-shadow:0 0 14px rgba(0,0,0,0.68)`;
+          `justify-content:center;line-height:1;`;
 
         if (i < SLOT_ROWS) {
           // Top of strip = final result symbols
           const perk = this.getPerkById(finalGrid[i][col]) || this.getRandomPerk();
-          sym.textContent = perk ? perk.icon : '';
-          sym.style.color = perk ? perk.color : '#6e7681';
+          setPerkVisualVars(sym, perk);
+          renderPerkAsset(sym, perk, 'slot', 'gamble-perk-symbol gamble-perk-symbol--slot', perk?.name || '');
         } else if (i >= TOTAL - SLOT_ROWS) {
           // Bottom of strip = current on-screen symbols (seamless start)
           const row = i - (TOTAL - SLOT_ROWS);
-          sym.textContent = curContent[col][row].text;
-          sym.style.color = curContent[col][row].color;
+          const perk = this.getPerkById(curContent[col][row]) || this.getRandomPerk();
+          setPerkVisualVars(sym, perk);
+          renderPerkAsset(sym, perk, 'slot', 'gamble-perk-symbol gamble-perk-symbol--slot', perk?.name || '');
         } else {
           // Middle = random symbols that scroll past
           const perk = this.getRandomPerk();
-          sym.textContent = perk ? perk.icon : '';
-          sym.style.color = perk ? perk.color : '#6e7681';
+          setPerkVisualVars(sym, perk);
+          renderPerkAsset(sym, perk, 'slot', 'gamble-perk-symbol gamble-perk-symbol--slot', perk?.name || '');
         }
         strip.appendChild(sym);
       }
@@ -1399,7 +1484,17 @@ export class GambleSystem {
       const button = this.ui.inventoryButtons[perk.id];
       const amount = this.inventory[perk.id] || 0;
       const displayAmount = debugOverride ? '∞' : String(amount);
-      button.textContent = perk.icon;
+      const assetState = debugOverride || amount > 0 ? 'active' : 'idle';
+      if (button.dataset.perkId !== perk.id || button.dataset.assetState !== assetState) {
+        const animateActivation = button.dataset.perkId === perk.id
+          && button.dataset.assetState === 'idle'
+          && assetState === 'active';
+        button.dataset.perkId = perk.id;
+        button.dataset.assetState = assetState;
+        renderPerkChipAsset(button, perk, assetState, animateActivation);
+      }
+      button.classList.toggle('gamble-perk-chip--active', assetState === 'active');
+      button.classList.toggle('gamble-perk-chip--idle', assetState === 'idle');
       button.dataset.count = displayAmount;
       button.title = debugOverride
         ? `${perk.name} (debug unlimited)`
