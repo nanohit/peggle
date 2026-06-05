@@ -122,6 +122,13 @@
               </div>
             </div>
             <div class="survival-control">
+              <label for="pvpHitsToWinSlider">Hits to Win</label>
+              <div class="survival-control-row">
+                <input type="range" id="pvpHitsToWinSlider" min="2" max="6" step="1" value="3">
+                <input type="number" id="pvpHitsToWinInput" min="2" max="6" step="1" value="3">
+              </div>
+            </div>
+            <div class="survival-control">
               <label for="pvpDifficultySelect">CPU Difficulty</label>
               <select id="pvpDifficultySelect" class="survival-curve-select">
                 <option value="easy">Easy</option>
@@ -310,6 +317,19 @@
             <button id="animCircleHalfBtn" class="anim-btn anim-btn-toggle anim-btn-sm active" type="button">Half</button>
             <button id="animCircleFullBtn" class="anim-btn anim-btn-toggle anim-btn-sm" type="button">Full</button>
           </div>
+          <!-- Rotation origin (pivot) -->
+          <div class="anim-hit-mode-row">
+            <button id="animOriginBtn" class="anim-btn anim-btn-toggle anim-btn-sm" type="button">Set Origin</button>
+            <button id="animOriginResetBtn" class="anim-btn anim-btn-sm" type="button">⟲ center</button>
+          </div>
+          <!-- Freeform trajectory path -->
+          <button id="animPathBtn" class="anim-btn anim-btn-toggle" type="button">Path: OFF</button>
+          <div id="animPathRow" class="anim-hit-mode-row" style="display:none">
+            <button id="animPathCloseBtn" class="anim-btn anim-btn-toggle anim-btn-sm" type="button">Loop</button>
+            <button id="animPathCircleBtn" class="anim-btn anim-btn-sm" type="button">Circle</button>
+            <button id="animPathClearBtn" class="anim-btn anim-btn-sm" type="button">Clear</button>
+          </div>
+          <div id="animPathHint" class="anim-hint" style="display:none">Drag to draw · Shift=straight · drag joints/handles · drag empty=add joint · Alt=corner</div>
           <label class="anim-toggle"><input type="checkbox" id="animHitTriggerToggle"> On Hit</label>
           <div id="animHitModeRow" class="anim-hit-mode-row" style="display:none">
             <button id="animHitCycleBtn" class="anim-btn anim-btn-toggle anim-btn-sm active" type="button">Loop</button>
@@ -342,6 +362,19 @@
           </div>
           <label class="anim-toggle"><input type="checkbox" id="bumperDisappearToggle"> Disappear on hit</label>
           <label class="anim-toggle"><input type="checkbox" id="bumperOrangeToggle"> Count as orange</label>
+          <label class="anim-toggle"><input type="checkbox" id="bumperPegReactToggle" checked> Pegs bounce off (destruction)</label>
+        </div>
+      </div>
+      <!-- Bomb peg properties panel (right side) -->
+      <div id="bombPanel" class="bumper-panel">
+        <div class="bumper-panel-title">Bomb Peg <button id="closeBombPanel" class="anim-close-btn">✕</button></div>
+        <div class="bumper-panel-body">
+          <div class="anim-slider">
+            <label>Power <input type="number" id="bombPowerInput" class="anim-num" value="1.0" step="0.1" min="0.3" max="4.0"></label>
+            <input type="range" id="bombPowerSlider" min="3" max="40" value="10">
+          </div>
+          <label class="anim-toggle"><input type="checkbox" id="bombPhysicsOnlyToggle" checked> Physics only (don't score caught pegs)</label>
+          <div class="survival-hint">Explodes on hit (bomb shockwave). Higher power = bigger blast radius and harder knockback. The blast also pushes the ball. With "Physics only" on, it just shoves nearby pegs around without scoring/clearing them; turn it off to also count them as hit.</div>
         </div>
       </div>
       <!-- Flipper properties panel (right side) -->
@@ -442,6 +475,7 @@
           <button class="peg-btn" data-type="purple" title="Purple (Bonus)"></button>
           <button class="peg-btn" data-type="multi" title="Multiball"></button>
           <button class="peg-btn" data-type="gamble" title="Lime Luck Peg (+6 Slot Luck)"></button>
+          <button class="peg-btn" data-type="bomb" title="Bomb (Explodes on Hit)"></button>
           <button class="peg-btn" data-type="obstacle" title="Obstacle (Stays)"></button>
           <button class="peg-btn" data-type="bumper" title="Bumper (Bouncy)"></button>
           <button class="peg-btn" data-type="portalBlue" title="Portal Blue"></button>
@@ -608,6 +642,10 @@
             <input type="checkbox" id="trajectoryToggle">
             Show full trajectory (debug)
           </label>
+        </div>
+        <div class="slider-group">
+          <label>Ignite FX preview: <span id="ignitePreviewValue">Off</span></label>
+          <input type="range" id="ignitePreviewSlider" min="0" max="100" value="0">
         </div>
       </div>
     </div>

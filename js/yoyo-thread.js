@@ -34,12 +34,33 @@ const YOYO_MAX_SOLVER_ITERATIONS = 22;
 const YOYO_MAX_SUBSTEPS = 3;
 const YOYO_LENGTH_BOOST_DIVISOR = 16;
 
+// Obstacle broadphase grid: pack signed cell coords into one numeric Map key.
+// Board cells are tiny (board px / ~28), so the offset/stride leave huge headroom.
+const YOYO_GRID_KEY_OFFSET = 1024;
+const YOYO_GRID_KEY_STRIDE = 8192;
+
 function toFiniteNumber(value, fallback) {
   return Number.isFinite(value) ? value : fallback;
 }
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+// Ascending in-place sort for the tiny integer candidate lists from a grid query.
+// Insertion sort beats native Array.sort here because it avoids the per-compare
+// comparator call (the lists are short and nearly sorted), and is identical in
+// result to `arr.sort((a, b) => a - b)`.
+function insertionSortAsc(arr) {
+  for (let i = 1; i < arr.length; i++) {
+    const v = arr[i];
+    let j = i - 1;
+    while (j >= 0 && arr[j] > v) {
+      arr[j + 1] = arr[j];
+      j--;
+    }
+    arr[j + 1] = v;
+  }
 }
 
 function segmentCircleFirstT(x1, y1, x2, y2, cx, cy, radius) {
@@ -462,6 +483,11 @@ export class YoyoThreadSystem {
     const segRest = Math.max(0.0001, seg.ropeLength / lastIndex);
     const ropeRadius = this.settings.ropeThickness * 0.5 + this.settings.collisionMargin;
 
+    // Broadphase the (already filtered) obstacles so each interior node only
+    // tests nearby pegs across the 8 iterations, same as the main rope solver.
+    this._buildObstacleGrid(obstacles);
+    const useGrid = this._gridUsableFor(obstacles);
+
     // Pin at surface positions when available, so rope endpoints stay outside
     // the portal obstacle brick instead of inside it.
     const pinAX = seg.anchorX;
@@ -519,11 +545,22 @@ export class YoyoThreadSystem {
       // Obstacle collisions for interior nodes
       for (let i = 1; i < lastIndex; i++) {
         const node = nodes[i];
-        for (const obs of obstacles) {
-          if (obs.kind === 'circle') {
-            this._resolveNodeCircle(node, obs, ropeRadius, false);
-          } else {
-            this._resolveNodeBrick(node, obs, ropeRadius, false);
+        if (useGrid) {
+          const bucket = this._gridBucketAt(node.x, node.y);
+          if (bucket) {
+            for (let k = 0; k < bucket.length; k++) {
+              const obs = obstacles[bucket[k]];
+              if (obs.kind === 'circle') this._resolveNodeCircle(node, obs, ropeRadius, false);
+              else this._resolveNodeBrick(node, obs, ropeRadius, false);
+            }
+          }
+        } else {
+          for (const obs of obstacles) {
+            if (obs.kind === 'circle') {
+              this._resolveNodeCircle(node, obs, ropeRadius, false);
+            } else {
+              this._resolveNodeBrick(node, obs, ropeRadius, false);
+            }
           }
         }
       }
@@ -534,8 +571,9 @@ export class YoyoThreadSystem {
 
   _simulateAllPortalSegments(state, obstacles) {
     if (!state.portalSegments || state.portalSegments.length === 0) return;
+    const out = this._portalActiveObstacles || (this._portalActiveObstacles = []);
     for (const seg of state.portalSegments) {
-      this._simulatePortalSegment(seg, this._filterObstaclesForNodes(seg.nodes, obstacles));
+      this._simulatePortalSegment(seg, this._filterObstaclesForNodes(seg.nodes, obstacles, null, null, null, out));
     }
   }
 
@@ -663,6 +701,7 @@ export class YoyoThreadSystem {
     state.visible = true;
     this._ensureNodes(state, ball);
     const activeObstacles = this._filterObstaclesForState(state, ball, obstacles);
+    this._buildObstacleGrid(activeObstacles);
 
     if (state.mode === 'extending') {
       this._simulateRope(state, ball, activeObstacles, dt, prevBallX, prevBallY);
@@ -718,7 +757,14 @@ export class YoyoThreadSystem {
     const shorten = this.settings.retractSpeed * retractScale * dt;
     const maxOver = this.settings.ropeSegmentLength * 2.25;
     const minByPath = Math.max(0, currentPathLen - maxOver);
-    state.ropeLength = Math.max(minByPath, state.ropeLength - shorten);
+    const grown = Math.max(minByPath, state.ropeLength - shorten);
+    // Retraction must not let a jittery / dynamically-wrapped zig-zag path inflate
+    // ropeLength (it can climb into the thousands, pinning node count + iteration
+    // cost at max). Bound per-step growth and clamp to a hard ceiling. The extend
+    // side already caps growth; this is the missing guard on the retract side.
+    const maxGrowPerStep = this.settings.ropeSegmentLength * 2;
+    const ropeCeiling = this.settings.maxNodes * this.settings.ropeSegmentLength * 1.5;
+    state.ropeLength = Math.min(grown, state.ropeLength + maxGrowPerStep, ropeCeiling);
     this._simulateRope(state, ball, activeObstacles, dt, prevBallX, prevBallY);
     const prePullX = ball.x;
     const prePullY = ball.y;
@@ -872,13 +918,28 @@ export class YoyoThreadSystem {
       && Math.abs(ly) <= obs.halfH + padding;
   }
 
-  _filterObstaclesForNodes(nodes, obstacles, skipPegId = null, anchorX = null, anchorY = null) {
-    if (!Array.isArray(obstacles) || obstacles.length === 0) return [];
+  // `out`, when supplied, is reused (cleared + refilled) to avoid allocating a
+  // fresh filtered array every step. The bounds-less fallback returns the full
+  // obstacle list directly; callers always use the return value, so either is safe.
+  _filterObstaclesForNodes(nodes, obstacles, skipPegId = null, anchorX = null, anchorY = null, out = null) {
+    if (out) out.length = 0;
+    if (!Array.isArray(obstacles) || obstacles.length === 0) return out || [];
 
     const ropeRadius = this.settings.ropeThickness * 0.5 + this.settings.collisionMargin;
     const margin = Math.max(this.settings.ropeSegmentLength * 4, ropeRadius + 24);
     const bounds = this._getNodeBounds(nodes, margin);
     if (!bounds) return obstacles;
+
+    if (out) {
+      for (let i = 0; i < obstacles.length; i++) {
+        const obs = obstacles[i];
+        if (!obs) continue;
+        if (skipPegId && obs.pegId === skipPegId) continue;
+        if (this._obstacleContainsPoint(obs, anchorX, anchorY, ropeRadius + 0.5)) continue;
+        if (this._boundsOverlap(bounds, obs)) out.push(obs);
+      }
+      return out;
+    }
 
     return obstacles.filter(obs => {
       if (!obs) return false;
@@ -904,8 +965,132 @@ export class YoyoThreadSystem {
       obstacles,
       state.anchorPegId,
       state.anchorX,
-      state.anchorY
+      state.anchorY,
+      (this._activeObstacles || (this._activeObstacles = []))
     );
+  }
+
+  // ── Spatial broadphase for rope obstacles ──
+  // The solver does nodes × obstacles × iterations × substeps collision checks.
+  // Once a rope wraps wide, the rope-AABB candidate set is most of the board, so
+  // every node was tested against every obstacle. A uniform grid lets each node/
+  // segment test only obstacles in nearby cells. We grid the SAME filtered
+  // candidate set and resolve in ascending index order, so far obstacles (which
+  // only ever early-returned) are skipped while near-obstacle results are
+  // identical — wrapping behaviour is preserved, not just approximated.
+  _buildObstacleGrid(obstacles) {
+    this._obsGridArray = obstacles;
+    this._obsGridReady = false;
+    const n = Array.isArray(obstacles) ? obstacles.length : 0;
+    if (n === 0) return;
+
+    let grid = this._obsGrid;
+    if (!grid) grid = this._obsGrid = new Map();
+    // Recycle bucket arrays across builds instead of letting clear() drop them.
+    const freeBuckets = this._obsGridFreeBuckets || (this._obsGridFreeBuckets = []);
+    if (grid.size > 0) {
+      for (const bucket of grid.values()) { bucket.length = 0; freeBuckets.push(bucket); }
+      grid.clear();
+    }
+
+    const baseRopeRadius = this.settings.ropeThickness * 0.5 + this.settings.collisionMargin;
+    // Inflate insertion so a single-cell point query finds any obstacle within
+    // collision reach (+ retract extra ~1.1 + a little move slack). NOTE: this is
+    // a broadphase ACCELERATION, not a re-derivation of the full-loop — under fast
+    // motion a node/segment can be pushed past this slack into an obstacle that
+    // wasn't in its pre-query, so the solve can take a different (still stable,
+    // endpoint-pinned) convergence path than scanning every obstacle would. A
+    // margin wide enough to remove that costs most of the speedup, so we keep it
+    // tight and accept settled-rope fidelity with fast-frame approximation.
+    const inflate = baseRopeRadius + 1.1 + 5;
+    const cell = Math.max(this.settings.ropeSegmentLength * 2, 28);
+    this._obsGridCell = cell;
+    this._obsGridInflate = inflate;
+
+    for (let idx = 0; idx < n; idx++) {
+      const o = obstacles[idx];
+      if (!o) continue;
+      const minCX = Math.floor((o.minX - inflate) / cell);
+      const maxCX = Math.floor((o.maxX + inflate) / cell);
+      const minCY = Math.floor((o.minY - inflate) / cell);
+      const maxCY = Math.floor((o.maxY + inflate) / cell);
+      for (let cx = minCX; cx <= maxCX; cx++) {
+        for (let cy = minCY; cy <= maxCY; cy++) {
+          const key = (cx + YOYO_GRID_KEY_OFFSET) * YOYO_GRID_KEY_STRIDE + (cy + YOYO_GRID_KEY_OFFSET);
+          let bucket = grid.get(key);
+          if (!bucket) { bucket = freeBuckets.pop() || []; grid.set(key, bucket); }
+          bucket.push(idx);
+        }
+      }
+    }
+
+    if (!this._obsGridStamp || this._obsGridStamp.length < n) {
+      this._obsGridStamp = new Int32Array(Math.max(n, 64));
+    }
+    this._obsGridReady = true;
+  }
+
+  _gridUsableFor(obstacles) {
+    return this._obsGridReady && this._obsGridArray === obstacles;
+  }
+
+  // Obstacle-index bucket for the cell containing (x, y). Obstacles are inserted
+  // with inflation >= collision reach, so one cell lookup is sufficient. The
+  // bucket is already in ascending index order (built in index order).
+  _gridBucketAt(x, y) {
+    const cell = this._obsGridCell;
+    const cx = Math.floor(x / cell);
+    const cy = Math.floor(y / cell);
+    const key = (cx + YOYO_GRID_KEY_OFFSET) * YOYO_GRID_KEY_STRIDE + (cy + YOYO_GRID_KEY_OFFSET);
+    return this._obsGrid.get(key) || null;
+  }
+
+  // Deduped, index-sorted obstacle indices overlapping a segment's inflated AABB.
+  _gridQuerySegment(ax, ay, bx, by, out) {
+    out.length = 0;
+    const cell = this._obsGridCell;
+    const inflate = this._obsGridInflate;
+    const grid = this._obsGrid;
+    const stamp = this._obsGridStamp;
+    let stampId = (this._obsGridStampId || 0) + 1;
+    if (stampId >= 2147483647) { stamp.fill(0); stampId = 1; }
+    this._obsGridStampId = stampId;
+
+    const minCX = Math.floor((Math.min(ax, bx) - inflate) / cell);
+    const maxCX = Math.floor((Math.max(ax, bx) + inflate) / cell);
+    const minCY = Math.floor((Math.min(ay, by) - inflate) / cell);
+    const maxCY = Math.floor((Math.max(ay, by) + inflate) / cell);
+    for (let cx = minCX; cx <= maxCX; cx++) {
+      for (let cy = minCY; cy <= maxCY; cy++) {
+        const bucket = grid.get((cx + YOYO_GRID_KEY_OFFSET) * YOYO_GRID_KEY_STRIDE + (cy + YOYO_GRID_KEY_OFFSET));
+        if (!bucket) continue;
+        for (let k = 0; k < bucket.length; k++) {
+          const idx = bucket[k];
+          if (stamp[idx] === stampId) continue;
+          stamp[idx] = stampId;
+          out.push(idx);
+        }
+      }
+    }
+    if (out.length > 1) insertionSortAsc(out);
+    return out;
+  }
+
+  _bendBlockedByObstacle(obs, x, y, ropeRadius) {
+    if (obs.kind === 'circle') {
+      const dx = x - obs.x;
+      const dy = y - obs.y;
+      const r = obs.radius + ropeRadius;
+      return dx * dx + dy * dy < r * r;
+    }
+    if (obs.kind === 'brick') {
+      const dx = x - obs.x;
+      const dy = y - obs.y;
+      const lx = dx * obs.cos + dy * obs.sin;
+      const ly = -dx * obs.sin + dy * obs.cos;
+      return Math.abs(lx) < obs.halfW + ropeRadius && Math.abs(ly) < obs.halfH + ropeRadius;
+    }
+    return false;
   }
 
   _ensureNodes(state, ball) {
@@ -1104,12 +1289,14 @@ export class YoyoThreadSystem {
       this._solveSegmentObstacleConstraints(state, obstacles, ropeRadius, retracting);
       this._solveWorldBoundsConstraints(state, ropeRadius, retracting);
       this._solveBendConstraints(state, bendStiffness, obstacles, ropeRadius);
+      this._clampSegmentLengths(state);
     }
 
     this._pinEndpoints(state, ball);
     this._solveNodeObstacleConstraints(state, obstacles, ropeRadius, retracting);
     this._solveSegmentObstacleConstraints(state, obstacles, ropeRadius, retracting);
     this._solveWorldBoundsConstraints(state, ropeRadius, retracting);
+    this._clampSegmentLengths(state);
     this._pinEndpoints(state, ball);
   }
 
@@ -1167,6 +1354,44 @@ export class YoyoThreadSystem {
     }
   }
 
+  // Hard inextensibility cap: the soft distance constraint only corrects a
+  // fraction per iteration, so a fast-moving peg (e.g. an aggressively rotating
+  // ring) can fling adjacent nodes far apart faster than it can pull them back,
+  // leaving the rope as long stretched strands that never retract. This pass
+  // FULLY snaps any over-long segment back to a hard max, so the rope can never
+  // visually stretch beyond `maxFactor`× its rest length per segment — under a
+  // path it can't fit, it pulls taut and yanks the ball home instead.
+  _clampSegmentLengths(state, maxFactor = 1.35) {
+    const nodes = state.nodes;
+    if (!nodes || nodes.length < 2) return;
+    const lastIndex = nodes.length - 1;
+    const segmentRest = Math.max(0.0001, state.ropeLength / lastIndex);
+    const maxLen = segmentRest * maxFactor;
+    for (let i = 0; i < lastIndex; i++) {
+      const a = nodes[i];
+      const b = nodes[i + 1];
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist <= maxLen || dist < 1e-6) continue;
+      const corr = (dist - maxLen) / dist;
+      if (i === 0) {
+        b.x -= dx * corr;
+        b.y -= dy * corr;
+      } else if (i + 1 === lastIndex) {
+        a.x += dx * corr;
+        a.y += dy * corr;
+      } else {
+        const offX = dx * corr * 0.5;
+        const offY = dy * corr * 0.5;
+        a.x += offX;
+        a.y += offY;
+        b.x -= offX;
+        b.y -= offY;
+      }
+    }
+  }
+
   _solveBendConstraints(state, stiffness, obstacles, ropeRadius) {
     if (!Number.isFinite(stiffness) || stiffness <= 0) return;
 
@@ -1176,6 +1401,7 @@ export class YoyoThreadSystem {
     const lastIndex = nodes.length - 1;
     const k = clamp(stiffness, 0, 0.7);
     const hasObstacles = Array.isArray(obstacles) && obstacles.length > 0;
+    const useGrid = hasObstacles && this._gridUsableFor(obstacles);
 
     for (let i = 1; i < lastIndex; i++) {
       const prev = nodes[i - 1];
@@ -1189,21 +1415,19 @@ export class YoyoThreadSystem {
       // obstacle — applying it would drag the node through the peg, destroying wrapping.
       if (hasObstacles) {
         let blocked = false;
-        for (const obs of obstacles) {
-          if (obs.kind === 'circle') {
-            const dx = targetX - obs.x;
-            const dy = targetY - obs.y;
-            const r = obs.radius + ropeRadius;
-            if (dx * dx + dy * dy < r * r) {
-              blocked = true;
-              break;
+        if (useGrid) {
+          const bucket = this._gridBucketAt(targetX, targetY);
+          if (bucket) {
+            for (let bk = 0; bk < bucket.length; bk++) {
+              if (this._bendBlockedByObstacle(obstacles[bucket[bk]], targetX, targetY, ropeRadius)) {
+                blocked = true;
+                break;
+              }
             }
-          } else if (obs.kind === 'brick') {
-            const dx = targetX - obs.x;
-            const dy = targetY - obs.y;
-            const lx = dx * obs.cos + dy * obs.sin;
-            const ly = -dx * obs.sin + dy * obs.cos;
-            if (Math.abs(lx) < obs.halfW + ropeRadius && Math.abs(ly) < obs.halfH + ropeRadius) {
+          }
+        } else {
+          for (const obs of obstacles) {
+            if (this._bendBlockedByObstacle(obs, targetX, targetY, ropeRadius)) {
               blocked = true;
               break;
             }
@@ -1222,14 +1446,25 @@ export class YoyoThreadSystem {
 
     const nodes = state.nodes;
     const lastIndex = nodes.length - 1;
+    const useGrid = this._gridUsableFor(obstacles);
 
     for (let i = 1; i < lastIndex; i++) {
       const node = nodes[i];
-      for (const obs of obstacles) {
-        if (obs.kind === 'circle') {
-          this._resolveNodeCircle(node, obs, ropeRadius, retracting);
-        } else if (obs.kind === 'brick') {
-          this._resolveNodeBrick(node, obs, ropeRadius, retracting);
+      if (useGrid) {
+        const bucket = this._gridBucketAt(node.x, node.y);
+        if (!bucket) continue;
+        for (let k = 0; k < bucket.length; k++) {
+          const obs = obstacles[bucket[k]];
+          if (obs.kind === 'circle') this._resolveNodeCircle(node, obs, ropeRadius, retracting);
+          else if (obs.kind === 'brick') this._resolveNodeBrick(node, obs, ropeRadius, retracting);
+        }
+      } else {
+        for (const obs of obstacles) {
+          if (obs.kind === 'circle') {
+            this._resolveNodeCircle(node, obs, ropeRadius, retracting);
+          } else if (obs.kind === 'brick') {
+            this._resolveNodeBrick(node, obs, ropeRadius, retracting);
+          }
         }
       }
     }
@@ -1240,16 +1475,27 @@ export class YoyoThreadSystem {
 
     const nodes = state.nodes;
     const lastIndex = nodes.length - 1;
+    const useGrid = this._gridUsableFor(obstacles);
+    const out = useGrid ? (this._obsQuery || (this._obsQuery = [])) : null;
 
     for (let i = 0; i < lastIndex; i++) {
       const a = nodes[i];
       const b = nodes[i + 1];
 
-      for (const obs of obstacles) {
-        if (obs.kind === 'circle') {
-          this._resolveSegmentCircle(a, b, obs, ropeRadius, i, lastIndex, retracting);
-        } else if (obs.kind === 'brick') {
-          this._resolveSegmentBrick(a, b, obs, ropeRadius, i, lastIndex, retracting);
+      if (useGrid) {
+        const cand = this._gridQuerySegment(a.x, a.y, b.x, b.y, out);
+        for (let k = 0; k < cand.length; k++) {
+          const obs = obstacles[cand[k]];
+          if (obs.kind === 'circle') this._resolveSegmentCircle(a, b, obs, ropeRadius, i, lastIndex, retracting);
+          else if (obs.kind === 'brick') this._resolveSegmentBrick(a, b, obs, ropeRadius, i, lastIndex, retracting);
+        }
+      } else {
+        for (const obs of obstacles) {
+          if (obs.kind === 'circle') {
+            this._resolveSegmentCircle(a, b, obs, ropeRadius, i, lastIndex, retracting);
+          } else if (obs.kind === 'brick') {
+            this._resolveSegmentBrick(a, b, obs, ropeRadius, i, lastIndex, retracting);
+          }
         }
       }
     }
@@ -1551,9 +1797,21 @@ export class YoyoThreadSystem {
   }
 
   _collectObstacles(pegs) {
-    if (!Array.isArray(pegs) || pegs.length === 0) return [];
+    // Reuse pooled records + the output array across steps to avoid allocating a
+    // fresh object per peg every frame (GC pressure while the solver is hottest).
+    const out = this._obstacleList || (this._obstacleList = []);
+    out.length = 0;
+    if (!Array.isArray(pegs) || pegs.length === 0) return out;
 
-    const out = [];
+    const pool = this._obstaclePool || (this._obstaclePool = []);
+    let used = 0;
+    const take = () => {
+      let rec = pool[used];
+      if (!rec) rec = pool[used] = {};
+      used++;
+      return rec;
+    };
+
     for (const peg of pegs) {
       if (!this._isWrappablePeg(peg)) continue;
 
@@ -1572,20 +1830,12 @@ export class YoyoThreadSystem {
         const sin = Math.sin(angle);
         const extX = Math.abs(cos) * halfW + Math.abs(sin) * halfH;
         const extY = Math.abs(sin) * halfW + Math.abs(cos) * halfH;
-        out.push({
-          kind: 'brick',
-          pegId: peg.id,
-          x: peg.x,
-          y: peg.y,
-          halfW,
-          halfH,
-          cos,
-          sin,
-          minX: peg.x - extX,
-          maxX: peg.x + extX,
-          minY: peg.y - extY,
-          maxY: peg.y + extY
-        });
+        const o = take();
+        o.kind = 'brick'; o.pegId = peg.id; o.x = peg.x; o.y = peg.y;
+        o.halfW = halfW; o.halfH = halfH; o.cos = cos; o.sin = sin;
+        o.minX = peg.x - extX; o.maxX = peg.x + extX;
+        o.minY = peg.y - extY; o.maxY = peg.y + extY;
+        out.push(o);
         continue;
       }
 
@@ -1599,34 +1849,22 @@ export class YoyoThreadSystem {
         const sin = Math.sin(angle);
         const extX = Math.abs(cos) * halfW + Math.abs(sin) * halfH;
         const extY = Math.abs(sin) * halfW + Math.abs(cos) * halfH;
-        out.push({
-          kind: 'brick',
-          pegId: peg.id,
-          x: peg.x,
-          y: peg.y,
-          halfW,
-          halfH,
-          cos,
-          sin,
-          minX: peg.x - extX,
-          maxX: peg.x + extX,
-          minY: peg.y - extY,
-          maxY: peg.y + extY
-        });
+        const o = take();
+        o.kind = 'brick'; o.pegId = peg.id; o.x = peg.x; o.y = peg.y;
+        o.halfW = halfW; o.halfH = halfH; o.cos = cos; o.sin = sin;
+        o.minX = peg.x - extX; o.maxX = peg.x + extX;
+        o.minY = peg.y - extY; o.maxY = peg.y + extY;
+        out.push(o);
         continue;
       }
+
       const radius = getPegWrapRadius(peg, wrapPad);
-      out.push({
-        kind: 'circle',
-        pegId: peg.id,
-        x: peg.x,
-        y: peg.y,
-        radius,
-        minX: peg.x - radius,
-        maxX: peg.x + radius,
-        minY: peg.y - radius,
-        maxY: peg.y + radius
-      });
+      const o = take();
+      o.kind = 'circle'; o.pegId = peg.id; o.x = peg.x; o.y = peg.y;
+      o.radius = radius;
+      o.minX = peg.x - radius; o.maxX = peg.x + radius;
+      o.minY = peg.y - radius; o.maxY = peg.y + radius;
+      out.push(o);
     }
 
     return out;

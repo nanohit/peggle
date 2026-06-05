@@ -7,15 +7,17 @@ import {
   getPvpMidline,
   getPvpRuntimePegs,
   normalizePvpSettings,
-  PVP_DEFAULT_AIM_LENGTH
+  PVP_DEFAULT_AIM_LENGTH,
+  PVP_DEFAULT_HITS_TO_WIN
 } from './pvp-mode.js';
 import { isPortalType } from './portal-defaults.js';
 
-const MATCH_HP = 3;
 const MAX_ROUND_SECONDS = 18;
 const FALLBACK_TARGET_RADIUS = 56;
 const AIM_ANGLE_EPSILON = 0.0015;
 const ROUND_END_DELAY_MS = 550;
+const PVP_COUNTDOWN_DURATION_MS = 3000;
+const PVP_COUNTDOWN_STEP_MS = 1000;
 
 function hashString(value) {
   const text = String(value || '');
@@ -100,11 +102,13 @@ export class PvpRuntime {
 
     this.state = 'idle';
     this.round = 0;
-    this.playerHp = MATCH_HP;
-    this.cpuHp = MATCH_HP;
+    this.matchHp = this.settings.hitsToWin || PVP_DEFAULT_HITS_TO_WIN;
+    this.playerHp = this.matchHp;
+    this.cpuHp = this.matchHp;
     this.score = 0;
     this.hitPegIds = new Set();
     this.roundHitPegIds = new Set();
+    this.roundContactPegIds = new Set();
     this.humanAimAngle = Math.PI / 2;
     this.cpuAimAngle = -Math.PI / 2;
     this.trajectory = null;
@@ -127,6 +131,8 @@ export class PvpRuntime {
     this.aimDeadlineSimMs = 0;
     this.roundStartedSimMs = 0;
     this.roundEndReadySimMs = 0;
+    this.countdownDelayUntilSimMs = 0;
+    this.countdownStartedSimMs = 0;
     this.matchSeed = 1;
     this.roundSeed = 1;
     this._rng = mulberry32(1);
@@ -404,6 +410,7 @@ export class PvpRuntime {
   loadLevel(level) {
     this.level = clone(level || {});
     this.settings = ensureLevelPvp(this.level);
+    this.matchHp = this.settings.hitsToWin || PVP_DEFAULT_HITS_TO_WIN;
     this.setAimLength(this.settings.aimLength ?? PVP_DEFAULT_AIM_LENGTH);
     this.pegs = clone(getPvpRuntimePegs(this.level, this.canvas.height));
     this.matchSeed = hashString(JSON.stringify({
@@ -425,20 +432,46 @@ export class PvpRuntime {
   }
 
   resetMatch() {
-    this.playerHp = MATCH_HP;
-    this.cpuHp = MATCH_HP;
+    this.matchHp = this.settings.hitsToWin || PVP_DEFAULT_HITS_TO_WIN;
+    this.playerHp = this.matchHp;
+    this.cpuHp = this.matchHp;
     this.score = 0;
     this.round = 0;
     this.simTimeMs = 0;
     this.roundEndReadySimMs = 0;
+    this.countdownDelayUntilSimMs = 0;
+    this.countdownStartedSimMs = 0;
     this.hitPegIds.clear();
     this.roundHitPegIds.clear();
+    this.roundContactPegIds.clear();
     this.humanBallPositionHistory = [];
     this.cpuBallPositionHistory = [];
     this._ended = false;
     this._stopped = false;
     this.startAimRound();
     this.emitUiStateIfChanged();
+  }
+
+  startIntroCountdown(delayMs = 0) {
+    if (this.isNetworkMode() || this._ended) return 0;
+    const delay = Math.max(0, Number(delayMs) || 0);
+    this.state = 'countdown';
+    this.round = 0;
+    this.roundEndReadySimMs = 0;
+    this.aimDeadlineSimMs = 0;
+    this.countdownDelayUntilSimMs = this.simTimeMs + delay;
+    this.countdownStartedSimMs = this.countdownDelayUntilSimMs;
+    this.roundHitPegIds.clear();
+    this.roundContactPegIds.clear();
+    this.humanBallPositionHistory = [];
+    this.cpuBallPositionHistory = [];
+    this.humanBall.active = false;
+    this.cpuBall.active = false;
+    this.physics.setBalls([]);
+    this.resetBallPositions();
+    this.trajectory = null;
+    this.emitUiStateIfChanged();
+    return delay + PVP_COUNTDOWN_DURATION_MS;
   }
 
   applyNetworkAimDeadline(deadlineAt = null, aimRemainingMs = null) {
@@ -483,8 +516,9 @@ export class PvpRuntime {
 
   applyCanonicalDuelState(snapshot = {}) {
     const hp = snapshot.hp || {};
-    if (Number.isFinite(hp.human)) this.playerHp = Math.max(0, Math.min(MATCH_HP, Math.round(hp.human)));
-    if (Number.isFinite(hp.cpu)) this.cpuHp = Math.max(0, Math.min(MATCH_HP, Math.round(hp.cpu)));
+    const maxHp = this.matchHp || PVP_DEFAULT_HITS_TO_WIN;
+    if (Number.isFinite(hp.human)) this.playerHp = Math.max(0, Math.min(maxHp, Math.round(hp.human)));
+    if (Number.isFinite(hp.cpu)) this.cpuHp = Math.max(0, Math.min(maxHp, Math.round(hp.cpu)));
 
     if (Array.isArray(snapshot.remainingPegIds)) {
       const keep = new Set(snapshot.remainingPegIds);
@@ -516,9 +550,12 @@ export class PvpRuntime {
   startAimRound() {
     if (this._ended) return;
     this.roundEndReadySimMs = 0;
+    this.countdownDelayUntilSimMs = 0;
+    this.countdownStartedSimMs = 0;
     this.round += 1;
     this.state = 'idle';
     this.roundHitPegIds.clear();
+    this.roundContactPegIds.clear();
     this.humanBallPositionHistory = [];
     this.cpuBallPositionHistory = [];
     this.physics.setBalls([]);
@@ -765,6 +802,10 @@ export class PvpRuntime {
     }
   }
 
+  queuePegEntryAnimations(options = {}) {
+    return this.renderer.queuePegEntryAnimations?.(this.pegs, options) || 0;
+  }
+
   start() {
     if (this.running) return;
     if (!this.level) this.loadLevel({ pegs: [], pvp: this.settings });
@@ -863,6 +904,14 @@ export class PvpRuntime {
       return;
     }
 
+    if (this.state === 'countdown') {
+      if (this.simTimeMs >= this.countdownStartedSimMs + PVP_COUNTDOWN_DURATION_MS) {
+        this.startAimRound();
+      }
+      this.render();
+      return;
+    }
+
     if (this.state === 'roundWait') {
       this.render();
       return;
@@ -916,6 +965,13 @@ export class PvpRuntime {
   }
 
   handlePhysicsResult(result) {
+    for (const event of result.contactEvents || []) {
+      const ballSide = event.ballSide || event.ball?.side || null;
+      if (ballSide !== 'human' && ballSide !== 'cpu') continue;
+      const peg = this.pegById.get(event.peg?.id);
+      if (peg && isRemovablePvpPeg(peg)) this.roundContactPegIds.add(peg.id);
+    }
+
     for (const event of result.hitEvents || []) {
       const ballSide = event.ballSide || event.ball?.side || null;
       if (ballSide !== 'human' && ballSide !== 'cpu') continue;
@@ -931,7 +987,7 @@ export class PvpRuntime {
   }
 
   checkStuckBalls() {
-    if (this.state !== 'playing' || this.roundHitPegIds.size === 0) return;
+    if (this.state !== 'playing' || (this.roundHitPegIds.size === 0 && this.roundContactPegIds.size === 0)) return;
     this.checkStuckBallForSide('human', this.humanBall, this.humanBallPositionHistory);
     this.checkStuckBallForSide('cpu', this.cpuBall, this.cpuBallPositionHistory);
   }
@@ -967,7 +1023,9 @@ export class PvpRuntime {
   }
 
   releaseStuckPeg(side) {
-    const candidates = this.pegs.filter(peg => this.roundHitPegIds.has(peg.id) && isRemovablePvpPeg(peg));
+    const candidates = this.pegs.filter(peg => (
+      this.collectRoundRemovalIds().has(peg.id) && isRemovablePvpPeg(peg)
+    ));
     if (candidates.length === 0) return;
     const peg = candidates.reduce((best, item) => {
       if (!best) return item;
@@ -980,6 +1038,7 @@ export class PvpRuntime {
     this.renderer.queuePegExitAnimations?.([peg]);
     this.pegs = this.pegs.filter(item => item.id !== peg.id);
     this.roundHitPegIds.delete(peg.id);
+    this.roundContactPegIds.delete(peg.id);
     this.hitPegIds.delete(peg.id);
     this.syncPhysicsPegs();
     this.humanBallPositionHistory = [];
@@ -1026,10 +1085,43 @@ export class PvpRuntime {
     this.cpuHp = Math.max(0, this.cpuHp - 1);
   }
 
+  collectRoundRemovalIds(seedIds = null) {
+    const ids = new Set(seedIds || [
+      ...this.roundHitPegIds,
+      ...this.roundContactPegIds
+    ]);
+    const groupIds = new Set();
+    const bezierGroupIds = new Set();
+
+    for (const peg of this.pegs) {
+      if (!peg?.id || !ids.has(peg.id)) continue;
+      if (peg.groupId) groupIds.add(peg.groupId);
+      if (peg.bezierGroupId) bezierGroupIds.add(peg.bezierGroupId);
+    }
+
+    if (groupIds.size > 0 || bezierGroupIds.size > 0) {
+      for (const peg of this.pegs) {
+        if (!peg?.id || !isRemovablePvpPeg(peg)) continue;
+        if (
+          ids.has(peg.id)
+          || (peg.groupId && groupIds.has(peg.groupId))
+          || (peg.bezierGroupId && bezierGroupIds.has(peg.bezierGroupId))
+        ) {
+          ids.add(peg.id);
+        }
+      }
+    }
+
+    for (const peg of this.pegs) {
+      if (peg?.id && ids.has(peg.id) && !isRemovablePvpPeg(peg)) ids.delete(peg.id);
+    }
+    return ids;
+  }
+
   finishRound() {
     if (this.state !== 'playing') return;
     this.state = 'roundEnd';
-    const removeIds = new Set(this.roundHitPegIds);
+    const removeIds = this.collectRoundRemovalIds();
     const removedPegIds = [...removeIds].filter(id => typeof id === 'string');
     if (removeIds.size > 0) {
       const removed = this.pegs.filter(peg => removeIds.has(peg.id));
@@ -1039,6 +1131,7 @@ export class PvpRuntime {
       this.syncPhysicsPegs();
     }
     this.roundHitPegIds.clear();
+    this.roundContactPegIds.clear();
     this.humanBallPositionHistory = [];
     this.cpuBallPositionHistory = [];
     this.humanBall.active = false;
@@ -1092,16 +1185,30 @@ export class PvpRuntime {
       ballsLeft: null,
       initialBallCount: null,
       orangePegsLeft: localHp,
-      totalOrangePegs: MATCH_HP,
+      totalOrangePegs: this.matchHp,
       playerHp: localHp,
       cpuHp: remoteHp,
-      maxHp: MATCH_HP
+      maxHp: this.matchHp
     };
   }
 
   getTimerRatio() {
     if (this.state !== 'idle' && !this.isAimingState()) return null;
     return Utils.clamp((this.aimDeadlineSimMs - this.simTimeMs) / Math.max(1, this.settings.aimTimerMs), 0, 1);
+  }
+
+  getCountdownState() {
+    if (this.state !== 'countdown') return null;
+    const elapsed = this.simTimeMs - this.countdownStartedSimMs;
+    if (elapsed < 0 || elapsed >= PVP_COUNTDOWN_DURATION_MS) return null;
+    const step = Math.max(0, Math.min(2, Math.floor(elapsed / PVP_COUNTDOWN_STEP_MS)));
+    const local = (elapsed - step * PVP_COUNTDOWN_STEP_MS) / PVP_COUNTDOWN_STEP_MS;
+    const fadeIn = Utils.clamp(local / 0.18, 0, 1);
+    const fadeOut = Utils.clamp((1 - local) / 0.22, 0, 1);
+    return {
+      text: String(3 - step),
+      alpha: Math.min(fadeIn, fadeOut)
+    };
   }
 
   getRenderState() {
@@ -1131,6 +1238,7 @@ export class PvpRuntime {
     }
 
     const localHp = this.getLocalHp();
+    const countdown = this.getCountdownState();
 
     return {
       pegs: this.pegs,
@@ -1152,8 +1260,8 @@ export class PvpRuntime {
       score: this.score,
       ballsLeft: null,
       orangePegsLeft: localHp,
-      totalOrangePegs: MATCH_HP,
-      levelProgress: localHp / MATCH_HP,
+      totalOrangePegs: this.matchHp,
+      levelProgress: localHp / Math.max(1, this.matchHp),
       worldHeight: this.canvas.height,
       backgroundFxId: this.level ? `pvp:${this.level.id || 'level'}` : 'pvp',
       backgroundEvents: [],
@@ -1161,8 +1269,10 @@ export class PvpRuntime {
       renderTimeSeconds: this.renderTimeSeconds,
       renderDeltaSeconds: this.renderDeltaSeconds,
       frameDeltaSeconds: this.rawFrameDeltaSeconds,
-      pvpMidline: this.settings.symmetryEnabled ? getPvpMidline(this.canvas.height) : null,
+      pvpMidline: getPvpMidline(this.canvas.height),
       pvpTimerRatio: this.getTimerRatio(),
+      countdownText: countdown?.text || null,
+      countdownAlpha: countdown?.alpha ?? 1,
       message: this.state === 'won' ? 'Victory' : (this.state === 'lost' ? 'Defeat' : null),
       subMessage: this.state === 'won' || this.state === 'lost' ? 'Continue' : null
     };
@@ -1175,7 +1285,7 @@ export class PvpRuntime {
       this.onVisualState({
         cpuHp: this.getRemoteHp(),
         playerHp: this.getLocalHp(),
-        maxHp: MATCH_HP,
+        maxHp: this.matchHp,
         timerRatio: state.pvpTimerRatio,
         timerVisible: Number.isFinite(state.pvpTimerRatio)
       });

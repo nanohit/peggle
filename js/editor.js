@@ -8,11 +8,8 @@ import { FLIPPER_DEFAULTS, normalizeFlipperConfig } from './flipper-defaults.js'
 import { SurvivalRuntime } from './survival-runtime.js';
 import { ensureLevelSurvival, normalizeSurvivalGamblePegProperties } from './survival-mode.js';
 import {
-  filterPvpAuthoredPegs,
   getPvpMidline,
-  getPvpRuntimePegs,
-  isPvpAuthoredPeg,
-  isPvpSymmetryEnabled,
+  mirrorPvpPeg,
   normalizePvpSettings
 } from './pvp-mode.js';
 import {
@@ -37,6 +34,9 @@ import {
   wrapPointWithVisibility,
   mirrorWrapTrace
 } from './animation.js';
+
+// Cap freeform trajectory authoring so paths stay cheap to sample/serialize.
+const MAX_ANIM_PATH_ANCHORS = 64;
 
 export class Editor {
   constructor(canvas, levelManager) {
@@ -72,6 +72,7 @@ export class Editor {
     // Alt-drag copy
     this.isCopying = false;
     this.pendingCopyDrag = false;
+    this._pendingPvpMirrorAfterDragIds = null;
     
     // Draw mode state
     this.drawPath = [];
@@ -99,6 +100,12 @@ export class Editor {
     this.animationPreview = false;
     this.animationPreviewAnimator = null;
     this.onAnimationOffsetChange = null; // callback for slider sync
+    // Rotation origin (pivot) + freeform trajectory authoring
+    this.animEditMode = 'none';        // 'none' | 'origin' | 'path'
+    this.animationPivot = null;        // { dx, dy } offset from center, or null = center
+    this.animPathDraft = null;         // { anchors:[{x,y,hIn,hOut}], closed } in world coords
+    this._animPathDragIndex = -1;
+    this._animPathGrab = null;
     this.previewLevelProgress = null;
     this.ballTrailPreview = false;
     this.shockwavePreview = false;
@@ -163,8 +170,49 @@ export class Editor {
 
       e.preventDefault();
 
-      // Animation mode: only handle ghost drag (hit any ghost peg)
+      // Animation mode: ghost drag / origin placement / trajectory editing
       if (this.animationMode) {
+        // Origin (pivot) placement: click anywhere to place + drag the pivot.
+        if (this.animEditMode === 'origin') {
+          this.isInteracting = true;
+          this.interactionType = 'animPivotDrag';
+          this.setAnimationPivotFromWorld(pos.x, pos.y);
+          return;
+        }
+        // Trajectory path editing (Draw-Mode-bezier-style controls).
+        if (this.animEditMode === 'path') {
+          if (!this.animPathDraft) {
+            this.isInteracting = true;
+            this.interactionType = 'animPathCreate';
+            this.startX = pos.x;
+            this.startY = pos.y;
+            return;
+          }
+          const ctrl = this.getAnimPathControlAt(pos.x, pos.y);
+          if (ctrl) {
+            this.isInteracting = true;
+            this._animPathDragIndex = ctrl.index;
+            if (ctrl.type === 'anchor') {
+              this.interactionType = 'animPathAnchor';
+              const a = this.animPathDraft.anchors[ctrl.index];
+              this._animPathGrab = {
+                ax: a.x, ay: a.y,
+                hIn: { ...a.hIn }, hOut: { ...a.hOut },
+                mx: pos.x, my: pos.y
+              };
+            } else {
+              this.interactionType = ctrl.type === 'hOut' ? 'animPathHandleOut' : 'animPathHandleIn';
+            }
+            return;
+          }
+          // Empty space → append a joint and drag out its handle (pen-tool style).
+          const idx = this.appendAnimPathAnchor(pos.x, pos.y);
+          this.isInteracting = true;
+          this.interactionType = 'animPathHandleOut';
+          this._animPathDragIndex = idx;
+          return;
+        }
+        // Default: drag the straight-line ghost.
         if (this.animationGhostOffset) {
           const ghosts = this.getAnimationGhosts();
           let nearGhost = false;
@@ -359,6 +407,26 @@ export class Editor {
           }
           break;
 
+        case 'animPivotDrag':
+          this.setAnimationPivotFromWorld(pos.x, pos.y);
+          break;
+
+        case 'animPathCreate':
+          this.beginAnimPathDraft(pos, e.shiftKey);
+          break;
+
+        case 'animPathAnchor':
+          this.applyAnimPathAnchorDrag(this._animPathDragIndex, pos, e.shiftKey);
+          break;
+
+        case 'animPathHandleOut':
+        case 'animPathHandleIn':
+          this.applyAnimPathHandleDrag(
+            this.interactionType === 'animPathHandleOut' ? 'hOut' : 'hIn',
+            this._animPathDragIndex, pos, e.shiftKey, e.altKey
+          );
+          break;
+
         case 'rotate':
           if (this.rotationCenter) {
             const currentAngle = Utils.angleBetween(
@@ -403,7 +471,7 @@ export class Editor {
           if (this.hasMoved && this.selectedPegIds.size > 0) {
             if (this.pendingCopyDrag) {
               this.saveUndoState();
-              this.duplicateSelectedPegsInPlace();
+              this.duplicateSelectedPegsInPlace({ deferPvpMirror: true });
               this.pendingCopyDrag = false;
               this.dragPegId = this.selectedPegIds.keys().next().value || null;
               this.captureDragStartPositions();
@@ -474,6 +542,17 @@ export class Editor {
           this._animDragStart = null;
           break;
 
+        case 'animPivotDrag':
+          break;
+
+        case 'animPathCreate':
+        case 'animPathAnchor':
+        case 'animPathHandleOut':
+        case 'animPathHandleIn':
+          this._animPathDragIndex = -1;
+          this._animPathGrab = null;
+          break;
+
         case 'rotate':
           this.levelManager.save();
           break;
@@ -494,6 +573,14 @@ export class Editor {
           break;
           
         case 'drag':
+          if (this._pendingPvpMirrorAfterDragIds?.size > 0) {
+            const level = this.levelManager.getCurrentLevel();
+            const movedCopies = Array.from(this._pendingPvpMirrorAfterDragIds)
+              .map(id => level?.pegs?.find(peg => peg.id === id))
+              .filter(Boolean);
+            this.createPvpMirroredCopies(movedCopies);
+            this._pendingPvpMirrorAfterDragIds = null;
+          }
           this.levelManager.save();
           break;
           
@@ -557,6 +644,7 @@ export class Editor {
       this.pendingCopyDrag = false;
       this.dragStartPositions = null;
       this.dragAnchorId = null;
+      this._pendingPvpMirrorAfterDragIds = null;
       this._panStartCameraY = null;
       this._panStartScreenY = null;
     };
@@ -741,13 +829,6 @@ export class Editor {
     if (this.pvpSettings.enabled) {
       this.survivalRuntime.setCameraY(0);
     }
-    this.selectedPegIds = new Set(
-      Array.from(this.selectedPegIds).filter(id => {
-        const level = this.levelManager.getCurrentLevel();
-        const peg = level?.pegs?.find(p => p.id === id);
-        return peg && this.isPvpEditablePeg(peg);
-      })
-    );
     this.notifySelectionChange();
     return this.pvpSettings;
   }
@@ -761,12 +842,63 @@ export class Editor {
   }
 
   isPvpEditablePeg(peg) {
-    return !peg?.pvpMirrored;
+    return !!peg;
   }
 
   getPvpEditablePegs(level) {
     const pegs = Array.isArray(level?.pegs) ? level.pegs : [];
-    return this.isPvpSymmetryMode() ? filterPvpAuthoredPegs(pegs, this.canvas.height) : pegs;
+    return pegs;
+  }
+
+  createPvpMirroredCopies(sourcePegs, options = {}) {
+    if (!this.isPvpSymmetryMode()) return [];
+    const level = this.levelManager.getCurrentLevel();
+    if (!level || !Array.isArray(level.pegs)) return [];
+    const pegs = (Array.isArray(sourcePegs) ? sourcePegs : [sourcePegs]).filter(Boolean);
+    if (pegs.length === 0) return [];
+
+    const midline = getPvpMidline(this.canvas.height);
+    let mirrorBezierGroupId = null;
+    const sourceBezierGroupId = options.sourceBezierGroupId || null;
+    if (sourceBezierGroupId && level.bezierCurves?.[sourceBezierGroupId]) {
+      mirrorBezierGroupId = Utils.generateId();
+      const sourceCurve = level.bezierCurves[sourceBezierGroupId];
+      const mirrorPoint = (point) => point && Number.isFinite(point.x) && Number.isFinite(point.y)
+        ? { ...point, y: this.canvas.height - point.y }
+        : point;
+      const mirroredCurve = {
+        ...sourceCurve,
+        start: mirrorPoint(sourceCurve.start),
+        end: mirrorPoint(sourceCurve.end),
+        h1: mirrorPoint(sourceCurve.h1),
+        h2: mirrorPoint(sourceCurve.h2),
+        refPoints: Array.isArray(sourceCurve.refPoints)
+          ? sourceCurve.refPoints.map(point => ({ ...point, y: this.canvas.height - Number(point.y || 0) }))
+          : sourceCurve.refPoints
+      };
+      level.bezierCurves[mirrorBezierGroupId] = mirroredCurve;
+    }
+
+    const created = [];
+    for (const peg of pegs) {
+      if (Math.abs(Number(peg.y || 0) - midline) <= 0.5) continue;
+      const mirrored = mirrorPvpPeg(peg, this.canvas.height);
+      if (!mirrored) continue;
+      delete mirrored.id;
+      delete mirrored.pvpMirrored;
+      delete mirrored.pvpMirrorOf;
+      if (mirrorBezierGroupId && peg.bezierGroupId === sourceBezierGroupId) {
+        mirrored.bezierGroupId = mirrorBezierGroupId;
+        mirrored.bezierIndex = Number.isFinite(peg.bezierIndex) ? peg.bezierIndex : null;
+      } else {
+        mirrored.bezierGroupId = null;
+        mirrored.bezierIndex = null;
+      }
+      mirrored.groupId = null;
+      const newPeg = this.levelManager.addPeg(mirrored);
+      if (newPeg) created.push(newPeg);
+    }
+    return created;
   }
 
   clampPvpAuthoredPosition(x, y) {
@@ -1692,6 +1824,7 @@ export class Editor {
     const isBrick = commitShape === 'brick';
     const w = this.getBrickWidth();
     const h = this.getBrickHeight();
+    const createdPegs = [];
     for (let i = 0; i < toCommit.length; i++) {
       const gb = toCommit[i];
       const pegData = {
@@ -1713,7 +1846,12 @@ export class Editor {
       if (this.selectedPegColor) pegData.color = this.selectedPegColor;
       if (!this.isPegPositionAllowed(pegData, pegData.x, pegData.y, pegData.angle, pegData.curveSlices)) continue;
       const newPeg = this.levelManager.addPeg(pegData);
+      if (newPeg) createdPegs.push(newPeg);
     }
+
+    this.createPvpMirroredCopies(createdPegs, {
+      sourceBezierGroupId: isBezierCommit ? bezierGroupId : null
+    });
 
     // Cleanup legacy artifacts from early bezier versions that committed circles
     // along the same path without bezierGroupId metadata.
@@ -1754,9 +1892,7 @@ export class Editor {
     
     // Check minimum distance from other pegs
     const minDist = PHYSICS_CONFIG.pegRadius * 2;
-    const distancePegs = this.isPvpSymmetryMode()
-      ? getPvpRuntimePegs(level, this.canvas.height)
-      : this.getPvpEditablePegs(level);
+    const distancePegs = this.getPvpEditablePegs(level);
     for (const peg of distancePegs) {
       if (Utils.distance(x, y, peg.x, peg.y) < minDist) {
         return null;
@@ -1764,6 +1900,7 @@ export class Editor {
     }
     
     const forceCircle = this.selectedPegType === 'bumper'
+      || this.selectedPegType === 'bomb'
       || isPortalType(this.selectedPegType)
       || isBilliardPegType(this.selectedPegType);
     const shape = forceCircle ? 'circle' : this.selectedShape;
@@ -1786,6 +1923,7 @@ export class Editor {
     if (this.selectedPegType === 'bumper') {
       pegData.bumperBounce = 2.0;
       pegData.bumperScale = 1.0;
+      pegData.bumperPegReact = true;
     }
     if (isPortalType(this.selectedPegType)) {
       pegData.portalScale = PORTAL_DEFAULT_SCALE;
@@ -1796,6 +1934,10 @@ export class Editor {
     if (this.selectedPegType === 'multi') {
       pegData.multiballSpawnCount = MULTIBALL_DEFAULT_SPAWN_COUNT;
     }
+    if (this.selectedPegType === 'bomb') {
+      pegData.bombPower = 1.0;
+      pegData.bombPhysicsOnly = true;
+    }
     if (this.selectedPegType === 'gamble') {
       Object.assign(pegData, normalizeSurvivalGamblePegProperties(pegData));
     }
@@ -1805,6 +1947,7 @@ export class Editor {
     if (!this.isPegPositionAllowed(pegData, pegData.x, pegData.y, pegData.angle, pegData.curveSlices)) return null;
 
     const peg = this.levelManager.addPeg(pegData);
+    this.createPvpMirroredCopies(peg);
     
     if (peg && this.onPegCountChange) {
       this.onPegCountChange(level.pegs.length);
@@ -2276,6 +2419,7 @@ export class Editor {
 
     this.saveUndoState();
     const newPegIds = new Set();
+    const newPegs = [];
 
     for (const pegId of this.selectedPegIds) {
       const peg = level.pegs.find(p => p.id === pegId);
@@ -2284,9 +2428,12 @@ export class Editor {
         const newPeg = this.levelManager.addPeg(pegData);
         if (newPeg) {
           newPegIds.add(newPeg.id);
+          newPegs.push(newPeg);
         }
       }
     }
+
+    this.createPvpMirroredCopies(newPegs);
 
     this.selectedPegIds = newPegIds;
     this.notifySelectionChange();
@@ -2297,11 +2444,12 @@ export class Editor {
   }
 
   // Duplicate in place (for alt+drag)
-  duplicateSelectedPegsInPlace() {
+  duplicateSelectedPegsInPlace(options = {}) {
     const level = this.levelManager.getCurrentLevel();
     if (!level || this.selectedPegIds.size === 0) return;
 
     const newPegIds = new Set();
+    const newPegs = [];
 
     for (const pegId of this.selectedPegIds) {
       const peg = level.pegs.find(p => p.id === pegId);
@@ -2310,8 +2458,15 @@ export class Editor {
         const newPeg = this.levelManager.addPeg(pegData);
         if (newPeg) {
           newPegIds.add(newPeg.id);
+          newPegs.push(newPeg);
         }
       }
+    }
+
+    if (options.deferPvpMirror) {
+      this._pendingPvpMirrorAfterDragIds = new Set(newPegs.map(peg => peg.id));
+    } else {
+      this.createPvpMirroredCopies(newPegs);
     }
     
     // Select the new copies (we'll drag these)
@@ -2408,9 +2563,7 @@ export class Editor {
     const baseRenderPegs = (level && this.mode === 'draw' && this.drawShapeMode === 'bezier' && this.bezierDraft && this.activeBezierGroupId)
       ? level.pegs.filter(p => p.bezierGroupId !== this.activeBezierGroupId)
       : (level ? level.pegs : []);
-    const renderPegs = (level && this.isPvpSymmetryMode())
-      ? getPvpRuntimePegs({ ...level, pegs: baseRenderPegs }, this.canvas.height)
-      : baseRenderPegs;
+    const renderPegs = baseRenderPegs;
     const wrapCopyPegIds = (this.animationPreview && this.animationPreviewAnimator)
       ? this.animationPreviewAnimator.getAnimatedPegIds()
       : null;
@@ -2429,6 +2582,10 @@ export class Editor {
     const hasSelection = !this.animationMode && this.selectedPegIds.size > 0;
     const rotationHandle = hasSelection ? this.getRotationHandlePosition() : null;
     const isBumperSelection = hasSelection && this.isSelectionAllBumpers();
+    // A freeform trajectory replaces the straight dx/dy ghost (hide it while
+    // editing a path or once a path draft exists).
+    const showStraightGhost = this.animationMode && !this.animationPreview
+      && this.animEditMode !== 'path' && !this.animPathDraft;
 
     this.renderer.renderGame({
       pegs: renderPegs,
@@ -2467,14 +2624,19 @@ export class Editor {
       pegShape: (this.mode === 'draw' && this.drawShapeMode === 'bezier') ? 'brick' : this.selectedShape,
       // Animation mode state
       animationMode: this.animationMode && !this.animationPreview,
-      animationGhosts: (this.animationMode && !this.animationPreview) ? this.getAnimationGhosts() : null,
+      animationGhosts: showStraightGhost ? this.getAnimationGhosts() : null,
       animationCenter: (this.animationMode && !this.animationPreview) ? this.getAnimationCenter() : null,
-      animationGhostCenter: (this.animationMode && !this.animationPreview) ? this.getAnimationGhostCenter() : null,
-      animationMotion: (this.animationMode && !this.animationPreview) ? this.resolveAnimationMotion() : null,
+      animationGhostCenter: showStraightGhost ? this.getAnimationGhostCenter() : null,
+      animationMotion: showStraightGhost ? this.resolveAnimationMotion() : null,
       animationInverse: this.animationMode && !this.animationPreview ? this.animationInverse : false,
-      animationCircularPath: this.animationMode && !this.animationPreview ? this.animationCircularPath : false,
+      animationCircularPath: showStraightGhost ? this.animationCircularPath : false,
       animationCircularFull: this.animationMode && !this.animationPreview ? this.animationCircularFull : false,
       animationGhostOffset: this.animationGhostOffset,
+      // Rotation origin (pivot) + trajectory path overlays
+      animationPivot: (this.animationMode && !this.animationPreview) ? this.getAnimationPivotWorld() : null,
+      animationPivotEditing: this.animationMode && !this.animationPreview && this.animEditMode === 'origin',
+      animationPathSamples: (this.animationMode && !this.animationPreview) ? this.getAnimPathSamples() : null,
+      animationPathControls: (this.animationMode && !this.animationPreview && this.animEditMode === 'path') ? this.animPathDraft : null,
       groups: level ? level.groups : [],
       // Flippers
       flippers: level ? level.flippers : null,
@@ -2484,7 +2646,7 @@ export class Editor {
       ballTrailPreview: this.ballTrailPreview,
       shockwavePreview: this.shockwavePreview
       ,
-      pvpMidline: this.isPvpSymmetryMode() ? getPvpMidline(this.canvas.height) : null,
+      pvpMidline: this.isPvpMode() ? getPvpMidline(this.canvas.height) : null,
       pvpSymmetryPreview: this.isPvpSymmetryMode()
     });
   }
@@ -2605,6 +2767,53 @@ export class Editor {
     return true;
   }
 
+  isSelectionAllBombs() {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level || this.selectedPegIds.size === 0) return false;
+    for (const pegId of this.selectedPegIds) {
+      const peg = level.pegs.find(p => p.id === pegId);
+      if (!peg || peg.type !== 'bomb') return false;
+    }
+    return true;
+  }
+
+  setSelectedBombPower(power) {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level) return;
+    const clamped = Utils.clamp(power, 0.3, 4.0);
+    for (const pegId of this.selectedPegIds) {
+      const peg = level.pegs.find(p => p.id === pegId);
+      if (peg && peg.type === 'bomb') {
+        peg.bombPower = clamped;
+      }
+    }
+    this.levelManager.save();
+  }
+
+  setSelectedBombPhysicsOnly(physicsOnly) {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level) return;
+    for (const pegId of this.selectedPegIds) {
+      const peg = level.pegs.find(p => p.id === pegId);
+      if (peg && peg.type === 'bomb') {
+        peg.bombPhysicsOnly = !!physicsOnly;
+      }
+    }
+    this.levelManager.save();
+  }
+
+  getSelectedBombProperties() {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level || this.selectedPegIds.size === 0) return null;
+    for (const pegId of this.selectedPegIds) {
+      const peg = level.pegs.find(p => p.id === pegId);
+      if (peg && peg.type === 'bomb') {
+        return { power: peg.bombPower ?? 1.0, physicsOnly: peg.bombPhysicsOnly !== false };
+      }
+    }
+    return null;
+  }
+
   isSelectionAllMultiballs() {
     const level = this.levelManager.getCurrentLevel();
     if (!level || this.selectedPegIds.size === 0) return false;
@@ -2672,7 +2881,8 @@ export class Editor {
           bounce: peg.bumperBounce ?? 2.0,
           scale: peg.bumperScale ?? 1.0,
           disappear: !!peg.bumperDisappear,
-          orange: !!peg.bumperOrange
+          orange: !!peg.bumperOrange,
+          pegReact: peg.bumperPegReact !== false
         };
       }
     }
@@ -3092,9 +3302,15 @@ export class Editor {
     this.animationHitSteps = existing?.hitSteps || 1;
     this.animationCircularPath = !!existing?.circularPath;
     this.animationCircularFull = !!existing?.circularFull;
+    this.animationPivot = existing?.pivot
+      ? { dx: existing.pivot.dx || 0, dy: existing.pivot.dy || 0 }
+      : null;
+    this.animEditMode = 'none';
     this.animationMode = true;
     this.animationPreview = false;
     this.animationPreviewAnimator = null;
+    // Load any existing trajectory path into an editable world-coord draft
+    this.animPathDraft = existing?.path ? this.animPathDataToDraft(existing.path) : null;
 
     return true;
   }
@@ -3113,6 +3329,11 @@ export class Editor {
     this.animationHitSteps = 1;
     this.animationCircularPath = false;
     this.animationCircularFull = false;
+    this.animEditMode = 'none';
+    this.animationPivot = null;
+    this.animPathDraft = null;
+    this._animPathGrab = null;
+    this._animPathDragIndex = -1;
   }
 
   getTargetAnimation() {
@@ -3140,6 +3361,8 @@ export class Editor {
       hitSteps: Math.max(1, Math.round(animData?.hitSteps || 1)),
       circularPath: !!animData?.circularPath,
       circularFull: !!animData?.circularFull,
+      pivot: animData?.pivot ? { dx: animData.pivot.dx || 0, dy: animData.pivot.dy || 0 } : null,
+      path: animData?.path || null,
     };
 
     this.saveUndoState();
@@ -3175,6 +3398,9 @@ export class Editor {
     this.animationInverse = false;
     this.animationCircularPath = false;
     this.animationCircularFull = false;
+    this.animationPivot = null;
+    this.animPathDraft = null;
+    this.animEditMode = 'none';
   }
 
   getAnimationCenter() {
@@ -3193,6 +3419,243 @@ export class Editor {
       const peg = level.pegs.find(p => p.id === this.animationTarget.id);
       return peg ? { x: peg.x, y: peg.y } : null;
     }
+  }
+
+  // ── Rotation origin (pivot) ──
+
+  getAnimationPivotWorld() {
+    const center = this.getAnimationCenter();
+    if (!center) return null;
+    if (!this.animationPivot) return { x: center.x, y: center.y, custom: false };
+    return {
+      x: center.x + (this.animationPivot.dx || 0),
+      y: center.y + (this.animationPivot.dy || 0),
+      custom: true
+    };
+  }
+
+  setAnimationPivotFromWorld(x, y) {
+    const center = this.getAnimationCenter();
+    if (!center) return;
+    this.animationPivot = { dx: x - center.x, dy: y - center.y };
+  }
+
+  clearAnimationPivot() {
+    this.animationPivot = null;
+  }
+
+  // ── Trajectory path authoring (poly-cubic-bezier, Draw-Mode style) ──
+
+  // Create the first segment from the element center out to the drag point.
+  // SHIFT = straight 45°-snapped line (matches Draw-Mode bezier).
+  beginAnimPathDraft(endWorld, shiftKey = false) {
+    const center = this.getAnimationCenter();
+    if (!center) return;
+    const sx = center.x, sy = center.y;
+    let ex = endWorld.x, ey = endWorld.y;
+    if (shiftKey) {
+      const snapped = this.snapVector45(ex - sx, ey - sy);
+      ex = sx + snapped.dx;
+      ey = sy + snapped.dy;
+    }
+    const dx = ex - sx, dy = ey - sy;
+    const d = Math.hypot(dx, dy) || 1;
+    const ux = dx / d, uy = dy / d;
+    const hl = Math.max(20, d * 0.28);
+    this.animPathDraft = {
+      closed: false,
+      anchors: [
+        { x: sx, y: sy, hIn: { x: sx - ux * hl, y: sy - uy * hl }, hOut: { x: sx + ux * hl, y: sy + uy * hl } },
+        { x: ex, y: ey, hIn: { x: ex - ux * hl, y: ey - uy * hl }, hOut: { x: ex + ux * hl, y: ey + uy * hl } }
+      ]
+    };
+  }
+
+  appendAnimPathAnchor(x, y) {
+    if (!this.animPathDraft) return -1;
+    const anchors = this.animPathDraft.anchors;
+    if (anchors.length >= MAX_ANIM_PATH_ANCHORS) return anchors.length - 1;
+    this.animPathDraft._samplesDirty = true;
+    const prev = anchors[anchors.length - 1];
+    const dx = x - prev.x, dy = y - prev.y;
+    const d = Math.hypot(dx, dy) || 1;
+    const ux = dx / d, uy = dy / d;
+    const hl = Math.max(20, d * 0.28);
+    anchors.push({
+      x, y,
+      hIn: { x: x - ux * hl, y: y - uy * hl },
+      hOut: { x: x + ux * hl, y: y + uy * hl }
+    });
+    return anchors.length - 1;
+  }
+
+  // A handle is "active" (affects the curve) only when its segment exists.
+  _animPathHandleActive(i, which) {
+    const d = this.animPathDraft;
+    if (!d) return false;
+    const n = d.anchors.length;
+    if (which === 'hOut') return d.closed || i < n - 1;
+    if (which === 'hIn') return d.closed || i > 0;
+    return false;
+  }
+
+  getAnimPathControlAt(x, y) {
+    const d = this.animPathDraft;
+    if (!d) return null;
+    const r = 13;
+    // Handles sit on top of anchors, so test them first.
+    for (let i = 0; i < d.anchors.length; i++) {
+      const a = d.anchors[i];
+      if (this._animPathHandleActive(i, 'hOut') && a.hOut && Utils.distance(x, y, a.hOut.x, a.hOut.y) <= r) {
+        return { type: 'hOut', index: i };
+      }
+      if (this._animPathHandleActive(i, 'hIn') && a.hIn && Utils.distance(x, y, a.hIn.x, a.hIn.y) <= r) {
+        return { type: 'hIn', index: i };
+      }
+    }
+    for (let i = 0; i < d.anchors.length; i++) {
+      const a = d.anchors[i];
+      if (Utils.distance(x, y, a.x, a.y) <= r) return { type: 'anchor', index: i };
+    }
+    return null;
+  }
+
+  applyAnimPathAnchorDrag(index, pos, shiftKey = false) {
+    const d = this.animPathDraft;
+    if (!d || !this._animPathGrab || !d.anchors[index]) return;
+    const g = this._animPathGrab;
+    let dx = pos.x - g.mx, dy = pos.y - g.my;
+    if (shiftKey) {
+      const snapped = this.snapVector45(dx, dy);
+      dx = snapped.dx; dy = snapped.dy;
+    }
+    const a = d.anchors[index];
+    a.x = g.ax + dx; a.y = g.ay + dy;
+    a.hIn = { x: g.hIn.x + dx, y: g.hIn.y + dy };
+    a.hOut = { x: g.hOut.x + dx, y: g.hOut.y + dy };
+    d._samplesDirty = true;
+  }
+
+  // Drag a handle. Default mirrors the sibling for smoothness (C1); ALT breaks
+  // symmetry for a corner; SHIFT snaps to 45°.
+  applyAnimPathHandleDrag(which, index, pos, shiftKey = false, altKey = false) {
+    const d = this.animPathDraft;
+    if (!d || !d.anchors[index]) return;
+    const a = d.anchors[index];
+    let nx = pos.x, ny = pos.y;
+    if (shiftKey) {
+      const snapped = this.snapVector45(nx - a.x, ny - a.y);
+      nx = a.x + snapped.dx; ny = a.y + snapped.dy;
+    }
+    if (which === 'hOut') {
+      a.hOut = { x: nx, y: ny };
+      if (!altKey) a.hIn = { x: 2 * a.x - nx, y: 2 * a.y - ny };
+    } else {
+      a.hIn = { x: nx, y: ny };
+      if (!altKey) a.hOut = { x: 2 * a.x - nx, y: 2 * a.y - ny };
+    }
+    d._samplesDirty = true;
+  }
+
+  toggleAnimPathClosed() {
+    if (!this.animPathDraft) return;
+    this.animPathDraft.closed = !this.animPathDraft.closed;
+    this.animPathDraft._samplesDirty = true;
+  }
+
+  clearAnimPath() {
+    this.animPathDraft = null;
+    this._animPathGrab = null;
+    this._animPathDragIndex = -1;
+  }
+
+  // Regularize the current anchors into a clean circle that passes through the
+  // first anchor (the element's start point), evenly spaced with circle handles.
+  snapAnimPathCircle() {
+    const d = this.animPathDraft;
+    if (!d || d.anchors.length < 2) return;
+    let cx = 0, cy = 0;
+    for (const a of d.anchors) { cx += a.x; cy += a.y; }
+    cx /= d.anchors.length; cy /= d.anchors.length;
+    let r = Math.hypot(d.anchors[0].x - cx, d.anchors[0].y - cy);
+    if (r < 5) {
+      let mr = 0;
+      for (const a of d.anchors) mr += Math.hypot(a.x - cx, a.y - cy);
+      r = (mr / d.anchors.length) || 60;
+    }
+    const n = Math.max(4, d.anchors.length);
+    const a0 = Math.atan2(d.anchors[0].y - cy, d.anchors[0].x - cx);
+    const k = (4 / 3) * Math.tan(Math.PI / n) * r; // bezier-circle handle length
+    const anchors = [];
+    for (let i = 0; i < n; i++) {
+      const ang = a0 + (i * 2 * Math.PI / n);
+      const px = cx + r * Math.cos(ang);
+      const py = cy + r * Math.sin(ang);
+      const tx = -Math.sin(ang), ty = Math.cos(ang); // CCW tangent
+      anchors.push({
+        x: px, y: py,
+        hIn: { x: px - tx * k, y: py - ty * k },
+        hOut: { x: px + tx * k, y: py + ty * k }
+      });
+    }
+    d.anchors = anchors;
+    d.closed = true;
+    d._samplesDirty = true;
+  }
+
+  // Sampled world-space points for drawing the path preview. Cached on the draft
+  // and only recomputed when geometry changes (mutators set `_samplesDirty`; a
+  // replaced draft has no `_samples`), so idle editor RAFs don't churn the GC.
+  getAnimPathSamples() {
+    const d = this.animPathDraft;
+    if (!d || d.anchors.length < 2) return null;
+    if (d._samples && !d._samplesDirty) return d._samples;
+    const pts = [{ x: d.anchors[0].x, y: d.anchors[0].y }];
+    const segCount = d.closed ? d.anchors.length : d.anchors.length - 1;
+    for (let i = 0; i < segCount; i++) {
+      const a = d.anchors[i];
+      const b = d.anchors[(i + 1) % d.anchors.length];
+      const p1 = a.hOut || a;
+      const p2 = b.hIn || b;
+      for (let s = 1; s <= 16; s++) {
+        const pt = this.getBezierPointAndTangent(s / 16, a, p1, p2, b);
+        pts.push({ x: pt.x, y: pt.y });
+      }
+    }
+    d._samples = pts;
+    d._samplesDirty = false;
+    return pts;
+  }
+
+  // Convert the world-coord draft to stored data (offsets from center).
+  animPathDraftToData() {
+    const d = this.animPathDraft;
+    const center = this.getAnimationCenter();
+    if (!d || !center || d.anchors.length < 2) return null;
+    return {
+      closed: !!d.closed,
+      anchors: d.anchors.map(a => ({
+        x: a.x - center.x,
+        y: a.y - center.y,
+        hIn: a.hIn ? { x: a.hIn.x - center.x, y: a.hIn.y - center.y } : undefined,
+        hOut: a.hOut ? { x: a.hOut.x - center.x, y: a.hOut.y - center.y } : undefined
+      }))
+    };
+  }
+
+  // Convert stored data (offsets from center) back to a world-coord draft.
+  animPathDataToDraft(data) {
+    const center = this.getAnimationCenter();
+    if (!data || !center || !Array.isArray(data.anchors) || data.anchors.length < 2) return null;
+    return {
+      closed: !!data.closed,
+      anchors: data.anchors.map(a => ({
+        x: a.x + center.x,
+        y: a.y + center.y,
+        hIn: a.hIn ? { x: a.hIn.x + center.x, y: a.hIn.y + center.y } : { x: a.x + center.x, y: a.y + center.y },
+        hOut: a.hOut ? { x: a.hOut.x + center.x, y: a.hOut.y + center.y } : { x: a.x + center.x, y: a.y + center.y }
+      }))
+    };
   }
 
   getAnimationGhostCenter() {
@@ -3220,6 +3683,11 @@ export class Editor {
     const cosR = Math.cos(rot);
     const sinR = Math.sin(rot);
     const pegsToGhost = this.getAnimationTargetPegs(level);
+    // Rotate about the custom origin (pivot), matching PegAnimator.tick. Default
+    // pivot = center, so this reduces to the old centre-rotation when unset.
+    const pivotWorld = this.getAnimationPivotWorld();
+    const pivotX = pivotWorld ? pivotWorld.x : center.x;
+    const pivotY = pivotWorld ? pivotWorld.y : center.y;
 
     // Mirror-wrap: trace path with wall reflections (emerge from red dot)
     const traced = mirrorWrapTrace(
@@ -3231,38 +3699,25 @@ export class Editor {
       const ghost = { ...peg };
       const ghostAngle = (peg.angle || 0) + rot;
 
-      if (this.animationTarget.type === 'group') {
-        const px = peg.x - center.x;
-        const py = peg.y - center.y;
-        let rx = px * cosR - py * sinR;
-        let ry = px * sinR + py * cosR;
-        if (traced.mirrorX) rx = -rx;
-        if (traced.mirrorY) ry = -ry;
-        ghost.x = traced.x + rx;
-        ghost.y = traced.y + ry;
-      } else {
-        ghost.x = traced.x;
-        ghost.y = traced.y;
-      }
+      let localRx = (pivotX + (peg.x - pivotX) * cosR - (peg.y - pivotY) * sinR) - center.x;
+      let localRy = (pivotY + (peg.x - pivotX) * sinR + (peg.y - pivotY) * cosR) - center.y;
+      if (traced.mirrorX) localRx = -localRx;
+      if (traced.mirrorY) localRy = -localRy;
+      ghost.x = traced.x + localRx;
+      ghost.y = traced.y + localRy;
 
       ghost.angle = ghostAngle;
       if (peg.curveSlices) {
         ghost.curveSlices = peg.curveSlices.map(s => {
-          const sx = s.x - (this.animationTarget.type === 'group' ? center.x : peg.x);
-          const sy = s.y - (this.animationTarget.type === 'group' ? center.y : peg.y);
-          let rsx = sx * cosR - sy * sinR;
-          let rsy = sx * sinR + sy * cosR;
-          if (traced.mirrorX) rsx = -rsx;
-          if (traced.mirrorY) rsy = -rsy;
+          let lsx = (pivotX + (s.x - pivotX) * cosR - (s.y - pivotY) * sinR) - center.x;
+          let lsy = (pivotY + (s.x - pivotX) * sinR + (s.y - pivotY) * cosR) - center.y;
+          if (traced.mirrorX) lsx = -lsx;
+          if (traced.mirrorY) lsy = -lsy;
           let rnx = s.nx * cosR - s.ny * sinR;
           let rny = s.nx * sinR + s.ny * cosR;
           if (traced.mirrorX) rnx = -rnx;
           if (traced.mirrorY) rny = -rny;
-          return {
-            x: (this.animationTarget.type === 'group' ? traced.x : ghost.x) + rsx,
-            y: (this.animationTarget.type === 'group' ? traced.y : ghost.y) + rsy,
-            nx: rnx, ny: rny
-          };
+          return { x: traced.x + lsx, y: traced.y + lsy, nx: rnx, ny: rny };
         });
       }
       return ghost;
@@ -3290,6 +3745,8 @@ export class Editor {
       wrap: true,
       circularPath: this.animationCircularPath,
       circularFull: this.animationCircularFull,
+      pivot: this.animationPivot ? { ...this.animationPivot } : null,
+      path: this.animPathDraftToData(),
     };
 
     // Temporarily assign animation

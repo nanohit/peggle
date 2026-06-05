@@ -25,7 +25,8 @@ import {
   ensureLevelPvp,
   normalizePvpAuthoredPegs,
   normalizePvpSettings,
-  PVP_DEFAULT_AIM_LENGTH
+  PVP_DEFAULT_AIM_LENGTH,
+  PVP_DEFAULT_HITS_TO_WIN
 } from './pvp-mode.js';
 import { PvpRuntime } from './pvp-runtime.js';
 import { GambleSystem } from './gamble-system.js';
@@ -60,9 +61,12 @@ import { normalizeVisuals } from './visual-config.js';
 import {
   attachCharacterSnapshotToLevel,
   CANONICAL_EMOTION_SLOTS,
+  createCharacterRefSnapshot,
   createDefaultCharacter,
   DEFAULT_CHARACTER_ID,
   DEFAULT_PERSONALITY,
+  getCharacterPvpPortraitSource,
+  getPvpPortraitSlotsForMaxHp,
   getCharacterSlotSource,
   getCharacterSlotSources,
   loadCharacterRegistry,
@@ -73,6 +77,7 @@ import {
   normalizeLevelCharacterAssignment,
   normalizePersonality,
   normalizePersonalityPatch,
+  PVP_PORTRAIT_SLOTS,
   readCharacterImageFile,
   resolveCharacterForLevel,
   saveCharacterRegistry
@@ -98,6 +103,10 @@ import { decodeBakedLevelJsonFromText, extractBakedLevelHash } from './baked-lev
 const ASPECT_RATIO = 3 / 4.5;
 const MAX_WIDTH = 400;
 const PVP_DUEL_LEVELS_STORAGE_KEY = 'pvp:duel:levels';
+const PVP_PEG_INTRO_BLANK_MS = 58;
+const PVP_PEG_INTRO_STAGGER_MS = 12;
+const PVP_PEG_INTRO_MAX_SPREAD_MS = 520;
+const PVP_PEG_INTRO_DURATION_MS = 320;
 
 const CHARACTER_SLOT_LABELS = {
   idle: 'Composed',
@@ -128,6 +137,15 @@ const CHARACTER_EVENT_META = {
 };
 
 const CHARACTER_EVENT_UI_HIDDEN = new Set(['dialogue_impulse']);
+
+const PVP_PORTRAIT_SLOT_LABELS = {
+  idle: 'Start / Idle',
+  stage1: 'Damage Stage 1',
+  stage2: 'Damage Stage 2',
+  stage3: 'Damage Stage 3',
+  stage4: 'Damage Stage 4',
+  final: 'Last Hit'
+};
 
 const CHARACTER_SCALAR_CONTROLS = [
   { path: ['refractoryMs'], label: 'Cooldown window', min: 0, max: 3000, step: 50, suffix: 'ms' },
@@ -314,6 +332,7 @@ class PeggleApp {
     this._dialoguePreviewState = null;
     this.characterRegistry = loadCharacterRegistry();
     this._selectedCharacterEditorId = this.characterRegistry.selectedId || DEFAULT_CHARACTER_ID;
+    this._pvpCharacterEditorScope = null;
     this._expressionVariantIndex = new Map();
     this.dialogueLanguage = getStoredLanguage();
     this.dialogueController = new DialogueController({ visualLayout: this.visualLayout, persistSeen: false });
@@ -368,6 +387,7 @@ class PeggleApp {
           <label class="admin-toggle"><input type="checkbox" id="yoyoThreadToggle"> Yo-yo Thread</label>
           <label class="admin-toggle"><input type="checkbox" id="yoyoDebugDragToggle"> Yo-yo Debug Drag</label>
           <button id="characterBtn" class="admin-btn">Characters</button>
+          <button id="enemyCharacterBtn" class="admin-btn">Enemy Characters</button>
           <button id="dialogueBtn" class="admin-btn">Dialogues</button>
           <button id="addToTrainingBtn" class="admin-btn">Add to Training</button>
           <button id="themeDefaultBtn" class="admin-btn">Default Theme</button>
@@ -998,7 +1018,13 @@ class PeggleApp {
     });
 
     document.getElementById('characterBtn')?.addEventListener('click', () => {
-      this.showCharacterEditor();
+      const level = this.levelManager.getCurrentLevel();
+      if (normalizePvpSettings(level?.pvp).enabled) this.showPvpCharacterEditor('player');
+      else this.showCharacterEditor();
+    });
+
+    document.getElementById('enemyCharacterBtn')?.addEventListener('click', () => {
+      this.showPvpCharacterEditor('enemy');
     });
 
     // Visual layout: config change callback — deep clone so the level owns its
@@ -1115,6 +1141,9 @@ class PeggleApp {
     // Bumper panel
     this.setupBumperPanel();
 
+    // Bomb peg panel
+    this.setupBombPanel();
+
     // Portal panel
     this.setupPortalPanel();
 
@@ -1193,6 +1222,16 @@ class PeggleApp {
       if (this.game) {
         this.game.setShowFullTrajectory(e.target.checked);
       }
+    });
+
+    // Ignite FX preview — hold the portrait flame at a fixed stage to inspect it
+    // live during play (relative intensity 0..1; 0 = off).
+    const ignitePreview = document.getElementById('ignitePreviewSlider');
+    const igniteValue = document.getElementById('ignitePreviewValue');
+    ignitePreview?.addEventListener('input', () => {
+      const stage = parseInt(ignitePreview.value, 10) / 100;
+      if (igniteValue) igniteValue.textContent = stage > 0 ? `${Math.round(stage * 100)}%` : 'Off';
+      this.visualLayout?.setFlamePreview(stage > 0 ? stage : null);
     });
   }
 
@@ -1378,6 +1417,53 @@ class PeggleApp {
       syncCircleButtons();
     });
 
+    // ── Rotation origin (pivot) ──
+    const originBtn = document.getElementById('animOriginBtn');
+    const originResetBtn = document.getElementById('animOriginResetBtn');
+    originBtn.addEventListener('click', () => {
+      if (!this.editor || !this.editor.animationMode) return;
+      this.editor.animEditMode = this.editor.animEditMode === 'origin' ? 'none' : 'origin';
+      this._syncAnimationEditModes();
+    });
+    originResetBtn.addEventListener('click', () => {
+      if (!this.editor || !this.editor.animationMode) return;
+      this.editor.clearAnimationPivot();
+      if (this.editor.animEditMode === 'origin') this.editor.animEditMode = 'none';
+      this._syncAnimationEditModes();
+    });
+
+    // ── Freeform trajectory path ──
+    const pathBtn = document.getElementById('animPathBtn');
+    const pathCloseBtn = document.getElementById('animPathCloseBtn');
+    const pathCircleBtn = document.getElementById('animPathCircleBtn');
+    const pathClearBtn = document.getElementById('animPathClearBtn');
+    pathBtn.addEventListener('click', () => {
+      if (!this.editor || !this.editor.animationMode) return;
+      const on = this.editor.animEditMode === 'path';
+      this.editor.animEditMode = on ? 'none' : 'path';
+      if (this.editor.animEditMode === 'path') {
+        // A freeform path overrides the straight diameter-circle.
+        this.editor.animationCircularPath = false;
+        syncCircleButtons();
+      }
+      this._syncAnimationEditModes();
+    });
+    pathCloseBtn.addEventListener('click', () => {
+      if (!this.editor || !this.editor.animationMode) return;
+      this.editor.toggleAnimPathClosed();
+      this._syncAnimationEditModes();
+    });
+    pathCircleBtn.addEventListener('click', () => {
+      if (!this.editor || !this.editor.animationMode) return;
+      this.editor.snapAnimPathCircle();
+      this._syncAnimationEditModes();
+    });
+    pathClearBtn.addEventListener('click', () => {
+      if (!this.editor || !this.editor.animationMode) return;
+      this.editor.clearAnimPath();
+      this._syncAnimationEditModes();
+    });
+
     // Hit trigger checkbox
     const hitTriggerToggle = document.getElementById('animHitTriggerToggle');
     const hitModeRow = document.getElementById('animHitModeRow');
@@ -1467,11 +1553,13 @@ class PeggleApp {
       const hitSteps = this.editor.animationHitSteps || 1;
       const circularPath = !!this.editor.animationCircularPath;
       const circularFull = !!this.editor.animationCircularFull;
+      const pivot = this.editor.animationPivot ? { ...this.editor.animationPivot } : null;
+      const path = this.editor.animPathDraftToData();
 
-      if (dx === 0 && dy === 0 && rot === 0) {
+      if (dx === 0 && dy === 0 && rot === 0 && !path) {
         this.editor.clearTargetAnimation();
       } else {
-        this.editor.setTargetAnimation({ dx, dy, rotation: rot, duration: dur, easing, inverse, cycle, wrap: true, hitTrigger, hitMode, hitSteps, circularPath, circularFull });
+        this.editor.setTargetAnimation({ dx, dy, rotation: rot, duration: dur, easing, inverse, cycle, wrap: true, hitTrigger, hitMode, hitSteps, circularPath, circularFull, pivot, path });
       }
       this.closeAnimationPanel();
     });
@@ -1568,6 +1656,22 @@ class PeggleApp {
       }
       this.editor.levelManager.save();
     });
+
+    // Pegs bounce off this bumper (destruction mode only). On by default; when off the
+    // bumper acts as a plain static obstacle for pegs (the ball still bounces).
+    const pegReactToggle = document.getElementById('bumperPegReactToggle');
+    pegReactToggle.addEventListener('change', () => {
+      if (!this.editor) return;
+      const level = this.editor.levelManager.getCurrentLevel();
+      if (!level) return;
+      for (const pegId of this.editor.selectedPegIds) {
+        const peg = level.pegs.find(p => p.id === pegId);
+        if (peg && peg.type === 'bumper') {
+          peg.bumperPegReact = pegReactToggle.checked;
+        }
+      }
+      this.editor.levelManager.save();
+    });
   }
 
   setupPortalPanel() {
@@ -1620,11 +1724,52 @@ class PeggleApp {
     document.getElementById('bumperScaleInput').value = props.scale.toFixed(1);
     document.getElementById('bumperDisappearToggle').checked = !!props.disappear;
     document.getElementById('bumperOrangeToggle').checked = !!props.orange;
+    document.getElementById('bumperPegReactToggle').checked = props.pegReact !== false;
     document.getElementById('bumperPanel').classList.add('visible');
   }
 
   closeBumperPanel() {
     document.getElementById('bumperPanel').classList.remove('visible');
+  }
+
+  setupBombPanel() {
+    const slider = document.getElementById('bombPowerSlider');
+    const input = document.getElementById('bombPowerInput');
+    const physicsOnlyToggle = document.getElementById('bombPhysicsOnlyToggle');
+
+    document.getElementById('closeBombPanel').addEventListener('click', () => {
+      this.closeBombPanel();
+    });
+
+    slider.addEventListener('input', () => {
+      if (!this.editor) return;
+      const v = parseInt(slider.value) / 10;
+      input.value = v.toFixed(1);
+      this.editor.setSelectedBombPower(v);
+    });
+    input.addEventListener('input', () => {
+      if (!this.editor) return;
+      const v = parseFloat(input.value) || 1.0;
+      slider.value = Math.max(3, Math.min(40, Math.round(v * 10)));
+      this.editor.setSelectedBombPower(v);
+    });
+    physicsOnlyToggle.addEventListener('change', () => {
+      if (!this.editor) return;
+      this.editor.setSelectedBombPhysicsOnly(physicsOnlyToggle.checked);
+    });
+  }
+
+  showBombPanel() {
+    const props = this.editor ? this.editor.getSelectedBombProperties() : null;
+    if (!props) return;
+    document.getElementById('bombPowerSlider').value = Math.round(props.power * 10);
+    document.getElementById('bombPowerInput').value = props.power.toFixed(1);
+    document.getElementById('bombPhysicsOnlyToggle').checked = props.physicsOnly !== false;
+    document.getElementById('bombPanel').classList.add('visible');
+  }
+
+  closeBombPanel() {
+    document.getElementById('bombPanel').classList.remove('visible');
   }
 
   showPortalPanel() {
@@ -2211,8 +2356,10 @@ class PeggleApp {
     const cpuToggle = document.getElementById('pvpCpuToggle');
     const timerSlider = document.getElementById('pvpAimTimerSlider');
     const timerInput = document.getElementById('pvpAimTimerInput');
+    const hitsSlider = document.getElementById('pvpHitsToWinSlider');
+    const hitsInput = document.getElementById('pvpHitsToWinInput');
     const difficultySelect = document.getElementById('pvpDifficultySelect');
-    if (!panel || !toggle || !controls || !symmetryToggle || !cpuToggle || !timerSlider || !timerInput || !difficultySelect) {
+    if (!panel || !toggle || !controls || !symmetryToggle || !cpuToggle || !timerSlider || !timerInput || !hitsSlider || !hitsInput || !difficultySelect) {
       return;
     }
 
@@ -2226,6 +2373,13 @@ class PeggleApp {
       timerSlider.value = value;
       timerInput.value = formatSeconds(value);
       this.updateLevelPvpSettings({ aimTimerMs: value });
+    };
+
+    const applyHits = (rawValue) => {
+      const value = Math.max(2, Math.min(6, Math.round(Number(rawValue) || PVP_DEFAULT_HITS_TO_WIN)));
+      hitsSlider.value = value;
+      hitsInput.value = value;
+      this.updateLevelPvpSettings({ hitsToWin: value });
     };
 
     toggle.addEventListener('change', () => {
@@ -2252,6 +2406,12 @@ class PeggleApp {
     });
     timerSlider.addEventListener('change', () => applyTimer(timerSlider.value));
     timerInput.addEventListener('change', () => applyTimer(timerInput.value, true));
+
+    hitsSlider.addEventListener('input', () => {
+      hitsInput.value = String(Math.round(Number(hitsSlider.value) || PVP_DEFAULT_HITS_TO_WIN));
+    });
+    hitsSlider.addEventListener('change', () => applyHits(hitsSlider.value));
+    hitsInput.addEventListener('change', () => applyHits(hitsInput.value));
 
     difficultySelect.addEventListener('change', () => {
       this.updateLevelPvpSettings({ cpuDifficulty: difficultySelect.value });
@@ -2801,6 +2961,9 @@ class PeggleApp {
     if (options.refreshUi !== false) {
       this.updateLevelSettings();
     }
+    if (this._pvpCharacterEditorScope && document.getElementById('characterOverlay')?.classList.contains('visible')) {
+      this._renderCharacterEditor();
+    }
     if (this.editor && this.editor.onPegCountChange) {
       this.editor.onPegCountChange(level.pegs.length);
     }
@@ -2935,7 +3098,7 @@ class PeggleApp {
   }
 
   _isCircleOnlyType(type) {
-    return type === 'bumper' || this._isPortalType(type) || isBilliardPegType(type);
+    return type === 'bumper' || type === 'bomb' || this._isPortalType(type) || isBilliardPegType(type);
   }
 
   _setActiveShapeButton(shape) {
@@ -2958,6 +3121,12 @@ class PeggleApp {
       this.showPortalPanel();
     } else {
       this.closePortalPanel();
+    }
+
+    if (count > 0 && this.editor.isSelectionAllBombs()) {
+      this.showBombPanel();
+    } else {
+      this.closeBombPanel();
     }
 
     if (count > 0 && (this.editor.isSelectionAllMultiballs() || this.editor.isSelectionAllGamblePegs())) {
@@ -2985,7 +3154,7 @@ class PeggleApp {
 
     const typeColors = {
       orange: '#ff6b35', billiardRed: '#e84d4d', billiardYellow: '#ffd447', blue: '#4ecdc4', green: '#95d5b2',
-      purple: '#c77dff', multi: '#ff4d9d', obstacle: '#6b7280',
+      purple: '#c77dff', multi: '#ff4d9d', obstacle: '#6b7280', bomb: '#ff1f2d',
       gamble: '#8cff00', bumper: '#e0e0e0', portalBlue: '#4ecdc4', portalOrange: '#ff8b3d'
     };
 
@@ -3054,6 +3223,33 @@ class PeggleApp {
     this._syncAnimationCycleButton();
     this._syncAnimationCircleButton();
     this._syncAnimationHitTrigger();
+    this._syncAnimationEditModes();
+  }
+
+  _syncAnimationEditModes() {
+    if (!this.editor) return;
+    const mode = this.editor.animEditMode || 'none';
+    const originBtn = document.getElementById('animOriginBtn');
+    if (originBtn) {
+      const on = mode === 'origin';
+      originBtn.classList.toggle('active', on);
+      originBtn.textContent = on ? 'Done' : 'Set Origin';
+    }
+    const pathOn = mode === 'path';
+    const pathBtn = document.getElementById('animPathBtn');
+    if (pathBtn) {
+      pathBtn.classList.toggle('active', pathOn);
+      pathBtn.textContent = pathOn ? 'Path: ON' : 'Path: OFF';
+    }
+    const pathRow = document.getElementById('animPathRow');
+    if (pathRow) pathRow.style.display = pathOn ? '' : 'none';
+    const pathHint = document.getElementById('animPathHint');
+    if (pathHint) pathHint.style.display = pathOn ? '' : 'none';
+    const pathCloseBtn = document.getElementById('animPathCloseBtn');
+    if (pathCloseBtn) {
+      const closed = !!(this.editor.animPathDraft && this.editor.animPathDraft.closed);
+      pathCloseBtn.classList.toggle('active', closed);
+    }
   }
 
   _syncAnimationInverseButton() {
@@ -3345,6 +3541,8 @@ class PeggleApp {
 
     this.mode = 'play';
     this.game = new Game(this.canvas);
+    // Portrait ignite flame builds up live as the in-progress shot clears pegs.
+    this.game.onShotHeat = (h) => this.visualLayout.setFlameHeat(h);
     this.visualLayout.setPvpOpponentTarget?.(null);
     this.visualLayout.setPvpMode?.(false);
     this.game.showPerfOverlay = true; // editor play mode shows debug info
@@ -3456,15 +3654,27 @@ class PeggleApp {
     this._applyLevelVisuals();
     this.resizeCanvas();
 
+    const playerCharacter = this._resolveLevelCharacter(level);
+    const enemyCharacter = this._resolvePvpEnemyCharacter(level);
     this.game = new PvpRuntime(this.canvas, {
       settings: pvpSettings,
       getTargetCircle: () => this.visualLayout.getCanvasSlotCircle?.('characterCircle', this.canvas),
       onVisualState: (state) => {
         if (!state) return;
+        const maxHp = state.maxHp || 3;
+        const playerSrc = getCharacterPvpPortraitSource(playerCharacter, { hp: state.playerHp, maxHp });
+        const enemySrc = getCharacterPvpPortraitSource(enemyCharacter, { hp: state.cpuHp, maxHp });
+        if (playerSrc) {
+          this.visualLayout.setCharacterPortraitSource(playerSrc, {
+            fadeMs: 160,
+            slotName: `pvp:${state.playerHp}`
+          });
+        }
         this.visualLayout.setPvpOpponentTarget?.({
           visible: true,
           hp: state.cpuHp,
-          maxHp: state.maxHp || 3
+          maxHp,
+          portraitSrc: enemySrc
         });
         this.visualLayout.setPvpAimTimer?.(
           state.timerVisible
@@ -3521,6 +3731,15 @@ class PeggleApp {
     this.game.renderer.setShockwave(visuals.shockwave);
     this.game.loadLevel(level);
     this.game.setAimLength(pvpSettings.aimLength ?? PVP_DEFAULT_AIM_LENGTH);
+    const introMs = this.game.queuePegEntryAnimations?.({
+      delayMs: PVP_PEG_INTRO_BLANK_MS,
+      staggerMs: PVP_PEG_INTRO_STAGGER_MS,
+      maxSpreadMs: PVP_PEG_INTRO_MAX_SPREAD_MS,
+      durationMs: PVP_PEG_INTRO_DURATION_MS,
+      order: 'center-out-y',
+      originY: this.canvas.height / 2
+    }) || 0;
+    this.game.startIntroCountdown?.(introMs);
     this.game.start();
 
     this._unsubBallCounter = this.game.subscribeUiState((snapshot) => {
@@ -3753,16 +3972,25 @@ class PeggleApp {
     const pvpCpuToggle = document.getElementById('pvpCpuToggle');
     const pvpTimerSlider = document.getElementById('pvpAimTimerSlider');
     const pvpTimerInput = document.getElementById('pvpAimTimerInput');
+    const pvpHitsSlider = document.getElementById('pvpHitsToWinSlider');
+    const pvpHitsInput = document.getElementById('pvpHitsToWinInput');
     const pvpDifficultySelect = document.getElementById('pvpDifficultySelect');
     if (pvpToggle) pvpToggle.checked = !!pvp.enabled;
     if (pvpSymmetryToggle) pvpSymmetryToggle.checked = !!pvp.symmetryEnabled;
     if (pvpCpuToggle) pvpCpuToggle.checked = !!pvp.cpuEnabled;
     if (pvpTimerSlider) pvpTimerSlider.value = Math.round(pvp.aimTimerMs);
     if (pvpTimerInput) pvpTimerInput.value = (Math.round(pvp.aimTimerMs) / 1000).toFixed(2).replace(/\.00$/, '');
+    if (pvpHitsSlider) pvpHitsSlider.value = Math.round(pvp.hitsToWin || PVP_DEFAULT_HITS_TO_WIN);
+    if (pvpHitsInput) pvpHitsInput.value = Math.round(pvp.hitsToWin || PVP_DEFAULT_HITS_TO_WIN);
     if (pvpDifficultySelect) pvpDifficultySelect.value = pvp.cpuDifficulty;
     if (aimSlider) aimSlider.value = aimVal;
     if (aimInput) aimInput.value = aimVal;
     this._setPvpSettingsVisible(!!pvp.enabled);
+    document.getElementById('enemyCharacterBtn')?.classList.toggle('hidden', !pvp.enabled);
+    if (this.mode === 'editor') {
+      this.visualLayout.setPvpMode?.(!!pvp.enabled);
+      this._showAssignedCharacterIdlePortrait(level);
+    }
 
     const billiard = ensureLevelBilliard(level);
     const billiardToggle = document.getElementById('billiardModeToggle');
@@ -3928,7 +4156,23 @@ class PeggleApp {
 
   _showAssignedCharacterIdlePortrait(level = this.levelManager.getCurrentLevel()) {
     if (!level || !this.visualLayout) return;
+    const pvp = normalizePvpSettings(level.pvp);
     const character = this._resolveLevelCharacter(level);
+    if (pvp.enabled) {
+      const enemy = this._resolvePvpEnemyCharacter(level);
+      const maxHp = pvp.hitsToWin || PVP_DEFAULT_HITS_TO_WIN;
+      const playerSrc = getCharacterPvpPortraitSource(character, { hp: maxHp, maxHp });
+      const enemySrc = getCharacterPvpPortraitSource(enemy, { hp: maxHp, maxHp });
+      this.visualLayout.setCharacterPortraitSource(playerSrc, { fadeMs: 0, slotName: 'pvp:idle' });
+      this.visualLayout.setPvpOpponentTarget?.({
+        visible: true,
+        hp: maxHp,
+        maxHp,
+        portraitSrc: enemySrc
+      });
+      return;
+    }
+    this.visualLayout.setPvpOpponentTarget?.(null);
     const src = getCharacterSlotSource(character, 'idle');
     this.visualLayout.setCharacterPortraitSource(src, { fadeMs: 0, slotName: 'idle' });
   }
@@ -3936,6 +4180,27 @@ class PeggleApp {
   _resolveLevelCharacter(level = this.levelManager.getCurrentLevel()) {
     this.characterRegistry = normalizeCharacterRegistry(this.characterRegistry);
     return resolveCharacterForLevel(level, this.characterRegistry);
+  }
+
+  _getPvpCharacterAssignment(level = this.levelManager.getCurrentLevel(), scope = 'player') {
+    if (scope === 'enemy') {
+      const pvp = normalizePvpSettings(level?.pvp);
+      return normalizeLevelCharacterAssignment(pvp.enemyCharacter);
+    }
+    return normalizeLevelCharacterAssignment(level?.character);
+  }
+
+  _resolvePvpEnemyCharacter(level = this.levelManager.getCurrentLevel()) {
+    this.characterRegistry = normalizeCharacterRegistry(this.characterRegistry);
+    const registry = this.characterRegistry;
+    const assignment = this._getPvpCharacterAssignment(level, 'enemy');
+    const snapshot = assignment.snapshot ? normalizeCharacter(assignment.snapshot) : null;
+    return normalizeCharacter(
+      registry.characters[assignment.characterId]
+      || snapshot
+      || registry.characters[DEFAULT_CHARACTER_ID]
+      || createDefaultCharacter()
+    );
   }
 
   _setPortraitControllerContextForCurrentLevel(options = {}) {
@@ -4109,10 +4374,41 @@ class PeggleApp {
     return level.character;
   }
 
+  _updateCurrentLevelPvpCharacter(scope, characterId, options = {}) {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level) return null;
+    const normalizedScope = scope === 'enemy' ? 'enemy' : 'player';
+    const registry = normalizeCharacterRegistry(this.characterRegistry);
+    const id = makeCharacterId(characterId, DEFAULT_CHARACTER_ID);
+    const character = registry.characters[id] || registry.characters[DEFAULT_CHARACTER_ID] || createDefaultCharacter();
+
+    if (normalizedScope === 'player') {
+      return this._updateCurrentLevelCharacter((assignment) => {
+        assignment.characterId = id;
+      }, options);
+    }
+
+    const pvp = normalizePvpSettings(level.pvp);
+    pvp.enemyCharacter = normalizeLevelCharacterAssignment({
+      characterId: id,
+      snapshot: createCharacterRefSnapshot(character)
+    });
+    level.pvp = normalizePvpSettings(pvp);
+    if (level.metadata) level.metadata.modified = new Date().toISOString();
+    this.levelManager.save();
+    if (this.mode === 'editor') this._showAssignedCharacterIdlePortrait(level);
+    if (options.rerender !== false && document.getElementById('characterOverlay')?.classList.contains('visible')) {
+      this._renderCharacterEditor();
+    }
+    return level.pvp.enemyCharacter;
+  }
+
   _refreshCurrentLevelForCharacterChange(characterId) {
     const level = this.levelManager.getCurrentLevel();
     const id = makeCharacterId(characterId);
-    if (normalizeLevelCharacterAssignment(level?.character).characterId !== id) return;
+    const playerMatches = normalizeLevelCharacterAssignment(level?.character).characterId === id;
+    const enemyMatches = normalizeLevelCharacterAssignment(normalizePvpSettings(level?.pvp).enemyCharacter).characterId === id;
+    if (!playerMatches && !enemyMatches) return;
     if (this.mode === 'play') {
       this._setPortraitControllerContextForCurrentLevel({ live: true });
     } else {
@@ -4129,18 +4425,31 @@ class PeggleApp {
     let touched = false;
     for (const level of levels) {
       const assignment = normalizeLevelCharacterAssignment(level?.character);
-      if (assignment.characterId !== oldId) continue;
-      assignment.characterId = replacementId;
-      level.character = normalizeLevelCharacterAssignment(assignment);
-      attachCharacterSnapshotToLevel(level, this.characterRegistry);
-      if (level.metadata) level.metadata.modified = new Date().toISOString();
-      touched = true;
+      if (assignment.characterId === oldId) {
+        assignment.characterId = replacementId;
+        level.character = normalizeLevelCharacterAssignment(assignment);
+        attachCharacterSnapshotToLevel(level, this.characterRegistry);
+        if (level.metadata) level.metadata.modified = new Date().toISOString();
+        touched = true;
+      }
+      const pvp = normalizePvpSettings(level?.pvp);
+      const enemy = normalizeLevelCharacterAssignment(pvp.enemyCharacter);
+      if (enemy.characterId === oldId) {
+        enemy.characterId = replacementId;
+        const character = this.characterRegistry.characters[replacementId] || this.characterRegistry.characters[DEFAULT_CHARACTER_ID];
+        if (character) enemy.snapshot = createCharacterRefSnapshot(character);
+        pvp.enemyCharacter = normalizeLevelCharacterAssignment(enemy);
+        level.pvp = normalizePvpSettings(pvp);
+        if (level.metadata) level.metadata.modified = new Date().toISOString();
+        touched = true;
+      }
     }
     if (touched) this.levelManager.save();
     return touched;
   }
 
   showCharacterEditor() {
+    this._pvpCharacterEditorScope = null;
     this.closeLevelList();
     this.closeCampaignList();
     this.closeCampaignEditor();
@@ -4167,6 +4476,31 @@ class PeggleApp {
 
   closeCharacterEditor() {
     document.getElementById('characterOverlay')?.classList.remove('visible');
+    this._pvpCharacterEditorScope = null;
+  }
+
+  showPvpCharacterEditor(scope = 'player') {
+    const level = this.levelManager.getCurrentLevel();
+    if (!normalizePvpSettings(level?.pvp).enabled) {
+      this.showCharacterEditor();
+      return;
+    }
+    this._pvpCharacterEditorScope = scope === 'enemy' ? 'enemy' : 'player';
+    this.closeLevelList();
+    this.closeCampaignList();
+    this.closeCampaignEditor();
+    this.closePvpDuelLevels();
+    this.closePhysicsSettings();
+    this.closeDialogueEditor();
+    this.characterRegistry = loadCharacterRegistry();
+    const assignment = this._getPvpCharacterAssignment(level, this._pvpCharacterEditorScope);
+    const selectedId = makeCharacterId(
+      assignment.characterId || this._selectedCharacterEditorId || this.characterRegistry.selectedId || DEFAULT_CHARACTER_ID
+    );
+    this._selectedCharacterEditorId = this.characterRegistry.characters[selectedId] ? selectedId : this.characterRegistry.selectedId;
+    this._renderCharacterEditor();
+    document.getElementById('characterOverlay')?.classList.add('visible');
+    this._positionEditorSideSheets();
   }
 
   _addCharacter() {
@@ -4378,6 +4712,109 @@ class PeggleApp {
         }).join('')}
       </div>
     `;
+  }
+
+  _pvpPortraitSlotLabel(slot) {
+    return PVP_PORTRAIT_SLOT_LABELS[slot] || formatCharacterLabel(slot);
+  }
+
+  _renderPvpPortraitGrid(character, maxHp = PVP_DEFAULT_HITS_TO_WIN) {
+    const normalized = normalizeCharacter(character);
+    const slotNames = getPvpPortraitSlotsForMaxHp(maxHp);
+    return `
+      <div class="character-expression-grid character-expression-grid--pvp">
+        ${slotNames.map(slot => {
+          const explicitSrc = normalized.pvpPortraits?.[slot] || '';
+          const previewSrc = explicitSrc || getCharacterPvpPortraitSource(normalized, { slot });
+          const stateLabel = explicitSrc ? 'Ready' : (previewSrc ? 'Fallback' : 'Empty');
+          return `
+            <div class="character-expression-card" data-pvp-portrait-slot="${this._esc(slot)}">
+              <div class="character-expression-stage">
+                <div class="character-expression-thumb"${previewSrc ? ` style="background-image:url('${this._esc(previewSrc)}')"` : ''}></div>
+              </div>
+              <div class="character-expression-title">${this._esc(this._pvpPortraitSlotLabel(slot))}</div>
+              <div class="character-expression-key">${this._esc(slot)}</div>
+              <div class="character-expression-state">${this._esc(stateLabel)}</div>
+              <div class="character-expression-actions">
+                <button class="dialogue-chip-btn" type="button" data-pvp-portrait-upload="${this._esc(slot)}">${explicitSrc ? 'Replace' : 'Upload'}</button>
+                <button class="dialogue-icon-btn dialogue-icon-btn--danger" type="button" title="Clear portrait" data-pvp-portrait-clear="${this._esc(slot)}"${explicitSrc ? '' : ' disabled'}>×</button>
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `;
+  }
+
+  _renderPvpCharacterEditor(scope = 'player') {
+    const body = document.getElementById('characterEditorBody');
+    if (!body) return;
+    const overlayTitle = document.querySelector('#characterOverlay .level-list-title');
+    if (overlayTitle) overlayTitle.textContent = scope === 'enemy' ? 'Enemy Characters' : 'Player Characters';
+
+    const level = this.levelManager.getCurrentLevel();
+    const pvp = normalizePvpSettings(level?.pvp);
+    this.characterRegistry = normalizeCharacterRegistry(this.characterRegistry);
+    const registry = this.characterRegistry;
+    const characterIds = Object.keys(registry.characters).sort();
+    const selectedId = registry.characters[this._selectedCharacterEditorId]
+      ? this._selectedCharacterEditorId
+      : (registry.selectedId || DEFAULT_CHARACTER_ID);
+    this._selectedCharacterEditorId = selectedId;
+    const selected = normalizeCharacter(registry.characters[selectedId] || createDefaultCharacter());
+    const assignment = this._getPvpCharacterAssignment(level, scope);
+    const assigned = normalizeCharacter(
+      registry.characters[assignment.characterId]
+      || assignment.snapshot
+      || registry.characters[DEFAULT_CHARACTER_ID]
+      || createDefaultCharacter()
+    );
+    const editorOptions = characterIds.map(id => `
+      <option value="${this._esc(id)}"${id === selectedId ? ' selected' : ''}>${this._esc(registry.characters[id]?.name || id)} (${this._esc(id)})</option>
+    `).join('');
+    const assignLabel = scope === 'enemy' ? 'Assign as Enemy' : 'Assign as Player';
+
+    body.innerHTML = `
+      <div class="dialogue-editor-toolbar">
+        <button class="dialogue-chip-btn" type="button" data-character-new>+ Character</button>
+        <button class="dialogue-preview-btn" type="button" data-character-pull-server title="Replace local characters with the version stored on the server">Pull from Server</button>
+        <button class="dialogue-chip-btn" type="button" data-character-push-server title="Upload local characters with images to the server">Push to Server</button>
+        <div class="dialogue-toolbar-spacer"></div>
+        <button class="dialogue-chip-btn" type="button" data-pvp-character-assign>${this._esc(assignLabel)}</button>
+      </div>
+      <div class="dialogue-card-block character-panel-block character-picker-block">
+        <div class="dialogue-block-title">Character</div>
+        <label class="dialogue-field">
+          <span class="dialogue-field-label">Editing character</span>
+          <select id="characterEditorSelect" class="dialogue-field-select">${editorOptions}</select>
+        </label>
+        <div class="character-override-summary">Assigned: ${this._esc(assigned.name)} (${this._esc(assigned.id)})</div>
+      </div>
+
+      <div class="dialogue-card-block character-panel-block">
+        <div class="dialogue-block-title">PvP Portraits (${pvp.hitsToWin} HP)</div>
+        ${this._renderPvpPortraitGrid(selected, pvp.hitsToWin)}
+      </div>
+
+      <div class="dialogue-card-block character-panel-block">
+        <div class="dialogue-block-title">Character Details</div>
+        <div class="dialogue-inline-grid">
+          <label class="dialogue-field">
+            <span class="dialogue-field-label">ID</span>
+            <input id="characterIdInput" class="dialogue-field-input" type="text" value="${this._esc(selected.id)}">
+          </label>
+          <label class="dialogue-field">
+            <span class="dialogue-field-label">Name</span>
+            <input id="characterNameInput" class="dialogue-field-input" type="text" value="${this._esc(selected.name)}">
+          </label>
+        </div>
+        <div class="dialogue-editor-toolbar">
+          <button class="dialogue-chip-btn" type="button" data-character-save-details>Save Details</button>
+        </div>
+      </div>
+    `;
+
+    this._bindPvpCharacterEditor(body, selected, scope);
   }
 
   _expressionVariantKey(characterId, slot) {
@@ -4616,6 +5053,12 @@ class PeggleApp {
   _renderCharacterEditor() {
     const body = document.getElementById('characterEditorBody');
     if (!body) return;
+    if (this._pvpCharacterEditorScope) {
+      this._renderPvpCharacterEditor(this._pvpCharacterEditorScope);
+      return;
+    }
+    const overlayTitle = document.querySelector('#characterOverlay .level-list-title');
+    if (overlayTitle) overlayTitle.textContent = 'Characters';
     const level = this.levelManager.getCurrentLevel();
     this.characterRegistry = normalizeCharacterRegistry(this.characterRegistry);
     const registry = this.characterRegistry;
@@ -4691,6 +5134,37 @@ class PeggleApp {
     `;
 
     this._bindFriendlyCharacterEditor(body, selected);
+  }
+
+  _bindPvpCharacterEditor(body, selected, scope = 'player') {
+    body.querySelector('[data-character-new]')?.addEventListener('click', () => this._addCharacter());
+    body.querySelector('[data-character-push-server]')?.addEventListener('click', (event) => {
+      this._pushCharacterRegistryToServer(event.currentTarget);
+    });
+    body.querySelector('[data-character-pull-server]')?.addEventListener('click', (event) => {
+      this._pullCharacterRegistryFromServer(event.currentTarget);
+    });
+    body.querySelector('[data-pvp-character-assign]')?.addEventListener('click', () => {
+      this._updateCurrentLevelPvpCharacter(scope, selected.id);
+    });
+    body.querySelector('#characterEditorSelect')?.addEventListener('change', (event) => {
+      this._selectedCharacterEditorId = event.target.value;
+      this.characterRegistry.selectedId = this._selectedCharacterEditorId;
+      this._saveCharacterRegistry(this.characterRegistry);
+      this._renderCharacterEditor();
+    });
+    body.querySelector('[data-character-save-details]')?.addEventListener('click', () => {
+      const rawId = body.querySelector('#characterIdInput')?.value || selected.id;
+      const nextId = makeCharacterId(rawId, selected.id);
+      const name = (body.querySelector('#characterNameInput')?.value || selected.name || nextId).trim();
+      this._saveCharacterEdits(selected.id, { id: nextId, name });
+    });
+    body.querySelectorAll('[data-pvp-portrait-upload]').forEach((button) => {
+      button.addEventListener('click', () => this._uploadPvpPortraitSlot(selected.id, button.dataset.pvpPortraitUpload));
+    });
+    body.querySelectorAll('[data-pvp-portrait-clear]').forEach((button) => {
+      button.addEventListener('click', () => this._removePvpPortraitSlot(selected.id, button.dataset.pvpPortraitClear));
+    });
   }
 
   _bindFriendlyCharacterEditor(body, selected) {
@@ -5022,6 +5496,39 @@ class PeggleApp {
       });
     };
     input.click();
+  }
+
+  _uploadPvpPortraitSlot(characterId, slotName) {
+    if (!PVP_PORTRAIT_SLOTS.includes(slotName)) return;
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/webp,image/*';
+    input.onchange = async (event) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      const dataUrl = await readCharacterImageFile(file);
+      if (!dataUrl) {
+        alert('Could not read that image.');
+        return;
+      }
+      this._mutateCharacter(characterId, (character) => {
+        character.pvpPortraits = {
+          ...(character.pvpPortraits || {}),
+          [slotName]: dataUrl
+        };
+      });
+    };
+    input.click();
+  }
+
+  _removePvpPortraitSlot(characterId, slotName) {
+    if (!PVP_PORTRAIT_SLOTS.includes(slotName)) return;
+    this._mutateCharacter(characterId, (character) => {
+      character.pvpPortraits = {
+        ...(character.pvpPortraits || {}),
+        [slotName]: null
+      };
+    });
   }
 
   _removeCharacterSlotVariant(characterId, slotName) {

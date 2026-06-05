@@ -1867,31 +1867,54 @@ export class Game {
     return firstContact;
   }
 
-  detonateBombShockwave(sourceBall, sourcePeg) {
-    const shockwave = buildBombShockwave(this.pegs, sourceBall, sourcePeg);
+  detonateBombShockwave(sourceBall, sourcePeg, options = null) {
+    const radiusMultiplier = Number.isFinite(options?.radiusMultiplier) ? options.radiusMultiplier : null;
+    const impulseScale = Number.isFinite(options?.impulseScale) ? Math.max(0, options.impulseScale) : 1;
+    const affectBalls = options?.affectBalls === true;
+    // When false the blast only shoves things around physically — it does not activate
+    // (score / clear / chain) the pegs it catches. Defaults true to preserve the perk.
+    const activateTargets = options?.activateTargets !== false;
+    const shockwave = buildBombShockwave(
+      this.pegs,
+      sourceBall,
+      sourcePeg,
+      radiusMultiplier ? { radiusMultiplier } : null
+    );
     this.queueBackgroundEvent({
       kind: 'bombSplash',
       x: Number.isFinite(shockwave.centerX) ? shockwave.centerX : (sourcePeg?.x ?? sourceBall?.x ?? this.canvas.width / 2),
       y: Number.isFinite(shockwave.centerY) ? shockwave.centerY : (sourcePeg?.y ?? sourceBall?.y ?? this.canvas.height / 2),
       radius: Math.max(84, Number.isFinite(shockwave.radius) ? shockwave.radius * 0.95 : 120),
-      strength: 2.8,
-      burst: 2.3,
+      strength: 2.8 * impulseScale,
+      burst: 2.3 * impulseScale,
       swirl: 1.15,
       spread: 3.2
     });
+
+    // The blast knocks the ball(s) back too (unlike vanilla bomb-perk behaviour).
+    if (affectBalls) {
+      this.applyBombKnockbackToBalls(shockwave.centerX, shockwave.centerY, shockwave.radius, impulseScale);
+    }
+
     if (!Array.isArray(shockwave.targets) || shockwave.targets.length === 0) return 0;
 
+    // Physical knockback (push the surrounding destruction bodies) ALWAYS happens.
     if (this.isDestructionMode()) {
       this.destructionSystem.syncBodies(this.pegs, this.groups);
+      const baseImpulse = this.destructionSettings?.bombImpulse;
+      const scaledImpulse = Number.isFinite(baseImpulse) ? baseImpulse * impulseScale : baseImpulse;
       this.destructionSystem.applyShockwaveTargets(
         shockwave.targets,
         shockwave.centerX,
         shockwave.centerY,
         shockwave.radius,
         sourceBall,
-        this.destructionSettings?.bombImpulse
+        scaledImpulse
       );
     }
+
+    // Physics-only blast: stop here, leaving the caught pegs knocked around but intact.
+    if (!activateTargets) return 0;
 
     let activatedCount = 0;
     for (const peg of shockwave.targets) {
@@ -1914,6 +1937,44 @@ export class Game {
       }
     }
     return activatedCount;
+  }
+
+  // Push every active ball outward from a blast centre, with linear falloff to the
+  // blast radius. Used by bomb pegs so the explosion also affects the main ball.
+  applyBombKnockbackToBalls(centerX, centerY, radius, scale = 1) {
+    if (!Array.isArray(this.balls) || !Number.isFinite(centerX) || !Number.isFinite(centerY)) return;
+    const maxR = Math.max(1, Number.isFinite(radius) ? radius : 1);
+    const baseImpulse = 7 * Math.max(0, scale);
+    if (baseImpulse <= 0) return;
+    for (const ball of this.balls) {
+      if (!ball || !ball.active || ball.isLauncherBall || ball.isDebugDragBall) continue;
+      const dx = ball.x - centerX;
+      const dy = ball.y - centerY;
+      const dist = Math.hypot(dx, dy);
+      if (dist > maxR) continue;
+      let nx = 0;
+      let ny = -1;
+      if (dist > 1e-3) { nx = dx / dist; ny = dy / dist; }
+      const falloff = 1 - (dist / maxR);
+      const impulse = baseImpulse * falloff;
+      ball.vx += nx * impulse;
+      ball.vy += ny * impulse;
+    }
+  }
+
+  // A bomb peg explodes on hit: reuse the bomb shockwave, scaled by the peg's power,
+  // and let the blast push the ball too.
+  detonatePegBomb(peg, sourceBall) {
+    if (!peg) return;
+    const power = Utils.clamp(Number.isFinite(peg.bombPower) ? peg.bombPower : 1, 0.3, 4.0);
+    // bombPhysicsOnly (default true): only physically shove pegs/ball; don't activate
+    // the caught pegs. Turn it off to also score/clear/chain them (vanilla-style).
+    this.detonateBombShockwave(sourceBall, peg, {
+      radiusMultiplier: 6 * power,
+      impulseScale: power,
+      affectBalls: true,
+      activateTargets: peg.bombPhysicsOnly === false
+    });
   }
 
   createRuntimeFlipper(config) {
@@ -2231,6 +2292,10 @@ export class Game {
     this.shotsFired = 0;
     this.initialOrangePegs = this.getTotalOrangePegs();
     this.removedOrangePegs = 0;
+    // Portrait-flame reference: the level's clearable total captured ONCE at load
+    // (the live count shrinks as pegs fall — we want the original size so a "big
+    // clear" means a big share of the WHOLE level, not of the few pegs left).
+    this._heatInitialClearable = Math.max(1, this._countClearablePegs());
     this.bucketCatchLight = 0;
     this.totalSurvivalTargets = this.isSurvivalMode() ? countSurvivalTargets(this.pegs) : 0;
     this.state = 'idle';
@@ -2487,6 +2552,46 @@ export class Game {
 
   getTotalOrangePegs() {
     return this.pegs.filter(p => this.isOrangePeg(p)).length;
+  }
+
+  // Count pegs that count as "cleared" for the ignite effect (skips obstacles,
+  // portals and permanent bumpers).
+  _countClearablePegs() {
+    let c = 0;
+    for (const p of this.pegs) {
+      if (p.type === 'obstacle' || this.isPortalPeg(p)) continue;
+      if (p.type === 'bumper' && !p.bumperDisappear && !p.bumperOrange) continue;
+      c++;
+    }
+    return c;
+  }
+
+  // Map a shot to a portrait-flame intensity 0..1. Driven by the ABSOLUTE number
+  // of pegs cleared this turn (so the effect only fires on objectively big clears,
+  // never when the last 1–2 pegs happen to be the whole board left), normalized to
+  // the LEVEL's starting size so a small level can still roar and a huge one need
+  // not be fully cleared. A hard floor keeps tiny clears dark.
+  _igniteIntensityFromShot(count, total) {
+    const n = count || 0;
+    const MIN_PEGS = 5;                 // a few pegs never ignites, whatever the share
+    if (n <= MIN_PEGS) return 0;
+    // Count at which the blaze maxes out — half the level, bounded both ways.
+    const refMax = Math.max(MIN_PEGS + 6, Math.min(28, (total || 0) * 0.5));
+    let i = (n - MIN_PEGS) / (refMax - MIN_PEGS);
+    i = Math.max(0, Math.min(1, i));
+    return i * i * (3 - 2 * i); // smoothstep
+  }
+
+  // Live "ignite heat" for the portrait flame: builds up as pegs fall this turn,
+  // fades to 0 when the turn resets. Measured against the level's ORIGINAL
+  // clearable total (cached at load), not the shrinking remaining count.
+  _currentShotHeat() {
+    const hits = this.turnHitPegIds.length;
+    if (hits <= 0 || this.isSurvivalMode() || this.isBilliardPhase()) return 0;
+    if (this._heatInitialClearable == null) {
+      this._heatInitialClearable = Math.max(1, this._countClearablePegs());
+    }
+    return this._igniteIntensityFromShot(hits, this._heatInitialClearable);
   }
 
   calculateScore(peg) {
@@ -3265,6 +3370,18 @@ export class Game {
     return changed;
   }
 
+  // Decay the bumper hit-pulse scale back to rest. Runs every frame in every state so
+  // peg-driven bumper hits (which can occur while idle/settling, not just while a ball
+  // is in play) don't leave the bumper stuck enlarged.
+  decayBumperHitScales() {
+    for (const peg of this.pegs) {
+      if (peg._bumperHitScale && peg._bumperHitScale > 1.001) {
+        peg._bumperHitScale = 1 + (peg._bumperHitScale - 1) * 0.85;
+        if (peg._bumperHitScale < 1.005) peg._bumperHitScale = 1;
+      }
+    }
+  }
+
   handleDestructionBumperHits(events = []) {
     if (!Array.isArray(events) || events.length === 0) return false;
     const seen = new Set();
@@ -3365,14 +3482,22 @@ export class Game {
       this.bucketCatchLight = Math.max(0, this.bucketCatchLight - dt * 2.6);
     }
     this.updatePortalPulses(dt);
+    this.decayBumperHitScales();
+    if (this.onShotHeat) this.onShotHeat(this._currentShotHeat());
     const worldHeight = this.isSurvivalMode() ? this.survivalRuntime.getWorldHeight() : this.canvas.height;
     this.suspendDestructionPhysicsOwnedAnimations();
-    this.animator.tick(this.pegs, dt, { width: this.canvas.width, height: worldHeight });
+    const animatorMoved = this.animator.tick(this.pegs, dt, { width: this.canvas.width, height: worldHeight });
     this.syncDestructionAnimatedBodies(dt);
     if (this.deepFreezeSystem.isActive()) {
       this.deepFreezeSystem.syncPegPositions(this.pegs, this.animator.getAnimatedPegIds());
     }
-    this.physics.markPegGridDirty();
+    // Only invalidate the peg collision grid when something actually moved a peg.
+    // Peg add/remove self-dirties via physics.setPegs(); destruction self-dirties
+    // in syncDestructionAnimatedBodies()/stepDestructionPegs(). Billiard and deep
+    // freeze move pegs without their own dirty signal, so keep dirtying for those.
+    if (animatorMoved || this.isBilliardPhase() || this.deepFreezeSystem.isActive()) {
+      this.physics.markPegGridDirty();
+    }
     this.updateUltraAimQte(dt);
 
     if (this.isSurvivalMode()) {
@@ -3514,6 +3639,9 @@ export class Game {
       const activated = this.activatePeg(peg, event.ball, { allowMultiball: true });
       if (activated) {
         this.queueLiquidPegSplash(peg, event.impact);
+        if (peg.type === 'bomb') {
+          this.detonatePegBomb(peg, event.ball);
+        }
       }
       // Notify animator for hit-triggered animations
       this.animator.notifyHit(peg.id);
@@ -3542,14 +3670,6 @@ export class Game {
     this.syncDynamicYoyoAnchors();
     const yoyoReleaseEvents = this.yoyoThread.step(this.balls, this.pegs, dt, { retractStartY });
     this.applyYoyoReleaseEvents(yoyoReleaseEvents);
-
-    // Animate bumper hit scale decay
-    for (const peg of this.pegs) {
-      if (peg._bumperHitScale && peg._bumperHitScale > 1.001) {
-        peg._bumperHitScale = 1 + (peg._bumperHitScale - 1) * 0.85;
-        if (peg._bumperHitScale < 1.005) peg._bumperHitScale = 1;
-      }
-    }
 
     // Check for stuck balls trapped inside structures
     if (result.ballsRemaining > 0) {

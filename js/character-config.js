@@ -18,6 +18,15 @@ export const CANONICAL_EMOTION_SLOTS = [
   'victory'
 ];
 
+export const PVP_PORTRAIT_SLOTS = [
+  'idle',
+  'stage1',
+  'stage2',
+  'stage3',
+  'stage4',
+  'final'
+];
+
 const DEFAULT_CHARACTER_ASSET = resolveAssetPaths('character');
 
 function clone(value) {
@@ -436,6 +445,20 @@ function normalizeSlotValue(value) {
   return null;
 }
 
+function normalizeSingleSlotValue(value) {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      if (typeof item === 'string' && item.trim()) return item.trim();
+    }
+    return null;
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed || null;
+  }
+  return null;
+}
+
 function normalizeSlots(rawSlots = null) {
   const result = {};
   if (isPlainObject(rawSlots)) {
@@ -448,6 +471,15 @@ function normalizeSlots(rawSlots = null) {
     if (!Object.prototype.hasOwnProperty.call(result, slot)) result[slot] = null;
   }
   if (!result.idle) result.idle = DEFAULT_CHARACTER_ASSET.webp;
+  return result;
+}
+
+function normalizePvpPortraits(rawPortraits = null) {
+  const result = {};
+  const source = isPlainObject(rawPortraits) ? rawPortraits : {};
+  for (const slot of PVP_PORTRAIT_SLOTS) {
+    result[slot] = normalizeSingleSlotValue(source[slot]);
+  }
   return result;
 }
 
@@ -465,6 +497,7 @@ export function createDefaultCharacter(overrides = null) {
       anger: null,
       victory: null
     },
+    pvpPortraits: normalizePvpPortraits(null),
     personality: DEFAULT_PERSONALITY,
     ...(isPlainObject(overrides) ? overrides : {})
   });
@@ -478,6 +511,7 @@ export function normalizeCharacter(raw = null) {
     id,
     name: typeof source.name === 'string' && source.name.trim() ? source.name.trim() : id,
     slots,
+    pvpPortraits: normalizePvpPortraits(source.pvpPortraits),
     personality: normalizePersonality(source.personality)
   };
 }
@@ -776,6 +810,49 @@ export function getCharacterSlotSourceAt(character, slotName, index) {
   if (sources.length === 0) return '';
   const safeIndex = ((Number(index) || 0) % sources.length + sources.length) % sources.length;
   return sources[safeIndex];
+}
+
+export function getPvpPortraitSlotForHealth({ hp = 1, maxHp = 3 } = {}) {
+  const max = Math.max(1, Math.min(PVP_PORTRAIT_SLOTS.length, Math.round(Number(maxHp) || 3)));
+  const current = Math.max(0, Math.min(max, Math.round(Number(hp) || 0)));
+  if (current >= max) return 'idle';
+  if (current <= 1) return 'final';
+  const damageStage = Math.max(1, Math.min(4, max - current));
+  return `stage${damageStage}`;
+}
+
+export function getPvpPortraitSlotsForMaxHp(maxHp = 3) {
+  const max = Math.max(2, Math.min(PVP_PORTRAIT_SLOTS.length, Math.round(Number(maxHp) || 3)));
+  const damageCount = Math.max(0, Math.min(4, max - 2));
+  return [
+    'idle',
+    ...Array.from({ length: damageCount }, (_, index) => `stage${index + 1}`),
+    'final'
+  ];
+}
+
+export function getCharacterPvpPortraitSource(character, health = {}) {
+  const normalized = normalizeCharacter(character);
+  const targetSlot = PVP_PORTRAIT_SLOTS.includes(health?.slot)
+    ? health.slot
+    : getPvpPortraitSlotForHealth(health);
+  const stageIndex = targetSlot.startsWith('stage')
+    ? Math.max(1, Math.min(4, Math.round(Number(targetSlot.replace('stage', '')) || 1)))
+    : 0;
+  const fallbackSlots = targetSlot === 'final'
+    ? ['final', 'stage4', 'stage3', 'stage2', 'stage1', 'idle']
+    : (targetSlot === 'idle'
+      ? ['idle']
+      : [
+          ...Array.from({ length: stageIndex }, (_, index) => `stage${stageIndex - index}`),
+          'idle'
+        ]);
+
+  for (const slot of fallbackSlots) {
+    const source = normalizeSingleSlotValue(normalized.pvpPortraits?.[slot]);
+    if (source) return source;
+  }
+  return getCharacterSlotSource(normalized, 'idle');
 }
 
 export function getLevelCharacterPortraitSources(level, registry = loadCharacterRegistry(), preferredSlot = 'idle') {

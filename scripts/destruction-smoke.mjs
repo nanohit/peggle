@@ -154,6 +154,103 @@ function testGroupPreservesOffsets() {
   assert.ok(Math.abs(afterDistance - beforeDistance) < 0.001);
 }
 
+function testGroupCenterOfMassRecomputesAfterRemoval() {
+  let pegs = [
+    circle('com-a', 140, 160, { groupId: 'beam' }),
+    circle('com-b', 160, 160, { groupId: 'beam' }),
+    circle('com-c', 180, 160, { groupId: 'beam' }),
+    circle('com-d', 200, 160, { groupId: 'beam' }),
+    circle('com-e', 220, 160, { groupId: 'beam' })
+  ];
+  const groups = [{ id: 'beam', destructionBody: true }];
+  const system = makeSystem({ gravityY: 0 });
+  system.reset(pegs, groups);
+
+  pegs = pegs.filter(peg => peg.id !== 'com-d' && peg.id !== 'com-e');
+  system.markStructureDirty();
+  system.syncBodies(pegs, groups);
+
+  const body = system.getBodyForPeg(pegs[0]);
+  assert.ok(Math.abs(body.x - 160) < 0.001);
+  assert.equal(pegs[0].x, 140);
+  assert.equal(pegs[2].x, 180);
+}
+
+function testUnbalancedGroupTopplesTowardRemainingMass() {
+  let pegs = [];
+  const beamXs = [115, 132, 149, 166, 183, 200, 217, 234, 251, 268, 285];
+  for (let i = 0; i < beamXs.length; i++) {
+    pegs.push(circle(`topple-${i}`, beamXs[i], 180, { groupId: 'topple-beam' }));
+  }
+  pegs.push(brick('topple-support', 200, 198, {
+    type: 'obstacle',
+    destructionStatic: true,
+    width: 12,
+    height: 35
+  }));
+  const groups = [{ id: 'topple-beam', destructionBody: true }];
+  const system = makeSystem({ restitution: 0.08 });
+  system.reset(pegs, groups);
+  stepMany(system, pegs, groups, 120, { ...BOUNDS, bucketEnabled: false });
+
+  pegs = pegs.filter(peg => !['topple-7', 'topple-8', 'topple-9', 'topple-10'].includes(peg.id));
+  system.markStructureDirty();
+  system.syncBodies(pegs, groups);
+  const body = system.getBodyForPeg(pegs[0]);
+  assert.ok(Math.abs(body.x - 166) < 0.001);
+
+  system.wakeDynamicBodies();
+  stepMany(system, pegs, groups, 24, { ...BOUNDS, bucketEnabled: false });
+
+  const beam = pegs.filter(peg => peg.groupId === 'topple-beam');
+  assert.ok(body.angle < -0.12);
+  assert.ok(beam[0].y > beam[beam.length - 1].y + 8);
+}
+
+function testBrickWakeSpinUsesRealLeverArm() {
+  const centerHit = brick('center-hit', 200, 200, { width: 60, height: 12 });
+  const centerSystem = makeSystem({ gravityY: 0, damping: 1 });
+  centerSystem.reset([centerHit], []);
+  const centerBody = centerSystem.getBodyForPeg(centerHit);
+  assert.equal(
+    centerSystem.applyBallImpact(centerHit, { x: 170, y: 200, vx: 6, vy: 0 }, { vx: 6, vy: 0, speed: 6 }),
+    true
+  );
+  assert.equal(centerBody.av, 0);
+
+  const offCenterHit = brick('off-center-hit', 200, 200, { width: 60, height: 12 });
+  const offCenterSystem = makeSystem({ gravityY: 0, damping: 1 });
+  offCenterSystem.reset([offCenterHit], []);
+  const offCenterBody = offCenterSystem.getBodyForPeg(offCenterHit);
+  offCenterSystem.applyBallImpact(offCenterHit, { x: 185, y: 194, vx: 0, vy: 6 }, { vx: 0, vy: 6, speed: 6 });
+  assert.ok(offCenterBody.av < -0.03);
+}
+
+function testRestingCurvedBrickStackDoesNotTopple() {
+  const pegs = [
+    brick('curve-floor', 200, 248, {
+      type: 'obstacle',
+      destructionStatic: true,
+      width: 180,
+      height: 12
+    }),
+    curvedBrick('curve-bottom', 200, 234, { width: 90, height: 10 }),
+    curvedBrick('curve-top', 200, 220, { width: 90, height: 10 })
+  ];
+  const system = makeSystem({ restitution: 0.08 });
+  system.reset(pegs, []);
+  const bottom = system.getBodyForPeg(pegs[1]);
+  const top = system.getBodyForPeg(pegs[2]);
+  stepMany(system, pegs, [], 420, { ...BOUNDS, bucketEnabled: false });
+
+  assert.ok(Math.abs(pegs[1].x - 200) < 2);
+  assert.ok(Math.abs(pegs[2].x - 200) < 3);
+  assert.ok(Math.abs(pegs[1].angle || 0) < 0.03);
+  assert.ok(Math.abs(pegs[2].angle || 0) < 0.04);
+  assert.equal(bottom.sleeping, true);
+  assert.equal(top.sleeping, true);
+}
+
 function testCurvedBrickSlicesMoveWithBody() {
   const pegs = [curvedBrick('curve', 180, 140)];
   const system = makeSystem({ gravityY: 0 });
@@ -866,6 +963,10 @@ const tests = [
   testPhysicsOnHitSleepsUntilImpact,
   testStackedBricksSettleWithoutDrift,
   testGroupPreservesOffsets,
+  testGroupCenterOfMassRecomputesAfterRemoval,
+  testUnbalancedGroupTopplesTowardRemainingMass,
+  testBrickWakeSpinUsesRealLeverArm,
+  testRestingCurvedBrickStackDoesNotTopple,
   testCurvedBrickSlicesMoveWithBody,
   testGroupedCurvedBrickSlicesMoveWithBody,
   testNormalPhysicsHitsCurvedBrickRibbon,

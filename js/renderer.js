@@ -34,6 +34,11 @@ const COLORS = {
   billiardRedHit: '#ff9a94',
   billiardRedGlow: 'rgba(232, 77, 77, 0.42)',
 
+  // Bomb peg — hotter/brighter red than billiardRed, explodes on hit
+  bomb: '#ff1f2d',
+  bombHit: '#ff7a5c',
+  bombGlow: 'rgba(255, 31, 45, 0.6)',
+
   billiardYellow: '#ffd447',
   billiardYellowHit: '#fff0a1',
   billiardYellowGlow: 'rgba(255, 212, 71, 0.42)',
@@ -113,6 +118,7 @@ const COLORS = {
 const PEG_COLORS = {
   orange: { main: COLORS.orange, hit: COLORS.orangeHit, glow: COLORS.orangeGlow },
   billiardRed: { main: COLORS.billiardRed, hit: COLORS.billiardRedHit, glow: COLORS.billiardRedGlow },
+  bomb: { main: COLORS.bomb, hit: COLORS.bombHit, glow: COLORS.bombGlow },
   billiardYellow: { main: COLORS.billiardYellow, hit: COLORS.billiardYellowHit, glow: COLORS.billiardYellowGlow },
   blue: { main: COLORS.blue, hit: COLORS.blueHit, glow: COLORS.blueGlow },
   green: { main: COLORS.green, hit: COLORS.greenHit, glow: COLORS.greenGlow },
@@ -153,6 +159,20 @@ const PEG_SURFACE_STYLES = {
     hitBright: '#ffffff',
     hitLight: '#ffc1bc',
     hitMain: '#ff746c'
+  },
+  bomb: {
+    bright: '#ffd0b0',
+    light: '#ff6b4a',
+    main: '#ff1f2d',
+    deep: '#9c0410',
+    shadow: '#3d0205',
+    rimLight: 'rgba(255, 138, 92, 0.98)',
+    line: 'rgba(255, 196, 150, 0.5)',
+    core: 'rgba(255, 60, 50, 0.5)',
+    glow: 'rgba(255, 31, 45, 0.38)',
+    hitBright: '#ffffff',
+    hitLight: '#ffb38f',
+    hitMain: '#ff5a3c'
   },
   billiardYellow: {
     bright: '#fff7bd',
@@ -1855,9 +1875,20 @@ export class Renderer {
     const staggerMs = Math.max(0, Number(options.staggerMs) || 16);
     const durationMs = Math.max(120, Number(options.durationMs) || PEG_EXIT_SHRINK_MS);
     const maxSpreadMs = Math.max(0, Number(options.maxSpreadMs) || 560);
+    const centerOut = options.order === 'center-out-y' || Number.isFinite(options.originY);
+    const originY = Number.isFinite(options.originY) ? options.originY : this.height / 2;
+    const maxDistanceFromOrigin = centerOut
+      ? Math.max(1, ...list.map(peg => Math.abs((Number.isFinite(peg.y) ? peg.y : originY) - originY)))
+      : 1;
     const ordered = [...list].sort((a, b) => {
       const ay = Number.isFinite(a.y) ? a.y : 0;
       const by = Number.isFinite(b.y) ? b.y : 0;
+      if (centerOut) {
+        const ad = Math.abs(ay - originY);
+        const bd = Math.abs(by - originY);
+        if (Math.abs(ad - bd) > 0.001) return ad - bd;
+        return ay - by;
+      }
       return by - ay;
     });
     const spreadMs = Math.min(maxSpreadMs, Math.max(0, ordered.length - 1) * staggerMs);
@@ -1865,7 +1896,9 @@ export class Renderer {
     this._pegEntryAnimations.clear();
     for (let i = 0; i < ordered.length; i++) {
       const peg = ordered[i];
-      const rank = ordered.length > 1 ? i / (ordered.length - 1) : 0;
+      const rank = centerOut
+        ? Math.abs((Number.isFinite(peg.y) ? peg.y : originY) - originY) / maxDistanceFromOrigin
+        : (ordered.length > 1 ? i / (ordered.length - 1) : 0);
       const delayMs = baseDelayMs + cubicBezierTimeForProgress(rank) * spreadMs;
       this._pegEntryAnimations.set(peg.id, {
         peg: this._clonePegForExitAnimation(peg),
@@ -2682,12 +2715,9 @@ export class Renderer {
     const drawH = img.naturalHeight * drawScale;
     const drawX = -pivotSrcX * drawScale;
     const opaqueTopY = img.naturalHeight * FLIPPER_ASSET_OPAQUE_TOP_RATIO * drawScale;
-    const opaqueBottomY = img.naturalHeight * FLIPPER_ASSET_OPAQUE_BOTTOM_RATIO * drawScale;
-    const topSurfaceY = -width * 0.5;
-    // Align the visible top edge with the physical capsule surface, while keeping the image proportional.
-    const drawY = flipAssetY
-      ? -topSurfaceY - opaqueBottomY
-      : topSurfaceY - opaqueTopY;
+    const bottomSurfaceY = width * 0.5;
+    // Align the screen-facing contact edge: left uses the image top, right uses it after Y-flip.
+    const drawY = -bottomSurfaceY - opaqueTopY;
 
     ctx.save();
     ctx.translate(pivotX, pivotY);
@@ -2848,6 +2878,48 @@ export class Renderer {
       ctx.font = "14px 'Noto Serif', Georgia, serif";
       ctx.fillText(subtext, 0, 15);
     }
+    ctx.restore();
+  }
+
+  drawCountdownOverlay(text, alpha = 1) {
+    const ctx = this.ctx;
+    const value = String(text || '').trim();
+    const t = Math.max(0, Math.min(1, Number.isFinite(alpha) ? alpha : 1));
+    if (!value || t <= 0.001) return;
+    const scale = 0.9 + t * 0.1;
+
+    ctx.save();
+    ctx.globalAlpha = t;
+    const glowRadius = Math.max(72, Math.min(this.width, this.height) * 0.22);
+    const glow = ctx.createRadialGradient(
+      this.width / 2,
+      this.height / 2,
+      glowRadius * 0.08,
+      this.width / 2,
+      this.height / 2,
+      glowRadius
+    );
+    glow.addColorStop(0, 'rgba(0, 0, 0, 0.46)');
+    glow.addColorStop(0.55, 'rgba(0, 0, 0, 0.24)');
+    glow.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.ellipse(this.width / 2, this.height / 2, glowRadius * 1.15, glowRadius * 0.74, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    ctx.save();
+    ctx.translate(this.width / 2, this.height / 2);
+    ctx.scale(scale, scale);
+    ctx.globalAlpha = t;
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.58)';
+    ctx.shadowBlur = 18;
+    ctx.shadowOffsetY = 3;
+    ctx.font = "78px 'Kelmscott Roman NF', 'Noto Serif', Georgia, serif";
+    ctx.fillText(value, 0, 2);
     ctx.restore();
   }
 
@@ -3187,6 +3259,116 @@ export class Renderer {
         ctx.arc(ghost.x, ghost.y, radius + 3, 0, Math.PI * 2);
         ctx.stroke();
       }
+    }
+
+    ctx.restore();
+  }
+
+  // Rotation origin (pivot) crosshair. Bright + ringed while editing, faded
+  // when a custom pivot merely exists.
+  drawAnimationPivot(pivot, editing) {
+    if (!pivot) return;
+    const ctx = this.ctx;
+    const isCustom = !!pivot.custom;
+    if (!editing && !isCustom) return; // default pivot = center: no marker needed
+    ctx.save();
+    const main = editing ? '#ff8c1a' : 'rgba(255, 140, 26, 0.7)';
+    const r = editing ? 11 : 8;
+    ctx.strokeStyle = main;
+    ctx.fillStyle = main;
+    ctx.lineWidth = editing ? 2 : 1.5;
+    // ring
+    ctx.beginPath();
+    ctx.arc(pivot.x, pivot.y, r, 0, Math.PI * 2);
+    ctx.stroke();
+    // crosshair
+    const c = r + 6;
+    ctx.beginPath();
+    ctx.moveTo(pivot.x - c, pivot.y);
+    ctx.lineTo(pivot.x + c, pivot.y);
+    ctx.moveTo(pivot.x, pivot.y - c);
+    ctx.lineTo(pivot.x, pivot.y + c);
+    ctx.stroke();
+    // center dot
+    ctx.beginPath();
+    ctx.arc(pivot.x, pivot.y, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // Freeform trajectory path: dashed curve through sampled points, plus
+  // anchor/handle controls while editing (generalized poly-bezier).
+  drawAnimationPath(samples, controls) {
+    if (!samples || samples.length < 2) return;
+    const ctx = this.ctx;
+    ctx.save();
+
+    // Curve
+    ctx.strokeStyle = '#ffd60a';
+    ctx.lineWidth = 1.75;
+    ctx.setLineDash([6, 4]);
+    ctx.beginPath();
+    ctx.moveTo(samples[0].x, samples[0].y);
+    for (let i = 1; i < samples.length; i++) ctx.lineTo(samples[i].x, samples[i].y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Start marker (where the element begins)
+    ctx.fillStyle = '#ffd60a';
+    ctx.beginPath();
+    ctx.arc(samples[0].x, samples[0].y, 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    if (!controls || !Array.isArray(controls.anchors)) {
+      ctx.restore();
+      return;
+    }
+
+    const anchors = controls.anchors;
+    const n = anchors.length;
+    const handleActive = (i, which) => {
+      if (which === 'hOut') return controls.closed || i < n - 1;
+      if (which === 'hIn') return controls.closed || i > 0;
+      return false;
+    };
+
+    // Handle stems
+    ctx.strokeStyle = 'rgba(66, 167, 255, 0.9)';
+    ctx.lineWidth = 1.25;
+    ctx.beginPath();
+    for (let i = 0; i < n; i++) {
+      const a = anchors[i];
+      if (handleActive(i, 'hOut') && a.hOut) { ctx.moveTo(a.x, a.y); ctx.lineTo(a.hOut.x, a.hOut.y); }
+      if (handleActive(i, 'hIn') && a.hIn) { ctx.moveTo(a.x, a.y); ctx.lineTo(a.hIn.x, a.hIn.y); }
+    }
+    ctx.stroke();
+
+    // Handle points (diamonds)
+    const drawDiamond = (x, y) => {
+      const rr = 5;
+      ctx.beginPath();
+      ctx.moveTo(x, y - rr); ctx.lineTo(x + rr, y);
+      ctx.lineTo(x, y + rr); ctx.lineTo(x - rr, y);
+      ctx.closePath();
+      ctx.fill(); ctx.stroke();
+    };
+    ctx.fillStyle = '#42a7ff';
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.25;
+    for (let i = 0; i < n; i++) {
+      const a = anchors[i];
+      if (handleActive(i, 'hOut') && a.hOut) drawDiamond(a.hOut.x, a.hOut.y);
+      if (handleActive(i, 'hIn') && a.hIn) drawDiamond(a.hIn.x, a.hIn.y);
+    }
+
+    // Anchor points (joints)
+    ctx.fillStyle = '#ffffff';
+    ctx.strokeStyle = '#42a7ff';
+    ctx.lineWidth = 1.5;
+    for (let i = 0; i < n; i++) {
+      ctx.beginPath();
+      ctx.arc(anchors[i].x, anchors[i].y, 6, 0, Math.PI * 2);
+      ctx.fill(); ctx.stroke();
     }
 
     ctx.restore();
@@ -3687,6 +3869,16 @@ export class Renderer {
       );
     }
 
+    // Trajectory path overlay (editor animation mode)
+    if (state.animationMode && state.animationPathSamples) {
+      this.drawAnimationPath(state.animationPathSamples, state.animationPathControls);
+    }
+
+    // Rotation origin (pivot) marker
+    if (state.animationMode && state.animationPivot) {
+      this.drawAnimationPivot(state.animationPivot, state.animationPivotEditing);
+    }
+
     if (state.drawCenter) {
       this.drawShapeCenter(state.drawCenter.x, state.drawCenter.y);
     }
@@ -3718,6 +3910,9 @@ export class Renderer {
     // }
 
     const endMessage = this._updateEndMessageState(state);
+    if (state.countdownText) {
+      this.drawCountdownOverlay(state.countdownText, state.countdownAlpha);
+    }
     if (endMessage) {
       this.drawMessage(endMessage.text, endMessage.subtext, endMessage.alpha);
     }

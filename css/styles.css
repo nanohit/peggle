@@ -445,6 +445,18 @@ html, body {
   box-shadow: inset 0 -2px 3px rgba(66, 7, 11, 0.58);
 }
 
+.peg-btn[data-type="bomb"] {
+  background: rgba(255, 31, 45, 0.22);
+  color: #ff5a3c;
+}
+.peg-btn[data-type="bomb"]::after {
+  border: 1px solid rgba(255, 150, 110, 0.95);
+  background:
+    radial-gradient(ellipse at 35% 24%, rgba(255, 255, 255, 0.9) 0%, rgba(255, 255, 255, 0.9) 12%, rgba(255, 255, 255, 0) 24%),
+    radial-gradient(circle at 48% 44%, #ffd0b0 0%, #ff6b4a 22%, #ff1f2d 56%, #9c0410 80%, #3d0205 100%);
+  box-shadow: inset 0 -2px 3px rgba(61, 2, 5, 0.6);
+}
+
 .peg-btn[data-type="billiardYellow"] {
   background: rgba(255, 212, 71, 0.2);
   color: var(--billiard-yellow);

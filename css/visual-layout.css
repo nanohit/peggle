@@ -57,6 +57,33 @@
   pointer-events: none;
 }
 
+.canvas-container--soft-horizontal {
+  overflow: hidden !important;
+}
+
+.canvas-container--soft-horizontal #gameCanvas,
+.canvas-container--soft-horizontal .game-foreground-layer,
+.level-transition-canvas--soft-edge {
+  -webkit-mask-image: linear-gradient(
+    90deg,
+    transparent 0,
+    rgba(0, 0, 0, 0.25) 10px,
+    #000 34px,
+    #000 calc(100% - 34px),
+    rgba(0, 0, 0, 0.25) calc(100% - 10px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    90deg,
+    transparent 0,
+    rgba(0, 0, 0, 0.25) 10px,
+    #000 34px,
+    #000 calc(100% - 34px),
+    rgba(0, 0, 0, 0.25) calc(100% - 10px),
+    transparent 100%
+  );
+}
+
 /* Slot clip layer — clips decorative assets to frame bounds */
 .visual-slot-clip {
   position: absolute;
@@ -64,6 +91,19 @@
   overflow: hidden;
   border-radius: 4px;
   z-index: auto;
+  pointer-events: none;
+}
+
+/* Ignite flame canvas — a square box centred on the character circle, clipped to
+   the frame. z-index 500 sits IN FRONT of the top banner + game field (so the
+   bonfire can rise up unobstructed) but BEHIND the portrait group (character /
+   characterCircle / health* are forced to 501 below), so the fire engulfs the
+   portrait without ever covering the face. left/top/width set by _layoutFlame. */
+.portrait-flame-canvas {
+  position: absolute;
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  z-index: 500;
   pointer-events: none;
 }
 
@@ -138,6 +178,7 @@
 .pvp-target-slot--characterCircle { z-index: 1; }
 .pvp-target-slot--healthCircle { z-index: 2; }
 .pvp-target-slot--healthCharCircle { z-index: 3; }
+.pvp-target-slot--character { z-index: 4; }
 
 .pvp-aim-timer-ring {
   position: absolute;
@@ -156,7 +197,7 @@
   width: 100%;
   height: 100%;
   overflow: visible;
-  transform: rotate(-90deg);
+  transform: rotate(180deg);
 }
 
 .pvp-aim-timer-track,

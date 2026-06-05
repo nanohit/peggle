@@ -4,6 +4,7 @@
 import { DEFAULT_SHOCKWAVE_EFFECT, DEFAULT_SHOCKWAVE_VICTORY_SETTINGS } from './shockwave-effect.js';
 import { DEFAULT_END_SEQUENCE, SLOT_DEFS, DEFAULT_LAYER_ORDER, resolveAssetPaths, normalizeVisuals } from './visual-config.js';
 import { compressImageFile } from './image-compression.js';
+import { PortraitFlame, FLAME_BOX_EXTENT } from './portrait-flame.js';
 
 const imageCache = new Map();
 
@@ -140,6 +141,13 @@ export class VisualLayout {
       this.slotElements[def.id] = el;
     }
 
+    // Ignite flame — white bonfire that engulfs the portrait circle and licks
+    // upward (z-index 500 via CSS: in front of the banner/game field, behind the
+    // portrait group). The canvas is a square box centred on the character circle
+    // (see _layoutFlame).
+    this._flame = new PortraitFlame(this._slotClip);
+    this._layoutFlame();
+
     // Build theme panel (editor only)
     if (this._includePanel) {
       this._buildPanel();
@@ -156,9 +164,37 @@ export class VisualLayout {
     this.mounted = true;
   }
 
+  // ─── Ignite flame (white fire corona around the portrait circle) ─────────
+  igniteFlame(intensity) {
+    this._flame?.ignite(intensity);
+  }
+
+  setFlameHeat(intensity) {
+    this._flame?.setHeat(intensity);
+  }
+
+  setFlamePreview(stage) {
+    this._flame?.setPreview(stage);
+  }
+
+  // Position the flame canvas as a square box centred on the character circle,
+  // sized FLAME_BOX_EXTENT× the circle diameter, using the SAME %-config the slot
+  // uses (robust — no live rect measurement). The flame then draws centred.
+  _layoutFlame() {
+    const cv = this._flame?.canvas;
+    const cfg = this.config?.slots?.characterCircle;
+    const def = SLOT_DEFS.find(d => d.id === 'characterCircle');
+    if (!cv || !cfg || !def) return;
+    const boxWpct = def.baseWidth * (cfg.scale || 1) * FLAME_BOX_EXTENT;
+    cv.style.left = cfg.x + '%';
+    cv.style.top = this._getAdjustedSlotY('characterCircle', cfg.y) + '%';
+    cv.style.width = boxWpct + '%';
+  }
+
   dispose() {
     if (!this.mounted) return;
     if (this._abortController) this._abortController.abort();
+    if (this._flame) { this._flame.dispose(); this._flame = null; }
 
     // Restore editor panels to canvas container
     if (this._reparentedPanels) {
@@ -244,6 +280,8 @@ export class VisualLayout {
     }
     this._applyGambleOverlayState();
     this.updateSurvivalProgressIndicator(this._survivalProgressState);
+    this._layoutFlame();
+    this._flame?.resize();
   }
 
   setSpinMode(active) {
@@ -2100,6 +2138,7 @@ export class VisualLayout {
     this.updateSurvivalProgressIndicator(this._survivalProgressState);
     this._renderPvpOpponentTarget();
     this._renderPvpAimTimer();
+    this._layoutFlame();
   }
 
   _getAdjustedSlotY(slotId, rawY) {
@@ -2396,7 +2435,10 @@ export class VisualLayout {
     }
     this._pvpOpponentTargetState = {
       hp: Math.max(0, Number.isFinite(state.hp) ? state.hp : 3),
-      maxHp: Math.max(1, Number.isFinite(state.maxHp) ? state.maxHp : 3)
+      maxHp: Math.max(1, Number.isFinite(state.maxHp) ? state.maxHp : 3),
+      portraitSrc: typeof state.portraitSrc === 'string' && state.portraitSrc.trim()
+        ? state.portraitSrc.trim()
+        : null
     };
     this._renderPvpOpponentTarget();
   }
@@ -2450,8 +2492,16 @@ export class VisualLayout {
     if (!layer || !canvasRect || !canvasRect.width || !canvasRect.height) return;
 
     const ratio = Math.max(0, Math.min(1, state.hp / state.maxHp));
-    const slotIds = ['characterCircle', 'healthCircle', 'healthCharCircle'];
+    const slotIds = ['characterCircle', 'healthCircle', 'healthCharCircle', 'character'];
     const visibleSlotIds = new Set();
+    const sourceAnchor = this.slotElements?.characterCircle?.getBoundingClientRect?.();
+    if (!sourceAnchor || !sourceAnchor.width || !sourceAnchor.height) return;
+    const sourceAnchorCenterX = sourceAnchor.left + sourceAnchor.width / 2;
+    const sourceAnchorCenterY = sourceAnchor.top + sourceAnchor.height / 2;
+    const anchorCanvasY = sourceAnchorCenterY - canvasRect.top;
+    const targetAnchorCenterX = sourceAnchorCenterX;
+    const targetAnchorCenterY = canvasRect.top + (canvasRect.height - anchorCanvasY);
+    const explicitOffsetY = Number.isFinite(state.offsetY) ? state.offsetY : 0;
 
     for (const slotId of slotIds) {
       const source = this.slotElements?.[slotId];
@@ -2461,15 +2511,15 @@ export class VisualLayout {
 
       const centerX = sourceRect.left + sourceRect.width / 2;
       const centerY = sourceRect.top + sourceRect.height / 2;
-      const relativeCanvasY = centerY - canvasRect.top;
-      const mirroredY = canvasRect.top + (canvasRect.height - relativeCanvasY);
+      const copiedCenterX = targetAnchorCenterX + (centerX - sourceAnchorCenterX);
+      const copiedCenterY = targetAnchorCenterY + (centerY - sourceAnchorCenterY) + explicitOffsetY;
 
       const clone = this._getPvpTargetSlot(slotId);
       if (!clone) continue;
       visibleSlotIds.add(slotId);
       clone.style.display = '';
-      clone.style.left = `${centerX - frameRect.left}px`;
-      clone.style.top = `${mirroredY - frameRect.top}px`;
+      clone.style.left = `${copiedCenterX - frameRect.left}px`;
+      clone.style.top = `${copiedCenterY - frameRect.top}px`;
       clone.style.width = `${sourceRect.width}px`;
       clone.style.height = `${sourceRect.height}px`;
       clone.style.opacity = source.style.opacity || '';
@@ -2498,10 +2548,14 @@ export class VisualLayout {
         clip.style.filter = ratio > 0 ? `drop-shadow(0 0 ${Math.round(5 * ratio + 3)}px ${color})` : 'none';
       } else {
         clone.innerHTML = '';
-        const computedBg = getComputedStyle(source).backgroundImage;
-        clone.style.backgroundImage = computedBg && computedBg !== 'none'
-          ? computedBg
-          : source.style.backgroundImage;
+        if (slotId === 'character' && state.portraitSrc) {
+          clone.style.backgroundImage = `url("${state.portraitSrc.replace(/"/g, '\\"')}")`;
+        } else {
+          const computedBg = getComputedStyle(source).backgroundImage;
+          clone.style.backgroundImage = computedBg && computedBg !== 'none'
+            ? computedBg
+            : source.style.backgroundImage;
+        }
       }
     }
 

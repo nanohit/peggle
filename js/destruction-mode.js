@@ -29,14 +29,34 @@ const FALL_MARGIN = 70;
 const WAKE_IMPULSE_MIN = 0.45;
 const HIT_IMPULSE_SCALE = 0.84;
 const HIT_IMPULSE_MIN = 1.35;
-const ANGULAR_IMPULSE_SCALE = 0.0017;
-const MAX_ANGULAR_SPEED = 0.13;
+const MAX_ANGULAR_SPEED = 0.22;
+// Fraction of the physically-correct angular impulse (invInertia × torque) applied
+// when a body is woken by an impact/explosion. 1 = textbook; tuned a touch hotter so
+// blasts visibly tumble bricks instead of just sliding them.
+const WAKE_ANGULAR_SCALE = 1.15;
+// Contacts only impart/resolve spin when the relative speed at the contact exceeds
+// ANGULAR_REST_SPEED, ramping to full over ANGULAR_IMPACT_RANGE. Below it the contact
+// stays linear only while the body's mass centre is inside its support patch. Once the
+// centre crosses the support edge, slow contacts are allowed to generate the real
+// toppling torque instead of pinning the body in mid-air.
+const ANGULAR_REST_SPEED = 2.0;
+const ANGULAR_IMPACT_RANGE = 4.0;
+const SUPPORT_TORQUE_DOT = 0.45;
+const SUPPORT_EDGE_TORQUE_MARGIN = 0.9;
+const SUPPORT_EDGE_TORQUE_RANGE = 16;
+const SUPPORT_EDGE_MIN_ANGULAR_SCALE = 0.3;
 const MAX_BODIES_WOKEN_PER_STEP = 24;
 const SUPPORT_MEMORY_FRAMES = 8;
 const SUPPORT_SLEEP_MULTIPLIER = 4.5;
 const ANGULAR_SLEEP_FLOOR = 0.0075;
 const BUCKET_MOVE_EPSILON = 0.01;
 const BUCKET_RIM_THICKNESS = 5.5;
+// Outward kick speed (px/step) per unit of bumperBounce, applied when a peg-body
+// genuinely contacts an active bumper so it gets ejected instead of nestling/sticking.
+const BUMPER_POP_SCALE = 1.6;
+// Steps before the same (bumper, body) pair can pop/pulse again — turns a lingering
+// contact into a periodic bump rather than an every-frame white flash.
+const BUMPER_CONTACT_COOLDOWN = 10;
 const GROUP_FRACTURE_IMPULSE = 4.6;
 const GROUP_FRACTURE_MIN_PEGS = 2;
 const PORTAL_BODY_COOLDOWN_STEPS = 8;
@@ -138,6 +158,14 @@ function isPortalPeg(peg) {
   return !!peg && isPortalType(peg.type);
 }
 
+// Whether destruction peg-bodies physically bounce off (and activate) this bumper.
+// Default on; when a level author turns it off the bumper behaves like a plain static
+// obstacle for pegs (no bounce boost, no pulse/activation), while the ball — handled
+// by the separate ball-physics path — still bounces normally.
+function bumperReactsToPegs(peg) {
+  return !!peg && peg.type === 'bumper' && peg.bumperPegReact !== false;
+}
+
 function getPegRadius(peg) {
   if (!peg) return PHYSICS_CONFIG.pegRadius;
   if (peg.type === 'bumper') return PHYSICS_CONFIG.pegRadius * (peg.bumperScale || 1);
@@ -176,6 +204,73 @@ function getPegMass(peg) {
   }
   const radius = getPegRadius(peg);
   return Math.max(0.7, (radius * radius) / Math.max(1, PHYSICS_CONFIG.pegRadius * PHYSICS_CONFIG.pegRadius));
+}
+
+// Moment of inertia of a single peg about its own centre (box w²+h²/12, disc r²/2).
+function getPegOwnInertia(peg, mass) {
+  if (!peg) return mass;
+  if (peg.shape === 'brick') {
+    const { width, height } = getBrickSize(peg);
+    const w = hasCurveSlices(peg) ? Math.max(width, getCurveRibbonLength(peg)) : width;
+    return mass * (w * w + height * height) / 12;
+  }
+  const radius = getPegRadius(peg);
+  return mass * radius * radius * 0.5;
+}
+
+function getWakeContactPoint(body, peg, sourceX = null, sourceY = null) {
+  const fallbackX = Number.isFinite(peg?.x) ? peg.x : (Number.isFinite(body?.x) ? body.x : 0);
+  const fallbackY = Number.isFinite(peg?.y) ? peg.y : (Number.isFinite(body?.y) ? body.y : 0);
+  if (!peg || !Number.isFinite(sourceX) || !Number.isFinite(sourceY)) {
+    return { x: fallbackX, y: fallbackY };
+  }
+
+  if (hasCurveSlices(peg)) {
+    let bestX = fallbackX;
+    let bestY = fallbackY;
+    let bestDistSq = Infinity;
+    for (let i = 1; i < peg.curveSlices.length; i++) {
+      const a = peg.curveSlices[i - 1];
+      const b = peg.curveSlices[i];
+      if (!a || !b) continue;
+      const dx = (b.x || 0) - (a.x || 0);
+      const dy = (b.y || 0) - (a.y || 0);
+      const lenSq = dx * dx + dy * dy;
+      if (lenSq <= 0.0001) continue;
+      const t = Utils.clamp(((sourceX - a.x) * dx + (sourceY - a.y) * dy) / lenSq, 0, 1);
+      const px = a.x + dx * t;
+      const py = a.y + dy * t;
+      const distSq = (sourceX - px) * (sourceX - px) + (sourceY - py) * (sourceY - py);
+      if (distSq < bestDistSq) {
+        bestDistSq = distSq;
+        bestX = px;
+        bestY = py;
+      }
+    }
+    return { x: bestX, y: bestY };
+  }
+
+  if (peg.shape === 'brick') {
+    const { width, height } = getBrickSize(peg);
+    const angle = peg.angle || 0;
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    const dx = sourceX - fallbackX;
+    const dy = sourceY - fallbackY;
+    const localX = Utils.clamp(dx * cos + dy * sin, -width * 0.5, width * 0.5);
+    const localY = Utils.clamp(-dx * sin + dy * cos, -height * 0.5, height * 0.5);
+    return {
+      x: fallbackX + localX * cos - localY * sin,
+      y: fallbackY + localX * sin + localY * cos
+    };
+  }
+
+  const radius = getPegRadius(peg);
+  const dir = normalizeVector(sourceX - fallbackX, sourceY - fallbackY, 0, -1);
+  return {
+    x: fallbackX + dir.x * radius,
+    y: fallbackY + dir.y * radius
+  };
 }
 
 function writePegAabb(peg, out) {
@@ -743,6 +838,8 @@ export class DestructionPegSystem {
     this._pegById = new Map();
     this._pairKeys = new Set();
     this._contactPairs = [];
+    this._bumperContactCd = new Map();
+    this._stepCounter = 0;
     this._grid = new Map();
     this._gridBucketPool = [];
     this._colliders = [];
@@ -917,6 +1014,7 @@ export class DestructionPegSystem {
     this._pendingWakeIds.clear();
     this._bumperHitEvents.length = 0;
     this._bumperHitKeys.clear();
+    this._bumperContactCd.clear();
     this._portalHitEvents.length = 0;
     this._runtimeBodyOverrides.clear();
     this._fractureQueue.length = 0;
@@ -1038,6 +1136,8 @@ export class DestructionPegSystem {
       av: 0,
       mass: 1,
       invMass: 1,
+      inertia: 1,
+      invInertia: 1,
       static: false,
       wakeOnHit: false,
       wakeOnHitBallOnly: false,
@@ -1062,6 +1162,9 @@ export class DestructionPegSystem {
       offsets: new Map(),
       _colliderIndices: [],
       transformDirty: false,
+      _supportSpanMin: Infinity,
+      _supportSpanMax: -Infinity,
+      _supportContactCount: 0,
       aabb: { minX: 0, maxX: 0, minY: 0, maxY: 0 }
     };
     this.refreshBody(body, members, { resetOffsets: true });
@@ -1135,6 +1238,11 @@ export class DestructionPegSystem {
       body.animationDetached = true;
       body.kinematic = false;
     }
+
+    // Keep the rigid body's origin at its true mass centre. When members disappear
+    // from a group, the remaining piece must rotate around the remaining mass, not
+    // around the old authored centre.
+    this.recomputeCenterOfMass(body);
   }
 
   getPhysicsOwnedPegIds() {
@@ -1161,17 +1269,18 @@ export class DestructionPegSystem {
     if (!body || !Array.isArray(body.pegIds) || body.pegIds.length === 0) return null;
     let cx = 0;
     let cy = 0;
-    let count = 0;
+    let totalMass = 0;
     for (const pegId of body.pegIds) {
       const peg = this._pegById.get(pegId);
       if (!peg || !Number.isFinite(peg.x) || !Number.isFinite(peg.y)) continue;
-      cx += peg.x;
-      cy += peg.y;
-      count++;
+      const mass = getPegMass(peg);
+      cx += peg.x * mass;
+      cy += peg.y * mass;
+      totalMass += mass;
     }
-    if (count === 0) return null;
-    cx /= count;
-    cy /= count;
+    if (totalMass <= 0) return null;
+    cx /= totalMass;
+    cy /= totalMass;
 
     let dot = 0;
     let cross = 0;
@@ -1206,6 +1315,101 @@ export class DestructionPegSystem {
     }
 
     return { x: cx, y: cy, angle: wrapAngle(angle) };
+  }
+
+  // Recompute the body's moment of inertia from its current offsets (own inertia of
+  // each peg plus the parallel-axis term for its offset). Static bodies don't rotate.
+  recomputeBodyInertia(body) {
+    if (!body) return;
+    let inertia = 0;
+    for (const pegId of body.pegIds) {
+      const peg = this._pegById.get(pegId);
+      const offset = body.offsets.get(pegId);
+      if (!peg || !offset) continue;
+      const pegMass = getPegMass(peg);
+      const dx = offset.x || 0;
+      const dy = offset.y || 0;
+      inertia += getPegOwnInertia(peg, pegMass) + pegMass * (dx * dx + dy * dy);
+    }
+    body.inertia = Math.max(1, inertia);
+    body.invInertia = body.static ? 0 : 1 / body.inertia;
+  }
+
+  // Re-derive each peg's rigid offset from where the peg currently is, relative to the
+  // body's current pose. Used when handing an animation-posed body over to physics so
+  // the rigid body adopts the exact current arrangement (no snap back to the authored
+  // rest pose, which otherwise reads as the group scattering on impact).
+  rebaseOffsetsToCurrentPegs(body) {
+    if (!body) return;
+    const cos = Math.cos(body.angle || 0);
+    const sin = Math.sin(body.angle || 0);
+    for (const pegId of body.pegIds) {
+      const peg = this._pegById.get(pegId);
+      if (!peg) continue;
+      const dx = (peg.x || 0) - body.x;
+      const dy = (peg.y || 0) - body.y;
+      const offset = body.offsets.get(pegId) || { x: 0, y: 0, angle: 0, curveSlices: null };
+      offset.x = dx * cos + dy * sin;
+      offset.y = -dx * sin + dy * cos;
+      offset.angle = wrapAngle((peg.angle || 0) - (body.angle || 0));
+      if (hasCurveSlices(peg)) {
+        offset.curveSlices = peg.curveSlices.map(slice => {
+          const sdx = (slice.x || 0) - body.x;
+          const sdy = (slice.y || 0) - body.y;
+          return {
+            x: sdx * cos + sdy * sin,
+            y: -sdx * sin + sdy * cos,
+            nx: (slice.nx || 0) * cos + (slice.ny || 0) * sin,
+            ny: -(slice.nx || 0) * sin + (slice.ny || 0) * cos
+          };
+        });
+      } else if (offset.curveSlices) {
+        offset.curveSlices = null;
+      }
+      body.offsets.set(pegId, offset);
+    }
+    this.recomputeBodyInertia(body);
+  }
+
+  // Move the body's rotation centre to the true mass-weighted centroid of its current
+  // pegs and re-derive offsets around it. Without this a group that loses pegs keeps
+  // spinning about its stale original centre, so it tips the wrong way (away from where
+  // the remaining mass actually is) and its "centre of gravity" looks arbitrary.
+  recomputeCenterOfMass(body) {
+    if (!body || !Array.isArray(body.pegIds) || body.pegIds.length === 0) return;
+    let cx = 0;
+    let cy = 0;
+    let total = 0;
+    for (const pegId of body.pegIds) {
+      const peg = this._pegById.get(pegId);
+      if (!peg || !Number.isFinite(peg.x) || !Number.isFinite(peg.y)) continue;
+      const m = getPegMass(peg);
+      cx += peg.x * m;
+      cy += peg.y * m;
+      total += m;
+    }
+    if (total <= 0) return;
+    body.x = cx / total;
+    body.y = cy / total;
+    this.rebaseOffsetsToCurrentPegs(body);
+  }
+
+  // Hand a hand-animated (kinematic) body over to physics cleanly: bake the current
+  // pose as its rigid rest state and drop the scripted animation velocity so it flies
+  // from the impact, not along its keyframe path.
+  detachAnimatedBody(body) {
+    if (!body || !body.kinematic) return;
+    const pose = this.getBodyPoseFromCurrentPegs(body);
+    if (pose) {
+      body.x = pose.x;
+      body.y = pose.y;
+      body.angle = pose.angle;
+      this.rebaseOffsetsToCurrentPegs(body);
+    }
+    body.vx = 0;
+    body.vy = 0;
+    body.av = 0;
+    body.kinematic = false;
   }
 
   syncAnimatedBodies(animatedPegIds = null, dtSeconds = BASE_STEP_SECONDS) {
@@ -1320,6 +1524,9 @@ export class DestructionPegSystem {
     if (!this.canWakeBody(body, source)) return false;
     const ix = Number.isFinite(impulseX) ? impulseX : 0;
     const iy = Number.isFinite(impulseY) ? impulseY : 0;
+    // Hand off cleanly from a hand-animation: bake the current pose and drop the
+    // scripted velocity before the impact, so the object flies from the hit.
+    this.detachAnimatedBody(body);
     body.sleeping = false;
     body.sleepFrames = 0;
     body.animationDetached = true;
@@ -1334,16 +1541,19 @@ export class DestructionPegSystem {
     if (ix !== 0 || iy !== 0) {
       body.vx += ix * body.invMass;
       body.vy += iy * body.invMass;
-      const px = Number.isFinite(contactPeg?.x) ? contactPeg.x : body.x;
-      const py = Number.isFinite(contactPeg?.y) ? contactPeg.y : body.y;
-      const sx = Number.isFinite(sourceX) ? sourceX : body.x;
-      const sy = Number.isFinite(sourceY) ? sourceY : body.y;
+      const contact = getWakeContactPoint(body, contactPeg, sourceX, sourceY);
+      const px = contact.x;
+      const py = contact.y;
       const rx = px - body.x;
       const ry = py - body.y;
+      // Angular impulse = invInertia x (r x impulse). No synthetic fallback here:
+      // a centre-line hit should slide a single brick, while an off-centre hit or a
+      // hit on one member of a group naturally produces spin through the lever arm.
       const torque = rx * iy - ry * ix;
-      const sourceBias = Math.sign((px - sx) * iy - (py - sy) * ix) || 1;
-      body.av += (torque || sourceBias * Math.hypot(ix, iy)) * ANGULAR_IMPULSE_SCALE / Math.max(0.65, body.mass);
-      body.av = Utils.clamp(body.av, -MAX_ANGULAR_SPEED, MAX_ANGULAR_SPEED);
+      if (Math.abs(torque) > 1e-4) {
+        body.av += torque * (body.invInertia || 0) * WAKE_ANGULAR_SCALE;
+        body.av = Utils.clamp(body.av, -MAX_ANGULAR_SPEED, MAX_ANGULAR_SPEED);
+      }
     }
     this.clampBodySpeed(body);
     this._pendingFallenCheck = true;
@@ -2114,6 +2324,7 @@ export class DestructionPegSystem {
     this._bumperHitEvents.length = 0;
     this._bumperHitKeys.clear();
     this._portalHitEvents.length = 0;
+    this._stepCounter++;
     if (!this.isEnabled() || !Array.isArray(pegs) || pegs.length === 0) {
       return { moved: false, fallenPegs: [], bumperHits: [], portalHits: [] };
     }
@@ -2143,7 +2354,7 @@ export class DestructionPegSystem {
     const safeDt = Number.isFinite(dtSeconds) && dtSeconds > 0 ? dtSeconds : BASE_STEP_SECONDS;
     const stepScale = Math.max(0.1, (safeDt / BASE_STEP_SECONDS) * timeScale);
     const linearDamping = Math.pow(this.settings.damping, stepScale);
-    const angularDamping = Math.pow(0.985, stepScale);
+    const angularDamping = Math.pow(0.992, stepScale);
     let maxMove = 0;
 
     for (const body of this.bodies.values()) {
@@ -2420,6 +2631,70 @@ export class DestructionPegSystem {
     }
   }
 
+  resetSupportTorqueSpans() {
+    for (const body of this.bodies.values()) {
+      if (!body) continue;
+      body._supportSpanMin = Infinity;
+      body._supportSpanMax = -Infinity;
+      body._supportContactCount = 0;
+    }
+  }
+
+  recordSupportTorqueSpan(body, minX, maxX, minY, maxY) {
+    if (!body || !Number.isFinite(minX) || !Number.isFinite(maxX) || !Number.isFinite(minY) || !Number.isFinite(maxY)) {
+      return;
+    }
+    const tx = this._gravityNormY;
+    const ty = -this._gravityNormX;
+    const p1 = minX * tx + minY * ty;
+    const p2 = maxX * tx + minY * ty;
+    const p3 = maxX * tx + maxY * ty;
+    const p4 = minX * tx + maxY * ty;
+    const spanMin = Math.min(p1, p2, p3, p4);
+    const spanMax = Math.max(p1, p2, p3, p4);
+    body._supportSpanMin = Math.min(body._supportSpanMin, spanMin);
+    body._supportSpanMax = Math.max(body._supportSpanMax, spanMax);
+    body._supportContactCount = (body._supportContactCount || 0) + 1;
+  }
+
+  prepareSupportTorqueSpans(colliders, pairs, pairCount) {
+    this.resetSupportTorqueSpans();
+    for (let p = 0; p < pairCount; p += 2) {
+      const a = colliders[pairs[p]];
+      const b = colliders[pairs[p + 1]];
+      if (!a || !b) continue;
+      const overlap = colliderOverlap(a, b, this._overlap, this._projectionA, this._projectionB);
+      if (!overlap || overlap.depth <= 0) continue;
+      const minX = Math.max(a.aabb.minX, b.aabb.minX);
+      const maxX = Math.min(a.aabb.maxX, b.aabb.maxX);
+      const minY = Math.max(a.aabb.minY, b.aabb.minY);
+      const maxY = Math.min(a.aabb.maxY, b.aabb.maxY);
+      if (minX > maxX || minY > maxY) continue;
+      const supportDot = overlap.nx * this._gravityNormX + overlap.ny * this._gravityNormY;
+      if (this.isActiveDynamic(a.body) && supportDot > SUPPORT_TORQUE_DOT) {
+        this.recordSupportTorqueSpan(a.body, minX, maxX, minY, maxY);
+      }
+      if (this.isActiveDynamic(b.body) && supportDot < -SUPPORT_TORQUE_DOT) {
+        this.recordSupportTorqueSpan(b.body, minX, maxX, minY, maxY);
+      }
+    }
+  }
+
+  getUnstableSupportAngularScale(body, supportDot) {
+    if (!body || supportDot <= SUPPORT_TORQUE_DOT || (body._supportContactCount || 0) <= 0) return 0;
+    const min = body._supportSpanMin;
+    const max = body._supportSpanMax;
+    if (!Number.isFinite(min) || !Number.isFinite(max) || min > max) return 0;
+    const tx = this._gravityNormY;
+    const ty = -this._gravityNormX;
+    const centre = (body.x || 0) * tx + (body.y || 0) * ty;
+    const outside = centre < min ? min - centre : (centre > max ? centre - max : 0);
+    const excess = outside - SUPPORT_EDGE_TORQUE_MARGIN;
+    if (excess <= 0) return 0;
+    const ramp = Utils.clamp(excess / SUPPORT_EDGE_TORQUE_RANGE, 0, 1);
+    return SUPPORT_EDGE_MIN_ANGULAR_SCALE + (1 - SUPPORT_EDGE_MIN_ANGULAR_SCALE) * ramp;
+  }
+
   resolveCollisions(subScale) {
     const colliders = this._colliders;
     const colliderCount = this._colliderCount;
@@ -2452,6 +2727,10 @@ export class DestructionPegSystem {
           const aKinematic = this.isKinematicCollider(a);
           const bKinematic = this.isKinematicCollider(b);
           if (!aActive && !bActive && !aKinematic && !bKinematic) continue;
+          // Bumpers are larger than the bucket and would jam in its rim, so let them
+          // fall straight through it instead of catching and pulsing forever.
+          if ((a.kind === 'bucket' && this.getColliderBumperPeg(b))
+            || (b.kind === 'bucket' && this.getColliderBumperPeg(a))) continue;
           if (!this.aabbOverlap(a.aabb, b.aabb)) continue;
 
           pairs[pairCount++] = i;
@@ -2460,6 +2739,7 @@ export class DestructionPegSystem {
       }
     }
     if (pairCount === 0) return;
+    this.prepareSupportTorqueSpans(colliders, pairs, pairCount);
 
     // Relaxation: re-evaluate and resolve every contact several times so the support
     // reaction propagates through the whole stack within this substep. One-shot side
@@ -2501,7 +2781,7 @@ export class DestructionPegSystem {
   getCollisionRestitution(a, b) {
     let restitution = this.settings.restitution;
     const bumper = this.getColliderBumperPeg(a) || this.getColliderBumperPeg(b);
-    if (bumper && Number.isFinite(bumper.bumperBounce)) {
+    if (bumper && bumperReactsToPegs(bumper) && Number.isFinite(bumper.bumperBounce)) {
       restitution = Math.max(restitution, Utils.clamp(bumper.bumperBounce, 0, 3));
     }
     return restitution;
@@ -2529,15 +2809,55 @@ export class DestructionPegSystem {
     return true;
   }
 
-  maybeQueueBumperHit(a, b, activeA, activeB, strength, nx, ny) {
+  maybeBumperContact(a, b, activeA, activeB, strength, nx, ny) {
     const bumperA = this.getColliderBumperPeg(a);
     const bumperB = this.getColliderBumperPeg(b);
-    if (bumperA && (activeA || activeB)) {
-      this.queueBumperHitEvent(a, activeB ? b : a, strength, nx, ny);
+    // nx,ny points a -> b. Outward from a-bumper is +n; outward from b-bumper is -n.
+    if (bumperA && bumperReactsToPegs(bumperA) && (activeA || activeB)) {
+      this.fireBumperContact(a, b, bumperA, nx, ny, strength);
     }
-    if (bumperB && (activeA || activeB)) {
-      this.queueBumperHitEvent(b, activeA ? a : b, strength, -nx, -ny);
+    if (bumperB && bumperReactsToPegs(bumperB) && (activeA || activeB)) {
+      this.fireBumperContact(b, a, bumperB, -nx, -ny, strength);
     }
+  }
+
+  // A bumper actively ejects whatever touches it (scaled by bumperBounce) and pulses,
+  // gated by a per-(bumper, body) cooldown. Without the active pop a slow/resting body
+  // just nestles against the bumper, firing a white pulse every frame with no bounce;
+  // with it the body is kicked off so the contact (and the pulse) ends.
+  fireBumperContact(bumperCollider, otherCollider, bumper, ox, oy, strength) {
+    const otherBody = otherCollider?.body || null;
+    const bumperBody = bumperCollider?.body || null;
+    if (!otherBody || !bumper?.id) return;
+
+    const key = `${bumper.id}:${otherBody.id}`;
+    if (this._stepCounter < (this._bumperContactCd.get(key) || 0)) return;
+    this._bumperContactCd.set(key, this._stepCounter + BUMPER_CONTACT_COOLDOWN);
+
+    const popSpeed = Utils.clamp(Number.isFinite(bumper.bumperBounce) ? bumper.bumperBounce : 2, 0, 3) * BUMPER_POP_SCALE;
+    if (popSpeed > 0) {
+      if (this.isActiveDynamic(otherBody)) {
+        const vn = (otherBody.vx || 0) * ox + (otherBody.vy || 0) * oy;
+        if (vn < popSpeed) {
+          const dv = popSpeed - vn;
+          otherBody.vx += ox * dv;
+          otherBody.vy += oy * dv;
+          this.clampBodySpeed(otherBody);
+        }
+      }
+      // A dynamic bumper recoils gently the opposite way so it doesn't ride along stuck.
+      if (this.isActiveDynamic(bumperBody)) {
+        const recoil = popSpeed * 0.5;
+        const vn = (bumperBody.vx || 0) * -ox + (bumperBody.vy || 0) * -oy;
+        if (vn < recoil) {
+          const dv = recoil - vn;
+          bumperBody.vx += -ox * dv;
+          bumperBody.vy += -oy * dv;
+          this.clampBodySpeed(bumperBody);
+        }
+      }
+    }
+    this.queueBumperHitEvent(bumperCollider, otherCollider, strength, ox, oy);
   }
 
   wakeSleepingBodyFromKinematic(body, collider, contactPeg) {
@@ -2593,9 +2913,49 @@ export class DestructionPegSystem {
       }
     }
 
-    const rvx = (bodyB.vx || 0) - (bodyA.vx || 0);
-    const rvy = (bodyB.vy || 0) - (bodyA.vy || 0);
+    // Contact point ~ centre of the overlapping AABB region of the two colliders. Used
+    // for the angular terms so off-centre hits/blasts actually tumble bricks. For a flat
+    // resting contact this sits under the body centre, so the normal torque is ~0 and
+    // stacks stay put — the rotation only kicks in for genuinely off-centre contacts.
+    const cpx = (Math.max(a.aabb.minX, b.aabb.minX) + Math.min(a.aabb.maxX, b.aabb.maxX)) * 0.5;
+    const cpy = (Math.max(a.aabb.minY, b.aabb.minY) + Math.min(a.aabb.maxY, b.aabb.maxY)) * 0.5;
+    // Lever arms only for active dynamic bodies — inactive ones (static pegs, and the
+    // bucket/flipper placeholder bodies that have no x/y) neither rotate nor get pushed,
+    // and using their undefined centre would poison the contact velocity with NaN.
+    const rAx = activeA ? (cpx - bodyA.x) : 0;
+    const rAy = activeA ? (cpy - bodyA.y) : 0;
+    const rBx = activeB ? (cpx - bodyB.x) : 0;
+    const rBy = activeB ? (cpy - bodyB.y) : 0;
+    // Kinematic carriers (bucket, flippers) push purely linearly — they should carry/
+    // shove bodies, not spin them — so suppress the angular term for those contacts.
+    const kinematicContact = this.isKinematicCollider(a) || this.isKinematicCollider(b);
+    let invIA = (activeA && !kinematicContact) ? (bodyA.invInertia || 0) : 0;
+    let invIB = (activeB && !kinematicContact) ? (bodyB.invInertia || 0) : 0;
+    const avA = activeA ? (bodyA.av || 0) : 0;
+    const avB = activeB ? (bodyB.av || 0) : 0;
+
+    // Relative velocity AT the contact point: v + ω × r  (2D: ω×r = (-ω·ry, ω·rx)).
+    const rvx = ((bodyB.vx || 0) - avB * rBy) - ((bodyA.vx || 0) - avA * rAy);
+    const rvy = ((bodyB.vy || 0) + avB * rBx) - ((bodyA.vy || 0) + avA * rAx);
     const relN = rvx * nx + rvy * ny;
+
+    // Gate angular response by impact speed, but let slow support contacts rotate when
+    // the body's mass centre is already outside the measured support patch. That keeps
+    // stable stacks calm while allowing real toppling from one-pixel/edge support.
+    const contactSpeedAngularScale = Utils.clamp(
+      (Math.hypot(rvx, rvy) - ANGULAR_REST_SPEED) / ANGULAR_IMPACT_RANGE,
+      0,
+      1
+    );
+    const supportDot = nx * this._gravityNormX + ny * this._gravityNormY;
+    invIA *= Math.max(
+      contactSpeedAngularScale,
+      this.getUnstableSupportAngularScale(bodyA, activeA ? supportDot : 0)
+    );
+    invIB *= Math.max(
+      contactSpeedAngularScale,
+      this.getUnstableSupportAngularScale(bodyB, activeB ? -supportDot : 0)
+    );
 
     // Unified normal solve. Drive the relative normal velocity up to the larger of:
     //  - the restitution bounce (only for genuine impacts, gated by a velocity
@@ -2615,36 +2975,49 @@ export class DestructionPegSystem {
     );
     const target = Math.max(bounceTarget, biasTarget);
     if (relN < target) {
-      const impulse = (target - relN) / invTotal;
-      if (activeA) {
-        bodyA.vx -= impulse * invA * nx;
-        bodyA.vy -= impulse * invA * ny;
-      }
-      if (activeB) {
-        bodyB.vx += impulse * invB * nx;
-        bodyB.vy += impulse * invB * ny;
+      const rnA = rAx * ny - rAy * nx;
+      const rnB = rBx * ny - rBy * nx;
+      const invMassN = invTotal + invIA * rnA * rnA + invIB * rnB * rnB;
+      if (invMassN > 0) {
+        const jn = (target - relN) / invMassN;
+        if (activeA) {
+          bodyA.vx -= jn * invA * nx;
+          bodyA.vy -= jn * invA * ny;
+          bodyA.av -= invIA * (rAx * (jn * ny) - rAy * (jn * nx));
+        }
+        if (activeB) {
+          bodyB.vx += jn * invB * nx;
+          bodyB.vy += jn * invB * ny;
+          bodyB.av += invIB * (rBx * (jn * ny) - rBy * (jn * nx));
+        }
       }
     }
 
+    // Friction along the contact tangent, with the matching angular term so a body
+    // sliding/scraping at the contact also picks up (or sheds) spin.
     const tx = -ny;
     const ty = nx;
     const relT = rvx * tx + rvy * ty;
-    const frictionImpulse = -relT * this.settings.friction / Math.max(1, invTotal);
-    if (activeA) {
-      bodyA.vx -= frictionImpulse * invA * tx;
-      bodyA.vy -= frictionImpulse * invA * ty;
-      bodyA.av *= collisionAngularDamping;
-    }
-    if (activeB) {
-      bodyB.vx += frictionImpulse * invB * tx;
-      bodyB.vy += frictionImpulse * invB * ty;
-      bodyB.av *= collisionAngularDamping;
+    const rtA = rAx * ty - rAy * tx;
+    const rtB = rBx * ty - rBy * tx;
+    const invMassT = invTotal + invIA * rtA * rtA + invIB * rtB * rtB;
+    if (invMassT > 0) {
+      const jt = (-relT * this.settings.friction) / invMassT;
+      if (activeA) {
+        bodyA.vx -= jt * invA * tx;
+        bodyA.vy -= jt * invA * ty;
+        bodyA.av -= invIA * (rAx * (jt * ty) - rAy * (jt * tx));
+      }
+      if (activeB) {
+        bodyB.vx += jt * invB * tx;
+        bodyB.vy += jt * invB * ty;
+        bodyB.av += invIB * (rBx * (jt * ty) - rBy * (jt * tx));
+      }
     }
 
     // Support classification (and its slope-slide acceleration) runs once, on the last
     // iteration, so the contact has settled and the slide accel isn't applied N times.
     if (lastIter) {
-      const supportDot = nx * this._gravityNormX + ny * this._gravityNormY;
       if (activeA && supportDot > 0.45) {
         this.markBodySupported(bodyA, nx, ny, supportDot, subScale, bodyB);
       }
@@ -2662,7 +3035,7 @@ export class DestructionPegSystem {
       this.maybeWakeSleepingCollisionBody(bodyA, bodyB, relN);
       this.maybeWakeSleepingCollisionBody(bodyB, bodyA, -relN);
       const collisionStrength = Math.abs(relN) + penetration * 0.22;
-      this.maybeQueueBumperHit(a, b, activeA, activeB, collisionStrength, nx, ny);
+      this.maybeBumperContact(a, b, activeA, activeB, collisionStrength, nx, ny);
       if (collisionStrength >= GROUP_FRACTURE_IMPULSE) {
         const contactX = ((a.x || bodyA.x || 0) + (b.x || bodyB.x || 0)) * 0.5;
         const contactY = ((a.y || bodyA.y || 0) + (b.y || bodyB.y || 0)) * 0.5;
@@ -2678,6 +3051,8 @@ export class DestructionPegSystem {
     if (!otherBody || otherBody.static) return false;
     const otherSpeed = bodyMotionEstimate(otherBody);
     if (otherSpeed < WAKE_IMPULSE_MIN || Math.abs(relN) < WAKE_IMPULSE_MIN) return false;
+    // Bake current pose + drop scripted velocity if this was a hand-animated body.
+    this.detachAnimatedBody(body);
     body.sleeping = false;
     body.sleepFrames = 0;
     body.animationDetached = true;

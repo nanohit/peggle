@@ -273,6 +273,83 @@ function circularDisplacement(dx, dy, t, arcSpan) {
   };
 }
 
+// ── Freeform trajectory paths (poly-cubic-bezier) ──
+// A path is { anchors: [{ x, y, hIn:{x,y}, hOut:{x,y} }], closed }, with all
+// coordinates expressed as OFFSETS from the animation's natural center and
+// anchors[0] = {0,0}. The element follows this curve by arc length.
+
+function cubicPoint(p0, p1, p2, p3, t) {
+  const u = 1 - t;
+  const uu = u * u, uuu = uu * u;
+  const tt = t * t, ttt = tt * t;
+  return {
+    x: uuu * p0.x + 3 * uu * t * p1.x + 3 * u * tt * p2.x + ttt * p3.x,
+    y: uuu * p0.y + 3 * uu * t * p1.y + 3 * u * tt * p2.y + ttt * p3.y
+  };
+}
+
+// Largest poly-bezier the LUT will materialize. Authoring is capped well below
+// this (see editor MAX_ANIM_PATH_ANCHORS); the guard only matters for corrupt
+// or hand-crafted level payloads, keeping load-time cost/memory bounded.
+const MAX_PATH_ANCHORS = 256;
+const PATH_LUT_SAMPLE_BUDGET = 1200;
+
+// Build an arc-length lookup table for a path. Returns { pts, cum, total } or null.
+export function buildPathLUT(path, segPerCurve = 18) {
+  let anchors = path?.anchors;
+  if (!Array.isArray(anchors) || anchors.length < 2) return null;
+  if (anchors.length > MAX_PATH_ANCHORS) anchors = anchors.slice(0, MAX_PATH_ANCHORS);
+  const pts = [];
+  const cum = [];
+  let total = 0;
+  const pushPoint = (x, y) => {
+    if (pts.length > 0) {
+      const last = pts[pts.length - 1];
+      total += Math.hypot(x - last.x, y - last.y);
+    }
+    pts.push({ x, y });
+    cum.push(total);
+  };
+  pushPoint(anchors[0].x, anchors[0].y);
+  const segCount = path.closed ? anchors.length : anchors.length - 1;
+  // Bound total samples so a long path can't blow up load-time cost.
+  const seg = Math.max(4, Math.min(segPerCurve, Math.floor(PATH_LUT_SAMPLE_BUDGET / Math.max(1, segCount))));
+  for (let i = 0; i < segCount; i++) {
+    const a = anchors[i];
+    const b = anchors[(i + 1) % anchors.length];
+    const p0 = { x: a.x, y: a.y };
+    const p1 = a.hOut ? { x: a.hOut.x, y: a.hOut.y } : { x: a.x, y: a.y };
+    const p2 = b.hIn ? { x: b.hIn.x, y: b.hIn.y } : { x: b.x, y: b.y };
+    const p3 = { x: b.x, y: b.y };
+    for (let s = 1; s <= seg; s++) {
+      const pt = cubicPoint(p0, p1, p2, p3, s / seg);
+      pushPoint(pt.x, pt.y);
+    }
+  }
+  if (total < 1e-6) return null;
+  return { pts, cum, total };
+}
+
+// Sample the path displacement (relative to anchor[0]) at parameter u in [0,1].
+export function samplePathLUT(lut, u) {
+  if (!lut || lut.pts.length === 0) return { tx: 0, ty: 0 };
+  const clamped = u <= 0 ? 0 : (u >= 1 ? 1 : u);
+  const target = clamped * lut.total;
+  const { pts, cum } = lut;
+  let lo = 0, hi = cum.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (cum[mid] < target) lo = mid + 1; else hi = mid;
+  }
+  const i = lo;
+  const prev = i > 0 ? i - 1 : 0;
+  const segLen = cum[i] - cum[prev];
+  const f = segLen > 1e-9 ? (target - cum[prev]) / segLen : 0;
+  const x = pts[prev].x + (pts[i].x - pts[prev].x) * f;
+  const y = pts[prev].y + (pts[i].y - pts[prev].y) * f;
+  return { tx: x - pts[0].x, ty: y - pts[0].y };
+}
+
 export class PegAnimator {
   constructor() {
     this.originalPositions = new Map(); // pegId → {x, y, angle, curveSlices?}
@@ -361,6 +438,9 @@ export class PegAnimator {
         hitSteps: Math.max(1, Math.round(anim.hitSteps || 1)),
         circularPath: !!anim.circularPath,
         circularFull: !!anim.circularFull,
+        pivot: anim.pivot ? { dx: anim.pivot.dx || 0, dy: anim.pivot.dy || 0 } : null,
+        path: anim.path || null,
+        _pathLUT: anim.path ? buildPathLUT(anim.path) : null,
       };
       this.animations.push(entry);
       if (entry.hitTrigger) {
@@ -396,6 +476,9 @@ export class PegAnimator {
         hitSteps: Math.max(1, Math.round(anim.hitSteps || 1)),
         circularPath: !!anim.circularPath,
         circularFull: !!anim.circularFull,
+        pivot: anim.pivot ? { dx: anim.pivot.dx || 0, dy: anim.pivot.dy || 0 } : null,
+        path: anim.path || null,
+        _pathLUT: anim.path ? buildPathLUT(anim.path) : null,
       };
       this.animations.push(entry);
       if (entry.hitTrigger) {
@@ -405,9 +488,13 @@ export class PegAnimator {
     }
   }
 
+  // Returns true if any animation actually applied a transform this frame, so
+  // callers can avoid re-dirtying the physics peg grid when nothing moved
+  // (e.g. static levels, or hit-trigger animations that haven't fired yet).
   tick(pegs, dtSeconds, bounds = null) {
-    if (this.animations.length === 0) return;
+    if (this.animations.length === 0) return false;
     this.elapsed += dtSeconds;
+    let movedAny = false;
 
     // Build peg lookup for fast access
     const pegMap = new Map();
@@ -476,8 +563,34 @@ export class PegAnimator {
       // because the return leg crosses the same wall as the forward leg.
       let wrapRefDx = 0, wrapRefDy = 0;
 
+      // Freeform trajectory: follow a poly-bezier curve by arc length.
+      // Overrides dx/dy + circularPath. Self-contained ⇒ no toroidal wrap.
+      if (anim._pathLUT) {
+        const hitSingleSpin = anim.hitTrigger && (anim.hitMode === 'single' || anim.hitMode === 'spin');
+        let baseU;
+        if (hitSingleSpin) {
+          const ht = this._hitTriggerState.get(ai);
+          baseU = ht ? ht._singleT || 0 : 0;
+        } else if (anim.cycle) {
+          baseU = (animElapsed % duration) / duration; // loop 0→1
+        } else {
+          const fullCycle = duration * 2;
+          const phase = (animElapsed % fullCycle) / duration;
+          const rawT = phase <= 1 ? phase : 2 - phase;
+          baseU = anim.easingFn(rawT); // ping-pong
+        }
+        const u = anim.inverse ? 1 - baseU : baseU;
+        const disp = samplePathLUT(anim._pathLUT, u);
+        tx = disp.tx;
+        ty = disp.ty;
+        // Rotation stays independent of the path (continuous in cycle, ping-pong otherwise).
+        const rotPhase = (anim.cycle && !hitSingleSpin) ? (animElapsed / duration) : baseU;
+        rot = anim.rotation * rotPhase;
+        wrapRefDx = 0;
+        wrapRefDy = 0;
+
       // Circular path: object follows a circular arc defined by the displacement vector
-      if (anim.circularPath) {
+      } else if (anim.circularPath) {
         const arcSpan = anim.circularFull ? Math.PI * 2 : Math.PI;
 
         if (anim.hitTrigger && (anim.hitMode === 'single' || anim.hitMode === 'spin')) {
@@ -587,7 +700,7 @@ export class PegAnimator {
       // Mirror-wrap: trace path with wall reflections (skip for circular paths)
       const W = worldWidth || 0;
       const H = worldHeight || 0;
-      const doWrap = anim.wrap && (canWrapX || canWrapY) && !anim.circularPath;
+      const doWrap = anim.wrap && (canWrapX || canWrapY) && !anim.circularPath && !anim._pathLUT;
       const traced = doWrap
         ? mirrorWrapTrace(anim.centerX, anim.centerY, tx, ty, W, H)
         : { x: anim.centerX + tx, y: anim.centerY + ty, mirrorX: false, mirrorY: false };
@@ -606,8 +719,15 @@ export class PegAnimator {
       const rawCenterX = anim.centerX + tx;
       const rawCenterY = anim.centerY + ty;
 
+      // Reaching here means this animation is live (inactive hit-triggers
+      // `continue` above), so it moves at least one peg this frame.
+      movedAny = true;
+
       const cosR = Math.cos(rot);
       const sinR = Math.sin(rot);
+      // Rotation pivot (custom origin offset from the natural center, default = center).
+      const pivotX = anim.centerX + (anim.pivot ? anim.pivot.dx || 0 : 0);
+      const pivotY = anim.centerY + (anim.pivot ? anim.pivot.dy || 0 : 0);
 
       for (const pegId of anim.pegIds) {
         const peg = pegMap.get(pegId);
@@ -617,21 +737,16 @@ export class PegAnimator {
         if (!orig) continue;
 
         const finalAngle = orig.angle + rot;
-        // Compute local offset for group members (rotation, mirroring)
-        let localRx = 0, localRy = 0;
-        if (anim.type === 'group') {
-          let localX = orig.x - anim.centerX;
-          let localY = orig.y - anim.centerY;
-          localRx = localX * cosR - localY * sinR;
-          localRy = localX * sinR + localY * cosR;
-          if (traced.mirrorX) localRx = -localRx;
-          if (traced.mirrorY) localRy = -localRy;
-          peg.x = traced.x + localRx;
-          peg.y = traced.y + localRy;
-        } else {
-          peg.x = traced.x;
-          peg.y = traced.y;
-        }
+        // Rotate the original position about the pivot, expressed relative to the
+        // natural center, then translate. Unified for group & individual: with the
+        // default pivot (= center) an individual peg spins in place while a group
+        // orbits its centroid; a custom pivot makes either orbit the pivot point.
+        let localRx = (pivotX + (orig.x - pivotX) * cosR - (orig.y - pivotY) * sinR) - anim.centerX;
+        let localRy = (pivotY + (orig.x - pivotX) * sinR + (orig.y - pivotY) * cosR) - anim.centerY;
+        if (traced.mirrorX) localRx = -localRx;
+        if (traced.mirrorY) localRy = -localRy;
+        peg.x = traced.x + localRx;
+        peg.y = traced.y + localRy;
         peg.angle = finalAngle;
         peg._animWrapShiftX = 0;
         peg._animWrapShiftY = 0;
@@ -667,30 +782,24 @@ export class PegAnimator {
         if (orig.curveSlices && peg.curveSlices) {
           for (let i = 0; i < orig.curveSlices.length; i++) {
             const os = orig.curveSlices[i];
-            let sx, sy;
-            if (anim.type === 'group') {
-              sx = os.x - anim.centerX;
-              sy = os.y - anim.centerY;
-            } else {
-              sx = os.x - orig.x;
-              sy = os.y - orig.y;
-            }
-            let rsx = sx * cosR - sy * sinR;
-            let rsy = sx * sinR + sy * cosR;
-            if (traced.mirrorX) rsx = -rsx;
-            if (traced.mirrorY) rsy = -rsy;
+            // Rotate each slice point about the same pivot, relative to center.
+            let lsx = (pivotX + (os.x - pivotX) * cosR - (os.y - pivotY) * sinR) - anim.centerX;
+            let lsy = (pivotY + (os.x - pivotX) * sinR + (os.y - pivotY) * cosR) - anim.centerY;
+            if (traced.mirrorX) lsx = -lsx;
+            if (traced.mirrorY) lsy = -lsy;
             let rnx = os.nx * cosR - os.ny * sinR;
             let rny = os.nx * sinR + os.ny * cosR;
             if (traced.mirrorX) rnx = -rnx;
             if (traced.mirrorY) rny = -rny;
-            peg.curveSlices[i].x = (anim.type === 'group' ? traced.x : peg.x) + rsx;
-            peg.curveSlices[i].y = (anim.type === 'group' ? traced.y : peg.y) + rsy;
+            peg.curveSlices[i].x = traced.x + lsx;
+            peg.curveSlices[i].y = traced.y + lsy;
             peg.curveSlices[i].nx = rnx;
             peg.curveSlices[i].ny = rny;
           }
         }
       }
     }
+    return movedAny;
   }
 
   reset(pegs) {

@@ -11,7 +11,18 @@ import { normalizeLevelData } from './levels.js';
 import { ensureLevelPvp, PVP_DEFAULT_AIM_LENGTH } from './pvp-mode.js';
 import { DialogueController } from './dialogue-controller.js';
 import { GambleSystem } from './gamble-system.js';
-import { loadCharacterRegistry, normalizeCharacterRegistry, saveCharacterRegistry, CHARACTER_REGISTRY_STORAGE_KEY } from './character-config.js';
+import {
+  CHARACTER_REGISTRY_STORAGE_KEY,
+  createDefaultCharacter,
+  DEFAULT_CHARACTER_ID,
+  getCharacterPvpPortraitSource,
+  loadCharacterRegistry,
+  normalizeCharacter,
+  normalizeCharacterRegistry,
+  normalizeLevelCharacterAssignment,
+  resolveCharacterForLevel,
+  saveCharacterRegistry
+} from './character-config.js';
 import { PortraitReactionController } from './portrait-reactions.js';
 import { getStoredLanguage, getPauseCopy, normalizeLanguage, setStoredLanguage } from './localization.js';
 import { topoOrder, buildNodeMap, buildParentMap, buildLevelIndexMap, graphFromLevels } from './graph/core.js';
@@ -275,6 +286,25 @@ async function fetchCharacterRegistryWithFallback() {
   return registry;
 }
 
+function resolvePvpEnemyCharacterForLevel(level, registry = loadCharacterRegistry()) {
+  const normalizedRegistry = normalizeCharacterRegistry(registry);
+  const assignment = normalizeLevelCharacterAssignment(level?.pvp?.enemyCharacter);
+  return normalizeCharacter(
+    normalizedRegistry.characters[assignment.characterId]
+    || assignment.snapshot
+    || normalizedRegistry.characters[DEFAULT_CHARACTER_ID]
+    || createDefaultCharacter()
+  );
+}
+
+function resolvePvpPortraitCharacters(level, registry = loadCharacterRegistry(), localSide = 'human') {
+  const human = resolveCharacterForLevel(level, registry);
+  const cpu = resolvePvpEnemyCharacterForLevel(level, registry);
+  return localSide === 'cpu'
+    ? { local: cpu, remote: human }
+    : { local: human, remote: cpu };
+}
+
 /*
  * Player data uses the same shared API as the editor, with static JSON as a
  * seed/fallback. That keeps peggle.vercel.app editing and alea.sh/al3a.vercel.app play
@@ -402,6 +432,22 @@ function markPlayerReady() {
 
 // --- Mirror level data horizontally ---
 
+// Mirror an animation block horizontally: flip translation, rotation, the
+// rotation-origin offset, and every trajectory-path anchor/handle x.
+function mirrorAnimationData(anim) {
+  if (!anim) return;
+  if (anim.dx) anim.dx = -anim.dx;
+  if (anim.rotation) anim.rotation = -anim.rotation;
+  if (anim.pivot && anim.pivot.dx) anim.pivot.dx = -anim.pivot.dx;
+  if (anim.path && Array.isArray(anim.path.anchors)) {
+    for (const a of anim.path.anchors) {
+      a.x = -a.x;
+      if (a.hIn) a.hIn.x = -a.hIn.x;
+      if (a.hOut) a.hOut.x = -a.hOut.x;
+    }
+  }
+}
+
 function cloneLevelData(levelData) {
   if (typeof structuredClone === 'function') {
     try {
@@ -432,8 +478,7 @@ function mirrorLevel(levelData, canvasWidth = WORLD_W) {
     }
 
     if (peg.animation) {
-      if (peg.animation.dx) peg.animation.dx = -peg.animation.dx;
-      if (peg.animation.rotation) peg.animation.rotation = -peg.animation.rotation;
+      mirrorAnimationData(peg.animation);
     }
   }
 
@@ -441,8 +486,7 @@ function mirrorLevel(levelData, canvasWidth = WORLD_W) {
   if (Array.isArray(m.groups)) {
     for (const group of m.groups) {
       if (group.animation) {
-        if (group.animation.dx) group.animation.dx = -group.animation.dx;
-        if (group.animation.rotation) group.animation.rotation = -group.animation.rotation;
+        mirrorAnimationData(group.animation);
       }
     }
   }
@@ -760,6 +804,13 @@ async function bootPvpDuelRoom(roomCode) {
     const level = normalizeLevelData(levelData);
     const pvp = ensureLevelPvp(level);
     if (!pvp.enabled) throw new Error('The selected room level is not marked as PvP.');
+    let roomCharacterRegistry = loadCharacterRegistry();
+    fetchCharacterRegistryWithFallback()
+      .then((registry) => {
+        roomCharacterRegistry = registry;
+        game?.render?.();
+      })
+      .catch(() => null);
 
     const adapter = {
       submitAim: (payload) => controller?.submitAim(payload),
@@ -773,10 +824,21 @@ async function bootPvpDuelRoom(roomCode) {
       getTargetCircle: () => visualLayout.getCanvasSlotCircle?.('characterCircle', canvas),
       onVisualState: (state) => {
         if (!state) return;
+        const maxHp = state.maxHp || 3;
+        const portraits = resolvePvpPortraitCharacters(level, roomCharacterRegistry, initialRoom.side);
+        const localSrc = getCharacterPvpPortraitSource(portraits.local, { hp: state.playerHp, maxHp });
+        const remoteSrc = getCharacterPvpPortraitSource(portraits.remote, { hp: state.cpuHp, maxHp });
+        if (localSrc) {
+          visualLayout.setCharacterPortraitSource(localSrc, {
+            fadeMs: 160,
+            slotName: `pvp:${initialRoom.side}:${state.playerHp}`
+          });
+        }
         visualLayout.setPvpOpponentTarget?.({
           visible: true,
           hp: state.cpuHp,
-          maxHp: state.maxHp || 3
+          maxHp,
+          portraitSrc: remoteSrc
         });
         visualLayout.setPvpAimTimer?.(
           state.timerVisible
@@ -882,6 +944,26 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
       gambleSystem,
       scopeKey: campaignName ? `campaign:${campaignName}` : 'single',
       paused
+    });
+  }
+
+  function updatePvpPortraitVisuals(levelData, state, localSide = 'human') {
+    if (!levelData || !state) return;
+    const maxHp = state.maxHp || 3;
+    const portraits = resolvePvpPortraitCharacters(levelData, characterRegistry, localSide);
+    const localSrc = getCharacterPvpPortraitSource(portraits.local, { hp: state.playerHp, maxHp });
+    const remoteSrc = getCharacterPvpPortraitSource(portraits.remote, { hp: state.cpuHp, maxHp });
+    if (localSrc) {
+      visualLayout.setCharacterPortraitSource(localSrc, {
+        fadeMs: 160,
+        slotName: `pvp:${localSide}:${state.playerHp}`
+      });
+    }
+    visualLayout.setPvpOpponentTarget?.({
+      visible: true,
+      hp: state.cpuHp,
+      maxHp,
+      portraitSrc: remoteSrc
     });
   }
 
@@ -1238,7 +1320,10 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
   function restartFromPause() {
     const introOptions = createPegIntroStartOptions({ suppressInputMs: 650 });
     if (activeCpuDuelMode) {
-      startRandomCpuDuelLevel(introOptions);
+      startRandomCpuDuelLevel({
+        ...introOptions,
+        pegIntro: createPvpPegIntroOptions()
+      });
       return;
     }
     hidePause();
@@ -1552,19 +1637,33 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
 
     pvpCpuDuelLaunchPromise = (async () => {
       const preferredLevels = initialCpuDuelMode ? [] : originalLevels;
-      const level = await loadRandomPvpCpuDuelLevel({ preferredLevels });
+      let level = await loadRandomPvpCpuDuelLevel({ preferredLevels });
       if (!level) {
-        alert('No PvP Duel levels configured for CPU mode.');
-        return false;
+        level = activeLevelData && ensureLevelPvp(activeLevelData).enabled
+          ? preparePvpCpuDuelLevel(activeLevelData)
+          : null;
+        if (!level) {
+          alert('No PvP Duel levels configured for CPU mode.');
+          return false;
+        }
       }
 
       mirrorState = false;
-      return startLevel(currentNodeId, {
+      const startOptions = {
         levelData: level,
         cpuDuel: true,
         suppressInputMs: Number.isFinite(options.suppressInputMs) ? options.suppressInputMs : 250,
         pegIntro: options.pegIntro || null
-      });
+      };
+      if (options.horizontalTransition) {
+        transitionToLevel(currentNodeId, {
+          ...startOptions,
+          axis: 'x',
+          direction: 'right'
+        });
+        return true;
+      }
+      return startLevel(currentNodeId, startOptions);
     })().finally(() => {
       pvpCpuDuelLaunchPromise = null;
       if (button) button.disabled = false;
@@ -1699,11 +1798,11 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     }
   }
 
-  function setPortraitScrollFx(offsetY) {
+  function setPortraitScrollFx(offsetY, offsetX = 0) {
     if (!visualLayout) return;
     for (const slotId of PORTRAIT_SCROLL_SLOTS) {
       if (!visualLayout.slotElements?.[slotId]) continue;
-      visualLayout.setSlotRuntimeFx(slotId, { translateY: offsetY });
+      visualLayout.setSlotRuntimeFx(slotId, { translateX: offsetX, translateY: offsetY });
     }
   }
 
@@ -1722,6 +1821,7 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     transitionOverlay = null;
     canvas.style.transition = '';
     canvas.style.transform = '';
+    canvas.parentElement?.classList.remove('canvas-container--soft-horizontal');
     clearPortraitScrollFx();
     const gambleRoot = gambleSystem?.ui?.root;
     if (gambleRoot) {
@@ -1771,6 +1871,14 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     };
   }
 
+  function createPvpPegIntroOptions(delayMs = PEG_INTRO_BLANK_MS) {
+    return {
+      ...createPegIntroOptions(delayMs),
+      order: 'center-out-y',
+      originY: WORLD_H / 2
+    };
+  }
+
   function createPegIntroStartOptions(options = {}, delayMs = PEG_INTRO_BLANK_MS) {
     return {
       ...options,
@@ -1779,10 +1887,24 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
   }
 
   function transitionToLevel(nodeId, options = {}) {
-    const direction = options.direction === 'down' ? 'down' : 'up';
+    const horizontal = options.axis === 'x' || options.direction === 'right' || options.direction === 'left';
+    const direction = horizontal
+      ? (options.direction === 'left' ? 'left' : 'right')
+      : (options.direction === 'down' ? 'down' : 'up');
+    const transitionLevel = options.levelData && Array.isArray(options.levelData.pegs)
+      ? options.levelData
+      : null;
+    const isPvpTransition = transitionLevel ? ensureLevelPvp(transitionLevel).enabled : false;
+    const buildStartOptions = (extra = {}) => ({
+      ...(transitionLevel ? { levelData: transitionLevel, cpuDuel: options.cpuDuel === true } : {}),
+      suppressInputMs: Number.isFinite(options.suppressInputMs) ? options.suppressInputMs : 650,
+      ...extra
+    });
     const frame = visualLayout.frame;
     if (!frame) {
-      startLevel(nodeId, { suppressInputMs: 650 });
+      startLevel(nodeId, buildStartOptions({
+        pegIntro: options.pegIntro || (isPvpTransition ? createPvpPegIntroOptions() : null)
+      }));
       return;
     }
 
@@ -1803,7 +1925,9 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     }
 
     if (!outgoingCanvas || canvasRect.width <= 0 || canvasRect.height <= 0) {
-      startLevel(nodeId, { suppressInputMs: 650 });
+      startLevel(nodeId, buildStartOptions({
+        pegIntro: options.pegIntro || (isPvpTransition ? createPvpPegIntroOptions() : null)
+      }));
       return;
     }
 
@@ -1819,27 +1943,40 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
 
     outgoingCanvas.style.width = '100%';
     outgoingCanvas.style.height = '100%';
-    outgoingCanvas.style.transform = 'translateY(0)';
+    outgoingCanvas.className = horizontal ? 'level-transition-canvas--soft-edge' : '';
+    outgoingCanvas.style.transform = horizontal ? 'translateX(0)' : 'translateY(0)';
     outgoingCanvas.style.transition = `transform ${LEVEL_SCROLL_MS}ms cubic-bezier(0.22, 1, 0.36, 1)`;
     overlay.appendChild(outgoingCanvas);
 
     frame.appendChild(overlay);
     transitionOverlay = overlay;
 
-    const incomingStart = direction === 'down' ? '-100%' : '100%';
-    const outgoingEnd = direction === 'down' ? '100%' : '-100%';
-    const pegIntro = createPegIntroOptions(LEVEL_SCROLL_MS + PEG_INTRO_BLANK_MS);
+    const translate = horizontal ? 'translateX' : 'translateY';
+    const incomingStart = horizontal
+      ? (direction === 'right' ? '100%' : '-100%')
+      : (direction === 'down' ? '-100%' : '100%');
+    const outgoingEnd = horizontal
+      ? (direction === 'right' ? '-100%' : '100%')
+      : (direction === 'down' ? '100%' : '-100%');
+    const pegIntro = options.pegIntro || (isPvpTransition
+      ? createPvpPegIntroOptions(LEVEL_SCROLL_MS + PEG_INTRO_BLANK_MS)
+      : createPegIntroOptions(LEVEL_SCROLL_MS + PEG_INTRO_BLANK_MS));
     const pegIntroMinMs = pegIntro.delayMs + PEG_INTRO_DURATION_MS;
 
     canvas.style.transition = 'none';
-    canvas.style.transform = `translateY(${incomingStart})`;
-    setPortraitScrollFx(direction === 'down' ? -canvasRect.height : canvasRect.height);
+    canvas.style.transform = `${translate}(${incomingStart})`;
+    if (horizontal) {
+      canvas.parentElement?.classList.add('canvas-container--soft-horizontal');
+    }
+    if (!horizontal) {
+      setPortraitScrollFx(direction === 'down' ? -canvasRect.height : canvasRect.height);
+    }
 
-    const started = startLevel(nodeId, {
+    const started = startLevel(nodeId, buildStartOptions({
       clearTransition: false,
       suppressInputMs: pegIntroMinMs + 120,
       pegIntro
-    });
+    }));
     if (!started) {
       clearLevelTransitionArtifacts();
       return;
@@ -1847,9 +1984,9 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
 
     requestAnimationFrame(() => {
       canvas.style.transition = `transform ${LEVEL_SCROLL_MS}ms cubic-bezier(0.22, 1, 0.36, 1)`;
-      canvas.style.transform = 'translateY(0)';
-      outgoingCanvas.style.transform = `translateY(${outgoingEnd})`;
-      setPortraitScrollFx(0);
+      canvas.style.transform = `${translate}(0)`;
+      outgoingCanvas.style.transform = `${translate}(${outgoingEnd})`;
+      if (!horizontal) setPortraitScrollFx(0, 0);
     });
 
     transitionTimer = setTimeout(() => {
@@ -1906,11 +2043,7 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
         getTargetCircle: () => visualLayout.getCanvasSlotCircle?.('characterCircle', canvas),
         onVisualState: (state) => {
           if (!state) return;
-          visualLayout.setPvpOpponentTarget?.({
-            visible: true,
-            hp: state.cpuHp,
-            maxHp: state.maxHp || 3
-          });
+          updatePvpPortraitVisuals(levelData, state, 'human');
           visualLayout.setPvpAimTimer?.(
             state.timerVisible
               ? { visible: true, ratio: state.timerRatio }
@@ -1923,6 +2056,9 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
       game.suppressInputFor?.(options.suppressInputMs);
     }
     game.confirmShoot = !!localStorage.getItem('peggle_confirmShoot');
+
+    // Portrait ignite flame builds up live as the in-progress shot clears pegs.
+    game.onShotHeat = (h) => visualLayout.setFlameHeat(h);
 
     // Apply visuals (background + frame + slots)
     const visuals = normalizeVisuals(levelData.visuals);
@@ -1937,9 +2073,14 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
 
     game.loadLevel(levelData);
     let pegIntroMs = 0;
-    if (options.pegIntro) {
-      pegIntroMs = game.queuePegEntryAnimations?.(options.pegIntro) || 0;
+    const pegIntroOptions = options.pegIntro || (pvp.enabled ? createPvpPegIntroOptions() : null);
+    if (pegIntroOptions) {
+      pegIntroMs = game.queuePegEntryAnimations?.(pegIntroOptions) || 0;
       if (pegIntroMs > 0) game.suppressInputFor?.(pegIntroMs + 80);
+    }
+    if (pvp.enabled) {
+      const countdownMs = game.startIntroCountdown?.(pegIntroMs) || 0;
+      if (countdownMs > 0) game.suppressInputFor?.(countdownMs + 80);
     }
     if (pvp.enabled) {
       if (gambleSystem) {
@@ -2007,7 +2148,9 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
         // Guard: only fire once (touchstart + click can both trigger on mobile)
         let fired = false;
         const onceAction = (action, options = {}) => {
+          const acceptAfter = performance.now() + Math.max(0, Number(options.ignoreEarlyMs) || 0);
           const guarded = (event) => {
+            if (event && performance.now() < acceptAfter) return;
             if (fired) return;
             fired = true;
             if (event?.cancelable) event.preventDefault();
@@ -2024,14 +2167,14 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
             guarded();
             return;
           }
-          canvas.addEventListener('click', guarded, { once: true });
-          canvas.addEventListener('touchstart', guarded, { once: true, passive: false });
+          canvas.addEventListener('click', guarded);
+          canvas.addEventListener('touchstart', guarded, { passive: false });
         };
 
         if (activeCpuDuelMode && pvp.enabled) {
           onceAction(() => {
-            startRandomCpuDuelLevel({ suppressInputMs: 650 });
-          });
+            startRandomCpuDuelLevel({ suppressInputMs: 650, horizontalTransition: true });
+          }, { ignoreEarlyMs: 450 });
         } else if (result === 'won') {
           await ensureFullCampaignReady();
           if (!endedGame || game !== endedGame) return;
@@ -2110,7 +2253,9 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
             }, { auto: true });
           }
         } else if (pvp.enabled) {
-          onceAction(() => startLevel(currentNodeId, { suppressInputMs: 650 }));
+          onceAction(() => {
+            startRandomCpuDuelLevel({ suppressInputMs: 650, horizontalTransition: true });
+          }, { ignoreEarlyMs: 450 });
         } else {
           // Defeat — toggle mirror and restart same level
           mirrorState = !mirrorState;
