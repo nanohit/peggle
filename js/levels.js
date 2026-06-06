@@ -1,6 +1,7 @@
 // Peggle Levels - Level management and storage
 
 import { Utils } from './utils.js';
+import { PHYSICS_CONFIG, DEFAULT_PEG_RADIUS } from './physics.js';
 import { normalizeFlipperConfig } from './flipper-defaults.js';
 import {
   ensureLevelSurvival,
@@ -51,6 +52,13 @@ export function normalizeLevelData(level) {
   level.yoyo = normalizeYoyoSettings(level.yoyo);
   if (typeof level.aimLength !== 'number') level.aimLength = 300;
   level.aimLength = Math.max(0, Math.min(300, Math.round(level.aimLength)));
+  // Per-level peg/ball/brick size. Absent ⇒ default; keep it absent on legacy
+  // levels so they stay byte-identical. A present value is clamped to a sane range.
+  if (Number.isFinite(level.pegRadius)) {
+    level.pegRadius = Math.max(3, Math.min(24, level.pegRadius));
+  } else {
+    delete level.pegRadius;
+  }
   normalizeLevelHitPegClearSettings(level);
   const survival = ensureLevelSurvival(level, 600);
   const pvp = ensureLevelPvp(level);
@@ -95,6 +103,16 @@ export function normalizeLevelData(level) {
       delete peg.width;
       delete peg.height;
       delete peg.curveSlices;
+      delete peg.brickBaseRadius;
+    }
+    if (peg && peg.shape === 'brick') {
+      if (Number.isFinite(peg.brickBaseRadius)) {
+        peg.brickBaseRadius = Math.max(3, Math.min(24, peg.brickBaseRadius));
+      } else {
+        delete peg.brickBaseRadius;
+      }
+    } else if (peg) {
+      delete peg.brickBaseRadius;
     }
     normalizeDestructionPegProperties(peg);
   }
@@ -263,6 +281,12 @@ export class LevelManager {
     if (peg.shape === 'brick') {
       newPeg.width = peg.width || 40;
       newPeg.height = peg.height || 12;
+      // Record the pegRadius this brick was authored at so per-level scaling can
+      // size it relative to its own baseline (no double-scale, fully reversible).
+      // Absent ⇒ treated as DEFAULT_PEG_RADIUS, so legacy bricks are unchanged.
+      newPeg.brickBaseRadius = Number.isFinite(peg.brickBaseRadius)
+        ? peg.brickBaseRadius
+        : (Number.isFinite(PHYSICS_CONFIG.pegRadius) ? PHYSICS_CONFIG.pegRadius : DEFAULT_PEG_RADIUS);
       if (Array.isArray(peg.curveSlices)) {
         newPeg.curveSlices = peg.curveSlices.map(slice => ({ ...slice }));
       }
@@ -281,6 +305,10 @@ export class LevelManager {
       newPeg.bumperDisappear = !!peg.bumperDisappear;
       newPeg.bumperOrange = !!peg.bumperOrange;
       newPeg.shape = 'circle'; // bumpers are always circles
+      delete newPeg.width;
+      delete newPeg.height;
+      delete newPeg.curveSlices;
+      delete newPeg.brickBaseRadius;
     }
 
     // Portal properties
@@ -310,6 +338,7 @@ export class LevelManager {
       delete newPeg.width;
       delete newPeg.height;
       delete newPeg.curveSlices;
+      delete newPeg.brickBaseRadius;
     }
 
     level.pegs.push(newPeg);

@@ -1,5 +1,6 @@
 import { Utils } from './utils.js';
 import { isPortalType } from './portal-defaults.js';
+import { getEffectiveBrickSize } from './physics.js';
 import { MAX_LUCK } from './slots-math.js';
 
 const MIN_SPEED_CURVE_Y = 0.05;
@@ -411,7 +412,7 @@ export function getPegVerticalExtent(peg, pegRadius = 10) {
   if (!peg) return r;
 
   if (peg.shape === 'brick') {
-    const height = toFiniteNumber(peg.height, r * 1.2);
+    const height = getEffectiveBrickSize(peg).height;
     return Math.max(r * 0.6, height / 2);
   }
 

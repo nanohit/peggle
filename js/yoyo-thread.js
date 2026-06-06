@@ -1,7 +1,7 @@
 // Yo-yo thread simulation for launched balls.
 // Uses a rope-chain (Verlet) solver with obstacle constraints for smooth curved wrapping.
 
-import { PHYSICS_CONFIG } from './physics.js';
+import { PHYSICS_CONFIG, getEffectiveBrickSize } from './physics.js';
 import { Utils } from './utils.js';
 import { getPortalScale, isPortalType } from './portal-defaults.js';
 
@@ -148,8 +148,7 @@ function getPegWrapRadius(peg, wrapPadding) {
   if (!peg) return PHYSICS_CONFIG.pegRadius + wrapPadding;
 
   if (peg.shape === 'brick') {
-    const width = peg.width || PHYSICS_CONFIG.brickWidth;
-    const height = peg.height || PHYSICS_CONFIG.brickHeight;
+    const { width, height } = getEffectiveBrickSize(peg);
     return Math.hypot(width, height) * 0.5 + wrapPadding;
   }
 
@@ -1840,8 +1839,7 @@ export class YoyoThreadSystem {
       }
 
       if (peg.shape === 'brick') {
-        const width = peg.width || PHYSICS_CONFIG.brickWidth;
-        const height = peg.height || PHYSICS_CONFIG.brickHeight;
+        const { width, height } = getEffectiveBrickSize(peg);
         const angle = peg.angle || 0;
         const halfW = width * 0.5 + wrapPad;
         const halfH = height * 0.5 + wrapPad;

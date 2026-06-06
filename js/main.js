@@ -3,7 +3,7 @@
 import { Game } from './game.js';
 import { Editor } from './editor.js';
 import { LevelManager, cloneLevelSnapshot, normalizeLevelData } from './levels.js';
-import { PHYSICS_CONFIG } from './physics.js';
+import { PHYSICS_CONFIG, DEFAULT_PEG_RADIUS } from './physics.js';
 import { FLIPPER_DEFAULTS, createDefaultFlipperConfig, normalizeFlipperConfig } from './flipper-defaults.js';
 import {
   ensureLevelSurvival,
@@ -1200,12 +1200,26 @@ class PeggleApp {
       document.getElementById('speedValue').textContent = PHYSICS_CONFIG.timeScale.toFixed(2);
     });
 
-    // Peg size
+    // Peg size — per-level. Unlike the other physics sliders (session globals),
+    // this writes onto the level being edited so it bakes/serves with it. The
+    // editor render loop re-applies level.pegRadius as the global each frame.
     const sizeSlider = document.getElementById('sizeSlider');
     sizeSlider.value = PHYSICS_CONFIG.pegRadius;
     sizeSlider.addEventListener('input', (e) => {
-      PHYSICS_CONFIG.pegRadius = parseInt(e.target.value);
-      document.getElementById('sizeValue').textContent = PHYSICS_CONFIG.pegRadius;
+      const v = parseFloat(e.target.value);
+      if (!Number.isFinite(v)) return;
+      PHYSICS_CONFIG.pegRadius = v;
+      document.getElementById('sizeValue').textContent = v;
+      const level = this.levelManager?.getCurrentLevel?.();
+      if (level) {
+        level.pegRadius = v;
+        level.metadata = level.metadata || {};
+        level.metadata.modified = new Date().toISOString();
+      }
+    });
+    sizeSlider.addEventListener('change', () => {
+      // Persist on drag release (avoid a localStorage write every input tick).
+      if (this.levelManager?.getCurrentLevel?.()) this.levelManager.save();
     });
 
     // Launch power
@@ -1252,8 +1266,12 @@ class PeggleApp {
     document.getElementById('speedSlider').value = PHYSICS_CONFIG.timeScale * 100;
     document.getElementById('speedValue').textContent = PHYSICS_CONFIG.timeScale.toFixed(2);
     
-    document.getElementById('sizeSlider').value = PHYSICS_CONFIG.pegRadius;
-    document.getElementById('sizeValue').textContent = PHYSICS_CONFIG.pegRadius;
+    const sizeLevel = this.levelManager?.getCurrentLevel?.();
+    const sizeVal = (sizeLevel && Number.isFinite(sizeLevel.pegRadius))
+      ? sizeLevel.pegRadius
+      : DEFAULT_PEG_RADIUS;
+    document.getElementById('sizeSlider').value = sizeVal;
+    document.getElementById('sizeValue').textContent = sizeVal;
     
     document.getElementById('powerSlider').value = PHYSICS_CONFIG.launchPower;
     document.getElementById('powerValue').textContent = PHYSICS_CONFIG.launchPower.toFixed(1);

@@ -1,4 +1,4 @@
-import { PHYSICS_CONFIG } from './physics.js';
+import { PHYSICS_CONFIG, getEffectiveBrickSize } from './physics.js';
 import { Utils } from './utils.js';
 import { isPortalType } from './portal-defaults.js';
 
@@ -110,18 +110,15 @@ function getPegSlideRadius(peg) {
   if (!peg) return PHYSICS_CONFIG.pegRadius;
   if (peg.type === 'bumper') return PHYSICS_CONFIG.pegRadius * (peg.bumperScale || 1);
   if (peg.shape === 'brick') {
-    const width = Number.isFinite(peg.width) ? peg.width : PHYSICS_CONFIG.brickWidth;
-    const height = Number.isFinite(peg.height) ? peg.height : PHYSICS_CONFIG.brickHeight;
+    const { width, height } = getEffectiveBrickSize(peg);
     return Math.max(PHYSICS_CONFIG.pegRadius, Math.hypot(width, height) * 0.5);
   }
   return PHYSICS_CONFIG.pegRadius;
 }
 
 function getBrickHalfSize(peg) {
-  return {
-    halfWidth: (Number.isFinite(peg?.width) ? peg.width : PHYSICS_CONFIG.brickWidth) * 0.5,
-    halfHeight: (Number.isFinite(peg?.height) ? peg.height : PHYSICS_CONFIG.brickHeight) * 0.5
-  };
+  const { width, height } = getEffectiveBrickSize(peg);
+  return { halfWidth: width * 0.5, halfHeight: height * 0.5 };
 }
 
 function getPegWallExtents(peg) {

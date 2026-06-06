@@ -3,7 +3,7 @@
 import { Renderer } from './renderer.js';
 import { LevelManager } from './levels.js';
 import { Utils } from './utils.js';
-import { PHYSICS_CONFIG } from './physics.js';
+import { PHYSICS_CONFIG, DEFAULT_PEG_RADIUS, getEffectiveBrickSize } from './physics.js';
 import { FLIPPER_DEFAULTS, normalizeFlipperConfig } from './flipper-defaults.js';
 import { SurvivalRuntime } from './survival-runtime.js';
 import { ensureLevelSurvival, normalizeSurvivalGamblePegProperties } from './survival-mode.js';
@@ -914,8 +914,7 @@ export class Editor {
       if (!this.isPvpEditablePeg(peg)) continue;
       
       if (peg.shape === 'brick') {
-        const w = peg.width || this.getBrickWidth();
-        const h = peg.height || this.getBrickHeight();
+        const { width: w, height: h } = getEffectiveBrickSize(peg);
         
         const cos = Math.cos(-(peg.angle || 0));
         const sin = Math.sin(-(peg.angle || 0));
@@ -1034,7 +1033,8 @@ export class Editor {
         let extentX;
         let extentY;
         if (peg.shape === 'brick') {
-          const r = Math.max(peg.width || 40, peg.height || 12) / 2;
+          const { width, height } = getEffectiveBrickSize(peg);
+          const r = Math.max(width, height) / 2;
           extentX = r;
           extentY = r;
         } else if (peg.type === 'bumper') {
@@ -2101,6 +2101,7 @@ export class Editor {
         peg.type = type;
         if (type === 'bumper') {
           peg.shape = 'circle';
+          delete peg.brickBaseRadius;
           if (peg.bumperBounce == null) peg.bumperBounce = 2.0;
           if (peg.bumperScale == null) peg.bumperScale = 1.0;
           delete peg.portalScale;
@@ -2114,6 +2115,7 @@ export class Editor {
           delete peg.gambleKnockbackSmoothMs;
         } else if (isPortalType(type)) {
           peg.shape = 'circle';
+          delete peg.brickBaseRadius;
           if (peg.portalScale == null) peg.portalScale = PORTAL_DEFAULT_SCALE;
           if (peg.portalOneWay == null) peg.portalOneWay = true;
           if (peg.portalOneWayFlip == null) peg.portalOneWayFlip = true;
@@ -2134,6 +2136,7 @@ export class Editor {
           delete peg.width;
           delete peg.height;
           delete peg.curveSlices;
+          delete peg.brickBaseRadius;
           delete peg.multiballSpawnCount;
           delete peg.gambleBallCount;
           delete peg.gambleLuckBonus;
@@ -2235,6 +2238,13 @@ export class Editor {
         if (peg.shape === 'brick') {
           peg.width = peg.width || this.getBrickWidth();
           peg.height = peg.height || this.getBrickHeight();
+          if (!Number.isFinite(peg.brickBaseRadius)) {
+            peg.brickBaseRadius = Number.isFinite(PHYSICS_CONFIG.pegRadius)
+              ? PHYSICS_CONFIG.pegRadius
+              : DEFAULT_PEG_RADIUS;
+          }
+        } else {
+          delete peg.brickBaseRadius;
         }
       }
     }
@@ -2379,7 +2389,14 @@ export class Editor {
       shape: peg.shape,
       angle: peg.angle,
       width: peg.width,
-      height: peg.height
+      height: peg.height,
+      // Carry the source's EFFECTIVE base so the copy matches it visually at any
+      // level size. A legacy brick (absent base) is implicitly DEFAULT_PEG_RADIUS;
+      // pin that explicitly so addPeg doesn't re-stamp the current size and make
+      // the duplicate diverge from its source in a resized level.
+      brickBaseRadius: peg.shape === 'brick'
+        ? (Number.isFinite(peg.brickBaseRadius) ? peg.brickBaseRadius : DEFAULT_PEG_RADIUS)
+        : peg.brickBaseRadius
     };
     const curveSlices = this.cloneCurveSlicesForOffset(peg.curveSlices, offsetX, offsetY);
     if (curveSlices) pegData.curveSlices = curveSlices;
@@ -2559,6 +2576,14 @@ export class Editor {
 
   render() {
     const level = this.levelManager.getCurrentLevel();
+    // Keep the global peg size in sync with the level being edited so the canvas
+    // (ball, circle pegs, brick thickness) renders at the level's size and the
+    // size never leaks across level switches. Absent ⇒ default 8.5.
+    if (level) {
+      PHYSICS_CONFIG.pegRadius = Number.isFinite(level.pegRadius)
+        ? level.pegRadius
+        : DEFAULT_PEG_RADIUS;
+    }
     const survivalOn = this.isSurvivalMode();
     const baseRenderPegs = (level && this.mode === 'draw' && this.drawShapeMode === 'bezier' && this.bezierDraft && this.activeBezierGroupId)
       ? level.pegs.filter(p => p.bezierGroupId !== this.activeBezierGroupId)

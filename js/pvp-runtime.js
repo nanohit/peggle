@@ -1,5 +1,5 @@
 import { Renderer } from './renderer.js';
-import { Ball, PhysicsEngine, PHYSICS_CONFIG, getBallRadius } from './physics.js';
+import { Ball, PhysicsEngine, PHYSICS_CONFIG, getBallRadius, DEFAULT_PEG_RADIUS } from './physics.js';
 import { Utils } from './utils.js';
 import { initAudio, lightTap, pegHitSound, resetHitCounter } from './haptics.js';
 import {
@@ -409,6 +409,12 @@ export class PvpRuntime {
 
   loadLevel(level) {
     this.level = clone(level || {});
+    // Per-level peg/ball/brick size (absent ⇒ default). PvP is its own runtime
+    // with its own renderer/physics, so set the global here too — before
+    // setPegs — so a duel honors its size and never inherits a leftover one.
+    PHYSICS_CONFIG.pegRadius = Number.isFinite(this.level.pegRadius)
+      ? this.level.pegRadius
+      : DEFAULT_PEG_RADIUS;
     this.settings = ensureLevelPvp(this.level);
     this.matchHp = this.settings.hitsToWin || PVP_DEFAULT_HITS_TO_WIN;
     this.setAimLength(this.settings.aimLength ?? PVP_DEFAULT_AIM_LENGTH);

@@ -1,6 +1,6 @@
 // Peg Animation System - cyclic peg/group animations during gameplay
 
-import { PHYSICS_CONFIG } from './physics.js';
+import { PHYSICS_CONFIG, getEffectiveBrickSize } from './physics.js';
 import { getPortalScale, isPortalType } from './portal-defaults.js';
 
 function linear(t) { return t; }
@@ -226,7 +226,8 @@ export function estimatePegExtents(peg, centerX, centerY, angle = 0, slices = nu
     return { x: r, y: r };
   }
 
-  const halfH = (peg.height || PHYSICS_CONFIG.pegRadius * 1.2) / 2;
+  const effBrick = getEffectiveBrickSize(peg);
+  const halfH = effBrick.height / 2;
   if (slices && slices.length >= 2) {
     let minX = Infinity, maxX = -Infinity;
     let minY = Infinity, maxY = -Infinity;
@@ -246,7 +247,7 @@ export function estimatePegExtents(peg, centerX, centerY, angle = 0, slices = nu
     };
   }
 
-  const halfW = (peg.width || PHYSICS_CONFIG.pegRadius * 4) / 2;
+  const halfW = effBrick.width / 2;
   const cos = Math.cos(angle);
   const sin = Math.sin(angle);
   return {

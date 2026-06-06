@@ -1,4 +1,4 @@
-import { PHYSICS_CONFIG } from './physics.js';
+import { PHYSICS_CONFIG, getEffectiveBrickSize } from './physics.js';
 import { Utils } from './utils.js';
 import { getPortalScale, isPortalType } from './portal-defaults.js';
 
@@ -173,10 +173,11 @@ function getPegRadius(peg) {
 }
 
 function getBrickSize(peg) {
-  return {
-    width: Number.isFinite(peg?.width) ? peg.width : PHYSICS_CONFIG.brickWidth,
-    height: Number.isFinite(peg?.height) ? peg.height : PHYSICS_CONFIG.brickHeight
-  };
+  // Effective (per-level scaled) size — drives mass, inertia, colliders and AABB.
+  // Curved ribbons get thinner via height only; the centerline (curveSlices,
+  // and thus getCurveRibbonLength) is unchanged, so curved-brick mass scales
+  // linearly with thickness while flat-brick mass scales with area.
+  return getEffectiveBrickSize(peg);
 }
 
 function hasCurveSlices(peg) {
@@ -669,6 +670,7 @@ function fillBucketEdgeCollider(collider, bucket, bucketBody, bucketPeg, vx, sid
   bucketPeg.y = bucket.y - bucketH * 0.08;
   bucketPeg.width = rimThickness;
   bucketPeg.height = rimHeight;
+  bucketPeg.brickBaseRadius = PHYSICS_CONFIG.pegRadius;
   bucketBody.vx = vx;
 
   collider.kind = 'bucket';
@@ -689,6 +691,7 @@ function fillKinematicRectCollider(collider, rect, body, peg, kind) {
   peg.angle = Number.isFinite(rect.angle) ? rect.angle : 0;
   peg.width = Math.max(1, Number.isFinite(rect.width) ? rect.width : PHYSICS_CONFIG.brickWidth);
   peg.height = Math.max(1, Number.isFinite(rect.height) ? rect.height : PHYSICS_CONFIG.brickHeight);
+  peg.brickBaseRadius = PHYSICS_CONFIG.pegRadius;
   body.vx = Number.isFinite(rect.vx) ? rect.vx : 0;
   body.vy = Number.isFinite(rect.vy) ? rect.vy : 0;
 

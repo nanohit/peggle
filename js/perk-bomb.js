@@ -1,4 +1,4 @@
-import { PHYSICS_CONFIG, getBallRadius } from './physics.js';
+import { PHYSICS_CONFIG, getBallRadius, getEffectiveBrickSize } from './physics.js';
 
 const DEFAULT_SHOCKWAVE_RADIUS_MULTIPLIER = 6;
 
@@ -10,8 +10,7 @@ function getPegReachRadius(peg) {
   if (!peg) return PHYSICS_CONFIG.pegRadius;
 
   if (peg.shape === 'brick') {
-    const width = peg.width || PHYSICS_CONFIG.brickWidth;
-    const height = peg.height || PHYSICS_CONFIG.brickHeight;
+    const { width, height } = getEffectiveBrickSize(peg);
     return Math.hypot(width, height) * 0.5;
   }
 

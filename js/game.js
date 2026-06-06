@@ -1,6 +1,6 @@
 // Peggle Game - Game loop and mechanics
 
-import { Ball, PhysicsEngine, PHYSICS_CONFIG, getBallRadius } from './physics.js';
+import { Ball, PhysicsEngine, PHYSICS_CONFIG, getBallRadius, getEffectiveBrickSize, DEFAULT_PEG_RADIUS } from './physics.js';
 import { Renderer } from './renderer.js';
 import { Utils } from './utils.js';
 import { PegAnimator } from './animation.js';
@@ -797,8 +797,9 @@ export class Game {
     const localOriginY = -(originX - pegX) * sin + (originY - pegY) * cos;
     const localDirX = dirX * cos + dirY * sin;
     const localDirY = -dirX * sin + dirY * cos;
-    const baseHalfW = (Number.isFinite(peg.width) ? peg.width : PHYSICS_CONFIG.brickWidth) * 0.5;
-    const baseHalfH = (Number.isFinite(peg.height) ? peg.height : PHYSICS_CONFIG.brickHeight) * 0.5;
+    const effBrick = getEffectiveBrickSize(peg);
+    const baseHalfW = effBrick.width * 0.5;
+    const baseHalfH = effBrick.height * 0.5;
     const halfW = baseHalfW + padding;
     const halfH = baseHalfH + padding;
 
@@ -1660,8 +1661,7 @@ export class Game {
 
     let sourceExtent = this.physics.getPegCollisionRadius(peg);
     if (peg?.shape === 'brick') {
-      const width = Number.isFinite(peg.width) ? peg.width : PHYSICS_CONFIG.brickWidth;
-      const height = Number.isFinite(peg.height) ? peg.height : PHYSICS_CONFIG.brickHeight;
+      const { width, height } = getEffectiveBrickSize(peg);
       const halfWidth = width / 2;
       const halfHeight = height / 2;
       const pegAngle = peg.angle || 0;
@@ -2179,6 +2179,14 @@ export class Game {
   }
 
   loadLevel(levelData) {
+    // Per-level peg/ball/brick size. Absent ⇒ DEFAULT_PEG_RADIUS, so legacy
+    // levels are untouched. Set BEFORE pegs are copied / physics.setPegs() /
+    // destruction bodies are built, since all of those read the global live
+    // (this is also the reset that stops a custom size leaking across campaign
+    // levels). Editing the global elsewhere is overridden here on every load.
+    PHYSICS_CONFIG.pegRadius = Number.isFinite(levelData?.pegRadius)
+      ? levelData.pegRadius
+      : DEFAULT_PEG_RADIUS;
     this.levelFxId++;
     this.backgroundEvents = [];
     if (
@@ -2425,8 +2433,7 @@ export class Game {
     if (!peg || !Number.isFinite(peg.x) || !Number.isFinite(peg.y)) return;
     let radius = PHYSICS_CONFIG.pegRadius * 5.2;
     if (peg.shape === 'brick') {
-      const width = Number.isFinite(peg.width) ? peg.width : PHYSICS_CONFIG.brickWidth;
-      const height = Number.isFinite(peg.height) ? peg.height : PHYSICS_CONFIG.brickHeight;
+      const { width, height } = getEffectiveBrickSize(peg);
       radius = Math.max(radius, Math.hypot(width, height) * 0.62);
     } else if (peg.type === 'bumper') {
       radius = Math.max(radius, PHYSICS_CONFIG.pegRadius * (peg.bumperScale || 1) * 5);

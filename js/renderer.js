@@ -1,6 +1,6 @@
 // Peggle Renderer - Canvas rendering for game and editor
 
-import { PHYSICS_CONFIG, getBallRadius } from './physics.js';
+import { PHYSICS_CONFIG, getBallRadius, getEffectiveBrickSize } from './physics.js';
 import { LiquidBackground } from './liquid-background.js';
 import {
   BallTrailRenderer,
@@ -1676,7 +1676,7 @@ export class Renderer {
 
     // ── Curved brick: render as a warped ribbon in world space ──
     if (peg.shape === 'brick' && peg.curveSlices && peg.curveSlices.length >= 2) {
-      const halfH = (peg.height || PHYSICS_CONFIG.pegRadius * 1.2) / 2;
+      const halfH = getEffectiveBrickSize(peg).height / 2;
       const sl = peg.curveSlices;
       const surfaceStyle = !peg.color ? this._getPegSurfaceStyle(peg.type) : null;
       ctx.save();
@@ -1716,8 +1716,7 @@ export class Renderer {
     const surfaceStyle = !peg.color ? this._getPegSurfaceStyle(peg.type) : null;
 
     if (peg.shape === 'brick') {
-      const w = peg.width || PHYSICS_CONFIG.pegRadius * 4;
-      const h = peg.height || PHYSICS_CONFIG.pegRadius * 1.2;
+      const { width: w, height: h } = getEffectiveBrickSize(peg);
       const brickSprite = surfaceStyle ? this._brickPegBodySprite(peg.type, w, h, isHit) : null;
 
       if (brickSprite) {
@@ -1807,8 +1806,7 @@ export class Renderer {
       ctx.lineWidth = 2;
 
       if (peg.shape === 'brick') {
-        const w = peg.width || PHYSICS_CONFIG.brickWidth;
-        const h = peg.height || PHYSICS_CONFIG.brickHeight;
+        const { width: w, height: h } = getEffectiveBrickSize(peg);
         ctx.strokeRect(-w/2 - 4, -h/2 - 4, w + 8, h + 8);
       } else {
         ctx.beginPath();
@@ -1822,8 +1820,7 @@ export class Renderer {
       ctx.globalAlpha = 0.45;
 
       if (peg.shape === 'brick') {
-        const w = peg.width || PHYSICS_CONFIG.brickWidth;
-        const h = peg.height || PHYSICS_CONFIG.brickHeight;
+        const { width: w, height: h } = getEffectiveBrickSize(peg);
         const rg = this._rectGlow(colors.hit, w, h, 6, 2);
         ctx.drawImage(rg.img, -rg.hw, -rg.hh);
       } else {
@@ -3243,15 +3240,14 @@ export class Renderer {
     ctx.lineWidth = 1.5;
     for (const ghost of ghosts) {
       if (ghost.shape === 'brick' && ghost.curveSlices && ghost.curveSlices.length >= 2) {
-        const halfH = (ghost.height || radius * 1.2) / 2;
+        const halfH = getEffectiveBrickSize(ghost).height / 2;
         this.drawCurvedBrickPath(ctx, ghost.curveSlices, halfH + 3, -halfH - 3);
         ctx.stroke();
       } else if (ghost.shape === 'brick') {
         ctx.save();
         ctx.translate(ghost.x, ghost.y);
         ctx.rotate(ghost.angle || 0);
-        const w = ghost.width || radius * 4;
-        const h = ghost.height || radius * 1.2;
+        const { width: w, height: h } = getEffectiveBrickSize(ghost);
         ctx.strokeRect(-w/2 - 3, -h/2 - 3, w + 6, h + 6);
         ctx.restore();
       } else {
@@ -3398,9 +3394,11 @@ export class Renderer {
     for (const peg of pegs) {
       const hasAnim = peg.animation || groupAnimIds.has(peg.id);
       if (hasAnim) {
-        const radius = peg.shape === 'brick'
-          ? Math.max(peg.width || 40, peg.height || 12) / 2
-          : PHYSICS_CONFIG.pegRadius;
+        let radius = PHYSICS_CONFIG.pegRadius;
+        if (peg.shape === 'brick') {
+          const { width, height } = getEffectiveBrickSize(peg);
+          radius = Math.max(width, height) / 2;
+        }
         ctx.fillText('\u2194', peg.x, peg.y - radius - 5);
       }
     }

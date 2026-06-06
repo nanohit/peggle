@@ -19,6 +19,13 @@ export const PHYSICS_CONFIG = {
   brickHeight: 10.2
 };
 
+// Canonical peg radius all legacy content was authored against. A level's
+// optional `level.pegRadius` (absent ⇒ this value) is applied to
+// PHYSICS_CONFIG.pegRadius at load, which scales the ball, circle pegs and
+// brick thickness together. Bricks remember the radius they were authored at in
+// `peg.brickBaseRadius` so they can be re-scaled relative to it without drift.
+export const DEFAULT_PEG_RADIUS = 8.5;
+
 // Get ball radius (always same as peg radius)
 export function getBallRadius() {
   return PHYSICS_CONFIG.pegRadius;
@@ -209,6 +216,30 @@ function hasCurveSlices(peg) {
   return !!(peg?.shape === 'brick' && Array.isArray(peg.curveSlices) && peg.curveSlices.length >= 2);
 }
 
+// Per-level size scale for a brick: currentPegRadius / authoringPegRadius.
+// A brick authored at `brickBaseRadius` (absent ⇒ DEFAULT_PEG_RADIUS) presents
+// at the current level's size regardless of when it was drawn — the base cancels
+// for bricks created from getBrickWidth/Height, and scales proportionally
+// otherwise. Absent base + default pegRadius ⇒ 1 ⇒ byte-identical to legacy.
+export function getBrickScale(peg) {
+  const base = Number.isFinite(peg?.brickBaseRadius) ? peg.brickBaseRadius : DEFAULT_PEG_RADIUS;
+  if (!(base > 0)) return 1;
+  return PHYSICS_CONFIG.pegRadius / base;
+}
+
+// Effective brick dimensions after per-level scaling. Flat bricks scale BOTH
+// width and height (uniform shrink). Curved/draw-mode ribbons scale ONLY the
+// thickness (height) — the centerline (curveSlices, in absolute world coords)
+// is left untouched, so seams and the authored shape/position are preserved.
+export function getEffectiveBrickSize(peg) {
+  const rawW = Number.isFinite(peg?.width) ? peg.width : PHYSICS_CONFIG.brickWidth;
+  const rawH = Number.isFinite(peg?.height) ? peg.height : PHYSICS_CONFIG.brickHeight;
+  const scale = getBrickScale(peg);
+  if (scale === 1) return { width: rawW, height: rawH };
+  if (hasCurveSlices(peg)) return { width: rawW, height: rawH * scale };
+  return { width: rawW * scale, height: rawH * scale };
+}
+
 function getCurveSliceShift(peg, pose = null) {
   return {
     x: Number.isFinite(pose?.x) ? pose.x - peg.x : 0,
@@ -218,7 +249,7 @@ function getCurveSliceShift(peg, pose = null) {
 
 function getCurveBrickBounds(peg, pose = null) {
   if (!hasCurveSlices(peg)) return null;
-  const halfH = (Number.isFinite(peg.height) ? peg.height : PHYSICS_CONFIG.brickHeight) * 0.5;
+  const halfH = getEffectiveBrickSize(peg).height * 0.5;
   const shift = getCurveSliceShift(peg, pose);
   let minX = Infinity;
   let maxX = -Infinity;
@@ -262,7 +293,7 @@ function getCurveBrickBounds(peg, pose = null) {
 function getCurveBrickCollision(ball, peg, pose = null) {
   if (!hasCurveSlices(peg)) return null;
   const shift = getCurveSliceShift(peg, pose);
-  const height = Number.isFinite(peg.height) ? peg.height : PHYSICS_CONFIG.brickHeight;
+  const height = getEffectiveBrickSize(peg).height;
   let best = null;
 
   for (let i = 0; i < peg.curveSlices.length - 1; i++) {
@@ -481,8 +512,7 @@ export class PhysicsEngine {
     if (peg.shape === 'brick') {
       const curveBounds = getCurveBrickBounds(peg, pose);
       if (curveBounds) return curveBounds;
-      const w = Number.isFinite(peg.width) ? peg.width : PHYSICS_CONFIG.brickWidth;
-      const h = Number.isFinite(peg.height) ? peg.height : PHYSICS_CONFIG.brickHeight;
+      const { width: w, height: h } = getEffectiveBrickSize(peg);
       const hw = w / 2;
       const hh = h / 2;
       const angle = peg.angle || 0;
@@ -521,7 +551,7 @@ export class PhysicsEngine {
       if (peg.shape === 'brick') {
         collision = hasCurveSlices(peg)
           ? getCurveBrickCollision(ball, peg, pose)
-          : circleRectCollision(ball, { ...peg, x: pose.x, y: pose.y });
+          : circleRectCollision(ball, { ...peg, x: pose.x, y: pose.y, ...getEffectiveBrickSize(peg) });
       } else {
         collision = Utils.circleCollision(ball, {
           x: pose.x,
