@@ -17,6 +17,7 @@ import { normalizeLevelCharacterAssignment } from './character-config.js';
 import { normalizeLevelHitPegClearSettings } from './hit-peg-clear-settings.js';
 import { isPortalType, normalizePortalPegProperties } from './portal-defaults.js';
 import { ensureLevelBilliard, isBilliardPegType } from './billiard-mode.js';
+import { isBombMagnetType, normalizeMagnetPegProperties } from './magnet-defaults.js';
 import {
   ensureLevelDestruction,
   normalizeDestructionPegProperties
@@ -97,6 +98,9 @@ export function normalizeLevelData(level) {
     }
     if (peg && isPortalType(peg.type)) {
       normalizePortalPegProperties(peg, { upgradeLegacyDefault: true });
+    }
+    if (peg && isBombMagnetType(peg.type)) {
+      normalizeMagnetPegProperties(peg);
     }
     if (peg && isBilliardPegType(peg.type)) {
       peg.shape = 'circle';
@@ -322,6 +326,16 @@ export class LevelManager {
     }
     if (peg.type === 'gamble') {
       Object.assign(newPeg, normalizeSurvivalGamblePegProperties(peg));
+    }
+    if (isBombMagnetType(peg.type)) {
+      Object.assign(newPeg, {
+        magnetRadius: peg.magnetRadius,
+        magnetStrength: peg.magnetStrength,
+        magnetMode: peg.magnetMode,
+        magnetExplosionPower: peg.magnetExplosionPower,
+        magnetBlast: peg.magnetBlast === true
+      });
+      normalizeMagnetPegProperties(newPeg);
     }
     if (Object.prototype.hasOwnProperty.call(peg, 'destructionStatic')) {
       newPeg.destructionStatic = peg.destructionStatic;

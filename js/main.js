@@ -56,6 +56,7 @@ import {
   ensureLevelDestruction,
   normalizeDestructionSettings
 } from './destruction-mode.js';
+import { isBombMagnetType, normalizeMagnetMode } from './magnet-defaults.js';
 import { VisualLayout } from './visual-layout.js';
 import { normalizeVisuals } from './visual-config.js';
 import {
@@ -1144,6 +1145,9 @@ class PeggleApp {
     // Bomb peg panel
     this.setupBombPanel();
 
+    // Bomb magnet panel
+    this.setupMagnetPanel();
+
     // Portal panel
     this.setupPortalPanel();
 
@@ -1788,6 +1792,99 @@ class PeggleApp {
 
   closeBombPanel() {
     document.getElementById('bombPanel').classList.remove('visible');
+  }
+
+  setupMagnetPanel() {
+    const radiusSlider = document.getElementById('magnetRadiusSlider');
+    const radiusInput = document.getElementById('magnetRadiusInput');
+    const strengthSlider = document.getElementById('magnetStrengthSlider');
+    const strengthInput = document.getElementById('magnetStrengthInput');
+    const explosionSlider = document.getElementById('magnetExplosionSlider');
+    const explosionInput = document.getElementById('magnetExplosionInput');
+    const modeSelect = document.getElementById('magnetModeSelect');
+    const blastToggle = document.getElementById('magnetBlastToggle');
+
+    document.getElementById('closeMagnetPanel').addEventListener('click', () => {
+      this.closeMagnetPanel();
+    });
+
+    const syncBlastEnabledUi = (on) => {
+      const dim = !on;
+      [explosionSlider, explosionInput].forEach(el => { if (el) el.disabled = dim; });
+      const powerRow = document.getElementById('magnetPowerRow');
+      if (powerRow) powerRow.classList.toggle('magnet-row--disabled', dim);
+    };
+
+    blastToggle.addEventListener('change', () => {
+      if (!this.editor) return;
+      this.editor.setSelectedMagnetBlast(blastToggle.checked);
+      syncBlastEnabledUi(blastToggle.checked);
+    });
+    this._syncMagnetBlastEnabledUi = syncBlastEnabledUi;
+
+    radiusSlider.addEventListener('input', () => {
+      if (!this.editor) return;
+      const v = parseInt(radiusSlider.value, 10) || 96;
+      radiusInput.value = String(v);
+      this.editor.setSelectedMagnetRadius(v);
+    });
+    radiusInput.addEventListener('input', () => {
+      if (!this.editor) return;
+      const v = parseFloat(radiusInput.value) || 96;
+      radiusSlider.value = Math.max(24, Math.min(280, Math.round(v / 4) * 4));
+      this.editor.setSelectedMagnetRadius(v);
+    });
+
+    strengthSlider.addEventListener('input', () => {
+      if (!this.editor) return;
+      const v = (parseInt(strengthSlider.value, 10) || 0) / 100;
+      strengthInput.value = v.toFixed(2);
+      this.editor.setSelectedMagnetStrength(v);
+    });
+    strengthInput.addEventListener('input', () => {
+      if (!this.editor) return;
+      const v = parseFloat(strengthInput.value) || 0;
+      strengthSlider.value = Math.max(0, Math.min(250, Math.round(v * 100)));
+      this.editor.setSelectedMagnetStrength(v);
+    });
+
+    explosionSlider.addEventListener('input', () => {
+      if (!this.editor) return;
+      const v = (parseInt(explosionSlider.value, 10) || 30) / 100;
+      explosionInput.value = v.toFixed(2);
+      this.editor.setSelectedMagnetExplosionPower(v);
+    });
+    explosionInput.addEventListener('input', () => {
+      if (!this.editor) return;
+      const v = parseFloat(explosionInput.value) || 1.15;
+      explosionSlider.value = Math.max(30, Math.min(400, Math.round(v * 100)));
+      this.editor.setSelectedMagnetExplosionPower(v);
+    });
+
+    modeSelect.addEventListener('change', () => {
+      if (!this.editor) return;
+      this.editor.setSelectedMagnetMode(normalizeMagnetMode(modeSelect.value));
+    });
+  }
+
+  showMagnetPanel() {
+    const props = this.editor ? this.editor.getSelectedMagnetProperties() : null;
+    if (!props) return;
+    document.getElementById('magnetRadiusSlider').value = Math.round(props.radius / 4) * 4;
+    document.getElementById('magnetRadiusInput').value = String(Math.round(props.radius));
+    document.getElementById('magnetStrengthSlider').value = Math.round(props.strength * 100);
+    document.getElementById('magnetStrengthInput').value = props.strength.toFixed(2);
+    document.getElementById('magnetExplosionSlider').value = Math.round(props.explosionPower * 100);
+    document.getElementById('magnetExplosionInput').value = props.explosionPower.toFixed(2);
+    document.getElementById('magnetModeSelect').value = normalizeMagnetMode(props.mode);
+    const blastToggle = document.getElementById('magnetBlastToggle');
+    if (blastToggle) blastToggle.checked = !!props.blast;
+    this._syncMagnetBlastEnabledUi?.(!!props.blast);
+    document.getElementById('magnetPanel').classList.add('visible');
+  }
+
+  closeMagnetPanel() {
+    document.getElementById('magnetPanel').classList.remove('visible');
   }
 
   showPortalPanel() {
@@ -3116,7 +3213,7 @@ class PeggleApp {
   }
 
   _isCircleOnlyType(type) {
-    return type === 'bumper' || type === 'bomb' || this._isPortalType(type) || isBilliardPegType(type);
+    return type === 'bumper' || type === 'bomb' || isBombMagnetType(type) || this._isPortalType(type) || isBilliardPegType(type);
   }
 
   _setActiveShapeButton(shape) {
@@ -3147,6 +3244,12 @@ class PeggleApp {
       this.closeBombPanel();
     }
 
+    if (count > 0 && this.editor.isSelectionAllBombMagnets()) {
+      this.showMagnetPanel();
+    } else {
+      this.closeMagnetPanel();
+    }
+
     if (count > 0 && (this.editor.isSelectionAllMultiballs() || this.editor.isSelectionAllGamblePegs())) {
       this.showMultiballPanel();
     } else {
@@ -3172,7 +3275,7 @@ class PeggleApp {
 
     const typeColors = {
       orange: '#ff6b35', billiardRed: '#e84d4d', billiardYellow: '#ffd447', blue: '#4ecdc4', green: '#95d5b2',
-      purple: '#c77dff', multi: '#ff4d9d', obstacle: '#6b7280', bomb: '#ff1f2d',
+      purple: '#c77dff', multi: '#ff4d9d', obstacle: '#6b7280', bomb: '#ff1f2d', bombMagnet: '#22d3ee',
       gamble: '#8cff00', bumper: '#e0e0e0', portalBlue: '#4ecdc4', portalOrange: '#ff8b3d'
     };
 
@@ -3392,6 +3495,7 @@ class PeggleApp {
     if (this.editor) {
       this.closeAnimationPanel?.();
       this.closeBumperPanel?.();
+      this.closeMagnetPanel?.();
       this.closePortalPanel?.();
       this.closeMultiballPanel?.();
       this.closeFlipperPanel?.();
@@ -3509,6 +3613,7 @@ class PeggleApp {
       // Close panels if open
       this.closeAnimationPanel();
       this.closeBumperPanel();
+      this.closeMagnetPanel();
       this.closePortalPanel();
       this.closeMultiballPanel();
       this.closeDestructionPegPanel();

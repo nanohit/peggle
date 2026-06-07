@@ -13,11 +13,13 @@ import {
 } from './shockwave-effect.js';
 import { getPortalScale, isPortalType } from './portal-defaults.js';
 import { FLIPPER_DEFAULTS } from './flipper-defaults.js';
+import { getMagnetRadius, getMagnetStrength, isBombMagnetPeg, normalizeMagnetMode } from './magnet-defaults.js';
 
 const FLIPPER_ASSET_SRC = 'visuals/assets_webtp/flipper.webp';
 const FLIPPER_ASSET_PIVOT_X_RATIO = 26.5 / 267;
 const FLIPPER_ASSET_OPAQUE_TOP_RATIO = 1 / 53;
 const FLIPPER_ASSET_OPAQUE_BOTTOM_RATIO = 51 / 53;
+const MAGNET_FIELD_PROFILE_LIMITS = Object.freeze({ full: 6, balanced: 4, lite: 2 });
 
 // Color palette
 const COLORS = {
@@ -38,6 +40,11 @@ const COLORS = {
   bomb: '#ff1f2d',
   bombHit: '#ff7a5c',
   bombGlow: 'rgba(255, 31, 45, 0.6)',
+
+  magnet: '#22d3ee',
+  magnetHit: '#ff6b4a',
+  magnetGlow: 'rgba(34, 211, 238, 0.58)',
+  magnetRepelGlow: 'rgba(255, 82, 68, 0.5)',
 
   billiardYellow: '#ffd447',
   billiardYellowHit: '#fff0a1',
@@ -119,6 +126,7 @@ const PEG_COLORS = {
   orange: { main: COLORS.orange, hit: COLORS.orangeHit, glow: COLORS.orangeGlow },
   billiardRed: { main: COLORS.billiardRed, hit: COLORS.billiardRedHit, glow: COLORS.billiardRedGlow },
   bomb: { main: COLORS.bomb, hit: COLORS.bombHit, glow: COLORS.bombGlow },
+  bombMagnet: { main: COLORS.magnet, hit: COLORS.magnetHit, glow: COLORS.magnetGlow },
   billiardYellow: { main: COLORS.billiardYellow, hit: COLORS.billiardYellowHit, glow: COLORS.billiardYellowGlow },
   blue: { main: COLORS.blue, hit: COLORS.blueHit, glow: COLORS.blueGlow },
   green: { main: COLORS.green, hit: COLORS.greenHit, glow: COLORS.greenGlow },
@@ -172,6 +180,20 @@ const PEG_SURFACE_STYLES = {
     glow: 'rgba(255, 31, 45, 0.38)',
     hitBright: '#ffffff',
     hitLight: '#ffb38f',
+    hitMain: '#ff5a3c'
+  },
+  bombMagnet: {
+    bright: '#d7fcff',
+    light: '#22d3ee',
+    main: '#2166d8',
+    deep: '#ff4b35',
+    shadow: '#47040a',
+    rimLight: 'rgba(115, 245, 255, 0.94)',
+    line: 'rgba(255, 177, 120, 0.46)',
+    core: 'rgba(34, 211, 238, 0.42)',
+    glow: 'rgba(34, 211, 238, 0.3)',
+    hitBright: '#ffffff',
+    hitLight: '#ffb081',
     hitMain: '#ff5a3c'
   },
   billiardYellow: {
@@ -1381,6 +1403,102 @@ export class Renderer {
       ctx.lineTo(this.width, y + 0.5);
       ctx.stroke();
     }
+  }
+
+  // Gather active magnet rings (world coords) for the WebGL force-field shimmer.
+  // Capped at the shader's field budget; nearest-to-top order is not important.
+  _collectMagnetFieldRings(pegs = [], cameraY = 0) {
+    if (!Array.isArray(pegs) || pegs.length === 0) return this._emptyFieldRings || (this._emptyFieldRings = []);
+    const rings = [];
+    const profile = normalizeTrailPerformanceProfile(this.performanceProfile);
+    const maxRings = MAGNET_FIELD_PROFILE_LIMITS[profile] || MAGNET_FIELD_PROFILE_LIMITS.balanced;
+    const top = Number.isFinite(cameraY) ? cameraY : 0;
+    const bottom = top + this.height;
+    for (const peg of pegs) {
+      if (!isBombMagnetPeg(peg) || peg._magnetDetonated === true) continue;
+      const radius = getMagnetRadius(peg);
+      if (!Number.isFinite(radius) || radius <= 0) continue;
+      const x = Number.isFinite(peg.x) ? peg.x : 0;
+      const y = Number.isFinite(peg.y) ? peg.y : 0;
+      const margin = Math.max(12, radius * 0.1 + 10);
+      if (x + radius + margin < 0 || x - radius - margin > this.width
+        || y + radius + margin < top || y - radius - margin > bottom) {
+        continue;
+      }
+      rings.push({
+        x,
+        y,
+        radius,
+        strength: getMagnetStrength(peg),
+        mode: normalizeMagnetMode(peg.magnetMode)
+      });
+      if (rings.length >= maxRings) break;
+    }
+    return rings.length > 0 ? rings : (this._emptyFieldRings || (this._emptyFieldRings = []));
+  }
+
+  drawMagnetRadii(pegs = [], cameraY = 0) {
+    if (!Array.isArray(pegs) || pegs.length === 0) return;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([5, 6]);
+    for (const peg of pegs) {
+      if (!isBombMagnetPeg(peg) || peg._magnetDetonated === true) continue;
+      const radius = getMagnetRadius(peg);
+      if (!Number.isFinite(radius) || radius <= 0) continue;
+      const mode = normalizeMagnetMode(peg.magnetMode);
+      const x = Number.isFinite(peg.x) ? peg.x : 0;
+      const y = (Number.isFinite(peg.y) ? peg.y : 0) - cameraY;
+      if (x + radius < 0 || x - radius > this.width || y + radius < 0 || y - radius > this.height) continue;
+
+      const color = mode === 'repel' ? COLORS.magnetRepelGlow : COLORS.magnetGlow;
+      ctx.strokeStyle = color;
+      ctx.fillStyle = mode === 'repel' ? 'rgba(255, 82, 68, 0.055)' : 'rgba(34, 211, 238, 0.05)';
+      ctx.beginPath();
+      ctx.arc(x, y, radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.setLineDash([]);
+      ctx.strokeStyle = mode === 'repel' ? 'rgba(255, 170, 120, 0.82)' : 'rgba(180, 252, 255, 0.82)';
+      ctx.beginPath();
+      ctx.arc(x, y, Math.max(4, PHYSICS_CONFIG.pegRadius + 4), 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([5, 6]);
+    }
+    ctx.restore();
+  }
+
+  drawLiteMagnetFields(rings = [], cameraY = 0, timeSeconds = 0) {
+    if (!Array.isArray(rings) || rings.length === 0) return;
+    const ctx = this.ctx;
+    const phase = (Number.isFinite(timeSeconds) ? timeSeconds : 0) * 2.4;
+    ctx.save();
+    ctx.lineWidth = 1.35;
+    for (const ring of rings) {
+      const radius = Number(ring?.radius);
+      if (!Number.isFinite(radius) || radius <= 0) continue;
+      const x = Number.isFinite(ring.x) ? ring.x : 0;
+      const y = (Number.isFinite(ring.y) ? ring.y : 0) - cameraY;
+      const mode = normalizeMagnetMode(ring.mode);
+      const pulse = 0.5 + 0.5 * Math.sin(phase + radius * 0.013 + x * 0.01);
+      ctx.strokeStyle = mode === 'repel'
+        ? `rgba(255, 82, 68, ${0.18 + pulse * 0.08})`
+        : `rgba(34, 211, 238, ${0.18 + pulse * 0.08})`;
+      ctx.setLineDash([7, 9]);
+      ctx.beginPath();
+      ctx.arc(x, y, radius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.strokeStyle = mode === 'repel'
+        ? 'rgba(255, 170, 120, 0.38)'
+        : 'rgba(180, 252, 255, 0.38)';
+      ctx.beginPath();
+      ctx.arc(x, y, Math.max(4, PHYSICS_CONFIG.pegRadius + 3), 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 
   // Trace a closed curved-ribbon path defined by slice boundary points.
@@ -3682,15 +3800,23 @@ export class Renderer {
       ? state.renderTimeSeconds
       : (typeof performance !== 'undefined' ? performance.now() / 1000 : 0);
 
+    const cameraY = Number.isFinite(state.cameraY) ? state.cameraY : 0;
     const shockwaveActive = this._shockwaveEffect.syncEvents(state.backgroundEvents, {
       preview: !!state.shockwavePreview,
       timeSeconds: state.renderTimeSeconds,
       width: this.width,
       height: this.height
     });
+    const magnetFieldRings = this._collectMagnetFieldRings(state.pegs, cameraY);
+    const liteFieldFallback = normalizeTrailPerformanceProfile(this.performanceProfile) === 'lite' && !shockwaveActive;
+    let magnetFieldActive = false;
+    if (liteFieldFallback) {
+      this._shockwaveEffect.syncFieldRings(this._emptyFieldRings || (this._emptyFieldRings = []));
+    } else {
+      magnetFieldActive = this._shockwaveEffect.syncFieldRings(magnetFieldRings);
+    }
     this.clear(state.levelProgress, state);
     
-    const cameraY = Number.isFinite(state.cameraY) ? state.cameraY : 0;
     const drewSurvivalBackground = this.drawSurvivalBackground(state.survivalBackground, cameraY, state.worldHeight);
     if (drewSurvivalBackground && this._bgVignetteCanvas) {
       this.ctx.drawImage(this._bgVignetteCanvas, 0, 0);
@@ -3699,6 +3825,10 @@ export class Renderer {
     if (state.showGrid) {
       this.showGrid = true;
       this.drawGrid(cameraY);
+      this.drawMagnetRadii(state.pegs, cameraY);
+    }
+    if (liteFieldFallback && !state.showGrid) {
+      this.drawLiteMagnetFields(magnetFieldRings, cameraY, this._renderTimeSeconds);
     }
 
     const useCamera = Math.abs(cameraY) > 0.001;
@@ -3745,7 +3875,7 @@ export class Renderer {
       this.ctx.restore();
     }
 
-    if (shockwaveActive) {
+    if (shockwaveActive || magnetFieldActive) {
       const waveCanvas = this._shockwaveEffect.renderToCanvas(this.canvas, {
         cameraY,
         width: this.width,

@@ -1,7 +1,7 @@
 // Visual Layout - DOM frame, draggable asset slots, theme panel
 // Wraps the canvas in a 9:17 frame with decorative elements and a side editor panel
 
-import { DEFAULT_SHOCKWAVE_EFFECT, DEFAULT_SHOCKWAVE_VICTORY_SETTINGS } from './shockwave-effect.js';
+import { DEFAULT_SHOCKWAVE_EFFECT, DEFAULT_SHOCKWAVE_VICTORY_SETTINGS, DEFAULT_SHOCKWAVE_MAGNET_FIELD } from './shockwave-effect.js';
 import { DEFAULT_END_SEQUENCE, SLOT_DEFS, DEFAULT_LAYER_ORDER, resolveAssetPaths, normalizeVisuals } from './visual-config.js';
 import { compressImageFile } from './image-compression.js';
 import { PortraitFlame, FLAME_BOX_EXTENT } from './portrait-flame.js';
@@ -827,6 +827,16 @@ export class VisualLayout {
               <span id="themeShockwaveVictoryOpacityValue" class="theme-range-value">86%</span>
             </div>
           </div>
+          <div class="theme-row">
+            <label class="theme-row-label"><input type="checkbox" id="themeShockwaveMagnetField"> Magnet field ring</label>
+          </div>
+          <div class="theme-row" id="themeShockwaveMagnetFieldIntensityRow">
+            <span class="theme-row-label">Field Intensity</span>
+            <div class="theme-row-actions">
+              <input type="range" id="themeShockwaveMagnetFieldIntensity" class="theme-row-range" min="0" max="250" value="100">
+              <span id="themeShockwaveMagnetFieldIntensityValue" class="theme-range-value">100%</span>
+            </div>
+          </div>
         </div>
         <div class="theme-section">
           <div class="theme-label">End Slow-Mo</div>
@@ -1337,6 +1347,31 @@ export class VisualLayout {
     this.panel.querySelector('#themeShockwaveVictoryRipple').addEventListener('input', e => setShockwaveVictoryRange('ripple', e.target.value), { signal: sig });
     this.panel.querySelector('#themeShockwaveVictoryOpacity').addEventListener('input', e => setShockwaveVictoryRange('opacity', e.target.value), { signal: sig });
 
+    const ensureMagnetField = (shockwave) => {
+      if (!shockwave) return null;
+      if (!shockwave.magnetField || typeof shockwave.magnetField !== 'object') {
+        shockwave.magnetField = {
+          enabled: DEFAULT_SHOCKWAVE_MAGNET_FIELD.enabled,
+          intensity: DEFAULT_SHOCKWAVE_MAGNET_FIELD.intensity
+        };
+      }
+      return shockwave.magnetField;
+    };
+    this.panel.querySelector('#themeShockwaveMagnetField').addEventListener('change', e => {
+      const magnetField = ensureMagnetField(ensureShockwave());
+      if (!magnetField) return;
+      magnetField.enabled = !!e.target.checked;
+      this._syncShockwaveButtons();
+      this._emitChange();
+    }, { signal: sig });
+    this.panel.querySelector('#themeShockwaveMagnetFieldIntensity').addEventListener('input', e => {
+      const magnetField = ensureMagnetField(ensureShockwave());
+      if (!magnetField) return;
+      magnetField.intensity = Math.max(0, parseInt(e.target.value, 10) || 0) / 100;
+      this._syncShockwaveButtons();
+      this._emitChange();
+    }, { signal: sig });
+
     this.panel.querySelector('#themeEndSlowmoStrength').addEventListener('input', e => {
       const endSequence = ensureEndSequence();
       if (!endSequence) return;
@@ -1751,6 +1786,10 @@ export class VisualLayout {
     setTrailRange('#themeShockwaveVictoryDuration', victorySettings.duration, DEFAULT_SHOCKWAVE_VICTORY_SETTINGS.duration);
     setTrailRange('#themeShockwaveVictoryRipple', victorySettings.ripple, DEFAULT_SHOCKWAVE_VICTORY_SETTINGS.ripple);
     setTrailRange('#themeShockwaveVictoryOpacity', victorySettings.opacity, DEFAULT_SHOCKWAVE_VICTORY_SETTINGS.opacity);
+    const magnetField = shockwave.magnetField || {};
+    const shockwaveMagnetField = sel('#themeShockwaveMagnetField');
+    if (shockwaveMagnetField) shockwaveMagnetField.checked = magnetField.enabled !== false;
+    setTrailRange('#themeShockwaveMagnetFieldIntensity', magnetField.intensity, DEFAULT_SHOCKWAVE_MAGNET_FIELD.intensity);
     const endSequence = this.config.endSequence || {};
     setTrailRange('#themeEndSlowmoStrength', endSequence.finalPegSlowmoStrength, DEFAULT_END_SEQUENCE.finalPegSlowmoStrength);
     this._syncBgRowVisibility();
@@ -1993,6 +2032,8 @@ export class VisualLayout {
     setValue('#themeShockwaveVictoryDurationValue', victorySettings.duration, DEFAULT_SHOCKWAVE_VICTORY_SETTINGS.duration, value => `${value.toFixed(2)}s`);
     setValue('#themeShockwaveVictoryRippleValue', victorySettings.ripple, DEFAULT_SHOCKWAVE_VICTORY_SETTINGS.ripple);
     setValue('#themeShockwaveVictoryOpacityValue', victorySettings.opacity, DEFAULT_SHOCKWAVE_VICTORY_SETTINGS.opacity);
+    const magnetField = shockwave.magnetField || {};
+    setValue('#themeShockwaveMagnetFieldIntensityValue', magnetField.intensity, DEFAULT_SHOCKWAVE_MAGNET_FIELD.intensity);
 
     const enabled = shockwave.enabled !== false;
     for (const id of [
@@ -2006,11 +2047,14 @@ export class VisualLayout {
       '#themeShockwaveWidth',
       '#themeShockwaveDuration',
       '#themeShockwaveRipple',
-      '#themeShockwaveOpacity'
+      '#themeShockwaveOpacity',
+      '#themeShockwaveMagnetField'
     ]) {
       const el = this.panel.querySelector(id);
       if (el) el.disabled = !enabled;
     }
+    const magnetFieldIntensity = this.panel.querySelector('#themeShockwaveMagnetFieldIntensity');
+    if (magnetFieldIntensity) magnetFieldIntensity.disabled = !enabled || magnetField.enabled === false;
     const bombTargets = this.panel.querySelector('#themeShockwaveBombTargets');
     if (bombTargets) bombTargets.disabled = !enabled || shockwave.bomb === false;
     const victorySeparateToggle = this.panel.querySelector('#themeShockwaveVictorySeparate');

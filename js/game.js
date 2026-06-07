@@ -36,6 +36,7 @@ import {
   normalizeLevelHitPegClearSettings
 } from './hit-peg-clear-settings.js';
 import { isPortalType, normalizePortalPegProperties } from './portal-defaults.js';
+import { getMagnetExplosionPower, isBombMagnetPeg, isMagnetBlastEnabled } from './magnet-defaults.js';
 import { lightTap, initAudio, pegHitSound, resetHitCounter } from './haptics.js';
 import { normalizeEndSequenceConfig } from './visual-config.js';
 
@@ -1977,6 +1978,23 @@ export class Game {
     });
   }
 
+  detonateBombMagnet(peg, sourceBall = null) {
+    if (!isBombMagnetPeg(peg) || peg._magnetDetonated === true) return false;
+    // Blast is opt-in: when disabled the magnet is a pure force field and never
+    // detonates (it still scores on a direct ball hit via activatePeg upstream).
+    if (!isMagnetBlastEnabled(peg)) return false;
+    peg._magnetDetonated = true;
+    peg._magnetPulse = 1.4;
+    const power = getMagnetExplosionPower(peg);
+    this.detonateBombShockwave(sourceBall, peg, {
+      radiusMultiplier: 6 * power,
+      impulseScale: power,
+      affectBalls: true,
+      activateTargets: false
+    });
+    return true;
+  }
+
   createRuntimeFlipper(config) {
     const cameraY = this.isSurvivalMode() ? this.getCameraY() : 0;
     const defaultScreenY = Math.max(30, this.canvas.height - FLIPPER_DEFAULTS.yOffset);
@@ -2652,7 +2670,9 @@ export class Game {
 
   refreshDestructionAfterPegRemoval() {
     if (!this.isDestructionMode()) return false;
-    this.animator.loadFromLevel(this.pegs, this.groups);
+    // Preserve each group's anchored rotation center: knocking pegs off a group must not
+    // re-center its spin / Set Origin pivot on the survivors.
+    this.animator.loadFromLevel(this.pegs, this.groups, { preserveGroupOrigins: true });
     this.destructionSystem.markStructureDirty();
     this.destructionSystem.syncBodies(this.pegs, this.groups);
     this.destructionSystem.wakeDynamicBodies?.();
@@ -3371,6 +3391,9 @@ export class Game {
     if (result?.portalHits?.length > 0) {
       changed = this.handleDestructionPortalHits(result.portalHits) || changed;
     }
+    if (result?.magnetHits?.length > 0) {
+      changed = this.handleDestructionMagnetHits(result.magnetHits) || changed;
+    }
     if (result?.fallenPegs?.length > 0) {
       changed = this.handleDestructionFallenPegs(result.fallenPegs) || changed;
     }
@@ -3434,6 +3457,34 @@ export class Game {
       }
     }
     return pulsed;
+  }
+
+  handleDestructionMagnetHits(events = []) {
+    if (!Array.isArray(events) || events.length === 0) return false;
+    const seen = new Set();
+    let changed = false;
+
+    for (const event of events) {
+      const peg = event?.peg;
+      if (!isBombMagnetPeg(peg) || !peg.id || seen.has(peg.id)) continue;
+      seen.add(peg.id);
+      if (!this.pegs.includes(peg)) continue;
+
+      const activated = this.activatePeg(peg, null, { allowMultiball: true });
+      if (activated) {
+        this.queueLiquidPegSplash(peg, event.impact);
+        changed = true;
+      }
+      if (this.detonateBombMagnet(peg, null)) {
+        this.animator.notifyHit(peg.id);
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      this.emitUiStateIfChanged(true, 'destruction-magnet-hit');
+    }
+    return changed;
   }
 
   handleDestructionFallenPegs(fallenEvents = []) {
@@ -3649,6 +3700,15 @@ export class Game {
         if (peg.type === 'bomb') {
           this.detonatePegBomb(peg, event.ball);
         }
+      }
+      // Magnet blast: the BALL hitting the magnet peg directly, OR the ball striking a
+      // peg-group that is ALREADY attached to a magnet. Pegs drifting/touching the magnet
+      // on their own never trigger it.
+      if (isBombMagnetPeg(peg)) {
+        this.detonateBombMagnet(peg, event.ball);
+      } else if (this.isDestructionMode()) {
+        const magnet = this.destructionSystem.getMagnetForAttachedPeg(peg);
+        if (magnet) this.detonateBombMagnet(magnet, event.ball);
       }
       // Notify animator for hit-triggered animations
       this.animator.notifyHit(peg.id);

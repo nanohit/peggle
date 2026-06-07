@@ -1,12 +1,14 @@
 const TAU = Math.PI * 2;
 const MAX_ACTIVE_WAVES = 28;
 const MAX_SHADER_WAVES = 16;
+// Persistent magnet force-field rings rendered in the same pass as transient waves.
+const MAX_SHADER_FIELDS = 6;
 const TRIGGER_KINDS = new Set(['bombSplash', 'bombTargetSplash', 'victorySplash']);
 
 const PROFILE_LIMITS = Object.freeze({
-  full: Object.freeze({ maxWaves: 16 }),
-  balanced: Object.freeze({ maxWaves: 8 }),
-  lite: Object.freeze({ maxWaves: 4 })
+  full: Object.freeze({ maxWaves: 16, maxFields: 6 }),
+  balanced: Object.freeze({ maxWaves: 8, maxFields: 4 }),
+  lite: Object.freeze({ maxWaves: 4, maxFields: 2 })
 });
 
 const SHOCKWAVE_VERTEX_SHADER = `
@@ -29,6 +31,7 @@ precision mediump float;
 #endif
 
 #define MAX_WAVES ${maxWaves}
+#define MAX_FIELDS ${MAX_SHADER_FIELDS}
 
 uniform sampler2D uTexture;
 uniform vec2 uResolution;
@@ -36,16 +39,67 @@ uniform int uWaveCount;
 uniform vec4 uWaveA[MAX_WAVES];
 uniform vec4 uWaveB[MAX_WAVES];
 uniform vec4 uWaveC[MAX_WAVES];
+uniform int uFieldCount;
+uniform vec4 uFieldA[MAX_FIELDS];
+uniform vec4 uFieldB[MAX_FIELDS];
 
 varying vec2 vUv;
 
 const float PI = 3.141592653589793;
+
+float fieldHash(vec2 p) {
+  p = fract(p * vec2(123.34, 456.21));
+  p += dot(p, p + 45.32);
+  return fract(p.x * p.y);
+}
+
+float fieldNoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  float a = fieldHash(i);
+  float b = fieldHash(i + vec2(1.0, 0.0));
+  float c = fieldHash(i + vec2(0.0, 1.0));
+  float d = fieldHash(i + vec2(1.0, 1.0));
+  return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
 
 void main() {
   vec2 pixel = vec2(vUv.x * uResolution.x, (1.0 - vUv.y) * uResolution.y);
   vec2 displacement = vec2(0.0);
   vec3 highlight = vec3(0.0);
   float energy = 0.0;
+
+  // Persistent magnet force-field rings: a noisy displacement band riding the radius
+  // boundary so the edge refracts the field behind it. PURE distortion — no colour, no
+  // glow, no haze — and independent of magnet strength (visible at any/zero force).
+  for (int i = 0; i < MAX_FIELDS; i++) {
+    if (i < uFieldCount) {
+      vec4 fa = uFieldA[i];   // x, y, radius, (unused)
+      vec4 fb = uFieldB[i];   // modeSign, time, band, intensity
+      vec2 fd = pixel - fa.xy;
+      float fdist = length(fd);
+      float fradius = fa.z;
+      float band = max(2.0, fb.z);
+      if (fdist > 0.001 && fdist > fradius - band * 2.4 && fdist < fradius + band * 2.4) {
+        vec2 dir = fd / fdist;
+        float ang = atan(fd.y, fd.x);
+        vec2 ncoord = vec2(cos(ang), sin(ang)) * 2.7;
+        float tt = fb.y;
+        float n1 = fieldNoise(ncoord * 1.6 + vec2(tt * 0.7, -tt * 0.5));
+        float n2 = fieldNoise(ncoord * 3.3 - vec2(tt * 0.45, tt * 0.6));
+        float wob = (n1 - 0.5) * band * 1.1 + (n2 - 0.5) * band * 0.5;
+        float ringR = fradius + wob;
+        float sb = (fdist - ringR) / band;
+        float prof = 1.0 - smoothstep(0.0, 1.0, abs(sb));
+        prof = prof * prof * (3.0 - 2.0 * prof);
+        if (prof > 0.0001) {
+          float amp = (2.6 + fradius * 0.022) * fb.w * prof;
+          displacement += dir * amp * fb.x * (0.55 + 0.45 * n1);
+        }
+      }
+    }
+  }
 
   for (int i = 0; i < MAX_WAVES; i++) {
     if (i < uWaveCount) {
@@ -115,6 +169,11 @@ export const DEFAULT_SHOCKWAVE_VICTORY_SETTINGS = Object.freeze({
   opacity: 0.22
 });
 
+export const DEFAULT_SHOCKWAVE_MAGNET_FIELD = Object.freeze({
+  enabled: true,
+  intensity: 1
+});
+
 export const DEFAULT_SHOCKWAVE_EFFECT = Object.freeze({
   enabled: true,
   bomb: true,
@@ -128,7 +187,8 @@ export const DEFAULT_SHOCKWAVE_EFFECT = Object.freeze({
   ripple: 0.59,
   opacity: 0,
   victorySeparate: true,
-  victorySettings: DEFAULT_SHOCKWAVE_VICTORY_SETTINGS
+  victorySettings: DEFAULT_SHOCKWAVE_VICTORY_SETTINGS,
+  magnetField: DEFAULT_SHOCKWAVE_MAGNET_FIELD
 });
 
 function clamp(value, min, max, fallback) {
@@ -168,6 +228,14 @@ function normalizeProfile(profile) {
   return Object.prototype.hasOwnProperty.call(PROFILE_LIMITS, profile) ? profile : 'balanced';
 }
 
+function normalizeMagnetFieldConfig(source) {
+  const raw = source && typeof source === 'object' && !Array.isArray(source) ? source : {};
+  return {
+    enabled: raw.enabled !== false,
+    intensity: clamp(raw.intensity, 0, 2.5, DEFAULT_SHOCKWAVE_MAGNET_FIELD.intensity)
+  };
+}
+
 function easeOutCubic(t) {
   const k = 1 - Math.max(0, Math.min(1, t));
   return 1 - k * k * k;
@@ -199,7 +267,8 @@ export function normalizeShockwaveConfig(raw = null) {
     victorySettings: normalizeShockwaveStyle(
       rawVictorySettings,
       rawVictorySettings ? base : DEFAULT_SHOCKWAVE_VICTORY_SETTINGS
-    )
+    ),
+    magnetField: normalizeMagnetFieldConfig(source.magnetField)
   };
 }
 
@@ -223,6 +292,10 @@ export class ShockwaveEffectRenderer {
     this._waveB = new Float32Array(MAX_SHADER_WAVES * 4);
     this._waveC = new Float32Array(MAX_SHADER_WAVES * 4);
     this._waveUniformViews = new Map();
+    this._fieldRings = [];
+    this._fieldA = new Float32Array(MAX_SHADER_FIELDS * 4);
+    this._fieldB = new Float32Array(MAX_SHADER_FIELDS * 4);
+    this._fieldUniformCount = 0;
     this._baseColor = { hex: '', r: 1, g: 1, b: 1 };
     this._victoryColor = { hex: '', r: 1, g: 1, b: 1 };
     this._previewWave = {
@@ -308,6 +381,20 @@ export class ShockwaveEffectRenderer {
     }
     this._prune(now);
     return this.config.enabled && (!!options?.preview || this.waves.length > 0);
+  }
+
+  // Persistent magnet force-field rings. `rings` = [{ x, y(world), radius, strength, mode }].
+  // Stored each frame by the renderer; rendered in the same WebGL pass as the waves.
+  syncFieldRings(rings) {
+    this._fieldRings = Array.isArray(rings) ? rings : [];
+    return this.hasFieldRings();
+  }
+
+  hasFieldRings() {
+    return this.config.enabled
+      && this.config.magnetField?.enabled !== false
+      && this.config.magnetField?.intensity > 0
+      && this._fieldRings.length > 0;
   }
 
   _prune(now = this._timeSeconds()) {
@@ -432,7 +519,10 @@ export class ShockwaveEffectRenderer {
         waveCount: gl.getUniformLocation(program, 'uWaveCount'),
         waveA: gl.getUniformLocation(program, 'uWaveA[0]'),
         waveB: gl.getUniformLocation(program, 'uWaveB[0]'),
-        waveC: gl.getUniformLocation(program, 'uWaveC[0]')
+        waveC: gl.getUniformLocation(program, 'uWaveC[0]'),
+        fieldCount: gl.getUniformLocation(program, 'uFieldCount'),
+        fieldA: gl.getUniformLocation(program, 'uFieldA[0]'),
+        fieldB: gl.getUniformLocation(program, 'uFieldB[0]')
       }
     };
     this._glPrograms.set(key, bundle);
@@ -589,7 +679,40 @@ export class ShockwaveEffectRenderer {
     return count;
   }
 
-  _renderWithShader(sourceCanvas, width, height, waveCount, limits) {
+  _prepareFieldUniforms(now, cameraY, width, height, limits) {
+    if (!this.hasFieldRings()) return 0;
+    const intensity = clamp(this.config.magnetField?.intensity, 0, 2.5, 1);
+    if (intensity <= 0) return 0;
+    const maxCount = Math.max(0, Math.min(MAX_SHADER_FIELDS, limits.maxFields || MAX_SHADER_FIELDS));
+    let count = 0;
+    for (let i = 0; i < this._fieldRings.length && count < maxCount; i++) {
+      const ring = this._fieldRings[i];
+      const radius = Number(ring?.radius);
+      if (!Number.isFinite(radius) || radius <= 0) continue;
+      const cx = Number(ring?.x);
+      const cy = Number(ring?.y) - cameraY;
+      if (!Number.isFinite(cx) || !Number.isFinite(cy)) continue;
+      const band = Math.max(4, radius * 0.06 + 7);
+      const margin = band * 2.6;
+      if (cx + radius + margin < 0 || cx - radius - margin > width
+        || cy + radius + margin < 0 || cy - radius - margin > height) continue;
+      const modeSign = ring?.mode === 'repel' ? -1 : 1;
+      const offset = count * 4;
+      this._fieldA[offset] = cx;
+      this._fieldA[offset + 1] = cy;
+      this._fieldA[offset + 2] = radius;
+      this._fieldA[offset + 3] = 1; // amplitude no longer scales with magnet strength
+      this._fieldB[offset] = modeSign;
+      this._fieldB[offset + 1] = now;
+      this._fieldB[offset + 2] = band;
+      this._fieldB[offset + 3] = intensity;
+      count++;
+    }
+    this._fieldUniformCount = count;
+    return count;
+  }
+
+  _renderWithShader(sourceCanvas, width, height, waveCount, fieldCount, limits) {
     const gl = this._ensureWebGl(width, height);
     if (!gl) return false;
     if (typeof gl.isContextLost === 'function' && gl.isContextLost()) return false;
@@ -632,10 +755,16 @@ export class ShockwaveEffectRenderer {
       gl.uniform1i(loc.texture, 0);
       gl.uniform2f(loc.resolution, width, height);
       gl.uniform1i(loc.waveCount, waveCount);
-      const uniformViews = this._getWaveUniformViews(Math.min(waveCount, bundle.maxWaves));
+      const uniformViews = this._getWaveUniformViews(Math.min(Math.max(1, waveCount), bundle.maxWaves));
       gl.uniform4fv(loc.waveA, uniformViews.a);
       gl.uniform4fv(loc.waveB, uniformViews.b);
       gl.uniform4fv(loc.waveC, uniformViews.c);
+      if (loc.fieldCount) gl.uniform1i(loc.fieldCount, fieldCount);
+      if (fieldCount > 0 && loc.fieldA) {
+        const fieldLen = Math.min(fieldCount, MAX_SHADER_FIELDS) * 4;
+        gl.uniform4fv(loc.fieldA, this._fieldA.subarray(0, fieldLen));
+        gl.uniform4fv(loc.fieldB, this._fieldB.subarray(0, fieldLen));
+      }
       gl.drawArrays(gl.TRIANGLES, 0, 6);
       return true;
     } catch (_) {
@@ -691,6 +820,7 @@ export class ShockwaveEffectRenderer {
       gl.uniform1i(loc.texture, 0);
       gl.uniform2f(loc.resolution, width, height);
       gl.uniform1i(loc.waveCount, 0);
+      if (loc.fieldCount) gl.uniform1i(loc.fieldCount, 0);
       gl.drawArrays(gl.TRIANGLES, 0, 6);
       return true;
     } catch (_) {
@@ -738,14 +868,16 @@ export class ShockwaveEffectRenderer {
     const now = Number.isFinite(options?.timeSeconds) ? options.timeSeconds : this._timeSeconds();
     const preview = !!options?.preview;
     if (!options?.skipPrune) this._prune(now);
-    if (!this.config.enabled || (!preview && this.waves.length === 0)) return null;
+    const hasFields = this.hasFieldRings();
+    if (!this.config.enabled || (!preview && this.waves.length === 0 && !hasFields)) return null;
 
     const cameraY = Number.isFinite(options?.cameraY) ? options.cameraY : 0;
     const profile = normalizeProfile(options?.profile);
     const limits = PROFILE_LIMITS[profile];
     const waveCount = this._prepareWaveUniforms(now, cameraY, width, height, limits, preview);
-    if (waveCount <= 0) return null;
-    return this._renderWithShader(sourceCanvas, width, height, waveCount, limits) ? this._glCanvas : null;
+    const fieldCount = this._prepareFieldUniforms(now, cameraY, width, height, limits);
+    if (waveCount <= 0 && fieldCount <= 0) return null;
+    return this._renderWithShader(sourceCanvas, width, height, waveCount, fieldCount, limits) ? this._glCanvas : null;
   }
 
   render(ctx, sourceCanvas, options = null) {

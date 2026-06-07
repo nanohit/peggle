@@ -124,6 +124,60 @@ function testPhysicsOnHitSleepsUntilImpact() {
   assert.ok(pegs[0].x > startX + 0.2);
 }
 
+async function testLevelManagerPreservesMagnetBlastOnAdd() {
+  const previousStorage = globalThis.localStorage;
+  globalThis.localStorage = {
+    getItem() { return null; },
+    setItem() {},
+    removeItem() {},
+    clear() {}
+  };
+  try {
+    const { LevelManager } = await import('../js/levels.js');
+    const manager = new LevelManager();
+    manager.createLevel('magnet-copy');
+    const peg = manager.addPeg({
+      type: 'bombMagnet',
+      shape: 'circle',
+      x: 120,
+      y: 140,
+      magnetBlast: true,
+      magnetExplosionPower: 2
+    });
+    assert.equal(peg.magnetBlast, true);
+    assert.equal(peg.magnetExplosionPower, 2);
+  } finally {
+    if (previousStorage === undefined) {
+      delete globalThis.localStorage;
+    } else {
+      globalThis.localStorage = previousStorage;
+    }
+  }
+}
+
+function testAttachedMagnetSleeperStaysAsleep() {
+  const magnet = circle('magnet', 120, 120, {
+    type: 'bombMagnet',
+    destructionStatic: true,
+    magnetRadius: 120,
+    magnetStrength: 0.5,
+    magnetMode: 'attract'
+  });
+  const peg = circle('settled', 134, 120);
+  const pegs = [magnet, peg];
+  const system = makeSystem({ gravityY: 0 });
+  system.reset(pegs, []);
+  const body = system.getBodyForPeg(peg);
+  system.markBodyMagnetAttachment(body, magnet);
+  body.sleeping = true;
+  body.vx = 0;
+  body.vy = 0;
+  system.applyMagnetForces(pegs, 1);
+  assert.equal(body.sleeping, true);
+  assert.equal(body.vx, 0);
+  assert.equal(body.vy, 0);
+}
+
 function testStackedBricksSettleWithoutDrift() {
   const pegs = [
     brick('floor', 200, 230, { type: 'obstacle', destructionStatic: true, width: 120, height: 12 }),
@@ -961,6 +1015,8 @@ function benchStaticSkip() {
 const tests = [
   testStaticWorldSkipsBroadphase,
   testPhysicsOnHitSleepsUntilImpact,
+  testLevelManagerPreservesMagnetBlastOnAdd,
+  testAttachedMagnetSleeperStaysAsleep,
   testStackedBricksSettleWithoutDrift,
   testGroupPreservesOffsets,
   testGroupCenterOfMassRecomputesAfterRemoval,
@@ -1000,7 +1056,7 @@ const tests = [
 ];
 
 for (const test of tests) {
-  test();
+  await test();
   console.log(`ok ${test.name}`);
 }
 

@@ -1,6 +1,14 @@
 import { PHYSICS_CONFIG, getEffectiveBrickSize } from './physics.js';
 import { Utils } from './utils.js';
 import { getPortalScale, isPortalType } from './portal-defaults.js';
+import {
+  getMagnetRadius,
+  getMagnetStrength,
+  isBombMagnetPeg,
+  isBombMagnetType,
+  normalizeMagnetMode,
+  normalizeMagnetPegProperties
+} from './magnet-defaults.js';
 
 const DEFAULTS = Object.freeze({
   enabled: false,
@@ -57,6 +65,11 @@ const BUMPER_POP_SCALE = 1.6;
 // Steps before the same (bumper, body) pair can pop/pulse again — turns a lingering
 // contact into a periodic bump rather than an every-frame white flash.
 const BUMPER_CONTACT_COOLDOWN = 10;
+// Velocity retained per step by a body inside a magnet's field. <1 bleeds the orbital /
+// jitter energy so attracted bodies spiral in and SETTLE against the magnet instead of
+// circling forever; deeper in the field (closer) ⇒ more damping. ~frames @60fps.
+const MAGNET_INFLUENCE_DAMPING_FAR = 0.94;
+const MAGNET_INFLUENCE_DAMPING_NEAR = 0.78;
 const GROUP_FRACTURE_IMPULSE = 4.6;
 const GROUP_FRACTURE_MIN_PEGS = 2;
 const PORTAL_BODY_COOLDOWN_STEPS = 8;
@@ -120,7 +133,7 @@ export function ensureLevelDestruction(level) {
 
 export function getDefaultDestructionStatic(peg) {
   if (!peg) return false;
-  return peg.type === 'obstacle' || peg.type === 'bumper' || isPortalType(peg.type);
+  return peg.type === 'obstacle' || peg.type === 'bumper' || isPortalType(peg.type) || isBombMagnetType(peg.type);
 }
 
 export function isDestructionStaticPeg(peg) {
@@ -131,6 +144,7 @@ export function isDestructionStaticPeg(peg) {
 
 export function normalizeDestructionPegProperties(peg) {
   if (!peg || typeof peg !== 'object') return peg;
+  if (isBombMagnetPeg(peg)) normalizeMagnetPegProperties(peg);
   coerceDestructionPegFlags(peg);
   delete peg._destructionBodyId;
   delete peg._destructionFalling;
@@ -440,6 +454,30 @@ function linearBodySpeed(body) {
   return Math.hypot(body.vx || 0, body.vy || 0);
 }
 
+function getSettingsGravityNorm(settings) {
+  const gx = settings?.gravityX || 0;
+  const gy = settings?.gravityY || 0;
+  const mag = Math.hypot(gx, gy);
+  if (mag <= 0.0001) return { x: 0, y: 1, mag: 0 };
+  return { x: gx / mag, y: gy / mag, mag };
+}
+
+function getBodyGravityNorm(body, settings) {
+  if (Number.isFinite(body?._gravityNormX) && Number.isFinite(body?._gravityNormY)) {
+    return {
+      x: body._gravityNormX,
+      y: body._gravityNormY,
+      mag: Number.isFinite(body._gravityMag) ? body._gravityMag : 0
+    };
+  }
+  return getSettingsGravityNorm(settings);
+}
+
+function getBodyGravityMagnitude(body, settings) {
+  if (Number.isFinite(body?._gravityMag)) return body._gravityMag;
+  return getSettingsGravityNorm(settings).mag;
+}
+
 function bodyMotionEstimate(body) {
   if (!body) return 0;
   return linearBodySpeed(body) + Math.abs(body.av || 0) * 18;
@@ -466,7 +504,7 @@ function hasStaticSlopeSlideDemand(body, settings) {
   if (supportDot <= 0 || supportDot >= slopeSleepSupportDot(settings)) return false;
   const grip = surfaceGripValue(settings);
   const tangent = Math.sqrt(Math.max(0, 1 - supportDot * supportDot));
-  const gravityMag = Math.hypot(settings?.gravityX || 0, settings?.gravityY || 0);
+  const gravityMag = getBodyGravityMagnitude(body, settings);
   return gravityMag * tangent * (1 - grip) > (settings?.sleepSpeed || DEFAULTS.sleepSpeed) * 0.08;
 }
 
@@ -900,6 +938,9 @@ export class DestructionPegSystem {
     this._bumperHitEvents = [];
     this._bumperHitKeys = new Set();
     this._portalHitEvents = [];
+    this._magnetHitEvents = [];
+    this._magnetHitKeys = new Set();
+    this._activeMagnetCache = [];
     this._runtimeBodyOverrides = new Map();
     this._fractureQueue = [];
     this._splitCounter = 0;
@@ -1019,6 +1060,9 @@ export class DestructionPegSystem {
     this._bumperHitKeys.clear();
     this._bumperContactCd.clear();
     this._portalHitEvents.length = 0;
+    this._magnetHitEvents.length = 0;
+    this._magnetHitKeys.clear();
+    this._activeMagnetCache.length = 0;
     this._runtimeBodyOverrides.clear();
     this._fractureQueue.length = 0;
     this._splitCounter = 0;
@@ -1155,6 +1199,11 @@ export class DestructionPegSystem {
       supported: false,
       supportMemory: 0,
       supportDot: 0,
+      _gravityX: DEFAULTS.gravityX,
+      _gravityY: DEFAULTS.gravityY,
+      _gravityNormX: 0,
+      _gravityNormY: 1,
+      _gravityMag: DEFAULTS.gravityY,
       staticSupportMemory: 0,
       staticSupportDot: 0,
       dynamicSupportMemory: 0,
@@ -2024,6 +2073,24 @@ export class DestructionPegSystem {
     return !!body && !body.static && !body.sleeping;
   }
 
+  // A body is "attached" to a magnet once it has actually contacted (fully reached) it.
+  // Sticky: survives the body settling/sleeping against the magnet, cleared only when it
+  // leaves the field or the magnet is gone. This is what makes a ball hitting a settled
+  // group detonate the magnet — pegs touching the magnet never self-trigger.
+  markBodyMagnetAttachment(body, magnet) {
+    if (!body || body.static || !magnet) return;
+    body._magnetAttachedPeg = magnet;
+    body._magnetAttachedStep = this._stepCounter;
+  }
+
+  // The (live, non-detonated) magnet a peg's body is attached to, else null.
+  getMagnetForAttachedPeg(peg) {
+    const body = peg ? this.getBodyForPeg(peg) : null;
+    const magnet = body?._magnetAttachedPeg || null;
+    if (magnet && magnet._magnetDetonated !== true && isBombMagnetPeg(magnet)) return magnet;
+    return null;
+  }
+
   wakeDynamicBodies() {
     let count = 0;
     for (const body of this.bodies.values()) {
@@ -2118,11 +2185,12 @@ export class DestructionPegSystem {
     const grip = surfaceGripValue(this.settings);
     const slide = 1 - grip;
     if (slide <= 0.001 || supportDot > 0.995) return;
-    const tangentX = this._gravityNormX - normalX * supportDot;
-    const tangentY = this._gravityNormY - normalY * supportDot;
+    const gravityNorm = getBodyGravityNorm(body, this.settings);
+    const tangentX = gravityNorm.x - normalX * supportDot;
+    const tangentY = gravityNorm.y - normalY * supportDot;
     const tangentMag = Math.hypot(tangentX, tangentY);
     if (tangentMag <= 0.0001) return;
-    const gravityMag = Math.hypot(this.settings.gravityX || 0, this.settings.gravityY || 0);
+    const gravityMag = getBodyGravityMagnitude(body, this.settings);
     const accel = gravityMag * slide * 0.74 * subScale;
     body.vx += (tangentX / tangentMag) * accel;
     body.vy += (tangentY / tangentMag) * accel;
@@ -2136,6 +2204,31 @@ export class DestructionPegSystem {
     } else {
       this._gravityNormX = this.settings.gravityX / mag;
       this._gravityNormY = this.settings.gravityY / mag;
+    }
+  }
+
+  resolveBodyGravity(body, bounds = null) {
+    const gx = this.settings.gravityX || 0;
+    const gy = this.settings.gravityY || 0;
+
+    const mag = Math.hypot(gx, gy);
+    body._gravityX = gx;
+    body._gravityY = gy;
+    body._gravityMag = mag;
+    if (mag <= 0.0001) {
+      body._gravityNormX = 0;
+      body._gravityNormY = 1;
+    } else {
+      body._gravityNormX = gx / mag;
+      body._gravityNormY = gy / mag;
+    }
+    return { x: gx, y: gy, mag };
+  }
+
+  refreshBodyGravityForBounds(bounds = null) {
+    for (const body of this.bodies.values()) {
+      if (!body || body.static) continue;
+      this.resolveBodyGravity(body, bounds);
     }
   }
 
@@ -2169,6 +2262,129 @@ export class DestructionPegSystem {
       radius = Math.max(radius, Math.hypot(offset.x || 0, offset.y || 0) + pegRadius);
     }
     return radius;
+  }
+
+  collectActiveMagnets(pegs = []) {
+    const magnets = this._activeMagnetCache;
+    magnets.length = 0;
+    if (!Array.isArray(pegs)) return magnets;
+    // Reuse pooled descriptor objects so the per-frame scan allocates nothing. The
+    // descriptors are only read synchronously inside applyMagnetForces, never retained.
+    const pool = this._magnetDescPool || (this._magnetDescPool = []);
+    let n = 0;
+    for (const peg of pegs) {
+      if (!isBombMagnetPeg(peg) || peg._magnetDetonated === true) continue;
+      const radius = getMagnetRadius(peg);
+      const strength = getMagnetStrength(peg);
+      if (radius <= 0 || strength <= 0) continue;
+      let desc = pool[n];
+      if (!desc) { desc = {}; pool[n] = desc; }
+      desc.peg = peg;
+      desc.x = Number.isFinite(peg.x) ? peg.x : 0;
+      desc.y = Number.isFinite(peg.y) ? peg.y : 0;
+      desc.radius = radius;
+      desc.radiusSq = radius * radius;
+      desc.strength = strength;
+      desc.mode = normalizeMagnetMode(peg.magnetMode);
+      magnets.push(desc);
+      n++;
+    }
+    return magnets;
+  }
+
+  applyMagnetForces(pegs = [], stepScale = 1) {
+    const magnets = this.collectActiveMagnets(pegs);
+    if (magnets.length === 0) return 0;
+    let affected = 0;
+
+    for (const body of this.bodies.values()) {
+      if (!body || body.static) continue;
+      if (body.sleeping && !canSupportMotionWakeBody(body)) continue;
+
+      const bodyX = Number.isFinite(body.x) ? body.x : 0;
+      const bodyY = Number.isFinite(body.y) ? body.y : 0;
+      const attachedPeg = body._magnetAttachedPeg || null;
+      let impulseX = 0;
+      let impulseY = 0;
+      let maxEased = 0;
+      let inField = false;
+      let attachedFound = false;
+      let attachedDistSq = Infinity;
+      let attachedRadiusSq = 0;
+      let onlyAttractAttachedHold = !!attachedPeg;
+      for (const magnet of magnets) {
+        const source = magnet.peg;
+        if (!source || body.pegIdSet?.has(source.id)) continue;
+        const dx = magnet.x - bodyX;
+        const dy = magnet.y - bodyY;
+        const distSq = dx * dx + dy * dy;
+        if (source === attachedPeg) {
+          attachedFound = true;
+          attachedDistSq = distSq;
+          attachedRadiusSq = magnet.radiusSq;
+        }
+        if (distSq <= 0.000001 || distSq > magnet.radiusSq) continue;
+        inField = true;
+
+        const dist = Math.sqrt(distSq);
+        const nx = dx / dist;
+        const ny = dy / dist;
+        const t = Utils.clamp(1 - dist / magnet.radius, 0, 1);
+        const eased = t * t * (3 - 2 * t);
+        if (eased > maxEased) maxEased = eased;
+        let force = magnet.strength * (0.18 + eased * 0.82);
+        // An arrived (attached) body just needs holding, not a hard inward shove — that
+        // shove is what made dense piles jostle forever against each other.
+        const isAttachedAttractHold = source === attachedPeg && magnet.mode !== 'repel';
+        if (isAttachedAttractHold) force *= 0.3;
+        else onlyAttractAttachedHold = false;
+        const sign = magnet.mode === 'repel' ? -1 : 1;
+        impulseX += nx * force * sign;
+        impulseY += ny * force * sign;
+      }
+
+      // Drop a stale attachment once the magnet is gone or the body has drifted well
+      // outside its field (so a body that flew off can't still detonate it).
+      // attachedRadiusSq is the attached magnet's own radius² (set when attachedFound),
+      // and the distance test only runs when attachedFound, so no getMagnetRadius() here.
+      const attached = attachedPeg;
+      if (attached && (!attachedFound || attached._magnetDetonated === true
+        || attachedDistSq > attachedRadiusSq * 2.25)) {
+        body._magnetAttachedPeg = null;
+      }
+
+      if (!inField || (impulseX * impulseX + impulseY * impulseY) <= 0.00000001) continue;
+      if (body.sleeping && onlyAttractAttachedHold && attachedFound) continue;
+      if (body.sleeping) {
+        body.sleeping = false;
+        body.sleepFrames = 0;
+        body.animationDetached = true;
+        body.kinematic = false;
+        body.supported = false;
+        body.supportMemory = 0;
+        body.supportDot = 0;
+        body.staticSupportMemory = 0;
+        body.staticSupportDot = 0;
+        body.dynamicSupportMemory = 0;
+        body.dynamicSupportBodyId = null;
+        this.markRuntimeCountersDirty();
+      }
+      body.vx += impulseX * stepScale;
+      body.vy += impulseY * stepScale;
+      // Bleed orbital / jitter energy (more, the deeper in the field) so attracted bodies
+      // spiral in and SETTLE against the magnet instead of circling and colliding forever.
+      const damp = Math.pow(
+        MAGNET_INFLUENCE_DAMPING_FAR
+          + (MAGNET_INFLUENCE_DAMPING_NEAR - MAGNET_INFLUENCE_DAMPING_FAR) * maxEased,
+        stepScale
+      );
+      body.vx *= damp;
+      body.vy *= damp;
+      this.clampBodySpeed(body);
+      affected++;
+    }
+
+    return affected;
   }
 
   getPortalCrossing(body, prevX, prevY, portal) {
@@ -2327,9 +2543,11 @@ export class DestructionPegSystem {
     this._bumperHitEvents.length = 0;
     this._bumperHitKeys.clear();
     this._portalHitEvents.length = 0;
+    this._magnetHitEvents.length = 0;
+    this._magnetHitKeys.clear();
     this._stepCounter++;
     if (!this.isEnabled() || !Array.isArray(pegs) || pegs.length === 0) {
-      return { moved: false, fallenPegs: [], bumperHits: [], portalHits: [] };
+      return { moved: false, fallenPegs: [], bumperHits: [], portalHits: [], magnetHits: [] };
     }
 
     this.syncBodies(pegs, groups);
@@ -2337,8 +2555,14 @@ export class DestructionPegSystem {
     this.updateBucketVelocity(bounds);
     this.drainWakeQueue(MAX_BODIES_WOKEN_PER_STEP);
     this.applyQueuedFractures(pegs, groups);
+    this.refreshBodyGravityForBounds(bounds);
     this.wakeSlopedSleepers();
     this.wakeSleepersWithUnstableSupports();
+
+    const timeScale = Number.isFinite(PHYSICS_CONFIG.timeScale) ? PHYSICS_CONFIG.timeScale : 1;
+    const safeDt = Number.isFinite(dtSeconds) && dtSeconds > 0 ? dtSeconds : BASE_STEP_SECONDS;
+    const stepScale = Math.max(0.1, (safeDt / BASE_STEP_SECONDS) * timeScale);
+    this.applyMagnetForces(pegs, stepScale);
 
     const hasAwake = this.hasAwakeBodies();
     const hasKinematicMotion = this._kinematicMotionCount > 0
@@ -2350,12 +2574,9 @@ export class DestructionPegSystem {
       const fallenPegs = this._pendingFallenCheck ? this.collectFallenPegs(pegs, bounds) : [];
       this._pendingFallenCheck = false;
       this.debugStats.skippedSteps++;
-      return { moved: fallenPegs.length > 0, fallenPegs, bumperHits: [], portalHits: [] };
+      return { moved: fallenPegs.length > 0, fallenPegs, bumperHits: [], portalHits: [], magnetHits: [] };
     }
 
-    const timeScale = Number.isFinite(PHYSICS_CONFIG.timeScale) ? PHYSICS_CONFIG.timeScale : 1;
-    const safeDt = Number.isFinite(dtSeconds) && dtSeconds > 0 ? dtSeconds : BASE_STEP_SECONDS;
-    const stepScale = Math.max(0.1, (safeDt / BASE_STEP_SECONDS) * timeScale);
     const linearDamping = Math.pow(this.settings.damping, stepScale);
     const angularDamping = Math.pow(0.992, stepScale);
     let maxMove = 0;
@@ -2368,8 +2589,8 @@ export class DestructionPegSystem {
         body.portalCooldown = Math.max(0, body.portalCooldown - 1);
       }
       if (body.static || body.sleeping) continue;
-      body.vx += this.settings.gravityX * stepScale;
-      body.vy += this.settings.gravityY * stepScale;
+      body.vx += (body._gravityX || 0) * stepScale;
+      body.vy += (body._gravityY || 0) * stepScale;
       body.vx *= linearDamping;
       body.vy *= linearDamping;
       body.av *= angularDamping;
@@ -2446,7 +2667,8 @@ export class DestructionPegSystem {
       moved,
       fallenPegs,
       bumperHits: this._bumperHitEvents.slice(),
-      portalHits: this._portalHitEvents.slice()
+      portalHits: this._portalHitEvents.slice(),
+      magnetHits: this._magnetHitEvents.slice()
     };
   }
 
@@ -2647,8 +2869,9 @@ export class DestructionPegSystem {
     if (!body || !Number.isFinite(minX) || !Number.isFinite(maxX) || !Number.isFinite(minY) || !Number.isFinite(maxY)) {
       return;
     }
-    const tx = this._gravityNormY;
-    const ty = -this._gravityNormX;
+    const gravityNorm = getBodyGravityNorm(body, this.settings);
+    const tx = gravityNorm.y;
+    const ty = -gravityNorm.x;
     const p1 = minX * tx + minY * ty;
     const p2 = maxX * tx + minY * ty;
     const p3 = maxX * tx + maxY * ty;
@@ -2673,12 +2896,19 @@ export class DestructionPegSystem {
       const minY = Math.max(a.aabb.minY, b.aabb.minY);
       const maxY = Math.min(a.aabb.maxY, b.aabb.maxY);
       if (minX > maxX || minY > maxY) continue;
-      const supportDot = overlap.nx * this._gravityNormX + overlap.ny * this._gravityNormY;
-      if (this.isActiveDynamic(a.body) && supportDot > SUPPORT_TORQUE_DOT) {
-        this.recordSupportTorqueSpan(a.body, minX, maxX, minY, maxY);
+      if (this.isActiveDynamic(a.body)) {
+        const gravityA = getBodyGravityNorm(a.body, this.settings);
+        const supportDotA = overlap.nx * gravityA.x + overlap.ny * gravityA.y;
+        if (supportDotA > SUPPORT_TORQUE_DOT) {
+          this.recordSupportTorqueSpan(a.body, minX, maxX, minY, maxY);
+        }
       }
-      if (this.isActiveDynamic(b.body) && supportDot < -SUPPORT_TORQUE_DOT) {
-        this.recordSupportTorqueSpan(b.body, minX, maxX, minY, maxY);
+      if (this.isActiveDynamic(b.body)) {
+        const gravityB = getBodyGravityNorm(b.body, this.settings);
+        const supportDotB = -overlap.nx * gravityB.x - overlap.ny * gravityB.y;
+        if (supportDotB > SUPPORT_TORQUE_DOT) {
+          this.recordSupportTorqueSpan(b.body, minX, maxX, minY, maxY);
+        }
       }
     }
   }
@@ -2688,8 +2918,9 @@ export class DestructionPegSystem {
     const min = body._supportSpanMin;
     const max = body._supportSpanMax;
     if (!Number.isFinite(min) || !Number.isFinite(max) || min > max) return 0;
-    const tx = this._gravityNormY;
-    const ty = -this._gravityNormX;
+    const gravityNorm = getBodyGravityNorm(body, this.settings);
+    const tx = gravityNorm.y;
+    const ty = -gravityNorm.x;
     const centre = (body.x || 0) * tx + (body.y || 0) * ty;
     const outside = centre < min ? min - centre : (centre > max ? centre - max : 0);
     const excess = outside - SUPPORT_EDGE_TORQUE_MARGIN;
@@ -2781,6 +3012,11 @@ export class DestructionPegSystem {
     return collider?.kind === 'peg' && collider.peg?.type === 'bumper' ? collider.peg : null;
   }
 
+  getColliderMagnetPeg(collider) {
+    const peg = collider?.kind === 'peg' ? collider.peg : null;
+    return isBombMagnetPeg(peg) && peg._magnetDetonated !== true ? peg : null;
+  }
+
   getCollisionRestitution(a, b) {
     let restitution = this.settings.restitution;
     const bumper = this.getColliderBumperPeg(a) || this.getColliderBumperPeg(b);
@@ -2822,6 +3058,16 @@ export class DestructionPegSystem {
     if (bumperB && bumperReactsToPegs(bumperB) && (activeA || activeB)) {
       this.fireBumperContact(b, a, bumperB, -nx, -ny, strength);
     }
+  }
+
+  maybeMagnetContact(a, b, activeA, activeB, strength, nx, ny) {
+    // A peg-body touching the magnet does NOT detonate it — it only records that the body
+    // is now attached. The blast fires later, only when the BALL strikes an attached
+    // group (handled on the ball-physics side via getMagnetForAttachedPeg).
+    const magnetA = this.getColliderMagnetPeg(a);
+    const magnetB = this.getColliderMagnetPeg(b);
+    if (magnetA && b?.body && !b.body.static) this.markBodyMagnetAttachment(b.body, magnetA);
+    if (magnetB && a?.body && !a.body.static) this.markBodyMagnetAttachment(a.body, magnetB);
   }
 
   // A bumper actively ejects whatever touches it (scaled by bumperBounce) and pulses,
@@ -2950,14 +3196,17 @@ export class DestructionPegSystem {
       0,
       1
     );
-    const supportDot = nx * this._gravityNormX + ny * this._gravityNormY;
+    const gravityA = activeA ? getBodyGravityNorm(bodyA, this.settings) : null;
+    const gravityB = activeB ? getBodyGravityNorm(bodyB, this.settings) : null;
+    const supportDotA = gravityA ? (nx * gravityA.x + ny * gravityA.y) : 0;
+    const supportDotB = gravityB ? (-nx * gravityB.x - ny * gravityB.y) : 0;
     invIA *= Math.max(
       contactSpeedAngularScale,
-      this.getUnstableSupportAngularScale(bodyA, activeA ? supportDot : 0)
+      this.getUnstableSupportAngularScale(bodyA, supportDotA)
     );
     invIB *= Math.max(
       contactSpeedAngularScale,
-      this.getUnstableSupportAngularScale(bodyB, activeB ? -supportDot : 0)
+      this.getUnstableSupportAngularScale(bodyB, supportDotB)
     );
 
     // Unified normal solve. Drive the relative normal velocity up to the larger of:
@@ -3021,11 +3270,11 @@ export class DestructionPegSystem {
     // Support classification (and its slope-slide acceleration) runs once, on the last
     // iteration, so the contact has settled and the slide accel isn't applied N times.
     if (lastIter) {
-      if (activeA && supportDot > 0.45) {
-        this.markBodySupported(bodyA, nx, ny, supportDot, subScale, bodyB);
+      if (activeA && supportDotA > 0.45) {
+        this.markBodySupported(bodyA, nx, ny, supportDotA, subScale, bodyB);
       }
-      if (activeB && supportDot < -0.45) {
-        this.markBodySupported(bodyB, -nx, -ny, -supportDot, subScale, bodyA);
+      if (activeB && supportDotB > 0.45) {
+        this.markBodySupported(bodyB, -nx, -ny, supportDotB, subScale, bodyA);
       }
     }
 
@@ -3039,6 +3288,7 @@ export class DestructionPegSystem {
       this.maybeWakeSleepingCollisionBody(bodyB, bodyA, -relN);
       const collisionStrength = Math.abs(relN) + penetration * 0.22;
       this.maybeBumperContact(a, b, activeA, activeB, collisionStrength, nx, ny);
+      this.maybeMagnetContact(a, b, activeA, activeB, collisionStrength, nx, ny);
       if (collisionStrength >= GROUP_FRACTURE_IMPULSE) {
         const contactX = ((a.x || bodyA.x || 0) + (b.x || bodyB.x || 0)) * 0.5;
         const contactY = ((a.y || bodyA.y || 0) + (b.y || bodyB.y || 0)) * 0.5;

@@ -24,7 +24,18 @@ import {
   PORTAL_DEFAULT_SCALE
 } from './portal-defaults.js';
 import { isBilliardPegType } from './billiard-mode.js';
-import { isDestructionStaticPeg } from './destruction-mode.js';
+import {
+  getMagnetExplosionPower,
+  getMagnetRadius,
+  getMagnetStrength,
+  isBombMagnetType,
+  isMagnetBlastEnabled,
+  normalizeMagnetMode,
+  normalizeMagnetPegProperties
+} from './magnet-defaults.js';
+import {
+  isDestructionStaticPeg
+} from './destruction-mode.js';
 import {
   PegAnimator,
   MIN_VISIBLE_RATIO,
@@ -1901,6 +1912,7 @@ export class Editor {
     
     const forceCircle = this.selectedPegType === 'bumper'
       || this.selectedPegType === 'bomb'
+      || isBombMagnetType(this.selectedPegType)
       || isPortalType(this.selectedPegType)
       || isBilliardPegType(this.selectedPegType);
     const shape = forceCircle ? 'circle' : this.selectedShape;
@@ -1937,6 +1949,9 @@ export class Editor {
     if (this.selectedPegType === 'bomb') {
       pegData.bombPower = 1.0;
       pegData.bombPhysicsOnly = true;
+    }
+    if (isBombMagnetType(this.selectedPegType)) {
+      normalizeMagnetPegProperties(pegData);
     }
     if (this.selectedPegType === 'gamble') {
       Object.assign(pegData, normalizeSurvivalGamblePegProperties(pegData));
@@ -2094,6 +2109,15 @@ export class Editor {
     if (!level || this.selectedPegIds.size === 0) return;
 
     this.saveUndoState();
+    const clearMagnetProps = (peg) => {
+      delete peg.magnetRadius;
+      delete peg.magnetStrength;
+      delete peg.magnetMode;
+      delete peg.magnetExplosionPower;
+      delete peg.magnetBlast;
+      delete peg._magnetDetonated;
+      delete peg._magnetPulse;
+    };
 
     for (const pegId of this.selectedPegIds) {
       const peg = level.pegs.find(p => p.id === pegId);
@@ -2113,6 +2137,7 @@ export class Editor {
           delete peg.gambleKnockbackEnabled;
           delete peg.gambleKnockbackDistance;
           delete peg.gambleKnockbackSmoothMs;
+          clearMagnetProps(peg);
         } else if (isPortalType(type)) {
           peg.shape = 'circle';
           delete peg.brickBaseRadius;
@@ -2131,6 +2156,25 @@ export class Editor {
           delete peg.gambleKnockbackEnabled;
           delete peg.gambleKnockbackDistance;
           delete peg.gambleKnockbackSmoothMs;
+          clearMagnetProps(peg);
+        } else if (isBombMagnetType(type)) {
+          normalizeMagnetPegProperties(peg);
+          delete peg.bumperBounce;
+          delete peg.bumperScale;
+          delete peg.bumperDisappear;
+          delete peg.bumperOrange;
+          delete peg._bumperHitScale;
+          delete peg.portalScale;
+          delete peg.portalOneWay;
+          delete peg.portalOneWayFlip;
+          delete peg.multiballSpawnCount;
+          delete peg.gambleBallCount;
+          delete peg.gambleLuckBonus;
+          delete peg.gambleKnockbackEnabled;
+          delete peg.gambleKnockbackDistance;
+          delete peg.gambleKnockbackSmoothMs;
+          delete peg.bombPower;
+          delete peg.bombPhysicsOnly;
         } else if (isBilliardPegType(type)) {
           peg.shape = 'circle';
           delete peg.width;
@@ -2151,6 +2195,7 @@ export class Editor {
           delete peg.portalScale;
           delete peg.portalOneWay;
           delete peg.portalOneWayFlip;
+          clearMagnetProps(peg);
         } else if (type === 'multi') {
           peg.multiballSpawnCount = normalizeMultiballSpawnCount(peg.multiballSpawnCount);
           delete peg.gambleBallCount;
@@ -2166,6 +2211,7 @@ export class Editor {
           delete peg.portalScale;
           delete peg.portalOneWay;
           delete peg.portalOneWayFlip;
+          clearMagnetProps(peg);
         } else if (type === 'gamble') {
           Object.assign(peg, normalizeSurvivalGamblePegProperties(peg));
           delete peg.multiballSpawnCount;
@@ -2177,6 +2223,7 @@ export class Editor {
           delete peg.portalScale;
           delete peg.portalOneWay;
           delete peg.portalOneWayFlip;
+          clearMagnetProps(peg);
         } else {
           // Clean up bumper properties when changing away
           delete peg.bumperBounce;
@@ -2193,6 +2240,7 @@ export class Editor {
           delete peg.gambleKnockbackEnabled;
           delete peg.gambleKnockbackDistance;
           delete peg.gambleKnockbackSmoothMs;
+          clearMagnetProps(peg);
         }
       }
     }
@@ -2232,6 +2280,8 @@ export class Editor {
       const peg = level.pegs.find(p => p.id === pegId);
       if (peg) {
         const forceCircle = peg.type === 'bumper'
+          || peg.type === 'bomb'
+          || isBombMagnetType(peg.type)
           || isPortalType(peg.type)
           || isBilliardPegType(peg.type);
         peg.shape = forceCircle ? 'circle' : shape;
@@ -2418,6 +2468,14 @@ export class Editor {
     if (peg.type === 'gamble') {
       Object.assign(pegData, normalizeSurvivalGamblePegProperties(peg));
     }
+    if (isBombMagnetType(peg.type)) {
+      pegData.magnetRadius = getMagnetRadius(peg);
+      pegData.magnetStrength = getMagnetStrength(peg);
+      pegData.magnetMode = normalizeMagnetMode(peg.magnetMode);
+      pegData.magnetExplosionPower = getMagnetExplosionPower(peg);
+      pegData.magnetBlast = isMagnetBlastEnabled(peg);
+      pegData.shape = 'circle';
+    }
     if (Object.prototype.hasOwnProperty.call(peg, 'destructionStatic')) {
       pegData.destructionStatic = peg.destructionStatic;
     }
@@ -2598,6 +2656,7 @@ export class Editor {
       : 0;
     const trackerState = survivalOn ? this.survivalRuntime.getTrackerState() : null;
     const cameraY = this.getCameraY();
+    const worldHeight = survivalOn ? this.survivalRuntime.getWorldHeight() : this.canvas.height;
 
     // Tick animation preview if active
     if (this.animationPreview && this.animationPreviewAnimator && level) {
@@ -2627,7 +2686,7 @@ export class Editor {
       backgroundFxId: level ? `editor:${level.id}` : 'editor',
       backgroundEvents: [],
       playState: 'editor',
-      worldHeight: survivalOn ? this.survivalRuntime.getWorldHeight() : this.canvas.height,
+      worldHeight,
       survivalBackground: survivalOn ? this.survivalRuntime.getBackground() : null,
       showLauncher: false,
       showGrid: this.showGrid,
@@ -2834,6 +2893,98 @@ export class Editor {
       const peg = level.pegs.find(p => p.id === pegId);
       if (peg && peg.type === 'bomb') {
         return { power: peg.bombPower ?? 1.0, physicsOnly: peg.bombPhysicsOnly !== false };
+      }
+    }
+    return null;
+  }
+
+  isSelectionAllBombMagnets() {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level || this.selectedPegIds.size === 0) return false;
+    for (const pegId of this.selectedPegIds) {
+      const peg = level.pegs.find(p => p.id === pegId);
+      if (!peg || !isBombMagnetType(peg.type)) return false;
+    }
+    return true;
+  }
+
+  setSelectedMagnetRadius(radius) {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level) return;
+    const clamped = Utils.clamp(radius, 24, 280);
+    for (const pegId of this.selectedPegIds) {
+      const peg = level.pegs.find(p => p.id === pegId);
+      if (peg && isBombMagnetType(peg.type)) {
+        peg.magnetRadius = clamped;
+      }
+    }
+    this.levelManager.save();
+  }
+
+  setSelectedMagnetStrength(strength) {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level) return;
+    const clamped = Utils.clamp(strength, 0, 2.5);
+    for (const pegId of this.selectedPegIds) {
+      const peg = level.pegs.find(p => p.id === pegId);
+      if (peg && isBombMagnetType(peg.type)) {
+        peg.magnetStrength = clamped;
+      }
+    }
+    this.levelManager.save();
+  }
+
+  setSelectedMagnetMode(mode) {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level) return;
+    const normalized = normalizeMagnetMode(mode);
+    for (const pegId of this.selectedPegIds) {
+      const peg = level.pegs.find(p => p.id === pegId);
+      if (peg && isBombMagnetType(peg.type)) {
+        peg.magnetMode = normalized;
+      }
+    }
+    this.levelManager.save();
+  }
+
+  setSelectedMagnetExplosionPower(power) {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level) return;
+    const clamped = Utils.clamp(power, 0.3, 4.0);
+    for (const pegId of this.selectedPegIds) {
+      const peg = level.pegs.find(p => p.id === pegId);
+      if (peg && isBombMagnetType(peg.type)) {
+        peg.magnetExplosionPower = clamped;
+      }
+    }
+    this.levelManager.save();
+  }
+
+  setSelectedMagnetBlast(enabled) {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level) return;
+    for (const pegId of this.selectedPegIds) {
+      const peg = level.pegs.find(p => p.id === pegId);
+      if (peg && isBombMagnetType(peg.type)) {
+        peg.magnetBlast = !!enabled;
+      }
+    }
+    this.levelManager.save();
+  }
+
+  getSelectedMagnetProperties() {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level || this.selectedPegIds.size === 0) return null;
+    for (const pegId of this.selectedPegIds) {
+      const peg = level.pegs.find(p => p.id === pegId);
+      if (peg && isBombMagnetType(peg.type)) {
+        return {
+          radius: getMagnetRadius(peg),
+          strength: getMagnetStrength(peg),
+          mode: normalizeMagnetMode(peg.magnetMode),
+          explosionPower: getMagnetExplosionPower(peg),
+          blast: isMagnetBlastEnabled(peg)
+        };
       }
     }
     return null;

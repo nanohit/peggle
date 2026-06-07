@@ -361,7 +361,20 @@ export class PegAnimator {
     this._hitTriggerState = new Map();  // animIndex → { active, elapsed, forward }
   }
 
-  loadFromLevel(pegs, groups = []) {
+  loadFromLevel(pegs, groups = [], options = {}) {
+    // When a group loses members mid-play (destruction knocks pegs off), reloading must
+    // NOT re-derive the rotation center from the *remaining* pegs — that drifts the origin
+    // (and any explicit Set Origin pivot, which is an offset from it) toward the new local
+    // centroid. preserveGroupOrigins keeps each group anchored to its prior center.
+    const preserveGroupOrigins = options.preserveGroupOrigins === true;
+    const prevGroupCenters = preserveGroupOrigins ? new Map() : null;
+    if (prevGroupCenters) {
+      for (const a of this.animations) {
+        if (a.type === 'group' && a.groupId != null) {
+          prevGroupCenters.set(a.groupId, { centerX: a.centerX, centerY: a.centerY });
+        }
+      }
+    }
     this.originalPositions.clear();
     this.animations = [];
     this.animatedPegIds.clear();
@@ -408,6 +421,13 @@ export class PegAnimator {
       if (count === 0) continue;
       cx /= count;
       cy /= count;
+      // Keep the original anchor when preserving (so the spin axis / Set Origin doesn't
+      // slide toward the remaining pegs); extents below still reflect the current members.
+      const preservedCenter = prevGroupCenters?.get(group.id);
+      if (preservedCenter) {
+        cx = preservedCenter.centerX;
+        cy = preservedCenter.centerY;
+      }
       let extentX = PHYSICS_CONFIG.pegRadius;
       let extentY = PHYSICS_CONFIG.pegRadius;
       for (const pegId of memberIds) {
@@ -421,6 +441,7 @@ export class PegAnimator {
 
       const entry = {
         type: 'group',
+        groupId: group.id,
         pegIds: memberIds,
         centerX: cx,
         centerY: cy,
