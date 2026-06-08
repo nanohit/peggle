@@ -25,6 +25,23 @@ import {
 
 const STORAGE_KEY = 'peggle_levels';
 const TRAINING_KEY = 'peggle_training_data';
+const STORAGE_OVERFLOW_KEY = 'peggle_levels_local_overflow';
+const STORAGE_QUOTA_RETRY_MS = 30000;
+
+function isStorageQuotaError(error) {
+  return error && (
+    error.name === 'QuotaExceededError' ||
+    error.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
+    error.code === 22 ||
+    error.code === 1014
+  );
+}
+
+function writeSmallStorageFlag(key, data) {
+  try {
+    localStorage.setItem(key, JSON.stringify(data));
+  } catch { /* best effort */ }
+}
 
 export function normalizeLevelData(level) {
   if (!level || typeof level !== 'object') return null;
@@ -153,6 +170,10 @@ export class LevelManager {
     this.levels = [];
     this.trainingLevels = [];
     this.currentLevelIndex = -1;
+    this.localStorageOverflowed = false;
+    this._localSaveQuotaBlockedUntil = 0;
+    this._localSaveQuotaBlockedSize = 0;
+    this._localSaveQuotaWarned = false;
     this.load();
   }
 
@@ -611,13 +632,89 @@ export class LevelManager {
     }
   }
 
-  // Save to localStorage
-  save() {
+  _getLocalStorageEvictionCandidates() {
+    const candidates = [];
     try {
-      const json = JSON.stringify(this.levels);
-      localStorage.setItem(STORAGE_KEY, json);
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (!key || key === STORAGE_KEY || key === TRAINING_KEY || key === STORAGE_OVERFLOW_KEY) continue;
+        const isCampaignCache = key.startsWith('campaign:') || key.startsWith('campaign_ts:');
+        const isBakedCache = key.startsWith('baked:');
+        if (!isCampaignCache && !isBakedCache) continue;
+        const value = localStorage.getItem(key) || '';
+        candidates.push({
+          key,
+          bytes: key.length + value.length,
+          priority: isCampaignCache ? 0 : 1
+        });
+      }
+    } catch {
+      return [];
+    }
+    return candidates.sort((a, b) => (a.priority - b.priority) || (b.bytes - a.bytes));
+  }
+
+  _markLocalStorageOverflow(size, error) {
+    this.localStorageOverflowed = true;
+    this._localSaveQuotaBlockedUntil = Date.now() + STORAGE_QUOTA_RETRY_MS;
+    this._localSaveQuotaBlockedSize = Number.isFinite(size) ? size : 0;
+    writeSmallStorageFlag(STORAGE_OVERFLOW_KEY, {
+      size: this._localSaveQuotaBlockedSize,
+      at: new Date().toISOString()
+    });
+    if (!this._localSaveQuotaWarned) {
+      this._localSaveQuotaWarned = true;
+      console.warn(
+        '[storage] Local level cache is too large for localStorage; remote save remains active.',
+        '| size:',
+        this._localSaveQuotaBlockedSize,
+        '| reason:',
+        error?.name || error?.message || 'storage quota'
+      );
+    }
+  }
+
+  _trySaveLevelsJson(json) {
+    localStorage.setItem(STORAGE_KEY, json);
+    this.localStorageOverflowed = false;
+    this._localSaveQuotaBlockedUntil = 0;
+    this._localSaveQuotaBlockedSize = 0;
+    this._localSaveQuotaWarned = false;
+    try { localStorage.removeItem(STORAGE_OVERFLOW_KEY); } catch { /* best effort */ }
+    return true;
+  }
+
+  // Save to localStorage as a best-effort editor cache. Remote save is handled
+  // by PeggleApp; quota failures here must never spam console or block editing.
+  save() {
+    if (typeof localStorage === 'undefined' || typeof localStorage.setItem !== 'function') return false;
+    const now = Date.now();
+    if (this._localSaveQuotaBlockedUntil > now) return false;
+    let json = '';
+    try {
+      json = JSON.stringify(this.levels);
+      this._trySaveLevelsJson(json);
+      return true;
     } catch (e) {
-      console.error('Failed to save levels:', e, '| size:', (() => { try { return JSON.stringify(this.levels).length; } catch(_) { return '?'; } })());
+      if (!isStorageQuotaError(e)) {
+        console.warn('[storage] Failed to save local level cache:', e);
+        return false;
+      }
+      for (const candidate of this._getLocalStorageEvictionCandidates()) {
+        try {
+          localStorage.removeItem(candidate.key);
+          this._trySaveLevelsJson(json);
+          console.warn('[storage] Freed local cache for levels by evicting:', candidate.key);
+          return true;
+        } catch (retryError) {
+          if (!isStorageQuotaError(retryError)) {
+            console.warn('[storage] Failed while freeing local level cache:', retryError);
+            return false;
+          }
+        }
+      }
+      this._markLocalStorageOverflow(json.length, e);
+      return false;
     }
   }
 
@@ -634,6 +731,7 @@ export class LevelManager {
   load() {
     try {
       const data = localStorage.getItem(STORAGE_KEY);
+      this.localStorageOverflowed = !!localStorage.getItem(STORAGE_OVERFLOW_KEY);
       if (data) {
         const parsed = JSON.parse(data);
         this.levels = Array.isArray(parsed)

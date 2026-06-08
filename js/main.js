@@ -349,8 +349,9 @@ class PeggleApp {
     // Hook into LevelManager.save to auto-sync current level to remote
     const origSave = this.levelManager.save.bind(this.levelManager);
     this.levelManager.save = () => {
-      origSave();
+      const localOk = origSave();
       this._debouncedRemoteSync();
+      return localOk;
     };
 
     this.visualLayout.mount();
@@ -505,28 +506,50 @@ class PeggleApp {
     try {
       const remoteNames = await api.listLevels();
       if (!remoteNames || remoteNames.length === 0) return;
-      const localNames = new Set();
-      for (const l of this.levelManager.getAllLevels()) {
-        localNames.add((l.name || '').replace(/[^a-zA-Z0-9_-]/g, '_'));
-        localNames.add(l.name || '');
+      const safeLevelName = (name) => (name || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+      const localIndexByName = new Map();
+      const localLevels = this.levelManager.getAllLevels();
+      for (let i = 0; i < localLevels.length; i++) {
+        const level = localLevels[i];
+        localIndexByName.set(level.name || '', i);
+        localIndexByName.set(safeLevelName(level.name), i);
       }
       let added = 0;
+      let refreshed = 0;
+      let refreshedCurrent = false;
+      const shouldRefreshExisting = this.levelManager.localStorageOverflowed === true;
       for (const name of remoteNames) {
-        if (localNames.has(name)) continue;
+        const localIndex = localIndexByName.has(name) ? localIndexByName.get(name) : -1;
+        if (localIndex >= 0 && !shouldRefreshExisting) continue;
         const data = await api.getLevel(name);
         if (data && Array.isArray(data.pegs)) {
           // Import remote level into local editor
           if (!data.id) data.id = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
           const normalized = this.levelManager.normalizeLevel(data);
           if (normalized) {
-            this.levelManager.levels.push(normalized);
-            added++;
+            if (localIndex >= 0) {
+              this.levelManager.levels[localIndex] = normalized;
+              refreshed++;
+              refreshedCurrent = refreshedCurrent || localIndex === this.levelManager.currentLevelIndex;
+            } else {
+              this.levelManager.levels.push(normalized);
+              const nextIndex = this.levelManager.levels.length - 1;
+              localIndexByName.set(name, nextIndex);
+              localIndexByName.set(normalized.name || '', nextIndex);
+              localIndexByName.set(safeLevelName(normalized.name), nextIndex);
+              added++;
+            }
           }
         }
       }
-      if (added > 0) {
+      if (added > 0 || refreshed > 0) {
         this.levelManager.save();
-        console.log(`[pull] Imported ${added} remote levels`);
+        console.log(`[pull] Imported ${added} remote levels, refreshed ${refreshed}`);
+        if (refreshedCurrent && this.mode === 'editor') {
+          this.startEditor();
+          this.updateLevelTitle();
+          this.updateLevelSettings();
+        }
       }
     } catch (e) {
       console.warn('[pull] Failed to pull remote levels:', e);
