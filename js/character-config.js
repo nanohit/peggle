@@ -1,9 +1,14 @@
-import { resolveAssetPaths } from './visual-config.js';
+import { DEFAULT_HEALTH_CIRCLE_COLOR, resolveAssetPaths } from './visual-config.js';
 import { compressImageFile } from './image-compression.js';
 
-export const CHARACTER_REGISTRY_VERSION = 1;
+export const CHARACTER_REGISTRY_VERSION = 2;
 export const CHARACTER_REGISTRY_STORAGE_KEY = 'peggle_character_registry_v1';
 export const DEFAULT_CHARACTER_ID = 'lu';
+export const DEFAULT_CHARACTER_HEALTH_CIRCLE_COLOR = DEFAULT_HEALTH_CIRCLE_COLOR;
+export const DEFAULT_CHARACTER_HEALTH_CIRCLE_COLORS = Object.freeze({
+  [DEFAULT_CHARACTER_ID]: DEFAULT_CHARACTER_HEALTH_CIRCLE_COLOR,
+  'character-2': '#ffd6ea'
+});
 export const DEFAULT_SATURATION_CAP = 1.5;
 export const PERSONALITY_TUNING_VERSION = 2;
 
@@ -48,6 +53,19 @@ function cleanSlotName(value, fallback = 'idle') {
   if (typeof value !== 'string') return fallback;
   const slot = value.trim();
   return slot || fallback;
+}
+
+function defaultHealthCircleColorForId(id) {
+  return DEFAULT_CHARACTER_HEALTH_CIRCLE_COLORS[id] || DEFAULT_CHARACTER_HEALTH_CIRCLE_COLOR;
+}
+
+function normalizeHealthCircleColor(value, fallback = DEFAULT_CHARACTER_HEALTH_CIRCLE_COLOR) {
+  const fallbackColor = typeof fallback === 'string' && fallback.trim()
+    ? fallback.trim()
+    : DEFAULT_CHARACTER_HEALTH_CIRCLE_COLOR;
+  if (typeof value !== 'string') return fallbackColor;
+  const color = value.trim();
+  return color || fallbackColor;
 }
 
 export function makeCharacterId(value, fallback = DEFAULT_CHARACTER_ID) {
@@ -484,8 +502,9 @@ function normalizePvpPortraits(rawPortraits = null) {
 }
 
 export function createDefaultCharacter(overrides = null) {
+  const defaultId = makeCharacterId(overrides?.id, DEFAULT_CHARACTER_ID);
   return normalizeCharacter({
-    id: DEFAULT_CHARACTER_ID,
+    id: defaultId,
     name: 'Lu',
     slots: {
       idle: DEFAULT_CHARACTER_ASSET.webp,
@@ -498,20 +517,33 @@ export function createDefaultCharacter(overrides = null) {
       victory: null
     },
     pvpPortraits: normalizePvpPortraits(null),
+    healthCircleColor: defaultHealthCircleColorForId(defaultId),
     personality: DEFAULT_PERSONALITY,
     ...(isPlainObject(overrides) ? overrides : {})
   });
 }
 
-export function normalizeCharacter(raw = null) {
+export function normalizeCharacter(raw = null, options = {}) {
   const source = isPlainObject(raw) ? raw : {};
   const id = makeCharacterId(source.id || source.characterId || DEFAULT_CHARACTER_ID);
   const slots = normalizeSlots(source.slots || source.emotions);
+  const fallbackHealthColor = defaultHealthCircleColorForId(id);
+  const rawHealthColor = source.healthCircleColor || source.healthColor;
+  let healthCircleColor = normalizeHealthCircleColor(rawHealthColor, fallbackHealthColor);
+  if (
+    options.migrateDefaultHealthColor === true
+    && typeof rawHealthColor === 'string'
+    && rawHealthColor.trim().toLowerCase() === DEFAULT_CHARACTER_HEALTH_CIRCLE_COLOR.toLowerCase()
+    && fallbackHealthColor.toLowerCase() !== DEFAULT_CHARACTER_HEALTH_CIRCLE_COLOR.toLowerCase()
+  ) {
+    healthCircleColor = fallbackHealthColor;
+  }
   return {
     id,
     name: typeof source.name === 'string' && source.name.trim() ? source.name.trim() : id,
     slots,
     pvpPortraits: normalizePvpPortraits(source.pvpPortraits),
+    healthCircleColor,
     personality: normalizePersonality(source.personality)
   };
 }
@@ -520,8 +552,9 @@ export function normalizeCharacterRegistry(raw = null) {
   const source = isPlainObject(raw) ? raw : {};
   const characters = {};
   const rawCharacters = isPlainObject(source.characters) ? source.characters : {};
+  const migrateDefaultHealthColor = !Number.isFinite(Number(source.version)) || Number(source.version) < 2;
   for (const [id, character] of Object.entries(rawCharacters)) {
-    const normalized = normalizeCharacter({ id, ...character });
+    const normalized = normalizeCharacter({ id, ...character }, { migrateDefaultHealthColor });
     characters[normalized.id] = normalized;
   }
   if (!characters[DEFAULT_CHARACTER_ID]) {
@@ -733,6 +766,7 @@ export function createCharacterRefSnapshot(character) {
   return {
     id: normalized.id,
     name: normalized.name,
+    healthCircleColor: normalized.healthCircleColor,
     personality: normalized.personality
   };
 }
@@ -776,6 +810,27 @@ export function resolveCharacterForLevel(level, registry = loadCharacterRegistry
   }
   character.personality = mergePersonalityPatch(character.personality, assignment.personalityPatch);
   return character;
+}
+
+export function getCharacterHealthCircleColor(character) {
+  return normalizeHealthCircleColor(normalizeCharacter(character).healthCircleColor);
+}
+
+export function getLevelHealthCircleColorOverride(level) {
+  const color = level?.visuals?.slots?.healthCircle?.color;
+  if (typeof color !== 'string' || !color.trim()) return null;
+  const normalized = color.trim();
+  if (normalized.toLowerCase() === DEFAULT_CHARACTER_HEALTH_CIRCLE_COLOR.toLowerCase()) {
+    return null;
+  }
+  return normalized;
+}
+
+export function applyCharacterHealthCircleColorToVisuals(visuals, level, character) {
+  if (!visuals?.slots?.healthCircle) return visuals;
+  visuals.slots.healthCircle.color = getLevelHealthCircleColorOverride(level)
+    || getCharacterHealthCircleColor(character);
+  return visuals;
 }
 
 function pickFromSlotValue(value) {

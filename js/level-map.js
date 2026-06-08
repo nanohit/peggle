@@ -17,7 +17,8 @@ const PAD_BOTTOM = 80;
 const LINE_W = 3;
 
 const ASSET_PATHS = {
-  background: 'visuals/level_background.webp',
+  topBackground: 'visuals/top_level_background.webp',
+  repeatBackground: 'visuals/level_backgroun.webp',
   secret: 'visuals/Level_graph/secret.webp',
   completed: 'visuals/Level_graph/completed_level.webp',
   completedSmall: 'visuals/Level_graph/completed_level_small.webp',
@@ -141,9 +142,8 @@ export class LevelMap {
     this._portraits = new Map();      // nodeId → Image
 
     this._overlay = null;
-    this._backgroundCanvas = null;
-    this._backgroundCtx = null;
     this._scrollEl = null;
+    this._contentEl = null;
     this._canvas = null;
     this._ctx = null;
     this._disposed = false;
@@ -168,7 +168,7 @@ export class LevelMap {
     this._loadAssets()
       .then(() => {
         if (!this._disposed) {
-          this._renderBackground();
+          this._applyScrollingBackground();
           this._render();
         }
       })
@@ -192,8 +192,7 @@ export class LevelMap {
       if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
       if (this._overlay === overlay) {
         this._overlay = null;
-        this._backgroundCanvas = null;
-        this._backgroundCtx = null;
+        this._contentEl = null;
         this._canvas = null;
         this._ctx = null;
       }
@@ -391,18 +390,17 @@ export class LevelMap {
       }
     });
 
-    this._backgroundCanvas = document.createElement('canvas');
-    this._backgroundCanvas.className = 'level-map-background';
-    this._backgroundCtx = this._backgroundCanvas.getContext('2d');
-    this._overlay.appendChild(this._backgroundCanvas);
-
     // Scroll container
     this._scrollEl = document.createElement('div');
     this._scrollEl.className = 'level-map-scroll';
-    this._scrollEl.style.paddingTop = (10 + this.contentInsetTop) + 'px';
     if (this.boundsRect?.width) {
       this._scrollEl.style.setProperty('--level-map-content-width', Math.round(this.boundsRect.width) + 'px');
     }
+
+    this._contentEl = document.createElement('div');
+    this._contentEl.className = 'level-map-content';
+    this._contentEl.style.width = this.canvasW + 'px';
+    this._contentEl.style.paddingTop = (10 + this.contentInsetTop) + 'px';
 
     // Canvas
     const dpr = window.devicePixelRatio || 1;
@@ -418,11 +416,12 @@ export class LevelMap {
 
     this._canvas.addEventListener('click', (e) => { e.stopPropagation(); this._onClick(e); });
 
-    this._scrollEl.appendChild(this._canvas);
+    this._contentEl.appendChild(this._canvas);
+    this._scrollEl.appendChild(this._contentEl);
     this._overlay.appendChild(this._scrollEl);
     parent.appendChild(this._overlay);
     this._overlay.classList.add('visible');
-    this._renderBackground();
+    this._applyScrollingBackground();
   }
 
   // ─── Rendering ───────────────────────────────────────────
@@ -447,53 +446,27 @@ export class LevelMap {
     }
   }
 
-  _renderBackground() {
-    const canvas = this._backgroundCanvas;
-    const ctx = this._backgroundCtx;
-    if (!canvas || !ctx) return;
-    const rect = this._overlay?.getBoundingClientRect?.() || this.boundsRect || {};
-    const w = Math.max(1, Math.ceil(rect.width || this.boundsRect?.width || this.canvasW || 1));
-    const h = Math.max(1, Math.ceil(rect.height || this.boundsRect?.height || this.canvasH || 1));
-    const dpr = Math.max(1, window.devicePixelRatio || 1);
-    const pixelW = Math.max(1, Math.round(w * dpr));
-    const pixelH = Math.max(1, Math.round(h * dpr));
-    if (canvas.width !== pixelW || canvas.height !== pixelH) {
-      canvas.width = pixelW;
-      canvas.height = pixelH;
-      canvas.style.width = w + 'px';
-      canvas.style.height = h + 'px';
-    }
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, w, h);
+  _applyScrollingBackground() {
+    if (!this._contentEl) return;
+    const topImg = this._assets.topBackground;
+    const repeatImg = this._assets.repeatBackground;
+    const width = Math.max(1, Math.ceil(this.canvasW || this.boundsRect?.width || 1));
+    const topHeight = this._scaledBackgroundHeight(topImg, width);
+    const repeatHeight = this._scaledBackgroundHeight(repeatImg, width);
+    const scrollHeight = Math.max(0, Math.ceil(this._scrollEl?.clientHeight || this.boundsRect?.height || 0));
+    const minBackgroundHeight = Math.max(topHeight + repeatHeight, scrollHeight + repeatHeight);
 
-    const img = this._assets.background;
-    if (!img) {
-      ctx.fillStyle = '#0E0E0E';
-      ctx.fillRect(0, 0, w, h);
-      return;
-    }
-
-    this._drawVerticalBackgroundTiles(ctx, img, w, h);
+    this._contentEl.style.setProperty('--level-map-bg-width', `${width}px`);
+    this._contentEl.style.setProperty('--level-map-top-bg-height', `${topHeight}px`);
+    this._contentEl.style.setProperty('--level-map-repeat-bg-height', `${repeatHeight}px`);
+    this._contentEl.style.setProperty('--level-map-repeat-bg-y', `${topHeight}px`);
+    this._contentEl.style.setProperty('--level-map-min-bg-height', `${minBackgroundHeight}px`);
   }
 
-  _drawVerticalBackgroundTiles(ctx, img, w, h) {
-    const sourceW = Math.max(1, img.naturalWidth || img.width || 1);
-    const sourceH = Math.max(1, img.naturalHeight || img.height || 1);
-    const tileW = Math.max(1, Math.ceil(w));
-    const tileH = Math.max(1, Math.ceil(tileW * sourceH / sourceW));
-    const x = Math.round((w - tileW) / 2);
-
-    const drawTile = (y, flipY) => {
-      ctx.save();
-      ctx.translate(x, y + (flipY ? tileH : 0));
-      ctx.scale(1, flipY ? -1 : 1);
-      ctx.drawImage(img, 0, 0, tileW, tileH);
-      ctx.restore();
-    };
-
-    for (let y = 0, row = 0; y < h; y += tileH, row++) {
-      drawTile(y, row % 2 === 1);
-    }
+  _scaledBackgroundHeight(img, width) {
+    const sourceW = Math.max(1, img?.naturalWidth || img?.width || 941);
+    const sourceH = Math.max(1, img?.naturalHeight || img?.height || 1672);
+    return Math.max(1, Math.ceil(width * sourceH / sourceW));
   }
 
   _drawConnections(ctx) {

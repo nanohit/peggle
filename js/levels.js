@@ -333,7 +333,8 @@ export class LevelManager {
         magnetStrength: peg.magnetStrength,
         magnetMode: peg.magnetMode,
         magnetExplosionPower: peg.magnetExplosionPower,
-        magnetBlast: peg.magnetBlast === true
+        magnetBlast: peg.magnetBlast === true,
+        magnetHittable: peg.magnetHittable !== false
       });
       normalizeMagnetPegProperties(newPeg);
     }

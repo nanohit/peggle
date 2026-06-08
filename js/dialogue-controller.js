@@ -11,7 +11,7 @@ const DIALOGUE_SEEN_STORAGE_KEY = 'peggle_dialogue_seen_v1';
 const DIALOGUE_FADE_MS = 260;
 const GAME_WORLD_REFERENCE_WIDTH = 400;
 const DIALOGUE_FRAME_SIDE_PADDING = 8;
-const DIALOGUE_SAFE_TOP_PADDING = 18;
+const DIALOGUE_SAFE_TOP_PADDING = 8;
 const DIALOGUE_PORTRAIT_GAP = 18;
 const DIALOGUE_MAX_BOTTOM_RATIO = 0.46;
 
@@ -438,7 +438,7 @@ export class DialogueController {
         desiredTop: 84,
         minTop: 32,
         maxBottom: 220,
-        fontSize: 28,
+        fontSize: 65,
         maxWidth: 280
       };
     }
@@ -461,10 +461,12 @@ export class DialogueController {
       ? portraitBounds.bottom + DIALOGUE_PORTRAIT_GAP * canvasScale
       : fallbackTop;
     const desiredTop = anchorTop + placementOffsetY * canvasScale;
-    const minTop = Math.max(DIALOGUE_SAFE_TOP_PADDING, canvasRect.top + canvasRect.height * 0.08);
+    const minTop = placementOffsetY < 0
+      ? DIALOGUE_SAFE_TOP_PADDING
+      : Math.max(DIALOGUE_SAFE_TOP_PADDING, canvasRect.top + canvasRect.height * 0.08);
     const maxBottom = Math.max(minTop + 44, canvasRect.top + canvasRect.height * DIALOGUE_MAX_BOTTOM_RATIO);
     const availableWidth = Math.max(140, frameRect.width - left - rightInset);
-    const fontSize = clamp(canvasRect.width * 0.105 * textScale, 12, 64);
+    const fontSize = clamp(canvasRect.width * 0.105 * textScale, 12, 65);
     return {
       left,
       right: rightInset,
@@ -527,6 +529,14 @@ export class DialogueController {
   }
 
   _getPortraitBounds(frameRect) {
+    const characterCircle = this._getSlotRect('characterCircle', frameRect);
+    if (characterCircle) {
+      return {
+        top: characterCircle.top,
+        bottom: characterCircle.bottom,
+        centerY: (characterCircle.top + characterCircle.bottom) / 2
+      };
+    }
     const portraitIds = ['characterCircle', 'healthCircle', 'healthCharCircle', 'character'];
     let minTop = Number.POSITIVE_INFINITY;
     let maxBottom = Number.NEGATIVE_INFINITY;

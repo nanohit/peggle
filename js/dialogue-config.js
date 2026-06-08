@@ -4,7 +4,7 @@ export const DIALOGUE_VERSION = 1;
 export const DIALOGUE_DEFAULT_TIMEOUT_MS = 15000;
 export const DIALOGUE_TRIGGER_TYPES = ['levelStart', 'spinReward', 'pegProgress', 'performanceCap30'];
 export const DIALOGUE_DEFAULT_SEGMENT_COLOR = '#ffffff';
-export const DIALOGUE_DEFAULT_TEXT_SCALE = 1;
+export const DIALOGUE_DEFAULT_TEXT_SCALE = 0.65;
 export const DIALOGUE_EMOTION_MODES = ['override', 'impulse'];
 export const DIALOGUE_DEFAULT_IMPULSE_MAGNITUDE = 0.55;
 

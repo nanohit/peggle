@@ -940,6 +940,79 @@
   pointer-events: auto;
 }
 
+.pause-character-nav {
+  position: absolute;
+  left: 50%;
+  top: 2.2%;
+  width: min(58%, 260px);
+  height: 16%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.pause-character-nav.is-hidden {
+  display: none;
+}
+
+.pause-character-arrow {
+  width: clamp(34px, 10vw, 48px);
+  height: clamp(42px, 12vw, 58px);
+  border: 0;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.94);
+  appearance: none;
+  -webkit-appearance: none;
+  font-family: Georgia, serif;
+  font-size: clamp(34px, 10vw, 52px);
+  line-height: 0.88;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  pointer-events: auto;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
+  -webkit-tap-highlight-color: transparent;
+  outline: none;
+  box-shadow: none;
+  transition: none;
+  user-select: none;
+  touch-action: manipulation;
+}
+
+.pause-character-arrow:hover,
+.pause-character-arrow:active {
+  background: transparent;
+  outline: none;
+  box-shadow: none;
+}
+
+.pause-character-arrow:hover {
+  transform: none;
+}
+
+.pause-character-arrow:active {
+  transform: scale(0.92);
+}
+
+.pause-character-arrow:focus,
+.pause-character-arrow:focus-visible {
+  background: transparent;
+  outline: none;
+  box-shadow: none;
+}
+
+@media (max-width: 520px) {
+  .pause-character-nav {
+    top: 0.8%;
+    width: 62%;
+  }
+}
+
 /* While level-map is open from pause: keep overlay mounted for instant return,
    but make it visually transparent and non-interactive. */
 .pause-overlay.pause-overlay--map-mode {
@@ -950,6 +1023,12 @@
 }
 
 .pause-overlay.pause-overlay--map-mode .pause-panel {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.pause-overlay.pause-overlay--map-mode .pause-character-nav {
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
@@ -1312,10 +1391,10 @@
 
 .dialogue-text {
   font-family: 'Noto Serif', Georgia, serif;
-  font-size: var(--dialogue-font-size, 28px);
+  font-size: var(--dialogue-font-size, 65px);
   font-weight: 600;
   line-height: 1.08;
-  letter-spacing: -0.01em;
+  letter-spacing: 0;
   color: #ffffff;
   text-shadow:
     0 2px 0 rgba(0, 0, 0, 0.88),

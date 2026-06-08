@@ -70,9 +70,11 @@ void main() {
   vec3 highlight = vec3(0.0);
   float energy = 0.0;
 
-  // Persistent magnet force-field rings: a noisy displacement band riding the radius
-  // boundary so the edge refracts the field behind it. PURE distortion — no colour, no
-  // glow, no haze — and independent of magnet strength (visible at any/zero force).
+  // Persistent magnet force fields: a noisy refracting band rides the radius boundary AND
+  // a gentle animated swirl fills the disk inside it, so the warp reads as a field VOLUME,
+  // not just an edge line. PURE distortion — no colour/glow/haze — and independent of
+  // magnet strength (visible at any/zero force). Cheap: the interior reuses the same two
+  // noise samples; only the disk up to the band's outer edge is touched.
   for (int i = 0; i < MAX_FIELDS; i++) {
     if (i < uFieldCount) {
       vec4 fa = uFieldA[i];   // x, y, radius, (unused)
@@ -81,22 +83,34 @@ void main() {
       float fdist = length(fd);
       float fradius = fa.z;
       float band = max(2.0, fb.z);
-      if (fdist > 0.001 && fdist > fradius - band * 2.4 && fdist < fradius + band * 2.4) {
+      float outer = fradius + band * 2.6;
+      if (fdist > 0.001 && fdist < outer) {
         vec2 dir = fd / fdist;
+        vec2 perp = vec2(-dir.y, dir.x);
         float ang = atan(fd.y, fd.x);
         vec2 ncoord = vec2(cos(ang), sin(ang)) * 2.7;
         float tt = fb.y;
         float n1 = fieldNoise(ncoord * 1.6 + vec2(tt * 0.7, -tt * 0.5));
         float n2 = fieldNoise(ncoord * 3.3 - vec2(tt * 0.45, tt * 0.6));
+        float intensity = fb.w;
+        float sign = fb.x;
+
+        // Boundary band — the noisy refracting ring on the radius.
         float wob = (n1 - 0.5) * band * 1.1 + (n2 - 0.5) * band * 0.5;
         float ringR = fradius + wob;
         float sb = (fdist - ringR) / band;
-        float prof = 1.0 - smoothstep(0.0, 1.0, abs(sb));
-        prof = prof * prof * (3.0 - 2.0 * prof);
-        if (prof > 0.0001) {
-          float amp = (2.6 + fradius * 0.022) * fb.w * prof;
-          displacement += dir * amp * fb.x * (0.55 + 0.45 * n1);
-        }
+        float ringProf = 1.0 - smoothstep(0.0, 1.0, abs(sb));
+        ringProf = ringProf * ringProf * (3.0 - 2.0 * ringProf);
+        float ringAmp = (2.6 + fradius * 0.022) * intensity * ringProf;
+        displacement += dir * ringAmp * sign * (0.55 + 0.45 * n1);
+
+        // Interior haze — a light rotating swirl across the disk, fading near the centre
+        // and at the rim, animated by time so the whole field shimmers gently.
+        float rN = fdist / max(1.0, fradius);                         // 0 centre .. 1 rim
+        float interior = smoothstep(0.04, 0.34, rN) * (1.0 - smoothstep(0.9, 1.08, rN));
+        float swirl = sin(ang * 3.0 + tt * 1.7 + (n1 - 0.5) * 6.2832);
+        float hazeAmp = (1.2 + fradius * 0.013) * intensity * interior * 0.5;
+        displacement += (perp * swirl + dir * (n2 - 0.5)) * hazeAmp * sign;
       }
     }
   }

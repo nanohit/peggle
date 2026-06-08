@@ -36,7 +36,7 @@ import {
   normalizeLevelHitPegClearSettings
 } from './hit-peg-clear-settings.js';
 import { isPortalType, normalizePortalPegProperties } from './portal-defaults.js';
-import { getMagnetExplosionPower, isBombMagnetPeg, isMagnetBlastEnabled } from './magnet-defaults.js';
+import { getMagnetExplosionPower, isBombMagnetPeg, isMagnetBlastEnabled, isMagnetHittable } from './magnet-defaults.js';
 import { lightTap, initAudio, pegHitSound, resetHitCounter } from './haptics.js';
 import { normalizeEndSequenceConfig } from './visual-config.js';
 
@@ -1980,6 +1980,8 @@ export class Game {
 
   detonateBombMagnet(peg, sourceBall = null) {
     if (!isBombMagnetPeg(peg) || peg._magnetDetonated === true) return false;
+    // A non-hittable magnet is inert to the ball — no blast at all.
+    if (!isMagnetHittable(peg)) return false;
     // Blast is opt-in: when disabled the magnet is a pure force field and never
     // detonates (it still scores on a direct ball hit via activatePeg upstream).
     if (!isMagnetBlastEnabled(peg)) return false;
@@ -3691,6 +3693,12 @@ export class Game {
       }
       // Obstacle (grey peg): permanent, just notify animator
       if (event.obstacleHit) {
+        this.animator.notifyHit(peg.id);
+        continue;
+      }
+      // A non-hittable magnet acts like a grey obstacle for the ball: it bounced in
+      // physics, but here there's no score and no blast (the force field still runs).
+      if (isBombMagnetPeg(peg) && !isMagnetHittable(peg)) {
         this.animator.notifyHit(peg.id);
         continue;
       }

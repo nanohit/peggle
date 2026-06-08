@@ -12,10 +12,13 @@ import { ensureLevelPvp, PVP_DEFAULT_AIM_LENGTH } from './pvp-mode.js';
 import { DialogueController } from './dialogue-controller.js';
 import { GambleSystem } from './gamble-system.js';
 import {
+  applyCharacterHealthCircleColorToVisuals,
   CHARACTER_REGISTRY_STORAGE_KEY,
+  createCharacterRefSnapshot,
   createDefaultCharacter,
   DEFAULT_CHARACTER_ID,
   getCharacterPvpPortraitSource,
+  getCharacterSlotSource,
   loadCharacterRegistry,
   normalizeCharacter,
   normalizeCharacterRegistry,
@@ -521,6 +524,10 @@ function createPauseOverlay() {
   const BASE = 'visuals/pause_menu/webp/';
 
   overlay.innerHTML = `
+    <div class="pause-character-nav" id="pauseCharacterNav">
+      <button class="pause-character-arrow pause-character-arrow--prev" id="pauseCharacterPrevBtn" type="button" aria-label="Previous character">‹</button>
+      <button class="pause-character-arrow pause-character-arrow--next" id="pauseCharacterNextBtn" type="button" aria-label="Next character">›</button>
+    </div>
     <div class="pause-panel">
       <img class="pause-bg" data-src="${BASE}pause_modal_background.webp" alt="" draggable="false">
       <div class="pause-content">
@@ -662,6 +669,7 @@ async function bootPvpDuelRoom(roomCode) {
   const pauseOverlay = createPauseOverlay();
   visualLayout.frame.appendChild(pauseOverlay);
   loadDeferredImages(pauseOverlay);
+  pauseOverlay.querySelector('#pauseCharacterNav')?.classList.add('is-hidden');
   pauseOverlay.querySelector('#pauseLevelBtn')?.remove();
   pauseOverlay.querySelector('#pausePvpDuelBtn')?.addEventListener('click', () => {
     window.location.href = createPvpCpuDuelUrl();
@@ -866,7 +874,11 @@ async function bootPvpDuelRoom(roomCode) {
       }
     });
 
-    const visuals = normalizeVisuals(level.visuals);
+    const visuals = applyCharacterHealthCircleColorToVisuals(
+      normalizeVisuals(level.visuals),
+      level,
+      resolveCharacterForLevel(level, roomCharacterRegistry)
+    );
     visualLayout.setConfig(visuals);
     game.renderer.setBackground(visuals.background);
     game.renderer.setBallTrail(visuals.ballTrail);
@@ -932,10 +944,144 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
   let characterRegistry = loadCharacterRegistry();
   const initialCpuDuelMode = options?.cpuDuel === true;
   let activeCpuDuelMode = initialCpuDuelMode;
+  let characterAssignments = new Map();
+
+  function getRegistryCharacter(characterId) {
+    const registry = normalizeCharacterRegistry(characterRegistry);
+    const assignment = normalizeLevelCharacterAssignment({ characterId });
+    return normalizeCharacter(
+      registry.characters[assignment.characterId]
+      || registry.characters[DEFAULT_CHARACTER_ID]
+      || createDefaultCharacter()
+    );
+  }
+
+  function setLevelCharacterAssignment(level, characterId) {
+    if (!level || typeof level !== 'object') return DEFAULT_CHARACTER_ID;
+    const assignment = normalizeLevelCharacterAssignment({ characterId });
+    const registry = normalizeCharacterRegistry(characterRegistry);
+    const character = normalizeCharacter(
+      registry.characters[assignment.characterId]
+      || registry.characters[DEFAULT_CHARACTER_ID]
+      || createDefaultCharacter()
+    );
+    level.character = normalizeLevelCharacterAssignment({
+      ...level.character,
+      characterId: assignment.characterId,
+      snapshot: createCharacterRefSnapshot(character)
+    });
+    return assignment.characterId;
+  }
+
+  function applyRuntimeCharacterAssignment(level, nodeId) {
+    const assignedId = characterAssignments.get(String(nodeId));
+    if (assignedId) setLevelCharacterAssignment(level, assignedId);
+  }
+
+  function normalizeCharacterAssignmentMap(raw) {
+    const source = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+    const next = new Map();
+    for (const [nodeId, characterId] of Object.entries(source)) {
+      if (!nodeId) continue;
+      const id = normalizeLevelCharacterAssignment({ characterId }).characterId;
+      next.set(String(nodeId), id);
+    }
+    return next;
+  }
+
+  function getAvailableCharacterIds() {
+    const registry = normalizeCharacterRegistry(characterRegistry);
+    return Object.keys(registry.characters || {}).sort();
+  }
+
+  function getActiveCharacterId() {
+    return normalizeLevelCharacterAssignment(activeLevelData?.character).characterId;
+  }
+
+  function resolveVisualsWithCharacter(levelData) {
+    const visuals = normalizeVisuals(levelData?.visuals);
+    const character = resolveCharacterForLevel(levelData, characterRegistry);
+    return applyCharacterHealthCircleColorToVisuals(visuals, levelData, character);
+  }
+
+  function getResolvedActiveHealthCircleColor() {
+    if (!activeLevelData) return '';
+    const character = resolveCharacterForLevel(activeLevelData, characterRegistry);
+    const themed = applyCharacterHealthCircleColorToVisuals({ slots: { healthCircle: {} } }, activeLevelData, character);
+    return themed?.slots?.healthCircle?.color || '';
+  }
+
+  function applyActiveCharacterVisuals(fadeMs = 160) {
+    if (!activeLevelData) return;
+    const character = resolveCharacterForLevel(activeLevelData, characterRegistry);
+    const healthCircleColor = getResolvedActiveHealthCircleColor();
+    visualLayout.setHealthCircleColor?.(healthCircleColor);
+    if (!ensureLevelPvp(activeLevelData).enabled) {
+      const src = getCharacterSlotSource(character, 'idle');
+      visualLayout.setCharacterPortraitSource(src, { fadeMs, slotName: 'idle' });
+    }
+    portraitReactionController.setContext({
+      level: activeLevelData,
+      registry: characterRegistry,
+      game,
+      gambleSystem,
+      scopeKey: campaignName ? `campaign:${campaignName}` : 'single',
+      paused
+    });
+  }
+
+  function syncPauseCharacterPicker() {
+    const nav = pauseOverlay.querySelector('#pauseCharacterNav');
+    if (!nav) return;
+    const ids = getAvailableCharacterIds();
+    nav.dataset.activeCharacterId = getActiveCharacterId();
+    nav.dataset.characterIds = ids.join(',');
+    const isPvp = activeLevelData ? ensureLevelPvp(activeLevelData).enabled : false;
+    nav.classList.toggle('is-hidden', isPvp || activeCpuDuelMode || ids.length <= 1);
+  }
+
+  function applyCharacterChoiceToRun(characterId) {
+    if (!activeLevelData || currentNodeId == null) return false;
+    const previousId = getActiveCharacterId();
+    const nextId = getRegistryCharacter(characterId).id;
+    if (!nextId || nextId === previousId) return false;
+
+    const startIndex = playableOrder.findIndex(nid => String(nid) === String(currentNodeId));
+    if (startIndex < 0) return false;
+
+    for (let i = startIndex; i < playableOrder.length; i++) {
+      const nodeId = playableOrder[i];
+      const levelIndex = nodeIdToLevelIndex.get(nodeId);
+      const level = levelIndex == null ? null : originalLevels[levelIndex];
+      if (!level) continue;
+      const effectiveId = characterAssignments.get(String(nodeId))
+        || normalizeLevelCharacterAssignment(level.character).characterId;
+      if (i !== startIndex && effectiveId !== previousId) break;
+      characterAssignments.set(String(nodeId), nextId);
+      setLevelCharacterAssignment(level, nextId);
+      if (levels[levelIndex]) setLevelCharacterAssignment(levels[levelIndex], nextId);
+    }
+
+    setLevelCharacterAssignment(activeLevelData, nextId);
+    saveProgress();
+    applyActiveCharacterVisuals(0);
+    syncPauseCharacterPicker();
+    return true;
+  }
+
+  function cyclePauseCharacter(delta) {
+    const ids = getAvailableCharacterIds();
+    if (ids.length <= 1) return;
+    const currentId = getActiveCharacterId();
+    const currentIndex = Math.max(0, ids.indexOf(currentId));
+    const nextIndex = ((currentIndex + delta) % ids.length + ids.length) % ids.length;
+    applyCharacterChoiceToRun(ids[nextIndex]);
+  }
 
   function refreshPortraitRegistry(nextRegistry) {
     if (!nextRegistry) return;
     characterRegistry = nextRegistry;
+    syncPauseCharacterPicker();
     if (!game || !activeLevelData) return;
     portraitReactionController.setContext({
       level: activeLevelData,
@@ -945,6 +1091,7 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
       scopeKey: campaignName ? `campaign:${campaignName}` : 'single',
       paused
     });
+    applyActiveCharacterVisuals(0);
   }
 
   function updatePvpPortraitVisuals(levelData, state, localSide = 'human') {
@@ -1146,6 +1293,10 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
   }
 
   function applySavedProgress(saved) {
+    characterAssignments = normalizeCharacterAssignmentMap(saved?.characterAssignments);
+    for (const nodeId of [...characterAssignments.keys()]) {
+      if (!nodeMap.has(nodeId)) characterAssignments.delete(nodeId);
+    }
     const migrated = migrateProgress(saved, playableOrder, nodeMap);
     completedNodes = new Set([...migrated.completedNodes].filter(nid => nodeMap.has(nid)));
     achievedNodes = new Set(
@@ -1176,6 +1327,9 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
       achievedNodeIds: [...achievedNodes],
       currentNodeId
     };
+    if (characterAssignments.size > 0) {
+      nextProgress.characterAssignments = Object.fromEntries(characterAssignments);
+    }
     savedProgress = nextProgress;
     try {
       localStorage.setItem(progressKey, JSON.stringify(nextProgress));
@@ -1289,6 +1443,7 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     setHudLockedByMap(false);
     game.pause();
     portraitReactionController.setPaused(true);
+    syncPauseCharacterPicker();
     pauseOverlay.classList.remove('pause-overlay--map-mode');
     pauseOverlay.classList.remove('pause-overlay--instant');
     pauseOverlay.classList.add('visible');
@@ -1705,6 +1860,39 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     if (e.target === pauseOverlay) hidePause();
   });
 
+  pauseOverlay.querySelector('#pauseCharacterPrevBtn')?.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    cyclePauseCharacter(-1);
+  });
+  pauseOverlay.querySelector('#pauseCharacterNextBtn')?.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    cyclePauseCharacter(1);
+  });
+  let pauseCharacterSwipe = null;
+  pauseOverlay.addEventListener('pointerdown', (event) => {
+    if (!paused || activeLevelMap || event.target.closest?.('button, input, label')) return;
+    const rect = pauseOverlay.getBoundingClientRect();
+    if (event.clientY > rect.top + rect.height * 0.3) return;
+    pauseCharacterSwipe = {
+      x: event.clientX,
+      y: event.clientY,
+      pointerId: event.pointerId
+    };
+  });
+  pauseOverlay.addEventListener('pointerup', (event) => {
+    if (!pauseCharacterSwipe || pauseCharacterSwipe.pointerId !== event.pointerId) return;
+    const dx = event.clientX - pauseCharacterSwipe.x;
+    const dy = event.clientY - pauseCharacterSwipe.y;
+    pauseCharacterSwipe = null;
+    if (Math.abs(dx) < 34 || Math.abs(dx) < Math.abs(dy) * 1.25) return;
+    cyclePauseCharacter(dx < 0 ? 1 : -1);
+  });
+  pauseOverlay.addEventListener('pointercancel', () => {
+    pauseCharacterSwipe = null;
+  });
+
   // Make topLeft and leftCircle slots trigger pause in play mode
   function setupPauseTriggers() {
     for (const slotId of ['top', 'topRight']) {
@@ -2018,8 +2206,10 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
       if (!original) return false;
       currentNodeId = nodeId;
       levelData = mirrorState ? mirrorLevel(original) : cloneLevelData(original);
+      applyRuntimeCharacterAssignment(levelData, nodeId);
     }
     activeLevelData = levelData;
+    syncPauseCharacterPicker();
 
     // Cleanup previous
     if (unsubUiState) { unsubUiState(); unsubUiState = null; }
@@ -2061,7 +2251,7 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     game.onShotHeat = (h) => visualLayout.setFlameHeat(h);
 
     // Apply visuals (background + frame + slots)
-    const visuals = normalizeVisuals(levelData.visuals);
+    const visuals = resolveVisualsWithCharacter(levelData);
     visualLayout.setConfig(visuals);
     game.renderer.setBackground(visuals.background);
     game.renderer.setBallTrail(visuals.ballTrail);

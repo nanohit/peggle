@@ -2424,8 +2424,17 @@ export class VisualLayout {
   // ─── Health bar (orange pegs) ──────────────────────
 
   updateHealthBar(orangeLeft, totalOrange) {
+    this._healthBarState = { orangeLeft, totalOrange };
     this._updateHealthCircle(orangeLeft, totalOrange);
     this._updateHealthCharCircle(orangeLeft, totalOrange);
+    this._renderPvpOpponentTarget();
+  }
+
+  setHealthCircleColor(color) {
+    if (!this.config?.slots?.healthCircle || typeof color !== 'string' || !color.trim()) return;
+    this.config.slots.healthCircle.color = color.trim();
+    const state = this._healthBarState || { orangeLeft: 1, totalOrange: 1 };
+    this._updateHealthCircle(state.orangeLeft, state.totalOrange);
     this._renderPvpOpponentTarget();
   }
 

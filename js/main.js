@@ -60,10 +60,12 @@ import { isBombMagnetType, normalizeMagnetMode } from './magnet-defaults.js';
 import { VisualLayout } from './visual-layout.js';
 import { normalizeVisuals } from './visual-config.js';
 import {
+  applyCharacterHealthCircleColorToVisuals,
   attachCharacterSnapshotToLevel,
   CANONICAL_EMOTION_SLOTS,
   createCharacterRefSnapshot,
   createDefaultCharacter,
+  DEFAULT_CHARACTER_HEALTH_CIRCLE_COLOR,
   DEFAULT_CHARACTER_ID,
   DEFAULT_PERSONALITY,
   getCharacterPvpPortraitSource,
@@ -1803,23 +1805,35 @@ class PeggleApp {
     const explosionInput = document.getElementById('magnetExplosionInput');
     const modeSelect = document.getElementById('magnetModeSelect');
     const blastToggle = document.getElementById('magnetBlastToggle');
+    const hittableToggle = document.getElementById('magnetHittableToggle');
 
     document.getElementById('closeMagnetPanel').addEventListener('click', () => {
       this.closeMagnetPanel();
     });
 
-    const syncBlastEnabledUi = (on) => {
-      const dim = !on;
-      [explosionSlider, explosionInput].forEach(el => { if (el) el.disabled = dim; });
+    // Blast needs a ball hit, so it's only meaningful while the magnet is hittable.
+    const syncBlastEnabledUi = () => {
+      const hittable = hittableToggle ? hittableToggle.checked : true;
+      const blastOn = blastToggle ? blastToggle.checked : false;
+      if (blastToggle) blastToggle.disabled = !hittable;
+      const dimPower = !hittable || !blastOn;
+      [explosionSlider, explosionInput].forEach(el => { if (el) el.disabled = dimPower; });
       const powerRow = document.getElementById('magnetPowerRow');
-      if (powerRow) powerRow.classList.toggle('magnet-row--disabled', dim);
+      if (powerRow) powerRow.classList.toggle('magnet-row--disabled', dimPower);
     };
 
     blastToggle.addEventListener('change', () => {
       if (!this.editor) return;
       this.editor.setSelectedMagnetBlast(blastToggle.checked);
-      syncBlastEnabledUi(blastToggle.checked);
+      syncBlastEnabledUi();
     });
+    if (hittableToggle) {
+      hittableToggle.addEventListener('change', () => {
+        if (!this.editor) return;
+        this.editor.setSelectedMagnetHittable(hittableToggle.checked);
+        syncBlastEnabledUi();
+      });
+    }
     this._syncMagnetBlastEnabledUi = syncBlastEnabledUi;
 
     radiusSlider.addEventListener('input', () => {
@@ -1879,7 +1893,9 @@ class PeggleApp {
     document.getElementById('magnetModeSelect').value = normalizeMagnetMode(props.mode);
     const blastToggle = document.getElementById('magnetBlastToggle');
     if (blastToggle) blastToggle.checked = !!props.blast;
-    this._syncMagnetBlastEnabledUi?.(!!props.blast);
+    const hittableToggle = document.getElementById('magnetHittableToggle');
+    if (hittableToggle) hittableToggle.checked = props.hittable !== false;
+    this._syncMagnetBlastEnabledUi?.();
     document.getElementById('magnetPanel').classList.add('visible');
   }
 
@@ -3680,7 +3696,7 @@ class PeggleApp {
     // Resize to current dimensions
     this.resizeCanvas();
 
-    const visuals = normalizeVisuals(level?.visuals);
+    const visuals = this._normalizeLevelVisualsWithCharacter(level);
     this.game.renderer.setBackground(visuals.background);
     this.game.renderer.setBallTrail(visuals.ballTrail);
     this.game.renderer.setShockwave(visuals.shockwave);
@@ -3848,7 +3864,7 @@ class PeggleApp {
     this.game.setShowFullTrajectory?.(trajectoryToggle?.checked);
     this.resizeCanvas();
 
-    const visuals = normalizeVisuals(level?.visuals);
+    const visuals = this._normalizeLevelVisualsWithCharacter(level);
     this.game.renderer.setBackground(visuals.background);
     this.game.renderer.setBallTrail(visuals.ballTrail);
     this.game.renderer.setShockwave(visuals.shockwave);
@@ -3929,7 +3945,7 @@ class PeggleApp {
       console.log('[visuals] No per-level visuals, no saved default — using system default');
     }
 
-    const visuals = level ? normalizeVisuals(rawVisuals) : normalizeVisuals(null);
+    const visuals = level ? this._normalizeLevelVisualsWithCharacter(level, rawVisuals) : normalizeVisuals(null);
     this.visualLayout.setConfig(visuals);
 
     // Apply background to whatever renderer is active
@@ -3943,6 +3959,11 @@ class PeggleApp {
     if (this.mode === 'editor') {
       this._showAssignedCharacterIdlePortrait(level);
     }
+  }
+
+  _normalizeLevelVisualsWithCharacter(level, rawVisuals = level?.visuals) {
+    const visuals = normalizeVisuals(rawVisuals);
+    return applyCharacterHealthCircleColorToVisuals(visuals, level, this._resolveLevelCharacter(level));
   }
 
   togglePlayMode() {
@@ -4281,6 +4302,8 @@ class PeggleApp {
     if (!level || !this.visualLayout) return;
     const pvp = normalizePvpSettings(level.pvp);
     const character = this._resolveLevelCharacter(level);
+    const themed = applyCharacterHealthCircleColorToVisuals({ slots: { healthCircle: {} } }, level, character);
+    this.visualLayout.setHealthCircleColor?.(themed.slots.healthCircle.color);
     if (pvp.enabled) {
       const enemy = this._resolvePvpEnemyCharacter(level);
       const maxHp = pvp.hitsToWin || PVP_DEFAULT_HITS_TO_WIN;
@@ -4465,6 +4488,12 @@ class PeggleApp {
     const defaultCharacter = registry.characters[DEFAULT_CHARACTER_ID];
     if (!defaultCharacter) return false;
     if (defaultCharacter.name && defaultCharacter.name !== 'Lu' && defaultCharacter.name !== DEFAULT_CHARACTER_ID) return true;
+    if (
+      typeof defaultCharacter.healthCircleColor === 'string'
+      && defaultCharacter.healthCircleColor.trim().toLowerCase() !== DEFAULT_CHARACTER_HEALTH_CIRCLE_COLOR.toLowerCase()
+    ) {
+      return true;
+    }
     const slots = defaultCharacter.slots || {};
     for (const [slotName, value] of Object.entries(slots)) {
       if (slotName === 'idle') continue;
@@ -4930,6 +4959,10 @@ class PeggleApp {
             <span class="dialogue-field-label">Name</span>
             <input id="characterNameInput" class="dialogue-field-input" type="text" value="${this._esc(selected.name)}">
           </label>
+          <label class="dialogue-field">
+            <span class="dialogue-field-label">Health circle</span>
+            <input id="characterHealthCircleColorInput" class="dialogue-field-input" type="color" value="${this._esc(this._colorInputValue(selected.healthCircleColor))}">
+          </label>
         </div>
         <div class="dialogue-editor-toolbar">
           <button class="dialogue-chip-btn" type="button" data-character-save-details>Save Details</button>
@@ -5238,6 +5271,10 @@ class PeggleApp {
             <span class="dialogue-field-label">Name</span>
             <input id="characterNameInput" class="dialogue-field-input" type="text" value="${this._esc(selected.name)}">
           </label>
+          <label class="dialogue-field">
+            <span class="dialogue-field-label">Health circle</span>
+            <input id="characterHealthCircleColorInput" class="dialogue-field-input" type="color" value="${this._esc(this._colorInputValue(selected.healthCircleColor))}">
+          </label>
         </div>
         <div class="dialogue-editor-toolbar">
           <button class="dialogue-chip-btn" type="button" data-character-save-details>Save Details</button>
@@ -5280,7 +5317,8 @@ class PeggleApp {
       const rawId = body.querySelector('#characterIdInput')?.value || selected.id;
       const nextId = makeCharacterId(rawId, selected.id);
       const name = (body.querySelector('#characterNameInput')?.value || selected.name || nextId).trim();
-      this._saveCharacterEdits(selected.id, { id: nextId, name });
+      const healthCircleColor = body.querySelector('#characterHealthCircleColorInput')?.value || selected.healthCircleColor;
+      this._saveCharacterEdits(selected.id, { id: nextId, name, healthCircleColor });
     });
     body.querySelectorAll('[data-pvp-portrait-upload]').forEach((button) => {
       button.addEventListener('click', () => this._uploadPvpPortraitSlot(selected.id, button.dataset.pvpPortraitUpload));
@@ -5326,7 +5364,8 @@ class PeggleApp {
       const rawId = body.querySelector('#characterIdInput')?.value || selected.id;
       const nextId = makeCharacterId(rawId, selected.id);
       const name = (body.querySelector('#characterNameInput')?.value || selected.name || nextId).trim();
-      this._saveCharacterEdits(selected.id, { id: nextId, name });
+      const healthCircleColor = body.querySelector('#characterHealthCircleColorInput')?.value || selected.healthCircleColor;
+      this._saveCharacterEdits(selected.id, { id: nextId, name, healthCircleColor });
     });
     body.querySelector('[data-character-export-personality]')?.addEventListener('click', () => {
       this._downloadJson(`${selected.id}-personality.json`, normalizePersonality(selected.personality));
@@ -5582,6 +5621,7 @@ class PeggleApp {
       ...prev,
       id: nextId,
       name: edits.name || prev.name,
+      healthCircleColor: edits.healthCircleColor || prev.healthCircleColor,
       personality: edits.personality || prev.personality
     });
     if (nextId !== oldId) delete registry.characters[oldId];
@@ -6452,6 +6492,11 @@ class PeggleApp {
     const d = document.createElement('div');
     d.textContent = s;
     return d.innerHTML;
+  }
+
+  _colorInputValue(value) {
+    const color = typeof value === 'string' ? value.trim() : '';
+    return /^#[0-9a-f]{6}$/i.test(color) ? color : DEFAULT_CHARACTER_HEALTH_CIRCLE_COLOR;
   }
 
   _findEditorLevelByBakedName(bakedName, editorLevels = this.levelManager.getAllLevels()) {

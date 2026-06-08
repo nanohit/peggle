@@ -41,6 +41,7 @@ export const DEFAULT_BACKGROUND = {
 };
 
 export const DEFAULT_FRAME_COLOR = '#0a0a14';
+export const DEFAULT_HEALTH_CIRCLE_COLOR = '#ebffeb';
 export const DEFAULT_END_SEQUENCE = {
   finalPegSlowmoStrength: 0.4,
 };
@@ -55,7 +56,7 @@ export const SLOT_DEFS = [
   { id: 'topLeft',          label: 'Top Left',         basename: 'top_left',              baseWidth: 26, defaultX: 19.24, defaultY: 9.71,  defaultScale: 1.47 },
   { id: 'topRight',         label: 'Top Right',        basename: 'top_right',             baseWidth: 26, defaultX: 81.43, defaultY: 9.48,  defaultScale: 1.47 },
   { id: 'characterCircle',  label: 'Character Circle', basename: 'character_circle',      baseWidth: 22, defaultX: 49.55, defaultY: 11.77, defaultScale: 1.16 },
-  { id: 'healthCircle',     label: 'Health Circle',    basename: null,                    baseWidth: 12, defaultX: 49.43, defaultY: 11.76, defaultScale: 1.79, dynamic: true, defaultColor: '#ebffeb' },
+  { id: 'healthCircle',     label: 'Health Circle',    basename: null,                    baseWidth: 12, defaultX: 49.43, defaultY: 11.76, defaultScale: 1.79, dynamic: true, defaultColor: DEFAULT_HEALTH_CIRCLE_COLOR },
   { id: 'healthCharCircle', label: 'Health Ring',      basename: 'character_circle',       baseWidth: 20, defaultX: 49.55, defaultY: 11.77, defaultScale: 1.01 },
   { id: 'character',        label: 'Character',        basename: 'character',             baseWidth: 22, defaultX: 49.55, defaultY: 11.3,  defaultScale: 0.83 },
   { id: 'leftCircle',       label: 'Left Circle',      basename: 'left_circle',           baseWidth: 16, defaultX: 10.9,  defaultY: 5.76,  defaultScale: 1.35 },
