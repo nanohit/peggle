@@ -345,12 +345,18 @@ class PeggleApp {
     this.campaignManager.beforeSyncCampaign = (campaign) => this._awaitCampaignRemoteLevelSaves(campaign);
     this.mode = 'editor'; // 'editor' or 'play'
     this._syncTimer = null;
+    this._cacheCompactTimer = null;
+    this._compactingLocalCache = false;
+    this._cacheCompactionDirty = false;
 
-    // Hook into LevelManager.save to auto-sync current level to remote
+    // Hook into LevelManager.save to auto-sync current level to remote and to
+    // keep the local cache from overflowing localStorage with raw image blobs.
     const origSave = this.levelManager.save.bind(this.levelManager);
+    this._levelManagerRawSave = origSave;
     this.levelManager.save = () => {
       const localOk = origSave();
       this._debouncedRemoteSync();
+      this._scheduleLocalCacheCompaction();
       return localOk;
     };
 
@@ -569,6 +575,52 @@ class PeggleApp {
         if (ok) console.log('[auto-sync] Saved to remote:', safeName);
       });
     }, 2000); // 2s debounce to avoid spamming during rapid edits
+  }
+
+  _scheduleLocalCacheCompaction() {
+    if (this._cacheCompactTimer) clearTimeout(this._cacheCompactTimer);
+    this._cacheCompactTimer = setTimeout(() => {
+      this._cacheCompactTimer = null;
+      this._compactLocalLevelCache();
+    }, 1500); // debounce so it runs after a burst of edits settles
+  }
+
+  // Shrink the heavy base64 images held in the local level cache down to the
+  // same caps used for remote/baked snapshots, then re-save the smaller blob.
+  // Runs off the hot path (debounced) so localStorage stops overflowing with
+  // raw uploads. Idempotent: already-capped images are skipped by byte size in
+  // compressDataImageUrl (no re-decode), so repeat passes are cheap.
+  async _compactLocalLevelCache() {
+    if (this._compactingLocalCache) {
+      this._cacheCompactionDirty = true;
+      return;
+    }
+    this._compactingLocalCache = true;
+    try {
+      const opts = {
+        viewportWidth: this.canvas?.width || MAX_WIDTH,
+        viewportHeight: this.canvas?.height || 600,
+        // Cache compaction cares about bytes, not pixels — let already-capped
+        // images skip the re-decode so repeat passes over all levels stay cheap.
+        skipDecodeUnderBytes: true
+      };
+      for (const level of this.levelManager.getAllLevels()) {
+        await compressLevelBackgroundImages(level, opts);
+      }
+      // Clear any prior quota block so the now-smaller payload can land even if
+      // a raw write just overflowed, then re-save the compacted cache directly
+      // (raw save, not the wrapped one, to avoid re-scheduling compaction).
+      this.levelManager._localSaveQuotaBlockedUntil = 0;
+      this._levelManagerRawSave?.();
+    } catch (e) {
+      console.warn('[storage] Local cache compaction failed:', e);
+    } finally {
+      this._compactingLocalCache = false;
+      if (this._cacheCompactionDirty) {
+        this._cacheCompactionDirty = false;
+        this._scheduleLocalCacheCompaction();
+      }
+    }
   }
 
   _logDiagnostics() {
@@ -3482,6 +3534,9 @@ class PeggleApp {
 
     // Async: pull remote levels into local cache
     this._pullRemoteLevels();
+    // Compact the existing cache once on boot so a pre-bloated localStorage
+    // (raw uploads from before compaction) shrinks under quota right away.
+    this._scheduleLocalCacheCompaction();
     // Background-pull the character registry so portraits show without
     // manually clicking Pull from Server. Local data wins if user already
     // has custom characters here.

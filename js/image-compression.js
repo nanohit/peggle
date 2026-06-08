@@ -47,7 +47,11 @@ function normalizeCompressionOptions(options = {}) {
     fallbackType: typeof options.fallbackType === 'string' ? options.fallbackType : DEFAULT_FALLBACK_TYPE,
     maxDataUrlBytes: options.maxDataUrlBytes == null
       ? null
-      : positiveInt(options.maxDataUrlBytes, null)
+      : positiveInt(options.maxDataUrlBytes, null),
+    // Quota-only opt-in: skip the decode when already under the byte budget.
+    // Trades away the maxWidth/maxHeight guarantee, so only enable it where
+    // pixel dimensions don't matter (the localStorage cache compaction).
+    skipDecodeUnderBytes: options.skipDecodeUnderBytes === true
   };
 }
 
@@ -100,6 +104,19 @@ export async function compressDataImageUrl(dataUrl, options = {}) {
   if (!isDataImageUrl(dataUrl) || !canUseCanvasCompression()) return dataUrl || null;
 
   const normalized = normalizeCompressionOptions(options);
+  // Opt-in quota-only fast path: skip the decode when already under the byte
+  // budget. This forgoes the maxWidth/maxHeight downscale guarantee (a tiny
+  // byte but huge-pixel image passes through), so it's gated behind an explicit
+  // flag and used only by the localStorage cache compaction, where bytes — not
+  // pixel dimensions — are the constraint. Keeps repeat compaction passes over
+  // a cached level set essentially free (byte counting only).
+  if (
+    normalized.skipDecodeUnderBytes
+    && normalized.maxDataUrlBytes != null
+    && estimateDataUrlBytes(dataUrl) <= normalized.maxDataUrlBytes
+  ) {
+    return dataUrl;
+  }
   const img = await loadImage(dataUrl);
   if (!img) return dataUrl;
 
@@ -122,7 +139,19 @@ export async function compressDataImageUrl(dataUrl, options = {}) {
 
   try {
     const compressed = canvasToDataUrl(canvas, normalized);
-    return compressed.length < dataUrl.length ? compressed : dataUrl;
+    // Keep the compressed result whenever the original actually violates a
+    // constraint — too many pixels, or over the byte budget — not only when it
+    // happens to be a shorter string. Otherwise a tiny-byte but huge-pixel
+    // source (e.g. a 4000×4000 / 186-byte SVG) would slip through unchanged
+    // because the rasterized 512×512 output is a longer string than the SVG.
+    const originalViolatesDimensions = fitted.scale < 1;
+    const originalViolatesBudget =
+      normalized.maxDataUrlBytes != null && originalBytes > normalized.maxDataUrlBytes;
+    return (
+      compressed.length < dataUrl.length
+      || originalViolatesDimensions
+      || originalViolatesBudget
+    ) ? compressed : dataUrl;
   } catch {
     return dataUrl;
   }
@@ -149,12 +178,16 @@ export async function compressLevelBackgroundImages(level, options = {}) {
 
   const viewportWidth = positiveInt(options.viewportWidth, 400);
   const viewportHeight = positiveInt(options.viewportHeight, 600);
+  // Quota-only: when set, lets the per-image compressor skip re-decoding an
+  // image that already fits the byte budget (used by localStorage compaction).
+  const skipDecodeUnderBytes = options.skipDecodeUnderBytes === true;
   const backgroundOptions = {
     maxWidth: Math.max(800, viewportWidth * 2),
     maxHeight: Math.max(800, viewportHeight * 2),
     quality: 0.8,
     fallbackType: 'image/jpeg',
-    maxDataUrlBytes: 420 * 1024
+    maxDataUrlBytes: 420 * 1024,
+    skipDecodeUnderBytes
   };
   const survivalWorldHeight = positiveInt(level.survival?.worldHeight, viewportHeight * 3);
   const survivalOptions = {
@@ -162,14 +195,16 @@ export async function compressLevelBackgroundImages(level, options = {}) {
     maxHeight: Math.max(800, Math.min(2400, survivalWorldHeight)),
     quality: 0.8,
     fallbackType: 'image/jpeg',
-    maxDataUrlBytes: 520 * 1024
+    maxDataUrlBytes: 520 * 1024,
+    skipDecodeUnderBytes
   };
   const slotOptions = {
     maxWidth: 512,
     maxHeight: 512,
     quality: 0.8,
     fallbackType: 'image/png',
-    maxDataUrlBytes: 220 * 1024
+    maxDataUrlBytes: 220 * 1024,
+    skipDecodeUnderBytes
   };
 
   const tasks = [];
