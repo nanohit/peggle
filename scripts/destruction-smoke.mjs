@@ -745,6 +745,39 @@ function testNestedAnimatedGroupsDoNotDetach() {
   assert.equal(innerBody.animationDetached, true);
 }
 
+function testActiveDebrisWakesAnimatedPhysicsOnHit() {
+  // An animated (kinematic) physics-on-hit body must STILL wake when a real, active
+  // (non-kinematic) body — e.g. a peg the ball knocked loose — falls onto it. The nested-
+  // animated-group guard lives only in wakeSleepingBodyFromKinematic, so this generic
+  // dynamic-vs-kinematic contact (via maybeWakeSleepingCollisionBody) is unaffected.
+  const target = circle('anim-target', 150, 200, { destructionPhysicsOnHit: true });
+  const debris = circle('debris', 150, 172, { destructionPhysicsOnHit: true });
+  const pegs = [target, debris];
+  const system = makeSystem({ gravityY: 0.2 });
+  system.reset(pegs, []);
+  const targetBody = system.getBodyForPeg(target);
+  const debrisBody = system.getBodyForPeg(debris);
+
+  // Ball knocks the debris loose; it falls onto the animated target below it.
+  assert.equal(
+    system.applyBallImpact(debris, { x: 150, y: 158, vx: 0, vy: 7 }, { vx: 0, vy: 7, speed: 7 }),
+    true
+  );
+  assert.equal(debrisBody.animationDetached, true);
+
+  // Keep the target animation-owned (kinematic, parked in place) every frame.
+  const animatedSet = new Set(['anim-target']);
+  let woke = false;
+  for (let i = 0; i < 40 && !woke; i++) {
+    system.syncAnimatedBodies(animatedSet, 1 / 120);
+    assert.equal(targetBody.kinematic || targetBody.animationDetached, true);
+    system.step(pegs, [], 1 / 120, { ...BOUNDS, bucketEnabled: false });
+    woke = targetBody.animationDetached === true;
+  }
+  assert.equal(woke, true, 'falling debris should hand the animated body to physics');
+  assert.equal(targetBody.kinematic, false);
+}
+
 function testDestructionBodyTeleportsThroughPortal() {
   const mover = circle('portal-body', 120, 90);
   const blue = {
@@ -1078,6 +1111,7 @@ const tests = [
   testAnimatedStaticBodyActsAsKinematicCollider,
   testAnimatedBodyDetachesAfterPhysicsWake,
   testNestedAnimatedGroupsDoNotDetach,
+  testActiveDebrisWakesAnimatedPhysicsOnHit,
   testDestructionBodyTeleportsThroughPortal,
   testYoyoConstrainedAtWallsDuringRetraction,
   testRemovalWakesSleepingDynamicSupportDependents,
