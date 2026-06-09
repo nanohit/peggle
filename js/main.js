@@ -1882,13 +1882,14 @@ class PeggleApp {
     const blastToggle = document.getElementById('magnetBlastToggle');
     const hittableToggle = document.getElementById('magnetHittableToggle');
     const knockoutToggle = document.getElementById('magnetKnockoutToggle');
+    const vanishAfterBlastToggle = document.getElementById('magnetVanishAfterBlastToggle');
 
     document.getElementById('closeMagnetPanel').addEventListener('click', () => {
       this.closeMagnetPanel();
     });
 
-    // Blast and Knockout both need a ball hit, so they're only meaningful while the
-    // magnet is hittable.
+    // Blast and the disappear triggers need a ball hit, so they're only meaningful while
+    // the magnet is hittable; "Disappear after blast" additionally needs Blast enabled.
     const syncBlastEnabledUi = () => {
       const hittable = hittableToggle ? hittableToggle.checked : true;
       const blastOn = blastToggle ? blastToggle.checked : false;
@@ -1898,6 +1899,9 @@ class PeggleApp {
       [explosionSlider, explosionInput].forEach(el => { if (el) el.disabled = dimPower; });
       const powerRow = document.getElementById('magnetPowerRow');
       if (powerRow) powerRow.classList.toggle('magnet-row--disabled', dimPower);
+      if (vanishAfterBlastToggle) vanishAfterBlastToggle.disabled = !hittable || !blastOn;
+      const vanishRow = document.getElementById('magnetVanishAfterBlastRow');
+      if (vanishRow) vanishRow.classList.toggle('magnet-row--disabled', !hittable || !blastOn);
     };
 
     blastToggle.addEventListener('change', () => {
@@ -1916,6 +1920,12 @@ class PeggleApp {
       knockoutToggle.addEventListener('change', () => {
         if (!this.editor) return;
         this.editor.setSelectedMagnetKnockout(knockoutToggle.checked);
+      });
+    }
+    if (vanishAfterBlastToggle) {
+      vanishAfterBlastToggle.addEventListener('change', () => {
+        if (!this.editor) return;
+        this.editor.setSelectedMagnetVanishAfterBlast(vanishAfterBlastToggle.checked);
       });
     }
     this._syncMagnetBlastEnabledUi = syncBlastEnabledUi;
@@ -1981,6 +1991,8 @@ class PeggleApp {
     if (hittableToggle) hittableToggle.checked = props.hittable !== false;
     const knockoutToggle = document.getElementById('magnetKnockoutToggle');
     if (knockoutToggle) knockoutToggle.checked = props.knockout === true;
+    const vanishAfterBlastToggle = document.getElementById('magnetVanishAfterBlastToggle');
+    if (vanishAfterBlastToggle) vanishAfterBlastToggle.checked = props.vanishAfterBlast === true;
     this._syncMagnetBlastEnabledUi?.();
     document.getElementById('magnetPanel').classList.add('visible');
   }

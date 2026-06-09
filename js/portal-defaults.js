@@ -1,6 +1,6 @@
 export const PORTAL_DEFAULT_SCALE = 3.0;
 export const PORTAL_MIN_SCALE = 0.5;
-export const PORTAL_MAX_SCALE = 5.0;
+export const PORTAL_MAX_SCALE = 10.0;
 
 export function isPortalType(type) {
   return type === 'portalBlue' || type === 'portalOrange';

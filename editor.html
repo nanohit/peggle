@@ -390,19 +390,20 @@
             <input type="range" id="magnetStrengthSlider" min="0" max="250" step="2" value="32">
           </div>
           <label class="anim-toggle"><input type="checkbox" id="magnetHittableToggle" checked> Hittable (ball reacts)</label>
-          <label class="anim-toggle"><input type="checkbox" id="magnetKnockoutToggle"> Knock out on hit (disappears)</label>
+          <label class="anim-toggle"><input type="checkbox" id="magnetKnockoutToggle"> Disappear on direct hit</label>
           <label class="anim-toggle"><input type="checkbox" id="magnetBlastToggle"> Blast on hit</label>
           <div class="anim-slider" id="magnetPowerRow">
             <label>Power <input type="number" id="magnetExplosionInput" class="anim-num" value="1.15" step="0.05" min="0.3" max="4.0"></label>
             <input type="range" id="magnetExplosionSlider" min="30" max="400" step="5" value="115">
           </div>
+          <label class="anim-toggle" id="magnetVanishAfterBlastRow"><input type="checkbox" id="magnetVanishAfterBlastToggle"> Disappear after blast</label>
           <label class="anim-toggle">Mode
             <select id="magnetModeSelect" class="anim-number-input">
               <option value="attract">Attract</option>
               <option value="repel">Repel</option>
             </select>
           </label>
-          <div class="survival-hint">Static by default. In Destruction mode it pulls or pushes physics bodies inside the radius. With <b>Blast on hit</b> it detonates like a red bomb when the ball strikes a peg group that reaches it (or the ball hits it directly), then its force turns off. Without it, it stays a pure force field. <b>Knock out on hit</b> lets the ball remove the magnet itself — it turns red and disappears (independent of Blast; with Blast on, the blast still fires).</div>
+          <div class="survival-hint">Static by default. In Destruction mode it pulls or pushes physics bodies inside the radius. With <b>Blast on hit</b> it detonates like a red bomb when the ball strikes a peg group that reaches it (or the ball hits it directly), then its force turns off. Without it, it stays a pure force field. Two independent disappear triggers: <b>Disappear on direct hit</b> (the ball strikes the magnet itself) and <b>Disappear after blast</b> (its blast fired — by a direct hit or an attached group). With both off, the magnet always persists.</div>
         </div>
       </div>
       <!-- Flipper properties panel (right side) -->
@@ -444,8 +445,8 @@
         <div class="bumper-panel-title">Portal <button id="closePortalPanel" class="anim-close-btn">✕</button></div>
         <div class="bumper-panel-body">
           <div class="anim-slider">
-            <label>Scale <input type="number" id="portalScaleInput" class="anim-num" value="3.0" step="0.1" min="0.5" max="5.0"></label>
-            <input type="range" id="portalScaleSlider" min="5" max="50" value="30">
+            <label>Scale <input type="number" id="portalScaleInput" class="anim-num" value="3.0" step="0.1" min="0.5" max="10.0"></label>
+            <input type="range" id="portalScaleSlider" min="5" max="100" value="30">
           </div>
           <label class="anim-toggle"><input type="checkbox" id="portalOneWayToggle" checked> One-sided (back side collides)</label>
           <label class="anim-toggle"><input type="checkbox" id="portalOneWayFlipToggle" checked> Invert one-sided direction</label>

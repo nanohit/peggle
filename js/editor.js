@@ -32,6 +32,7 @@ import {
   isMagnetBlastEnabled,
   isMagnetHittable,
   isMagnetKnockoutEnabled,
+  isMagnetVanishAfterBlast,
   normalizeMagnetMode,
   normalizeMagnetPegProperties
 } from './magnet-defaults.js';
@@ -1856,6 +1857,7 @@ export class Editor {
         pegData.height = h;
         if (gb.slices) pegData.curveSlices = gb.slices;
       }
+      this.applyCreationDestructionDefaults(pegData);
       if (this.selectedPegColor) pegData.color = this.selectedPegColor;
       if (!this.isPegPositionAllowed(pegData, pegData.x, pegData.y, pegData.angle, pegData.curveSlices)) continue;
       const newPeg = this.levelManager.addPeg(pegData);
@@ -1893,6 +1895,18 @@ export class Editor {
     if (updated && this.onPegCountChange) {
       this.onPegCountChange(updated.pegs.length);
     }
+  }
+
+  // Stamp creation-time defaults that depend on peg type. Blue (normal) pegs default to
+  // physics-on-hit + ball-only so in destruction mode they react to the ball but ignore
+  // peg/bomb shoves; the author can toggle it off afterward (this only seeds the default,
+  // it never overrides an existing peg). Called by every peg-creation path.
+  applyCreationDestructionDefaults(pegData) {
+    if (pegData && pegData.type === 'blue') {
+      pegData.destructionPhysicsOnHit = true;
+      pegData.destructionPhysicsOnHitBallOnly = true;
+    }
+    return pegData;
   }
 
   placePeg(x, y) {
@@ -1958,6 +1972,7 @@ export class Editor {
     if (this.selectedPegType === 'gamble') {
       Object.assign(pegData, normalizeSurvivalGamblePegProperties(pegData));
     }
+    this.applyCreationDestructionDefaults(pegData);
     if (this.selectedPegColor) {
       pegData.color = this.selectedPegColor;
     }
@@ -2119,8 +2134,10 @@ export class Editor {
       delete peg.magnetBlast;
       delete peg.magnetHittable;
       delete peg.magnetKnockout;
+      delete peg.magnetVanishAfterBlast;
       delete peg._magnetDetonated;
       delete peg._magnetPulse;
+      delete peg._magnetVanishPending;
     };
 
     for (const pegId of this.selectedPegIds) {
@@ -2480,6 +2497,7 @@ export class Editor {
       pegData.magnetBlast = isMagnetBlastEnabled(peg);
       pegData.magnetHittable = isMagnetHittable(peg);
       pegData.magnetKnockout = isMagnetKnockoutEnabled(peg);
+      pegData.magnetVanishAfterBlast = isMagnetVanishAfterBlast(peg);
       pegData.shape = 'circle';
     }
     if (Object.prototype.hasOwnProperty.call(peg, 'destructionStatic')) {
@@ -3002,6 +3020,18 @@ export class Editor {
     this.levelManager.save();
   }
 
+  setSelectedMagnetVanishAfterBlast(enabled) {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level) return;
+    for (const pegId of this.selectedPegIds) {
+      const peg = level.pegs.find(p => p.id === pegId);
+      if (peg && isBombMagnetType(peg.type)) {
+        peg.magnetVanishAfterBlast = !!enabled;
+      }
+    }
+    this.levelManager.save();
+  }
+
   getSelectedMagnetProperties() {
     const level = this.levelManager.getCurrentLevel();
     if (!level || this.selectedPegIds.size === 0) return null;
@@ -3015,7 +3045,8 @@ export class Editor {
           explosionPower: getMagnetExplosionPower(peg),
           blast: isMagnetBlastEnabled(peg),
           hittable: isMagnetHittable(peg),
-          knockout: isMagnetKnockoutEnabled(peg)
+          knockout: isMagnetKnockoutEnabled(peg),
+          vanishAfterBlast: isMagnetVanishAfterBlast(peg)
         };
       }
     }
@@ -3100,11 +3131,10 @@ export class Editor {
   setSelectedPortalScale(scale) {
     const level = this.levelManager.getCurrentLevel();
     if (!level) return;
-    const clamped = Utils.clamp(scale, 0.5, 5.0);
     for (const pegId of this.selectedPegIds) {
       const peg = level.pegs.find(p => p.id === pegId);
       if (peg && isPortalType(peg.type)) {
-        peg.portalScale = normalizePortalScale(clamped);
+        peg.portalScale = normalizePortalScale(scale);
         normalizePortalPegProperties(peg);
       }
     }

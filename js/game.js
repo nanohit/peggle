@@ -36,7 +36,7 @@ import {
   normalizeLevelHitPegClearSettings
 } from './hit-peg-clear-settings.js';
 import { isPortalType, normalizePortalPegProperties } from './portal-defaults.js';
-import { getMagnetExplosionPower, isBombMagnetPeg, isMagnetBlastEnabled, isMagnetHittable, isMagnetKnockoutEnabled } from './magnet-defaults.js';
+import { getMagnetExplosionPower, isBombMagnetPeg, isMagnetBlastEnabled, isMagnetHittable, isMagnetKnockoutEnabled, isMagnetVanishAfterBlast } from './magnet-defaults.js';
 import { lightTap, initAudio, pegHitSound, resetHitCounter } from './haptics.js';
 import { normalizeEndSequenceConfig } from './visual-config.js';
 
@@ -1994,7 +1994,21 @@ export class Game {
       affectBalls: true,
       activateTargets: false
     });
+    // "Disappear after blast" — independent of the direct-hit knockout. Fires for both a
+    // direct ball hit and an attached group reaching the magnet (both route through here).
+    if (isMagnetVanishAfterBlast(peg)) this.scheduleMagnetVanish(peg);
     return true;
+  }
+
+  // A bomb magnet is a persistent force field; it only disappears when an author-enabled
+  // vanish trigger fires (direct-hit knockout or after-blast). Schedule the removal through
+  // the timed-clear machinery so it pops after the same delay as a cleared peg, and (as a
+  // fallback for a fast-draining turn) it's also removed in endTurn while pending.
+  scheduleMagnetVanish(peg) {
+    if (!isBombMagnetPeg(peg) || !peg?.id || peg._magnetVanishPending) return;
+    peg._magnetVanishPending = true;
+    const delay = Math.max(0, this.hitPegClearDelayMs || 0);
+    this.pendingHitPegClears.set(peg.id, this.levelElapsedMs + delay);
   }
 
   createRuntimeFlipper(config) {
@@ -2658,15 +2672,11 @@ export class Game {
   scheduleHitPegClear(peg) {
     if (!peg || !peg.id) return;
     if (peg.type === 'obstacle' || this.isPermanentBumper(peg) || this.isPortalPeg(peg)) return;
-    // A bomb magnet is a persistent force field. A ball hit removes it ONLY when its
-    // "knockout" option is on (independent of Blast): off ⇒ it never disappears even
-    // if the level's timed-clear is enabled; on ⇒ it disappears on hit even when the
-    // level's timed-clear is off.
-    if (isBombMagnetPeg(peg)) {
-      if (!isMagnetHittable(peg) || !isMagnetKnockoutEnabled(peg)) return;
-    } else if (!this.hitPegTimedClearEnabled) {
-      return;
-    }
+    // Bomb magnets never clear through the generic hit-peg path — they only disappear via
+    // scheduleMagnetVanish, gated by the per-magnet vanish checkboxes (direct-hit knockout
+    // / after-blast), so a plain hit/score never removes a force field.
+    if (isBombMagnetPeg(peg)) return;
+    if (!this.hitPegTimedClearEnabled) return;
     const delay = Math.max(0, this.hitPegClearDelayMs || 0);
     this.pendingHitPegClears.set(peg.id, this.levelElapsedMs + delay);
   }
@@ -2675,9 +2685,9 @@ export class Game {
     if (!peg) return false;
     if (peg.type === 'obstacle' || this.isPortalPeg(peg)) return false;
     if (this.isPermanentBumper(peg)) return false;
-    // Magnets only clear when explicitly knock-out-able (and hittable); otherwise they
-    // stay on the board as a force field no matter how often the ball strikes them.
-    if (isBombMagnetPeg(peg) && (!isMagnetHittable(peg) || !isMagnetKnockoutEnabled(peg))) return false;
+    // A magnet is removable only once a vanish trigger has flagged it (set in
+    // scheduleMagnetVanish); otherwise it stays a force field however often it's struck.
+    if (isBombMagnetPeg(peg)) return peg._magnetVanishPending === true;
     return this.hasPegBeenActivated(peg.id);
   }
 
@@ -2732,9 +2742,9 @@ export class Game {
 
   processTimedHitPegClears() {
     // No `hitPegTimedClearEnabled` gate here: the map is only populated by
-    // scheduleHitPegClear, which adds normal pegs only when timed-clear is on but adds
-    // knock-out-able magnets regardless — so a knockout magnet still pops on a level
-    // that otherwise keeps hit pegs on the board.
+    // scheduleHitPegClear for normal timed clears, or by scheduleMagnetVanish for magnet
+    // direct-hit / after-blast vanish triggers. Magnet vanish works even on levels that
+    // otherwise keep hit pegs on the board.
     if (!this.pendingHitPegClears || this.pendingHitPegClears.size === 0) return false;
 
     const dueIds = new Set();
@@ -3269,10 +3279,28 @@ export class Game {
       if (p.type === 'obstacle') return true;
       if (this.isPortalPeg(p)) return true;
       if (p.type === 'bumper' && !p.bumperDisappear && !p.bumperOrange) return true;
+      // A bomb magnet persists through end-of-turn no matter how often it was struck/scored;
+      // it leaves only when an author-enabled vanish trigger flagged it (direct-hit knockout
+      // or after-blast). This is what keeps a plain hit from dissolving a force field.
+      if (isBombMagnetPeg(p)) {
+        if (!p._magnetVanishPending) return true;
+        removedPegs.push(p);
+        return false;
+      }
       if (!hitSet.has(p.id)) return true;
       removedPegs.push(p);
       return false;
     });
+    // Kept (non-vanishing) magnets must not linger rendered as "hit": drop them from the
+    // hit sets so they show as a normal force field again (they may re-score if struck on a
+    // later turn, which is fine for a persistent peg).
+    for (const p of this.pegs) {
+      if (!isBombMagnetPeg(p)) continue;
+      let i = this.hitPegIds.indexOf(p.id);
+      if (i !== -1) this.hitPegIds.splice(i, 1);
+      i = this.turnHitPegIds.indexOf(p.id);
+      if (i !== -1) this.turnHitPegIds.splice(i, 1);
+    }
     this.renderer.queuePegExitAnimations?.(removedPegs);
     this.physics.setPegs(this.pegs);
     this.syncPhysicsHitPegState();
@@ -3727,7 +3755,9 @@ export class Game {
       // peg-group that is ALREADY attached to a magnet. Pegs drifting/touching the magnet
       // on their own never trigger it.
       if (isBombMagnetPeg(peg)) {
-        this.detonateBombMagnet(peg, event.ball);
+        this.detonateBombMagnet(peg, event.ball); // may schedule vanish-after-blast
+        // Direct-hit knockout: vanish when the ball strikes the magnet itself.
+        if (isMagnetHittable(peg) && isMagnetKnockoutEnabled(peg)) this.scheduleMagnetVanish(peg);
       } else if (this.isDestructionMode()) {
         const magnet = this.destructionSystem.getMagnetForAttachedPeg(peg);
         if (magnet) this.detonateBombMagnet(magnet, event.ball);

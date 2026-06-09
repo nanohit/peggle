@@ -356,7 +356,8 @@ export class LevelManager {
         magnetExplosionPower: peg.magnetExplosionPower,
         magnetBlast: peg.magnetBlast === true,
         magnetHittable: peg.magnetHittable !== false,
-        magnetKnockout: peg.magnetKnockout === true
+        magnetKnockout: peg.magnetKnockout === true,
+        magnetVanishAfterBlast: peg.magnetVanishAfterBlast === true
       });
       normalizeMagnetPegProperties(newPeg);
     }
@@ -368,6 +369,14 @@ export class LevelManager {
     }
     if (Object.prototype.hasOwnProperty.call(peg, 'destructionPhysicsOnHitBallOnly')) {
       newPeg.destructionPhysicsOnHitBallOnly = peg.destructionPhysicsOnHitBallOnly;
+    }
+    if (newPeg.type === 'blue') {
+      if (!Object.prototype.hasOwnProperty.call(newPeg, 'destructionPhysicsOnHit')) {
+        newPeg.destructionPhysicsOnHit = true;
+      }
+      if (!Object.prototype.hasOwnProperty.call(newPeg, 'destructionPhysicsOnHitBallOnly')) {
+        newPeg.destructionPhysicsOnHitBallOnly = true;
+      }
     }
     normalizeDestructionPegProperties(newPeg);
     if (isBilliardPegType(peg.type)) {

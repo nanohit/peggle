@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { performance } from 'node:perf_hooks';
 import { DestructionPegSystem } from '../js/destruction-mode.js';
 import { PhysicsEngine, PHYSICS_CONFIG } from '../js/physics.js';
+import { PORTAL_MAX_SCALE } from '../js/portal-defaults.js';
 import { YoyoThreadSystem } from '../js/yoyo-thread.js';
 
 const BOUNDS = {
@@ -176,6 +177,181 @@ function testAttachedMagnetSleeperStaysAsleep() {
   assert.equal(body.sleeping, true);
   assert.equal(body.vx, 0);
   assert.equal(body.vy, 0);
+}
+
+async function testLevelManagerDefaultsBlueAndPortalLimit() {
+  const previousStorage = globalThis.localStorage;
+  globalThis.localStorage = {
+    getItem() { return null; },
+    setItem() {},
+    removeItem() {},
+    clear() {}
+  };
+  try {
+    const { LevelManager } = await import('../js/levels.js');
+    const { Editor } = await import('../js/editor.js');
+    const manager = new LevelManager();
+    manager.createLevel('creation-defaults');
+
+    const blue = manager.addPeg({ type: 'blue', shape: 'circle', x: 40, y: 60 });
+    assert.equal(blue.destructionPhysicsOnHit, true);
+    assert.equal(blue.destructionPhysicsOnHitBallOnly, true);
+
+    const explicitOff = manager.addPeg({
+      type: 'blue',
+      shape: 'circle',
+      x: 64,
+      y: 60,
+      destructionPhysicsOnHit: false,
+      destructionPhysicsOnHitBallOnly: false
+    });
+    assert.equal(explicitOff.destructionPhysicsOnHit, false);
+    assert.equal(explicitOff.destructionPhysicsOnHitBallOnly, false);
+
+    const portal = manager.addPeg({ type: 'portalBlue', shape: 'circle', x: 100, y: 60 });
+    Editor.prototype.setSelectedPortalScale.call({
+      levelManager: manager,
+      selectedPegIds: new Set([portal.id])
+    }, PORTAL_MAX_SCALE);
+    assert.equal(portal.portalScale, PORTAL_MAX_SCALE);
+  } finally {
+    if (previousStorage === undefined) {
+      delete globalThis.localStorage;
+    } else {
+      globalThis.localStorage = previousStorage;
+    }
+  }
+}
+
+async function testMagnetVanishTriggersAreIndependent() {
+  const previousStorage = globalThis.localStorage;
+  globalThis.localStorage = {
+    getItem() { return null; },
+    setItem() {},
+    removeItem() {},
+    clear() {}
+  };
+  try {
+    const { Game } = await import('../js/game.js');
+    const makeHarness = (pegs, turnHitIds = []) => {
+      const game = Object.create(Game.prototype);
+      Object.assign(game, {
+        billiardPhase: false,
+        state: 'playing',
+        _pendingEndResult: null,
+        _turnBucketCatchCount: 0,
+        temporaryFlipperActive: false,
+        temporaryFlipperTurns: 0,
+        baseFlipperConfig: null,
+        flippers: null,
+        pegs,
+        groups: [],
+        hitPegIds: [],
+        turnHitPegIds: [...turnHitIds],
+        pendingHitPegClears: new Map(),
+        pendingDestructionPileClears: new Map(),
+        removedOrangePegs: 0,
+        ballsLeft: 3,
+        levelElapsedMs: 0,
+        hitPegClearDelayMs: 0,
+        hitPegTimedClearEnabled: false,
+        yoyoThread: { clear() {}, setLaunchAnchor() {} },
+        dynamicYoyoAnchors: new Map(),
+        survivalRuntime: { isEnabled() { return false; } },
+        renderer: {
+          queuePegExitAnimations(removedPegs) {
+            game._removedPegIds = removedPegs.map(peg => peg.id);
+          }
+        },
+        physics: {
+          hitPegs: new Set(),
+          setPegs(nextPegs) { game._physicsPegIds = nextPegs.map(peg => peg.id); },
+          setBalls(nextBalls) { game.balls = nextBalls; },
+          clearHitPegs() {}
+        },
+        launchX: 200,
+        launchY: 40,
+        balls: []
+      });
+      game.emitGameplayEvent = () => {};
+      game.emitUiStateIfChanged = () => {};
+      game.finishDeepFreezeShot = () => false;
+      game.resetUltraAimRuntime = () => {};
+      game.syncPhysicsHitPegState = () => {};
+      game.refreshDestructionAfterPegRemoval = () => false;
+      game.resetStuckBallTracking = () => {};
+      game.updateLaunchPosition = () => {};
+      game.getOrangePegsLeft = () => 1;
+      game.detonateBombShockwave = () => {};
+      return game;
+    };
+
+    const directHitPersists = makeHarness([
+      circle('magnet', 100, 100, {
+        type: 'bombMagnet',
+        magnetHittable: true,
+        magnetKnockout: false,
+        magnetBlast: false
+      }),
+      circle('orange', 140, 100)
+    ], ['magnet']);
+    directHitPersists.endTurn();
+    assert.deepEqual(directHitPersists.pegs.map(peg => peg.id), ['magnet', 'orange']);
+    assert.deepEqual(directHitPersists._removedPegIds || [], []);
+    assert.deepEqual(directHitPersists.hitPegIds, []);
+    assert.deepEqual(directHitPersists.turnHitPegIds, []);
+
+    const directHitVanishes = makeHarness([
+      circle('magnet', 100, 100, {
+        type: 'bombMagnet',
+        magnetHittable: true,
+        magnetKnockout: true,
+        magnetBlast: false
+      }),
+      circle('orange', 140, 100)
+    ], ['magnet']);
+    directHitVanishes.scheduleMagnetVanish(directHitVanishes.pegs[0]);
+    directHitVanishes.endTurn();
+    assert.deepEqual(directHitVanishes.pegs.map(peg => peg.id), ['orange']);
+    assert.deepEqual(directHitVanishes._removedPegIds, ['magnet']);
+
+    const blastPersists = makeHarness([
+      circle('magnet', 100, 100, {
+        type: 'bombMagnet',
+        magnetHittable: true,
+        magnetKnockout: false,
+        magnetBlast: true,
+        magnetVanishAfterBlast: false
+      }),
+      circle('orange', 140, 100)
+    ], ['magnet']);
+    assert.equal(blastPersists.detonateBombMagnet(blastPersists.pegs[0], null), true);
+    assert.equal(blastPersists.pegs[0]._magnetVanishPending, undefined);
+    blastPersists.endTurn();
+    assert.deepEqual(blastPersists.pegs.map(peg => peg.id), ['magnet', 'orange']);
+
+    const blastVanishes = makeHarness([
+      circle('magnet', 100, 100, {
+        type: 'bombMagnet',
+        magnetHittable: true,
+        magnetKnockout: false,
+        magnetBlast: true,
+        magnetVanishAfterBlast: true
+      }),
+      circle('orange', 140, 100)
+    ], ['magnet']);
+    assert.equal(blastVanishes.detonateBombMagnet(blastVanishes.pegs[0], null), true);
+    assert.equal(blastVanishes.pegs[0]._magnetVanishPending, true);
+    blastVanishes.endTurn();
+    assert.deepEqual(blastVanishes.pegs.map(peg => peg.id), ['orange']);
+    assert.deepEqual(blastVanishes._removedPegIds, ['magnet']);
+  } finally {
+    if (previousStorage === undefined) {
+      delete globalThis.localStorage;
+    } else {
+      globalThis.localStorage = previousStorage;
+    }
+  }
 }
 
 function testStackedBricksSettleWithoutDrift() {
@@ -1086,6 +1262,8 @@ const tests = [
   testPhysicsOnHitSleepsUntilImpact,
   testLevelManagerPreservesMagnetBlastOnAdd,
   testAttachedMagnetSleeperStaysAsleep,
+  testLevelManagerDefaultsBlueAndPortalLimit,
+  testMagnetVanishTriggersAreIndependent,
   testStackedBricksSettleWithoutDrift,
   testGroupPreservesOffsets,
   testGroupCenterOfMassRecomputesAfterRemoval,
