@@ -366,20 +366,38 @@ export class PegAnimator {
     // NOT re-derive the rotation center from the *remaining* pegs — that drifts the origin
     // (and any explicit Set Origin pivot, which is an offset from it) toward the new local
     // centroid. preserveGroupOrigins keeps each group anchored to its prior center.
+    // A mid-play structure refresh (a peg knocked off a group) reuses this method only to
+    // rebuild group membership — it must NOT restart the in-progress animations. So when
+    // preserving, keep the global clock, the authored rest snapshots, the suspended
+    // (physics-owned) set, and each animation's hit-trigger progress. Resetting `elapsed`
+    // snapped every continuous A↔B / cycle animation back to its start (point A) on ANY
+    // removal, and re-snapshotting originalPositions against the current animated pose
+    // doubled the displacement.
     const preserveGroupOrigins = options.preserveGroupOrigins === true;
+    const preserveTimeline = preserveGroupOrigins;
+    const animKey = (a) => (a.type === 'group' ? `g:${a.groupId}` : `p:${a.pegIds[0]}`);
     const prevGroupCenters = preserveGroupOrigins ? new Map() : null;
-    if (prevGroupCenters) {
-      for (const a of this.animations) {
-        if (a.type === 'group' && a.groupId != null) {
+    const prevHitStates = preserveTimeline ? new Map() : null;
+    if (prevGroupCenters || prevHitStates) {
+      for (let ai = 0; ai < this.animations.length; ai++) {
+        const a = this.animations[ai];
+        if (prevGroupCenters && a.type === 'group' && a.groupId != null) {
           prevGroupCenters.set(a.groupId, { centerX: a.centerX, centerY: a.centerY });
+        }
+        if (prevHitStates && a.hitTrigger) {
+          const ht = this._hitTriggerState.get(ai);
+          if (ht) prevHitStates.set(animKey(a), ht);
         }
       }
     }
-    this.originalPositions.clear();
+    const prevOriginalPositions = preserveTimeline ? this.originalPositions : null;
+    this.originalPositions = new Map();
     this.animations = [];
     this.animatedPegIds.clear();
-    this.suspendedPegIds.clear();
-    this.elapsed = 0;
+    if (!preserveTimeline) {
+      this.suspendedPegIds.clear();
+      this.elapsed = 0;
+    }
     this._hitTriggerState = new Map();
 
     // Build peg lookup
@@ -390,10 +408,15 @@ export class PegAnimator {
       p._animWrapShiftY = 0;
       p._wrapCopies = null;
       p._wrapHideMain = false;
-      // Snapshot original positions (deep copy curveSlices)
-      const snap = { x: p.x, y: p.y, angle: p.angle || 0 };
-      if (p.curveSlices) {
-        snap.curveSlices = p.curveSlices.map(s => ({ x: s.x, y: s.y, nx: s.nx, ny: s.ny }));
+      // Reuse the existing authored snapshot on a preserving refresh (so the rest layout —
+      // the animation's baseline — stays the original A pose, not the current animated one);
+      // otherwise snapshot the current position (deep-copying curveSlices).
+      let snap = prevOriginalPositions ? prevOriginalPositions.get(p.id) : null;
+      if (!snap) {
+        snap = { x: p.x, y: p.y, angle: p.angle || 0 };
+        if (p.curveSlices) {
+          snap.curveSlices = p.curveSlices.map(s => ({ x: s.x, y: s.y, nx: s.nx, ny: s.ny }));
+        }
       }
       this.originalPositions.set(p.id, snap);
     }
@@ -466,7 +489,8 @@ export class PegAnimator {
       };
       this.animations.push(entry);
       if (entry.hitTrigger) {
-        this._hitTriggerState.set(this.animations.length - 1, { active: false, elapsed: 0, forward: true, step: 0, _prevStep: 0 });
+        const restored = prevHitStates ? prevHitStates.get(animKey(entry)) : null;
+        this._hitTriggerState.set(this.animations.length - 1, restored || { active: false, elapsed: 0, forward: true, step: 0, _prevStep: 0 });
       }
       for (const pegId of memberIds) this.animatedPegIds.add(pegId);
     }
@@ -504,7 +528,8 @@ export class PegAnimator {
       };
       this.animations.push(entry);
       if (entry.hitTrigger) {
-        this._hitTriggerState.set(this.animations.length - 1, { active: false, elapsed: 0, forward: true, step: 0, _prevStep: 0 });
+        const restored = prevHitStates ? prevHitStates.get(animKey(entry)) : null;
+        this._hitTriggerState.set(this.animations.length - 1, restored || { active: false, elapsed: 0, forward: true, step: 0, _prevStep: 0 });
       }
       this.animatedPegIds.add(p.id);
     }
