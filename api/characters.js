@@ -9,6 +9,7 @@ import {
   selectMirroredValue,
   writeDriveRecord
 } from './drive-store.js';
+import { setPlayerAwareCache } from './player-cache.js';
 
 let redis;
 function getRedis() {
@@ -45,6 +46,7 @@ async function kvDel(key) {
 
 const REGISTRY_KEY = 'character:__registry';
 const CHARACTER_COLLECTION = 'characters';
+const DEFAULT_CHARACTER_ID = 'lu';
 
 async function getMirroredValue(collection, name, key) {
   const redisValue = await kvGet(key);
@@ -88,6 +90,45 @@ async function readStaticCharacterRegistry() {
   }
 }
 
+function makeCharacterId(value, fallback = DEFAULT_CHARACTER_ID) {
+  if (typeof value !== 'string') return fallback;
+  const cleaned = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return cleaned || fallback;
+}
+
+function parseCharacterIds(raw) {
+  const text = typeof raw === 'string' ? raw : '';
+  const ids = text
+    .split(',')
+    .map(id => makeCharacterId(id, ''))
+    .filter(Boolean);
+  return [...new Set(ids)];
+}
+
+function pickCharacterSubset(registry, ids) {
+  if (!Array.isArray(ids) || ids.length === 0 || !registry || typeof registry !== 'object') return registry;
+  const source = registry.characters && typeof registry.characters === 'object' && !Array.isArray(registry.characters)
+    ? registry.characters
+    : {};
+  const wanted = new Set([DEFAULT_CHARACTER_ID, ...ids.map(id => makeCharacterId(id))]);
+  const characters = {};
+  for (const id of wanted) {
+    if (source[id]) characters[id] = source[id];
+  }
+  if (Object.keys(characters).length === 0) return registry;
+  const selectedId = characters[registry.selectedId] ? registry.selectedId : (characters[DEFAULT_CHARACTER_ID] ? DEFAULT_CHARACTER_ID : Object.keys(characters)[0]);
+  return {
+    ...registry,
+    selectedId,
+    characters,
+    partial: true
+  };
+}
+
 function setCorsHeaders(req, res) {
   const origin = req.headers.origin || '*';
   res.setHeader('Access-Control-Allow-Origin', origin);
@@ -105,8 +146,8 @@ export default async function handler(req, res) {
     if (req.method === 'GET') {
       const registry = await getMirroredValue(CHARACTER_COLLECTION, '__registry', REGISTRY_KEY) || await readStaticCharacterRegistry();
       if (!registry) return res.status(404).json({ error: 'No registry stored' });
-      res.setHeader('Cache-Control', 'no-store');
-      return res.json(registry);
+      setPlayerAwareCache(req, res);
+      return res.json(pickCharacterSubset(registry, parseCharacterIds(req.query.ids)));
     }
 
     if (req.method === 'POST') {

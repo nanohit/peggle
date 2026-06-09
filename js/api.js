@@ -27,6 +27,19 @@ function jsonHeaders() {
   return { 'Content-Type': 'application/json' };
 }
 
+function applyPlayerCacheParam(params, options = {}) {
+  if (options.playerCache === true) params.set('player', '1');
+  return params;
+}
+
+function normalizeIdList(ids) {
+  if (!ids) return [];
+  const source = typeof ids === 'string'
+    ? ids.split(',')
+    : (typeof ids?.[Symbol.iterator] === 'function' ? [...ids] : []);
+  return [...new Set(source.map(id => String(id || '').trim()).filter(Boolean))].sort();
+}
+
 export const api = {
   // ─── Levels ───────────────────────────────────
 
@@ -42,9 +55,10 @@ export const api = {
     }
   },
 
-  async getLevel(name) {
+  async getLevel(name, options = {}) {
     try {
-      const res = await fetch(`${API_BASE}/levels?name=${encodeURIComponent(name)}`);
+      const params = applyPlayerCacheParam(new URLSearchParams({ name }), options);
+      const res = await fetch(`${API_BASE}/levels?${params.toString()}`);
       if (!res.ok) return null;
       return await res.json();
     } catch (e) {
@@ -106,9 +120,10 @@ export const api = {
   },
 
   /** Get campaign with all level data resolved (for player) */
-  async getResolvedCampaign(name) {
+  async getResolvedCampaign(name, options = {}) {
     try {
-      const res = await fetch(`${API_BASE}/campaigns?name=${encodeURIComponent(name)}&resolve=true`);
+      const params = applyPlayerCacheParam(new URLSearchParams({ name, resolve: 'true' }), options);
+      const res = await fetch(`${API_BASE}/campaigns?${params.toString()}`);
       if (!res.ok) return null;
       const data = await res.json();
       if (data && Array.isArray(data.levels) && data.levels.length > 0) return data;
@@ -119,10 +134,11 @@ export const api = {
     }
   },
 
-  async getPrimaryCampaign({ initial = false } = {}) {
+  async getPrimaryCampaign({ initial = false, playerCache = false } = {}) {
     try {
       const params = new URLSearchParams({ primary: 'true' });
       params.set(initial ? 'initial' : 'resolve', 'true');
+      applyPlayerCacheParam(params, { playerCache });
       const res = await fetch(`${API_BASE}/campaigns?${params.toString()}`);
       if (!res.ok) return null;
       const data = await res.json();
@@ -191,9 +207,13 @@ export const api = {
 
   // ─── Characters ───────────────────────────────
 
-  async getCharacterRegistry() {
+  async getCharacterRegistry(options = {}) {
     try {
-      const res = await fetch(`${API_BASE}/characters`);
+      const params = applyPlayerCacheParam(new URLSearchParams(), options);
+      const ids = normalizeIdList(options.characterIds);
+      if (ids.length > 0) params.set('ids', ids.join(','));
+      const query = params.toString();
+      const res = await fetch(`${API_BASE}/characters${query ? `?${query}` : ''}`);
       if (!res.ok) return null;
       return await res.json();
     } catch (e) {

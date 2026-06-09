@@ -9,6 +9,7 @@ import {
   selectMirroredValue,
   writeDriveRecord
 } from './drive-store.js';
+import { setPlayerAwareCache } from './player-cache.js';
 
 let redis;
 function getRedis() {
@@ -155,7 +156,7 @@ export default async function handler(req, res) {
     if (req.method === 'OPTIONS') return res.status(204).end();
 
     if (req.method === 'GET') {
-      res.setHeader('Cache-Control', 'no-store');
+      setPlayerAwareCache(req, res);
       const { name } = req.query;
       if (!name) {
         const remoteNames = (await getMirroredValue(LEVEL_COLLECTION, '__index', INDEX_KEY)) || [];

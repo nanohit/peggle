@@ -11,6 +11,7 @@ import {
   selectMirroredValue,
   writeDriveRecord
 } from './drive-store.js';
+import { setPlayerAwareCache } from './player-cache.js';
 
 let redis;
 function getRedis() {
@@ -100,8 +101,8 @@ async function writeMirroredValue(collection, name, key, value, { deleted = fals
   return { ok: redisOk || driveOk, redisOk, driveOk, envelope };
 }
 
-function sendCacheableCampaign(res, payload) {
-  res.setHeader('Cache-Control', 'no-store');
+function sendCacheableCampaign(req, res, payload) {
+  setPlayerAwareCache(req, res);
   return res.json(payload);
 }
 
@@ -241,7 +242,7 @@ export default async function handler(req, res) {
 
       if (!name) {
         const names = [...new Set([...((await getMirroredValue(CAMPAIGN_COLLECTION, '__index', INDEX_KEY)) || []), ...(await getStaticCampaignNames())])].sort();
-        if (names.length === 0) return sendCacheableCampaign(res, { campaigns: [] });
+        if (names.length === 0) return sendCacheableCampaign(req, res, { campaigns: [] });
         const rawCampaigns = await Promise.all(names.map(n => getCampaignData(n)));
         const campaigns = [];
         for (let i = 0; i < names.length; i++) {
@@ -254,7 +255,7 @@ export default async function handler(req, res) {
             campaigns.push({ name: n, levelCount });
           }
         }
-        return sendCacheableCampaign(res, { campaigns });
+        return sendCacheableCampaign(req, res, { campaigns });
       }
 
       const campaign = await getCampaignData(name);
@@ -283,7 +284,7 @@ export default async function handler(req, res) {
               const levelData = await getLevelData(item.levelName);
               if (!levelData) continue;
               const node = nodeMap.get(item.nodeId);
-              return sendCacheableCampaign(res, {
+              return sendCacheableCampaign(req, res, {
                 name: campaign.name || name,
                 partial: true,
                 initialNodeId: item.nodeId,
@@ -331,7 +332,7 @@ export default async function handler(req, res) {
               type: n.type || 'normal'
             }));
 
-          return sendCacheableCampaign(res, {
+          return sendCacheableCampaign(req, res, {
             name: campaign.name || name,
             levels,
             graph: { nodes: exportedNodes }
@@ -344,7 +345,7 @@ export default async function handler(req, res) {
           for (const ln of uniqueLevelNames) {
             const levelData = await getLevelData(ln);
             if (levelData) {
-              return sendCacheableCampaign(res, {
+              return sendCacheableCampaign(req, res, {
                 name: campaign.name || name,
                 partial: true,
                 initialNodeId: 0,
@@ -365,10 +366,10 @@ export default async function handler(req, res) {
           const levelData = levelCache.get(ln);
           if (levelData) levels.push(sanitizeLevelForPlayer(levelData));
         }
-        return sendCacheableCampaign(res, { name: campaign.name || name, levels });
+        return sendCacheableCampaign(req, res, { name: campaign.name || name, levels });
       }
 
-      return sendCacheableCampaign(res, campaign);
+      return sendCacheableCampaign(req, res, campaign);
     }
 
     if (req.method === 'POST') {

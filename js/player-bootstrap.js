@@ -174,7 +174,7 @@ function staticNamePath(name) {
 // Fetch a level from the shared backend first; static files remain a deploy
 // seed/offline fallback.
 async function fetchLevel(name) {
-  const remote = await api.getLevel(name);
+  const remote = await api.getLevel(name, { playerCache: true });
   const data = remote
     || await staticJson('/data/player/levels/' + staticNamePath(name) + '.json')
     || await staticJson('/levels/' + staticNamePath(name) + '.json');
@@ -195,7 +195,7 @@ async function loadCampaign(name) {
     const cacheTimeKey = 'campaign_ts:' + name;
     const stored = localStorage.getItem(cacheKey);
 
-    const remote = await api.getResolvedCampaign(name);
+    const remote = await api.getResolvedCampaign(name, { playerCache: true });
     if (hasCampaignLevels(remote)) {
       try {
         localStorage.setItem(cacheKey, JSON.stringify(remote));
@@ -253,7 +253,7 @@ async function loadPrimaryCampaignName() {
 }
 
 async function loadPrimaryInitialCampaign() {
-  const remote = await api.getPrimaryCampaign({ initial: true });
+  const remote = await api.getPrimaryCampaign({ initial: true, playerCache: true });
   if (hasCampaignLevels(remote)) return remote;
   const data = await staticJson('/data/player/primary.initial.json');
   if (hasCampaignLevels(data)) return data;
@@ -261,7 +261,7 @@ async function loadPrimaryInitialCampaign() {
 }
 
 async function loadPrimaryFullCampaign() {
-  const remote = await api.getPrimaryCampaign({ initial: false });
+  const remote = await api.getPrimaryCampaign({ initial: false, playerCache: true });
   if (hasCampaignLevels(remote)) return remote;
   const data = await staticJson('/data/player/primary.json');
   if (hasCampaignLevels(data)) return data;
@@ -328,13 +328,36 @@ async function loadPrimaryCampaign() {
   return await loadCampaign(primaryName);
 }
 
-async function fetchCharacterRegistryWithFallback() {
+function collectCharacterIdsFromLevels(sourceLevels) {
+  const ids = new Set([DEFAULT_CHARACTER_ID]);
+  for (const level of Array.isArray(sourceLevels) ? sourceLevels : []) {
+    ids.add(normalizeLevelCharacterAssignment(level?.character).characterId);
+    ids.add(normalizeLevelCharacterAssignment(level?.pvp?.enemyCharacter).characterId);
+  }
+  return [...ids].filter(Boolean).sort();
+}
+
+function normalizeCharacterIdList(ids) {
+  if (!ids) return [];
+  const source = typeof ids === 'string'
+    ? ids.split(',')
+    : (typeof ids?.[Symbol.iterator] === 'function' ? [...ids] : []);
+  return [...new Set(source.map(id => normalizeLevelCharacterAssignment({ characterId: id }).characterId))].sort();
+}
+
+async function fetchCharacterRegistryWithFallback(options = {}) {
   const localFallback = () => loadCharacterRegistry();
-  const remote = await api.getCharacterRegistry();
+  const characterIds = normalizeCharacterIdList(options.characterIds);
+  const remote = await api.getCharacterRegistry({
+    playerCache: true,
+    characterIds
+  });
+  const remotePartial = remote?.partial === true;
   const registry = remote ? normalizeCharacterRegistry(remote) : await loadStaticCharacterRegistry();
   if (!registry) return localFallback();
+  registry.partial = remotePartial;
   try {
-    saveCharacterRegistry(registry);
+    if (!registry.partial) saveCharacterRegistry(registry);
   } catch (e) {
     console.warn('[player] character registry cache write failed', e);
   }
@@ -869,7 +892,7 @@ async function bootPvpDuelRoom(roomCode) {
     const clientId = getOrCreatePvpDuelClientId();
     const initialRoom = await api.joinPvpDuelRoom(roomCode, clientId);
     if (!initialRoom) throw new Error('Could not join PvP Duel room.');
-    const levelData = await api.getLevel(initialRoom.levelName);
+    const levelData = await api.getLevel(initialRoom.levelName, { playerCache: true });
     if (!levelData || !Array.isArray(levelData.pegs)) {
       throw new Error(`PvP Duel level not found: ${initialRoom.levelName || 'unknown'}`);
     }
@@ -1143,8 +1166,10 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     applyCharacterChoiceToRun(ids[nextIndex]);
   }
 
-  function refreshPortraitRegistry(nextRegistry) {
+  let characterRegistryComplete = false;
+  function refreshPortraitRegistry(nextRegistry, options = {}) {
     if (!nextRegistry) return;
+    characterRegistryComplete = options.complete !== false && nextRegistry.partial !== true;
     characterRegistry = nextRegistry;
     syncPauseCharacterPicker();
     if (!game || !activeLevelData) return;
@@ -1180,14 +1205,39 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
   }
 
   let characterRegistryWarmupPromise = null;
-  function startCharacterRegistryWarmup() {
-    if (characterRegistryWarmupPromise) return characterRegistryWarmupPromise;
+  let characterRegistryWarmupKey = '';
+  let characterRegistryWarmupSeq = 0;
+  function getWarmupCharacterIds() {
+    const ids = new Set(collectCharacterIdsFromLevels(originalLevels));
+    for (const id of characterAssignments.values()) {
+      ids.add(normalizeLevelCharacterAssignment({ characterId: id }).characterId);
+    }
+    return [...ids].filter(Boolean).sort();
+  }
+
+  function startCharacterRegistryWarmup(options = {}) {
+    const full = options.full === true;
+    if (full && characterRegistryComplete) return Promise.resolve(characterRegistry);
+    if (!full && characterRegistryComplete) return Promise.resolve(characterRegistry);
+    const characterIds = full ? [] : getWarmupCharacterIds();
+    const key = full ? '__full__' : characterIds.join(',');
+    if (characterRegistryWarmupPromise && characterRegistryWarmupKey === key) return characterRegistryWarmupPromise;
     // Pull character images after the first frame. This used to block first play
     // for up to the network timeout, which is especially painful on a clean device.
-    characterRegistryWarmupPromise = fetchCharacterRegistryWithFallback()
-      .then(refreshPortraitRegistry)
+    characterRegistryWarmupKey = key;
+    const requestSeq = ++characterRegistryWarmupSeq;
+    characterRegistryWarmupPromise = fetchCharacterRegistryWithFallback({ characterIds })
+      .then(registry => {
+        if (requestSeq !== characterRegistryWarmupSeq) return registry;
+        refreshPortraitRegistry(registry, { complete: full });
+        return registry;
+      })
       .catch(() => null);
     return characterRegistryWarmupPromise;
+  }
+
+  function ensureFullCharacterRegistryReady() {
+    return startCharacterRegistryWarmup({ full: true });
   }
 
   // Create and attach pause overlay (inside the visual frame so it covers the game area)
@@ -1427,6 +1477,7 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
             : (findNextNode(playableOrder, graphParentMap, completedNodes) ?? playableOrder[0]);
         }
         saveProgress();
+        startCharacterRegistryWarmup();
         return fullCampaign;
       })
       .catch(error => {
@@ -1509,6 +1560,9 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     game.pause();
     portraitReactionController.setPaused(true);
     syncPauseCharacterPicker();
+    ensureFullCharacterRegistryReady()
+      .then(() => syncPauseCharacterPicker())
+      .catch(() => null);
     pauseOverlay.classList.remove('pause-overlay--map-mode');
     pauseOverlay.classList.remove('pause-overlay--instant');
     pauseOverlay.classList.add('visible');
@@ -2540,7 +2594,6 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     requestAnimationFrame(() => requestAnimationFrame(() => {
       markPlayerReady();
       startCharacterRegistryWarmup();
-      startCampaignHydration();
     }));
     return true;
   }
