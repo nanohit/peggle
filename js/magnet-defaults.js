@@ -10,7 +10,11 @@ export const MAGNET_DEFAULTS = Object.freeze({
   blast: false,
   // Hittable ON by default: the ball activates/detonates it. OFF ⇒ the ball treats it
   // like a grey obstacle peg (bounces, no score, no blast); the force field still works.
-  hittable: true
+  hittable: true,
+  // Knockout OFF by default: a ball hit does NOT remove the magnet — it persists as a
+  // force field. ON ⇒ a ball hit knocks it out (it activates, turns red, and disappears).
+  // Independent of Blast: a non-knockout magnet still blasts on hit, it just stays.
+  knockout: false
 });
 
 export const MAGNET_MODES = Object.freeze(['attract', 'repel']);
@@ -42,6 +46,7 @@ export function normalizeMagnetPegProperties(peg) {
   peg.magnetExplosionPower = clampNumber(peg.magnetExplosionPower, 0.3, 4, MAGNET_DEFAULTS.explosionPower);
   peg.magnetBlast = peg.magnetBlast === true;
   peg.magnetHittable = peg.magnetHittable !== false;
+  peg.magnetKnockout = peg.magnetKnockout === true;
   if (!Object.prototype.hasOwnProperty.call(peg, 'destructionStatic')) {
     peg.destructionStatic = true;
   }
@@ -70,4 +75,8 @@ export function isMagnetBlastEnabled(peg) {
 
 export function isMagnetHittable(peg) {
   return peg?.magnetHittable !== false;
+}
+
+export function isMagnetKnockoutEnabled(peg) {
+  return peg?.magnetKnockout === true;
 }

@@ -390,6 +390,7 @@
             <input type="range" id="magnetStrengthSlider" min="0" max="250" step="2" value="32">
           </div>
           <label class="anim-toggle"><input type="checkbox" id="magnetHittableToggle" checked> Hittable (ball reacts)</label>
+          <label class="anim-toggle"><input type="checkbox" id="magnetKnockoutToggle"> Knock out on hit (disappears)</label>
           <label class="anim-toggle"><input type="checkbox" id="magnetBlastToggle"> Blast on hit</label>
           <div class="anim-slider" id="magnetPowerRow">
             <label>Power <input type="number" id="magnetExplosionInput" class="anim-num" value="1.15" step="0.05" min="0.3" max="4.0"></label>
@@ -401,7 +402,7 @@
               <option value="repel">Repel</option>
             </select>
           </label>
-          <div class="survival-hint">Static by default. In Destruction mode it pulls or pushes physics bodies inside the radius. With <b>Blast on hit</b> it detonates like a red bomb when the ball strikes a peg group that reaches it (or the ball hits it directly), then its force turns off. Without it, it stays a pure force field.</div>
+          <div class="survival-hint">Static by default. In Destruction mode it pulls or pushes physics bodies inside the radius. With <b>Blast on hit</b> it detonates like a red bomb when the ball strikes a peg group that reaches it (or the ball hits it directly), then its force turns off. Without it, it stays a pure force field. <b>Knock out on hit</b> lets the ball remove the magnet itself — it turns red and disappears (independent of Blast; with Blast on, the blast still fires).</div>
         </div>
       </div>
       <!-- Flipper properties panel (right side) -->

@@ -31,6 +31,7 @@ import {
   isBombMagnetType,
   isMagnetBlastEnabled,
   isMagnetHittable,
+  isMagnetKnockoutEnabled,
   normalizeMagnetMode,
   normalizeMagnetPegProperties
 } from './magnet-defaults.js';
@@ -2117,6 +2118,7 @@ export class Editor {
       delete peg.magnetExplosionPower;
       delete peg.magnetBlast;
       delete peg.magnetHittable;
+      delete peg.magnetKnockout;
       delete peg._magnetDetonated;
       delete peg._magnetPulse;
     };
@@ -2477,6 +2479,7 @@ export class Editor {
       pegData.magnetExplosionPower = getMagnetExplosionPower(peg);
       pegData.magnetBlast = isMagnetBlastEnabled(peg);
       pegData.magnetHittable = isMagnetHittable(peg);
+      pegData.magnetKnockout = isMagnetKnockoutEnabled(peg);
       pegData.shape = 'circle';
     }
     if (Object.prototype.hasOwnProperty.call(peg, 'destructionStatic')) {
@@ -2987,6 +2990,18 @@ export class Editor {
     this.levelManager.save();
   }
 
+  setSelectedMagnetKnockout(enabled) {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level) return;
+    for (const pegId of this.selectedPegIds) {
+      const peg = level.pegs.find(p => p.id === pegId);
+      if (peg && isBombMagnetType(peg.type)) {
+        peg.magnetKnockout = !!enabled;
+      }
+    }
+    this.levelManager.save();
+  }
+
   getSelectedMagnetProperties() {
     const level = this.levelManager.getCurrentLevel();
     if (!level || this.selectedPegIds.size === 0) return null;
@@ -2999,7 +3014,8 @@ export class Editor {
           mode: normalizeMagnetMode(peg.magnetMode),
           explosionPower: getMagnetExplosionPower(peg),
           blast: isMagnetBlastEnabled(peg),
-          hittable: isMagnetHittable(peg)
+          hittable: isMagnetHittable(peg),
+          knockout: isMagnetKnockoutEnabled(peg)
         };
       }
     }

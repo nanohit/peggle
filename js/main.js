@@ -1881,16 +1881,19 @@ class PeggleApp {
     const modeSelect = document.getElementById('magnetModeSelect');
     const blastToggle = document.getElementById('magnetBlastToggle');
     const hittableToggle = document.getElementById('magnetHittableToggle');
+    const knockoutToggle = document.getElementById('magnetKnockoutToggle');
 
     document.getElementById('closeMagnetPanel').addEventListener('click', () => {
       this.closeMagnetPanel();
     });
 
-    // Blast needs a ball hit, so it's only meaningful while the magnet is hittable.
+    // Blast and Knockout both need a ball hit, so they're only meaningful while the
+    // magnet is hittable.
     const syncBlastEnabledUi = () => {
       const hittable = hittableToggle ? hittableToggle.checked : true;
       const blastOn = blastToggle ? blastToggle.checked : false;
       if (blastToggle) blastToggle.disabled = !hittable;
+      if (knockoutToggle) knockoutToggle.disabled = !hittable;
       const dimPower = !hittable || !blastOn;
       [explosionSlider, explosionInput].forEach(el => { if (el) el.disabled = dimPower; });
       const powerRow = document.getElementById('magnetPowerRow');
@@ -1907,6 +1910,12 @@ class PeggleApp {
         if (!this.editor) return;
         this.editor.setSelectedMagnetHittable(hittableToggle.checked);
         syncBlastEnabledUi();
+      });
+    }
+    if (knockoutToggle) {
+      knockoutToggle.addEventListener('change', () => {
+        if (!this.editor) return;
+        this.editor.setSelectedMagnetKnockout(knockoutToggle.checked);
       });
     }
     this._syncMagnetBlastEnabledUi = syncBlastEnabledUi;
@@ -1970,6 +1979,8 @@ class PeggleApp {
     if (blastToggle) blastToggle.checked = !!props.blast;
     const hittableToggle = document.getElementById('magnetHittableToggle');
     if (hittableToggle) hittableToggle.checked = props.hittable !== false;
+    const knockoutToggle = document.getElementById('magnetKnockoutToggle');
+    if (knockoutToggle) knockoutToggle.checked = props.knockout === true;
     this._syncMagnetBlastEnabledUi?.();
     document.getElementById('magnetPanel').classList.add('visible');
   }

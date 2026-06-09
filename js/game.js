@@ -36,7 +36,7 @@ import {
   normalizeLevelHitPegClearSettings
 } from './hit-peg-clear-settings.js';
 import { isPortalType, normalizePortalPegProperties } from './portal-defaults.js';
-import { getMagnetExplosionPower, isBombMagnetPeg, isMagnetBlastEnabled, isMagnetHittable } from './magnet-defaults.js';
+import { getMagnetExplosionPower, isBombMagnetPeg, isMagnetBlastEnabled, isMagnetHittable, isMagnetKnockoutEnabled } from './magnet-defaults.js';
 import { lightTap, initAudio, pegHitSound, resetHitCounter } from './haptics.js';
 import { normalizeEndSequenceConfig } from './visual-config.js';
 
@@ -2656,9 +2656,17 @@ export class Game {
   }
 
   scheduleHitPegClear(peg) {
-    if (!this.hitPegTimedClearEnabled) return;
     if (!peg || !peg.id) return;
     if (peg.type === 'obstacle' || this.isPermanentBumper(peg) || this.isPortalPeg(peg)) return;
+    // A bomb magnet is a persistent force field. A ball hit removes it ONLY when its
+    // "knockout" option is on (independent of Blast): off ⇒ it never disappears even
+    // if the level's timed-clear is enabled; on ⇒ it disappears on hit even when the
+    // level's timed-clear is off.
+    if (isBombMagnetPeg(peg)) {
+      if (!isMagnetHittable(peg) || !isMagnetKnockoutEnabled(peg)) return;
+    } else if (!this.hitPegTimedClearEnabled) {
+      return;
+    }
     const delay = Math.max(0, this.hitPegClearDelayMs || 0);
     this.pendingHitPegClears.set(peg.id, this.levelElapsedMs + delay);
   }
@@ -2667,6 +2675,9 @@ export class Game {
     if (!peg) return false;
     if (peg.type === 'obstacle' || this.isPortalPeg(peg)) return false;
     if (this.isPermanentBumper(peg)) return false;
+    // Magnets only clear when explicitly knock-out-able (and hittable); otherwise they
+    // stay on the board as a force field no matter how often the ball strikes them.
+    if (isBombMagnetPeg(peg) && (!isMagnetHittable(peg) || !isMagnetKnockoutEnabled(peg))) return false;
     return this.hasPegBeenActivated(peg.id);
   }
 
@@ -2720,7 +2731,10 @@ export class Game {
   }
 
   processTimedHitPegClears() {
-    if (!this.hitPegTimedClearEnabled) return false;
+    // No `hitPegTimedClearEnabled` gate here: the map is only populated by
+    // scheduleHitPegClear, which adds normal pegs only when timed-clear is on but adds
+    // knock-out-able magnets regardless — so a knockout magnet still pops on a level
+    // that otherwise keeps hit pegs on the board.
     if (!this.pendingHitPegClears || this.pendingHitPegClears.size === 0) return false;
 
     const dueIds = new Set();
