@@ -87,7 +87,7 @@ const LAST_PEG_SLOWMO_TOTAL_MS = LAST_PEG_SLOWMO_DROP_MS + LAST_PEG_SLOWMO_HOLD_
 const BILLIARD_SIDE_LAUNCH_POWER_SCALE = 1.75;
 const BILLIARD_BOTTOM_LAUNCH_POWER_SCALE = 2;
 const BILLIARD_EXTRA_LAUNCHER_LAYOUT = 'bottom-corners'; // 'bottom-corners' or 'cross'
-const MAGNET_BLAST_COOLDOWN_MS = 700;
+const MAGNET_BLAST_COOLDOWN_MS = 1750;
 
 function average(values) {
   if (!Array.isArray(values) || values.length === 0) return 0;
