@@ -1568,6 +1568,13 @@ export class DestructionPegSystem {
   canWakeBody(body, source = 'generic') {
     if (!body || body.static) return false;
     if (body.wakeOnHitBallOnly && body.sleeping && source !== 'ball') return false;
+    // A currently script-animated (kinematic) body must not be knocked into physics by a
+    // solver collision — e.g. an animated group nested inside another animated group
+    // (concentric counter-rotating rings), where an offset-pivot orbit gives one ring the
+    // linear velocity that trips wakeSleepingBodyFromKinematic. It stays animation-owned
+    // until a genuine impact (ball/blast/deepfreeze) detaches it via its own wake source.
+    // Non-animated physics-on-hit bodies (kinematic === false) still wake from debris.
+    if (body.kinematic && source === 'collision') return false;
     return true;
   }
 
@@ -3111,6 +3118,8 @@ export class DestructionPegSystem {
 
   wakeSleepingBodyFromKinematic(body, collider, contactPeg) {
     if (!body || body.static || !body.sleeping || !this.isKinematicCollider(collider)) return false;
+    // canWakeBody blocks waking a currently-animated (kinematic) body via a collision,
+    // so nested animated groups don't knock each other into physics.
     if (!this.canWakeBody(body, 'collision')) return false;
     const sourceScale = collider.kind === 'flipper' ? 0.82 : 0.55;
     const impulseX = (collider.body.vx || 0) * Math.max(1, body.mass) * sourceScale;

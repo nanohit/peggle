@@ -709,6 +709,42 @@ function testAnimatedBodyDetachesAfterPhysicsWake() {
   assert.ok(system.getPhysicsOwnedPegIds().includes('anim-wake'));
 }
 
+function testNestedAnimatedGroupsDoNotDetach() {
+  // Two animated physics-on-hit bodies overlapping like concentric rings. The outer one
+  // orbits with real linear velocity (as from an offset Origin/pivot) while overlapping
+  // the inner — exactly what used to trip wakeSleepingBodyFromKinematic and knock the
+  // inner ring into physics. Neither may detach from the contact; only a ball/blast can.
+  const inner = circle('ring-inner', 150, 180, { destructionPhysicsOnHit: true });
+  const outer = circle('ring-outer', 160, 180, { destructionPhysicsOnHit: true });
+  const pegs = [inner, outer];
+  const system = makeSystem({ gravityY: 0 });
+  system.reset(pegs, []);
+  const innerBody = system.getBodyForPeg(inner);
+  const outerBody = system.getBodyForPeg(outer);
+  assert.equal(innerBody.sleeping, true);
+  assert.equal(outerBody.sleeping, true);
+
+  const animated = new Set(['ring-inner', 'ring-outer']);
+  for (let i = 0; i < 40; i++) {
+    outer.x = 160 + Math.sin(i * 0.7) * 5;
+    outer.y = 180 + Math.cos(i * 0.7) * 5;
+    system.syncAnimatedBodies(animated, 1 / 120);
+    system.step(pegs, [], 1 / 120, { ...BOUNDS, bucketEnabled: false });
+    assert.equal(innerBody.animationDetached, false, `inner detached on frame ${i}`);
+    assert.equal(outerBody.animationDetached, false, `outer detached on frame ${i}`);
+    assert.equal(innerBody.kinematic, true, `inner left animation on frame ${i}`);
+  }
+  assert.equal(innerBody.sleeping, true);
+  assert.equal(outerBody.sleeping, true);
+
+  // A genuine ball hit still hands the inner ring over to physics.
+  assert.equal(
+    system.applyBallImpact(inner, { x: 120, y: 180, vx: 8, vy: 0 }, { vx: 8, vy: 0, speed: 8 }),
+    true
+  );
+  assert.equal(innerBody.animationDetached, true);
+}
+
 function testDestructionBodyTeleportsThroughPortal() {
   const mover = circle('portal-body', 120, 90);
   const blue = {
@@ -1041,6 +1077,7 @@ const tests = [
   testFlipperKinematicWakesDestructionBody,
   testAnimatedStaticBodyActsAsKinematicCollider,
   testAnimatedBodyDetachesAfterPhysicsWake,
+  testNestedAnimatedGroupsDoNotDetach,
   testDestructionBodyTeleportsThroughPortal,
   testYoyoConstrainedAtWallsDuringRetraction,
   testRemovalWakesSleepingDynamicSupportDependents,
