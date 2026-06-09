@@ -1167,9 +1167,16 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
   }
 
   let characterRegistryComplete = false;
+  let fullRegistryRequested = false;
   function refreshPortraitRegistry(nextRegistry, options = {}) {
     if (!nextRegistry) return;
-    characterRegistryComplete = options.complete !== false && nextRegistry.partial !== true;
+    const incomingComplete = options.complete !== false && nextRegistry.partial !== true;
+    // Completeness is monotonic: never let a late subset result clobber a full
+    // one that was already applied or is in flight (e.g. a hydration-triggered
+    // subset warmup racing the pause menu's full-registry fetch). Without this
+    // the pause character picker could silently drop to the campaign subset.
+    if (!incomingComplete && (characterRegistryComplete || fullRegistryRequested)) return;
+    characterRegistryComplete = incomingComplete;
     characterRegistry = nextRegistry;
     syncPauseCharacterPicker();
     if (!game || !activeLevelData) return;
@@ -1217,8 +1224,8 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
 
   function startCharacterRegistryWarmup(options = {}) {
     const full = options.full === true;
-    if (full && characterRegistryComplete) return Promise.resolve(characterRegistry);
-    if (!full && characterRegistryComplete) return Promise.resolve(characterRegistry);
+    if (characterRegistryComplete) return Promise.resolve(characterRegistry);
+    if (full) fullRegistryRequested = true;
     const characterIds = full ? [] : getWarmupCharacterIds();
     const key = full ? '__full__' : characterIds.join(',');
     if (characterRegistryWarmupPromise && characterRegistryWarmupKey === key) return characterRegistryWarmupPromise;
@@ -1228,7 +1235,11 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     const requestSeq = ++characterRegistryWarmupSeq;
     characterRegistryWarmupPromise = fetchCharacterRegistryWithFallback({ characterIds })
       .then(registry => {
-        if (requestSeq !== characterRegistryWarmupSeq) return registry;
+        // A full result is the most complete and always applies (refreshPortrait-
+        // Registry's monotonic guard keeps a stale subset from undoing it). A
+        // subset applies only if it's still the latest request, so a newer subset
+        // (more levels) wins over an older one.
+        if (!full && requestSeq !== characterRegistryWarmupSeq) return registry;
         refreshPortraitRegistry(registry, { complete: full });
         return registry;
       })
