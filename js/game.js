@@ -36,7 +36,15 @@ import {
   normalizeLevelHitPegClearSettings
 } from './hit-peg-clear-settings.js';
 import { isPortalType, normalizePortalPegProperties } from './portal-defaults.js';
-import { getMagnetExplosionPower, isBombMagnetPeg, isMagnetBlastEnabled, isMagnetHittable, isMagnetKnockoutEnabled, isMagnetVanishAfterBlast } from './magnet-defaults.js';
+import {
+  getMagnetExplosionPower,
+  isBombMagnetPeg,
+  isMagnetBlastEnabled,
+  isMagnetHittable,
+  isMagnetKnockoutEnabled,
+  isMagnetVanishAfterBlast,
+  normalizeMagnetPegProperties
+} from './magnet-defaults.js';
 import { lightTap, initAudio, pegHitSound, resetHitCounter } from './haptics.js';
 import { normalizeEndSequenceConfig } from './visual-config.js';
 
@@ -79,6 +87,7 @@ const LAST_PEG_SLOWMO_TOTAL_MS = LAST_PEG_SLOWMO_DROP_MS + LAST_PEG_SLOWMO_HOLD_
 const BILLIARD_SIDE_LAUNCH_POWER_SCALE = 1.75;
 const BILLIARD_BOTTOM_LAUNCH_POWER_SCALE = 2;
 const BILLIARD_EXTRA_LAUNCHER_LAYOUT = 'bottom-corners'; // 'bottom-corners' or 'cross'
+const MAGNET_BLAST_COOLDOWN_MS = 700;
 
 function average(values) {
   if (!Array.isArray(values) || values.length === 0) return 0;
@@ -1979,13 +1988,13 @@ export class Game {
   }
 
   detonateBombMagnet(peg, sourceBall = null) {
-    if (!isBombMagnetPeg(peg) || peg._magnetDetonated === true) return false;
+    if (!isBombMagnetPeg(peg) || this.isMagnetBlastOnCooldown(peg)) return false;
     // A non-hittable magnet is inert to the ball — no blast at all.
     if (!isMagnetHittable(peg)) return false;
     // Blast is opt-in: when disabled the magnet is a pure force field and never
     // detonates (it still scores on a direct ball hit via activatePeg upstream).
     if (!isMagnetBlastEnabled(peg)) return false;
-    peg._magnetDetonated = true;
+    peg._magnetBlastCooldownUntilMs = this.levelElapsedMs + MAGNET_BLAST_COOLDOWN_MS;
     peg._magnetPulse = 1.4;
     const power = getMagnetExplosionPower(peg);
     this.detonateBombShockwave(sourceBall, peg, {
@@ -1996,8 +2005,41 @@ export class Game {
     });
     // "Disappear after blast" — independent of the direct-hit knockout. Fires for both a
     // direct ball hit and an attached group reaching the magnet (both route through here).
-    if (isMagnetVanishAfterBlast(peg)) this.scheduleMagnetVanish(peg);
+    if (isMagnetVanishAfterBlast(peg)) {
+      this.scheduleMagnetVanish(peg);
+    } else {
+      this.pauseMagnetForceAfterBlast(peg);
+    }
     return true;
+  }
+
+  isMagnetBlastOnCooldown(peg) {
+    if (!isBombMagnetPeg(peg)) return true;
+    if (peg._magnetFieldDisabled === true) return true;
+    const cooldownUntil = Number.isFinite(peg._magnetBlastCooldownUntilMs)
+      ? peg._magnetBlastCooldownUntilMs
+      : 0;
+    return cooldownUntil > this.levelElapsedMs;
+  }
+
+  pauseMagnetForceAfterBlast(peg) {
+    if (!isBombMagnetPeg(peg)) return;
+    peg._magnetForcePaused = true;
+    peg._magnetForceResumeAtMs = this.levelElapsedMs + MAGNET_BLAST_COOLDOWN_MS;
+  }
+
+  updateMagnetForcePauses() {
+    if (!Array.isArray(this.pegs) || this.pegs.length === 0) return false;
+    let changed = false;
+    for (const peg of this.pegs) {
+      if (!isBombMagnetPeg(peg) || peg._magnetForcePaused !== true) continue;
+      const resumeAt = Number.isFinite(peg._magnetForceResumeAtMs) ? peg._magnetForceResumeAtMs : 0;
+      if (resumeAt > this.levelElapsedMs) continue;
+      delete peg._magnetForcePaused;
+      delete peg._magnetForceResumeAtMs;
+      changed = true;
+    }
+    return changed;
   }
 
   // A bomb magnet is a persistent force field; it only disappears when an author-enabled
@@ -2007,6 +2049,9 @@ export class Game {
   scheduleMagnetVanish(peg) {
     if (!isBombMagnetPeg(peg) || !peg?.id || peg._magnetVanishPending) return;
     peg._magnetVanishPending = true;
+    peg._magnetFieldDisabled = true;
+    delete peg._magnetForcePaused;
+    delete peg._magnetForceResumeAtMs;
     const delay = Math.max(0, this.hitPegClearDelayMs || 0);
     this.pendingHitPegClears.set(peg.id, this.levelElapsedMs + delay);
   }
@@ -2276,6 +2321,9 @@ export class Game {
       }
       if (isPortalType(copy.type)) {
         normalizePortalPegProperties(copy, { upgradeLegacyDefault: true });
+      }
+      if (isBombMagnetPeg(copy)) {
+        normalizeMagnetPegProperties(copy);
       }
       if (isBilliardPegType(copy.type)) {
         copy.shape = 'circle';
@@ -3584,6 +3632,7 @@ export class Game {
       this.bucketCatchLight = Math.max(0, this.bucketCatchLight - dt * 2.6);
     }
     this.updatePortalPulses(dt);
+    this.updateMagnetForcePauses();
     this.decayBumperHitScales();
     if (this.onShotHeat) this.onShotHeat(this._currentShotHeat());
     const worldHeight = this.isSurvivalMode() ? this.survivalRuntime.getWorldHeight() : this.canvas.height;

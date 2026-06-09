@@ -14,8 +14,9 @@ export const MAGNET_DEFAULTS = Object.freeze({
   // Two independent disappearance triggers, both OFF by default (the magnet persists as a
   // force field). `knockout` = vanish when the ball hits the magnet directly. `vanishAfter
   // Blast` = vanish once its blast fires (direct hit OR an attached group reaching it).
-  // Both are independent of Blast firing per se: a non-vanishing magnet still blasts, it
-  // just stays. `vanishAfterBlast` only does anything when Blast is enabled.
+  // Both are independent of Blast firing per se: a non-vanishing magnet can blast again
+  // after a short cooldown. Its force field briefly pauses after each blast, then resumes.
+  // `vanishAfterBlast` only does anything when Blast is enabled.
   knockout: false,
   vanishAfterBlast: false
 });
@@ -51,6 +52,14 @@ export function normalizeMagnetPegProperties(peg) {
   peg.magnetHittable = peg.magnetHittable !== false;
   peg.magnetKnockout = peg.magnetKnockout === true;
   peg.magnetVanishAfterBlast = peg.magnetVanishAfterBlast === true;
+  delete peg._magnetDetonated;
+  delete peg._magnetBlastSpent;
+  delete peg._magnetBlastCooldownUntilMs;
+  delete peg._magnetFieldDisabled;
+  delete peg._magnetForcePaused;
+  delete peg._magnetForceResumeAtMs;
+  delete peg._magnetVanishPending;
+  delete peg._magnetPulse;
   if (!Object.prototype.hasOwnProperty.call(peg, 'destructionStatic')) {
     peg.destructionStatic = true;
   }
@@ -87,4 +96,10 @@ export function isMagnetKnockoutEnabled(peg) {
 
 export function isMagnetVanishAfterBlast(peg) {
   return peg?.magnetVanishAfterBlast === true;
+}
+
+export function isMagnetForceActive(peg) {
+  return isBombMagnetPeg(peg)
+    && peg._magnetFieldDisabled !== true
+    && peg._magnetForcePaused !== true;
 }

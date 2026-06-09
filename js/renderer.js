@@ -13,7 +13,7 @@ import {
 } from './shockwave-effect.js';
 import { getPortalScale, isPortalType } from './portal-defaults.js';
 import { FLIPPER_DEFAULTS } from './flipper-defaults.js';
-import { getMagnetRadius, getMagnetStrength, isBombMagnetPeg, normalizeMagnetMode } from './magnet-defaults.js';
+import { getMagnetRadius, getMagnetStrength, isMagnetForceActive, normalizeMagnetMode } from './magnet-defaults.js';
 
 const FLIPPER_ASSET_SRC = 'visuals/assets_webtp/flipper.webp';
 const FLIPPER_ASSET_PIVOT_X_RATIO = 26.5 / 267;
@@ -1415,7 +1415,7 @@ export class Renderer {
     const top = Number.isFinite(cameraY) ? cameraY : 0;
     const bottom = top + this.height;
     for (const peg of pegs) {
-      if (!isBombMagnetPeg(peg) || peg._magnetDetonated === true) continue;
+      if (!isMagnetForceActive(peg)) continue;
       const radius = getMagnetRadius(peg);
       if (!Number.isFinite(radius) || radius <= 0) continue;
       const x = Number.isFinite(peg.x) ? peg.x : 0;
@@ -1444,7 +1444,7 @@ export class Renderer {
     ctx.lineWidth = 1.5;
     ctx.setLineDash([5, 6]);
     for (const peg of pegs) {
-      if (!isBombMagnetPeg(peg) || peg._magnetDetonated === true) continue;
+      if (!isMagnetForceActive(peg)) continue;
       const radius = getMagnetRadius(peg);
       if (!Number.isFinite(radius) || radius <= 0) continue;
       const mode = normalizeMagnetMode(peg.magnetMode);

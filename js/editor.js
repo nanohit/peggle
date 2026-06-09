@@ -2136,6 +2136,11 @@ export class Editor {
       delete peg.magnetKnockout;
       delete peg.magnetVanishAfterBlast;
       delete peg._magnetDetonated;
+      delete peg._magnetBlastSpent;
+      delete peg._magnetBlastCooldownUntilMs;
+      delete peg._magnetFieldDisabled;
+      delete peg._magnetForcePaused;
+      delete peg._magnetForceResumeAtMs;
       delete peg._magnetPulse;
       delete peg._magnetVanishPending;
     };

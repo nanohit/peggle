@@ -311,6 +311,7 @@ async function testMagnetVanishTriggersAreIndependent() {
       circle('orange', 140, 100)
     ], ['magnet']);
     directHitVanishes.scheduleMagnetVanish(directHitVanishes.pegs[0]);
+    assert.equal(directHitVanishes.pegs[0]._magnetFieldDisabled, true);
     directHitVanishes.endTurn();
     assert.deepEqual(directHitVanishes.pegs.map(peg => peg.id), ['orange']);
     assert.deepEqual(directHitVanishes._removedPegIds, ['magnet']);
@@ -327,6 +328,30 @@ async function testMagnetVanishTriggersAreIndependent() {
     ], ['magnet']);
     assert.equal(blastPersists.detonateBombMagnet(blastPersists.pegs[0], null), true);
     assert.equal(blastPersists.pegs[0]._magnetVanishPending, undefined);
+    const firstCooldownUntil = blastPersists.pegs[0]._magnetBlastCooldownUntilMs;
+    assert.ok(firstCooldownUntil > blastPersists.levelElapsedMs);
+    assert.equal(blastPersists.pegs[0]._magnetForcePaused, true);
+    assert.equal(makeSystem({ gravityY: 0 }).collectActiveMagnets([blastPersists.pegs[0]]).length, 0);
+    blastPersists.levelElapsedMs = blastPersists.pegs[0]._magnetForceResumeAtMs - 1;
+    assert.equal(blastPersists.updateMagnetForcePauses(), false);
+    assert.equal(blastPersists.pegs[0]._magnetForcePaused, true);
+    assert.equal(blastPersists.detonateBombMagnet(blastPersists.pegs[0], null), false);
+    blastPersists.levelElapsedMs = blastPersists.pegs[0]._magnetForceResumeAtMs;
+    assert.equal(blastPersists.updateMagnetForcePauses(), true);
+    assert.equal(blastPersists.pegs[0]._magnetForcePaused, undefined);
+    assert.equal(makeSystem({ gravityY: 0 }).collectActiveMagnets([blastPersists.pegs[0]]).length, 1);
+    const forceSystem = makeSystem({ gravityY: 0 });
+    const forceTarget = circle('force-target', 130, 100);
+    forceSystem.reset([blastPersists.pegs[0], forceTarget], []);
+    const forceTargetBody = forceSystem.getBodyForPeg(forceTarget);
+    forceTargetBody.sleeping = false;
+    forceTargetBody.vx = 0;
+    forceTargetBody.vy = 0;
+    assert.equal(forceSystem.applyMagnetForces([blastPersists.pegs[0], forceTarget], 1), 1);
+    assert.ok(forceTargetBody.vx < 0, 'resumed attract magnet should pull the target back toward itself');
+    assert.equal(blastPersists.detonateBombMagnet(blastPersists.pegs[0], null), true);
+    assert.ok(blastPersists.pegs[0]._magnetBlastCooldownUntilMs > firstCooldownUntil);
+    assert.equal(blastPersists.pegs[0]._magnetForcePaused, true);
     blastPersists.endTurn();
     assert.deepEqual(blastPersists.pegs.map(peg => peg.id), ['magnet', 'orange']);
 
@@ -342,6 +367,8 @@ async function testMagnetVanishTriggersAreIndependent() {
     ], ['magnet']);
     assert.equal(blastVanishes.detonateBombMagnet(blastVanishes.pegs[0], null), true);
     assert.equal(blastVanishes.pegs[0]._magnetVanishPending, true);
+    assert.equal(blastVanishes.pegs[0]._magnetFieldDisabled, true);
+    assert.equal(makeSystem({ gravityY: 0 }).collectActiveMagnets([blastVanishes.pegs[0]]).length, 0);
     blastVanishes.endTurn();
     assert.deepEqual(blastVanishes.pegs.map(peg => peg.id), ['orange']);
     assert.deepEqual(blastVanishes._removedPegIds, ['magnet']);

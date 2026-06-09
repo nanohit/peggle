@@ -6,6 +6,7 @@ import {
   getMagnetStrength,
   isBombMagnetPeg,
   isBombMagnetType,
+  isMagnetForceActive,
   normalizeMagnetMode,
   normalizeMagnetPegProperties
 } from './magnet-defaults.js';
@@ -2083,11 +2084,12 @@ export class DestructionPegSystem {
     body._magnetAttachedStep = this._stepCounter;
   }
 
-  // The (live, non-detonated) magnet a peg's body is attached to, else null.
+  // The live magnet a peg's body is attached to, else null. Game-level detonation
+  // applies its own blast cooldown, so this only answers attachment/field liveness.
   getMagnetForAttachedPeg(peg) {
     const body = peg ? this.getBodyForPeg(peg) : null;
     const magnet = body?._magnetAttachedPeg || null;
-    if (magnet && magnet._magnetDetonated !== true && isBombMagnetPeg(magnet)) return magnet;
+    if (isMagnetForceActive(magnet)) return magnet;
     return null;
   }
 
@@ -2273,7 +2275,7 @@ export class DestructionPegSystem {
     const pool = this._magnetDescPool || (this._magnetDescPool = []);
     let n = 0;
     for (const peg of pegs) {
-      if (!isBombMagnetPeg(peg) || peg._magnetDetonated === true) continue;
+      if (!isMagnetForceActive(peg)) continue;
       const radius = getMagnetRadius(peg);
       const strength = getMagnetStrength(peg);
       if (radius <= 0 || strength <= 0) continue;
@@ -2348,7 +2350,7 @@ export class DestructionPegSystem {
       // attachedRadiusSq is the attached magnet's own radius² (set when attachedFound),
       // and the distance test only runs when attachedFound, so no getMagnetRadius() here.
       const attached = attachedPeg;
-      if (attached && (!attachedFound || attached._magnetDetonated === true
+      if (attached && (!attachedFound || !isMagnetForceActive(attached)
         || attachedDistSq > attachedRadiusSq * 2.25)) {
         body._magnetAttachedPeg = null;
       }
@@ -3014,7 +3016,7 @@ export class DestructionPegSystem {
 
   getColliderMagnetPeg(collider) {
     const peg = collider?.kind === 'peg' ? collider.peg : null;
-    return isBombMagnetPeg(peg) && peg._magnetDetonated !== true ? peg : null;
+    return isMagnetForceActive(peg) ? peg : null;
   }
 
   getCollisionRestitution(a, b) {
