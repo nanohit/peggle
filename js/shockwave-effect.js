@@ -575,7 +575,10 @@ export class ShockwaveEffectRenderer {
       depth: false,
       stencil: false,
       premultipliedAlpha: false,
-      preserveDrawingBuffer: false
+      // This WebGL canvas is displayed directly as a DOM overlay. With a frame
+      // cap, skipped rAF ticks can leave the compositor showing a cleared back
+      // buffer on some browsers unless the last drawn shockwave frame is kept.
+      preserveDrawingBuffer: true
     };
     const gl = this._glCanvas.getContext('webgl', attrs) || this._glCanvas.getContext('experimental-webgl', attrs);
     if (!gl) {

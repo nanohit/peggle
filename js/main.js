@@ -7595,7 +7595,7 @@ class PeggleApp {
     this._refreshCampaignEditor(campaignId);
   }
 
-  _editCampaignLevel(bakedName) {
+  async _editCampaignLevel(bakedName) {
     const levels = this.levelManager.getAllLevels();
     const match = levels.find(l => {
       const safe = (l.name || '').replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -7605,8 +7605,9 @@ class PeggleApp {
     if (match) {
       this.levelManager.setCurrentLevelById(match.id);
     } else {
-      const snapshot = this._readBakedLevelSnapshot(bakedName);
-      if (!snapshot) { alert('Baked level data not found: ' + bakedName); return; }
+      const snapshot = this._readBakedLevelSnapshot(bakedName)
+        || await this._cacheRemoteBakedLevel(bakedName);
+      if (!snapshot) { alert('Level data not found locally or on server: ' + bakedName); return; }
       const imported = this.levelManager.importLevel(JSON.stringify(snapshot));
       if (!imported) { alert('Failed to import level'); return; }
       this.levelManager.setCurrentLevelById(imported.id);

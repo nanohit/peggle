@@ -26,6 +26,27 @@ const FLIPPER_ASSET_OPAQUE_TOP_RATIO = 1 / 53;
 const FLIPPER_ASSET_OPAQUE_BOTTOM_RATIO = 51 / 53;
 const MAGNET_FIELD_PROFILE_LIMITS = Object.freeze({ full: 6, balanced: 4, lite: 2 });
 
+// Magnet-field visualization mode. The persistent GL distortion pass costs
+// ~1ms/frame of GPU+pipeline time the whole time a magnet is on screen, and
+// the cost is fixed pipeline overhead (full-canvas texture upload + sync) —
+// measured: half-res/bbox internal rendering does NOT meaningfully help.
+// The 2D fallback is kept behind `?magnetfx=2d` for on-device A/B, but the
+// default stays GL so authored magnet distortion remains visible everywhere.
+// Blast shockwaves stay GL everywhere (transient), and while one is active the
+// field rings ride that GL pass for free, exactly like the lite profile does.
+function getMagnetFieldModeOverride() {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = (new URL(window.location.href).searchParams.get('magnetfx') || '').toLowerCase();
+    if (raw === 'gl' || raw === '2d') return raw;
+  } catch (error) {
+    // ignore malformed URLs
+  }
+  return null;
+}
+
+const MAGNET_FIELD_MODE = getMagnetFieldModeOverride() || 'gl';
+
 // Color palette
 const COLORS = {
   background: '#1a1a2e',
@@ -3829,14 +3850,18 @@ export class Renderer {
       : (typeof performance !== 'undefined' ? performance.now() / 1000 : 0);
 
     const cameraY = Number.isFinite(state.cameraY) ? state.cameraY : 0;
+    const shockwaveTimeSeconds = this._renderTimeSeconds;
     const shockwaveActive = this._shockwaveEffect.syncEvents(state.backgroundEvents, {
       preview: !!state.shockwavePreview,
-      timeSeconds: state.renderTimeSeconds,
+      timeSeconds: shockwaveTimeSeconds,
       width: this.width,
       height: this.height
     });
     const magnetFieldRings = this._collectMagnetFieldRings(state.pegs, cameraY);
-    const liteFieldFallback = normalizeTrailPerformanceProfile(this.performanceProfile) === 'lite' && !shockwaveActive;
+    const liteFieldFallback = (
+      MAGNET_FIELD_MODE === '2d'
+      || normalizeTrailPerformanceProfile(this.performanceProfile) === 'lite'
+    ) && !shockwaveActive;
     let magnetFieldActive = false;
     if (liteFieldFallback) {
       this._shockwaveEffect.syncFieldRings(this._emptyFieldRings || (this._emptyFieldRings = []));
@@ -3910,9 +3935,25 @@ export class Renderer {
         height: this.height,
         profile: this.performanceProfile,
         preview: !!state.shockwavePreview,
-        timeSeconds: state.renderTimeSeconds,
+        timeSeconds: shockwaveTimeSeconds,
         skipPrune: true
       });
+      if (!waveCanvas) {
+        if (shockwaveActive) {
+          this._shockwaveEffect.render(this.ctx, this.canvas, {
+            cameraY,
+            width: this.width,
+            height: this.height,
+            profile: this.performanceProfile,
+            preview: !!state.shockwavePreview,
+            timeSeconds: shockwaveTimeSeconds,
+            skipPrune: true
+          });
+        }
+        if (magnetFieldActive && !state.showGrid) {
+          this.drawLiteMagnetFields(magnetFieldRings, cameraY, shockwaveTimeSeconds);
+        }
+      }
       this._setShockwaveLayerVisible(!!waveCanvas);
     } else {
       this._setShockwaveLayerVisible(false);
