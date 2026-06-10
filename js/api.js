@@ -236,6 +236,47 @@ export const api = {
     }
   },
 
+  // ─── Assets ───────────────────────────────────
+
+  async getAssetStoreStatus() {
+    try {
+      const res = await fetch(`${API_BASE}/assets?status=1`);
+      if (!res.ok) return null;
+      return await res.json();
+    } catch (e) {
+      console.warn('[api] getAssetStoreStatus failed:', e);
+      return null;
+    }
+  },
+
+  async uploadAsset(dataUrl, options = {}) {
+    try {
+      const res = await fetch(`${API_BASE}/assets`, {
+        method: 'POST',
+        headers: jsonHeaders(),
+        body: JSON.stringify({
+          dataUrl,
+          role: options.role || 'backgrounds',
+          key: options.key || undefined,
+          keyPrefix: options.keyPrefix || undefined,
+          cacheControl: options.cacheControl || undefined
+        })
+      });
+      if (!res.ok) return null;
+      return await res.json();
+    } catch (e) {
+      console.warn('[api] uploadAsset failed:', e);
+      return null;
+    }
+  },
+
+  assetUrl(key, options = {}) {
+    if (!key) return '';
+    const params = new URLSearchParams({ key: String(key) });
+    if (options.source) params.set('source', String(options.source));
+    return `${API_BASE}/assets?${params.toString()}`;
+  },
+
   // ─── PvP Duel ────────────────────────────────
 
   async listPvpDuelLevels() {

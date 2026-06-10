@@ -20,7 +20,7 @@
           ? 'https://peggle.vercel.app/api'
           : '/api';
 
-        window.__PEGGLE_PRIMARY_CAMPAIGN_PRELOAD__ = fetch(apiBase + '/campaigns?primary=true&initial=true', {
+        window.__PEGGLE_PRIMARY_CAMPAIGN_PRELOAD__ = fetch(apiBase + '/campaigns?primary=true&initial=true&player=1', {
           credentials: 'same-origin'
         }).then(res => res.ok ? res.json() : null)
           .then(data => data || fetch('/data/player/primary.initial.json', { credentials: 'same-origin' })

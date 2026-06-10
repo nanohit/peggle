@@ -119,7 +119,7 @@ async function getAccessToken() {
   return tokenCache.value;
 }
 
-async function driveRequest(url, options = {}) {
+export async function driveRequest(url, options = {}) {
   const token = await getAccessToken();
   const res = await fetch(url, {
     ...options,
@@ -178,6 +178,18 @@ async function ensureFolder(name, parentId = null) {
   return folder;
 }
 
+export async function ensureDriveFolderPath(names = []) {
+  if (!isDriveMirrorEnabled()) return null;
+  const rootName = process.env.GOOGLE_DRIVE_ROOT_FOLDER_NAME || DEFAULT_ROOT_FOLDER;
+  let folder = await ensureFolder(rootName);
+  for (const name of names) {
+    const safeName = String(name || '').trim();
+    if (!safeName) continue;
+    folder = await ensureFolder(safeName, folder.id);
+  }
+  return folder;
+}
+
 async function getCollectionFolder(collection) {
   const rootName = process.env.GOOGLE_DRIVE_ROOT_FOLDER_NAME || DEFAULT_ROOT_FOLDER;
   const root = await ensureFolder(rootName);
@@ -208,6 +220,50 @@ async function findFile(name, parentId) {
   const file = data.files?.[0] || null;
   if (file) fileCache.set(cacheKey, file);
   return file;
+}
+
+export async function findDriveFileInFolder(name, parentId) {
+  if (!isDriveMirrorEnabled() || !name || !parentId) return null;
+  return await findFile(name, parentId);
+}
+
+export async function downloadDriveFile(fileId) {
+  if (!isDriveMirrorEnabled() || !fileId) return null;
+  const res = await driveRequest(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`);
+  const contentType = res.headers.get('content-type') || 'application/octet-stream';
+  const etag = res.headers.get('etag') || null;
+  const buffer = Buffer.from(await res.arrayBuffer());
+  return { buffer, contentType, etag };
+}
+
+export async function writeDriveBlobFile({ name, parentId, mimeType, body, existingFileId = null } = {}) {
+  if (!isDriveMirrorEnabled()) return null;
+  if (!name || !parentId) throw new Error('Drive blob name and parentId are required');
+  const buffer = Buffer.isBuffer(body) ? body : Buffer.from(body || '');
+  if (!buffer.length) throw new Error('Drive blob body is empty');
+
+  const boundary = `alea_blob_${Math.random().toString(36).slice(2)}`;
+  const metadata = { name, mimeType: mimeType || 'application/octet-stream', parents: [parentId] };
+  let method = 'POST';
+  let url = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id,name,mimeType,size';
+  if (existingFileId) {
+    method = 'PATCH';
+    delete metadata.parents;
+    url = `https://www.googleapis.com/upload/drive/v3/files/${existingFileId}?uploadType=multipart&supportsAllDrives=true&fields=id,name,mimeType,size`;
+  }
+
+  const chunks = [
+    Buffer.from(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n`),
+    Buffer.from(`--${boundary}\r\nContent-Type: ${metadata.mimeType}\r\n\r\n`),
+    buffer,
+    Buffer.from(`\r\n--${boundary}--\r\n`)
+  ];
+  const res = await driveRequest(url, {
+    method,
+    headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
+    body: Buffer.concat(chunks)
+  });
+  return await res.json();
 }
 
 export async function readDriveRecord(collection, name) {
