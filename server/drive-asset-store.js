@@ -9,7 +9,7 @@ import {
   findDriveFileInFolder,
   isDriveMirrorEnabled,
   writeDriveBlobFile
-} from './drive-store.js';
+} from '../api/drive-store.js';
 
 const DEFAULT_DRIVE_ASSETS_FOLDER = 'assets';
 

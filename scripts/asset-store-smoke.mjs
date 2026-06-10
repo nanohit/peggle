@@ -5,7 +5,7 @@ import {
   getAssetStoreStatus,
   readAsset,
   uploadAsset
-} from '../api/asset-store.js';
+} from '../server/asset-store.js';
 
 const TINY_PNG_DATA_URL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=';
 

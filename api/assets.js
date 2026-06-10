@@ -3,12 +3,12 @@ import {
   IMMUTABLE_IMAGE_CACHE_CONTROL,
   contentTypeForAssetKey,
   normalizeAssetKey
-} from './asset-utils.js';
+} from '../server/asset-utils.js';
 import {
   getAssetStoreStatus,
   readAsset,
   uploadAsset
-} from './asset-store.js';
+} from '../server/asset-store.js';
 
 function setCorsHeaders(req, res) {
   const origin = req.headers.origin || '*';
