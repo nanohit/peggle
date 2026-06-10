@@ -14,6 +14,11 @@ import {
 import { getPortalScale, isPortalType } from './portal-defaults.js';
 import { FLIPPER_DEFAULTS } from './flipper-defaults.js';
 import { getMagnetRadius, getMagnetStrength, isMagnetForceActive, normalizeMagnetMode } from './magnet-defaults.js';
+import {
+  assetCacheKey,
+  assetUrlCandidates,
+  isAssetImageSource
+} from './asset-ref.js';
 
 const FLIPPER_ASSET_SRC = 'visuals/assets_webtp/flipper.webp';
 const FLIPPER_ASSET_PIVOT_X_RATIO = 26.5 / 267;
@@ -859,34 +864,45 @@ export class Renderer {
   }
 
   _loadBackgroundAsset(src, imageProp, srcProp, dirtyProp) {
-    if (!src) {
+    if (!isAssetImageSource(src)) {
       this[srcProp] = '';
       this[imageProp] = null;
       this[dirtyProp] = true;
       return;
     }
-    if (this[srcProp] === src) return;
+    const key = assetCacheKey(src);
+    if (this[srcProp] === key) return;
 
-    this[srcProp] = src;
+    this[srcProp] = key;
     this[imageProp] = null;
     this[dirtyProp] = true;
 
-    const img = new Image();
-    img.onload = () => {
-      if (this[srcProp] !== src) return;
-      this[imageProp] = img;
-      this[dirtyProp] = true;
+    const candidates = assetUrlCandidates(src);
+    const loadCandidate = (index) => {
+      const url = candidates[index];
+      if (!url) {
+        if (this[srcProp] !== key) return;
+        this[imageProp] = null;
+        this[dirtyProp] = true;
+        return;
+      }
+      const img = new Image();
+      img.onload = () => {
+        if (this[srcProp] !== key) return;
+        this[imageProp] = img;
+        this[dirtyProp] = true;
+      };
+      img.onerror = () => {
+        if (this[srcProp] !== key) return;
+        loadCandidate(index + 1);
+      };
+      img.src = url;
     };
-    img.onerror = () => {
-      if (this[srcProp] !== src) return;
-      this[imageProp] = null;
-      this[dirtyProp] = true;
-    };
-    img.src = src;
+    loadCandidate(0);
   }
 
   _hasProgressionBackground(bg = this.backgroundConfig) {
-    return !!(bg && bg.type === 'image' && typeof bg.progressionImage === 'string' && bg.progressionImage);
+    return !!(bg && bg.type === 'image' && isAssetImageSource(bg.progressionImage));
   }
 
   _hasLiquidProgression(bg = this.backgroundConfig) {
@@ -1192,7 +1208,7 @@ export class Renderer {
 
   _ensureBgBaseCache() {
     const bg = this.backgroundConfig;
-    const key = `${this.width}|${this.height}|${bg?.type}|${bg?.colorTop}|${bg?.colorBottom}|${bg?.image || ''}|${bg?.mirrored ? 1 : 0}`;
+    const key = `${this.width}|${this.height}|${bg?.type}|${bg?.colorTop}|${bg?.colorBottom}|${assetCacheKey(bg?.image) || ''}|${bg?.mirrored ? 1 : 0}`;
     if (!this._bgBaseDirty && this._bgBaseKey === key && this._bgBaseCanvas) return;
 
     const canvas = this._ensureBackgroundCanvas('_bgBaseCanvas');
@@ -1205,7 +1221,7 @@ export class Renderer {
   _ensureBgOverlayCache() {
     const bg = this.backgroundConfig;
     const hasProgression = this._hasProgressionBackground(bg);
-    const key = `${this.width}|${this.height}|${hasProgression ? (bg.progressionImage || '') : ''}|${bg?.mirrored ? 1 : 0}`;
+    const key = `${this.width}|${this.height}|${hasProgression ? (assetCacheKey(bg.progressionImage) || '') : ''}|${bg?.mirrored ? 1 : 0}`;
     if (!this._bgOverlayDirty && this._bgOverlayKey === key && this._bgOverlayCanvas) return;
 
     const canvas = this._ensureBackgroundCanvas('_bgOverlayCanvas');
@@ -1325,21 +1341,33 @@ export class Renderer {
   }
 
   _getSurvivalBackgroundImage(src) {
-    if (!src || typeof src !== 'string') return null;
-    if (this._survivalBgImageSrc === src && this._survivalBgImage) {
+    if (!isAssetImageSource(src)) return null;
+    const key = assetCacheKey(src);
+    if (this._survivalBgImageSrc === key && this._survivalBgImage) {
       return this._survivalBgImage;
     }
 
-    const img = new Image();
-    this._survivalBgImageSrc = src;
-    this._survivalBgImage = img;
-    img.onerror = () => {
-      if (this._survivalBgImageSrc !== src) return;
-      this._survivalBgImage = null;
-      this._survivalBgImageSrc = '';
+    this._survivalBgImageSrc = key;
+    this._survivalBgImage = null;
+    const candidates = assetUrlCandidates(src);
+    const loadCandidate = (index) => {
+      const url = candidates[index];
+      if (!url) {
+        if (this._survivalBgImageSrc !== key) return;
+        this._survivalBgImage = null;
+        this._survivalBgImageSrc = '';
+        return;
+      }
+      const img = new Image();
+      this._survivalBgImage = img;
+      img.onerror = () => {
+        if (this._survivalBgImageSrc !== key) return;
+        loadCandidate(index + 1);
+      };
+      img.src = url;
     };
-    img.src = src;
-    return img;
+    loadCandidate(0);
+    return this._survivalBgImage;
   }
 
   drawSurvivalBackground(background, cameraY = 0, worldHeight = this.height) {

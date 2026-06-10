@@ -78,6 +78,7 @@ Expected roles:
 
 ```text
 backgrounds
+level-slots
 characters
 pvp-portraits
 survival-backgrounds
@@ -292,3 +293,15 @@ characters.<id>.pvpPortraits.<slot>
 Character images are stored separately from levels in `/api/characters`, but levels can reference a character by ID and can carry a small reference snapshot. Player APIs already strip full `character.snapshot.slots` and `character.snapshot.emotions` from levels, so the main character payload to slim down is the registry itself.
 
 Saving should compress the image first, upload it through `/api/assets`, then store the returned `asset` object in the level or character JSON.
+
+Dry-run migration writes originals, migrated previews, and `report.json` under `backups/` without uploading or changing KV:
+
+```bash
+npm run migrate:assets -- --collections=levels,characters,campaigns
+```
+
+Actual migration is opt-in only:
+
+```bash
+npm run migrate:assets -- --collections=levels,characters,campaigns --write
+```

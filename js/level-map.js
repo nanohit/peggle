@@ -7,6 +7,7 @@ import { topoOrder } from './graph/core.js';
 import { computeLayout, toPixelPositions } from './graph/layout.js';
 import { getNodeState } from './graph/progression.js';
 import { getLevelCharacterPortraitSources, loadCharacterRegistry, resolveCharacterForLevel } from './character-config.js';
+import { assetCacheKey, assetUrlCandidates } from './asset-ref.js';
 
 const BIG_R = 38;
 const SMALL_R = 24;
@@ -27,35 +28,45 @@ const ASSET_PATHS = {
 const IMAGE_CACHE = new Map();
 
 function loadImg(src) {
-  if (!src || typeof Image === 'undefined') return Promise.resolve(null);
-  const cached = IMAGE_CACHE.get(src);
+  const cacheKey = assetCacheKey(src);
+  if (!cacheKey || typeof Image === 'undefined') return Promise.resolve(null);
+  const cached = IMAGE_CACHE.get(cacheKey);
   if (cached) return cached.promise;
   const entry = { image: null, promise: null };
+  const candidates = assetUrlCandidates(src);
   entry.promise = new Promise(resolve => {
-    const img = new Image();
-    img.onload = () => {
-      const finish = () => {
-        entry.image = img;
-        resolve(img);
+    const tryCandidate = (index) => {
+      const url = candidates[index];
+      if (!url) {
+        resolve(null);
+        return;
+      }
+      const img = new Image();
+      img.onload = () => {
+        const finish = () => {
+          entry.image = img;
+          resolve(img);
+        };
+        try {
+          const decodePromise = typeof img.decode === 'function' ? img.decode() : null;
+          if (decodePromise && typeof decodePromise.then === 'function') {
+            decodePromise.then(finish, finish);
+            return;
+          }
+        } catch { /* drawImage can still use the loaded image */ }
+        finish();
       };
-      try {
-        const decodePromise = typeof img.decode === 'function' ? img.decode() : null;
-        if (decodePromise && typeof decodePromise.then === 'function') {
-          decodePromise.then(finish, finish);
-          return;
-        }
-      } catch { /* drawImage can still use the loaded image */ }
-      finish();
+      img.onerror = () => tryCandidate(index + 1);
+      img.src = url;
     };
-    img.onerror = () => resolve(null);
-    img.src = src;
+    tryCandidate(0);
   });
-  IMAGE_CACHE.set(src, entry);
+  IMAGE_CACHE.set(cacheKey, entry);
   return entry.promise;
 }
 
 function getLoadedImg(src) {
-  return IMAGE_CACHE.get(src)?.image || null;
+  return IMAGE_CACHE.get(assetCacheKey(src))?.image || null;
 }
 
 async function loadFirstImg(candidates) {

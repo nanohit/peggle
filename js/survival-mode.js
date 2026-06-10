@@ -2,6 +2,7 @@ import { Utils } from './utils.js';
 import { isPortalType } from './portal-defaults.js';
 import { getEffectiveBrickSize } from './physics.js';
 import { MAX_LUCK } from './slots-math.js';
+import { normalizeAssetImageValue } from './asset-ref.js';
 
 const MIN_SPEED_CURVE_Y = 0.05;
 const MAX_SPEED_CURVE_Y = 3;
@@ -297,10 +298,8 @@ export function normalizeSurvivalBackground(rawSettings = null) {
   const rawBackground = raw.background && typeof raw.background === 'object' && !Array.isArray(raw.background)
     ? raw.background
     : {};
-  const legacyImage = typeof raw.backgroundImage === 'string' ? raw.backgroundImage : null;
-  const image = typeof rawBackground.image === 'string'
-    ? rawBackground.image
-    : legacyImage;
+  const legacyImage = normalizeAssetImageValue(raw.backgroundImage);
+  const image = normalizeAssetImageValue(rawBackground.image) || legacyImage;
   const requestedType = typeof rawBackground.type === 'string'
     ? rawBackground.type
     : (image ? 'image' : SURVIVAL_DEFAULTS.background.type);

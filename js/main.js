@@ -89,6 +89,11 @@ import { PortraitReactionController } from './portrait-reactions.js';
 import { CampaignManager } from './campaign-manager.js';
 import { api } from './api.js';
 import { compressImageFile, compressLevelBackgroundImages } from './image-compression.js';
+import { assetCssUrl, isAssetImageSource } from './asset-ref.js';
+import {
+  externalizeCharacterRegistryImages,
+  externalizeLevelImages
+} from './asset-externalize.js';
 import { computeLayout, toPixelPositions } from './graph/layout.js';
 import { Utils } from './utils.js';
 import { DialogueController } from './dialogue-controller.js';
@@ -4504,7 +4509,8 @@ class PeggleApp {
       button.textContent = 'Pushing...';
     }
     try {
-      const ok = await api.saveCharacterRegistry(registry);
+      const prepared = await externalizeCharacterRegistryImages(registry);
+      const ok = await api.saveCharacterRegistry(prepared.data);
       if (button) {
         button.textContent = ok ? 'Pushed ✓' : 'Push failed';
         if (!ok) button.title = 'Server rejected the push or the network is unavailable.';
@@ -4512,6 +4518,9 @@ class PeggleApp {
       if (!ok) {
         if (!silent) alert('Failed to push character registry to server.');
         return false;
+      }
+      if (prepared.report.changed) {
+        this.characterRegistry = saveCharacterRegistry(prepared.data);
       }
       return true;
     } catch (error) {
@@ -4933,6 +4942,7 @@ class PeggleApp {
           const hasImage = sources.length > 0;
           const variantIndex = hasImage ? this._getExpressionVariantIndex(character.id, slot, sources.length) : 0;
           const currentSrc = hasImage ? sources[variantIndex] : '';
+          const currentCss = currentSrc ? assetCssUrl(currentSrc) : '';
           const isIdle = slot === 'idle';
           const canPreview = !isIdle && hasImage;
           const multi = sources.length > 1;
@@ -4945,7 +4955,7 @@ class PeggleApp {
           return `
             <div class="character-expression-card" data-character-slot="${this._esc(slot)}">
               <div class="character-expression-stage">
-                <div class="character-expression-thumb"${currentSrc ? ` style="background-image:url('${this._esc(currentSrc)}')"` : ''}></div>
+                <div class="character-expression-thumb"${currentCss ? ` style="background-image:${this._esc(currentCss)}"` : ''}></div>
                 ${multi ? `
                   <button class="character-variant-arrow character-variant-arrow--prev" type="button" data-character-variant-prev="${this._esc(slot)}" title="Previous image">‹</button>
                   <button class="character-variant-arrow character-variant-arrow--next" type="button" data-character-variant-next="${this._esc(slot)}" title="Next image">›</button>
@@ -4979,11 +4989,12 @@ class PeggleApp {
         ${slotNames.map(slot => {
           const explicitSrc = normalized.pvpPortraits?.[slot] || '';
           const previewSrc = explicitSrc || getCharacterPvpPortraitSource(normalized, { slot });
+          const previewCss = previewSrc ? assetCssUrl(previewSrc) : '';
           const stateLabel = explicitSrc ? 'Ready' : (previewSrc ? 'Fallback' : 'Empty');
           return `
             <div class="character-expression-card" data-pvp-portrait-slot="${this._esc(slot)}">
               <div class="character-expression-stage">
-                <div class="character-expression-thumb"${previewSrc ? ` style="background-image:url('${this._esc(previewSrc)}')"` : ''}></div>
+                <div class="character-expression-thumb"${previewCss ? ` style="background-image:${this._esc(previewCss)}"` : ''}></div>
               </div>
               <div class="character-expression-title">${this._esc(this._pvpPortraitSlotLabel(slot))}</div>
               <div class="character-expression-key">${this._esc(slot)}</div>
@@ -5752,8 +5763,8 @@ class PeggleApp {
       this._mutateCharacter(characterId, (character) => {
         const existing = character.slots[slotName];
         const list = Array.isArray(existing)
-          ? existing.filter(v => typeof v === 'string' && v.trim())
-          : (typeof existing === 'string' && existing.trim() ? [existing] : []);
+          ? existing.filter(isAssetImageSource)
+          : (isAssetImageSource(existing) ? [existing] : []);
         list.push(dataUrl);
         character.slots[slotName] = list.length > 1 ? list : list[0];
         this._setExpressionVariantIndex(character.id, slotName, list.length - 1);
@@ -5799,8 +5810,8 @@ class PeggleApp {
     this._mutateCharacter(characterId, (character) => {
       const existing = character.slots[slotName];
       const list = Array.isArray(existing)
-        ? existing.filter(v => typeof v === 'string' && v.trim())
-        : (typeof existing === 'string' && existing.trim() ? [existing] : []);
+        ? existing.filter(isAssetImageSource)
+        : (isAssetImageSource(existing) ? [existing] : []);
       if (list.length === 0) {
         character.slots[slotName] = null;
         this._setExpressionVariantIndex(character.id, slotName, 0);
@@ -6621,6 +6632,10 @@ class PeggleApp {
       viewportWidth: this.canvas?.width || MAX_WIDTH,
       viewportHeight: this.canvas?.height || 600
     });
+    const prepared = await externalizeLevelImages(snapshot);
+    if (prepared.report.failed > 0) {
+      console.warn('[assets] Some level images stayed inline after upload failures:', prepared.report.errors);
+    }
     return snapshot;
   }
 

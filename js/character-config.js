@@ -1,5 +1,10 @@
 import { DEFAULT_HEALTH_CIRCLE_COLOR, resolveAssetPaths } from './visual-config.js';
 import { compressImageFile } from './image-compression.js';
+import {
+  assetDisplayUrl,
+  isAssetImageSource,
+  normalizeAssetImageValue
+} from './asset-ref.js';
 
 export const CHARACTER_REGISTRY_VERSION = 2;
 export const CHARACTER_REGISTRY_STORAGE_KEY = 'peggle_character_registry_v1';
@@ -447,34 +452,25 @@ function normalizeSlotValue(value) {
   if (Array.isArray(value)) {
     const cleaned = [];
     for (const item of value) {
-      if (typeof item === 'string') {
-        const trimmed = item.trim();
-        if (trimmed) cleaned.push(trimmed);
-      }
+      const normalized = normalizeAssetImageValue(item);
+      if (normalized) cleaned.push(normalized);
     }
     if (cleaned.length === 0) return null;
     if (cleaned.length === 1) return cleaned[0];
     return cleaned;
   }
-  if (typeof value === 'string') {
-    const trimmed = value.trim();
-    return trimmed || null;
-  }
-  return null;
+  return normalizeAssetImageValue(value);
 }
 
 function normalizeSingleSlotValue(value) {
   if (Array.isArray(value)) {
     for (const item of value) {
-      if (typeof item === 'string' && item.trim()) return item.trim();
+      const normalized = normalizeAssetImageValue(item);
+      if (normalized) return normalized;
     }
     return null;
   }
-  if (typeof value === 'string') {
-    const trimmed = value.trim();
-    return trimmed || null;
-  }
-  return null;
+  return normalizeAssetImageValue(value);
 }
 
 function normalizeSlots(rawSlots = null) {
@@ -800,13 +796,12 @@ export function resolveCharacterForLevel(level, registry = loadCharacterRegistry
 
   const legacySrc = level?.visuals?.slots?.character?.customSrc;
   if (
-    typeof legacySrc === 'string'
-    && legacySrc.trim()
+    isAssetImageSource(legacySrc)
     && !registryCharacter
     && !snapshot
     && assignment.characterId === DEFAULT_CHARACTER_ID
   ) {
-    character.slots.idle = legacySrc.trim();
+    character.slots.idle = normalizeAssetImageValue(legacySrc);
   }
   character.personality = mergePersonalityPatch(character.personality, assignment.personalityPatch);
   return character;
@@ -835,11 +830,11 @@ export function applyCharacterHealthCircleColorToVisuals(visuals, level, charact
 
 function pickFromSlotValue(value) {
   if (Array.isArray(value)) {
-    const cleaned = value.filter(v => typeof v === 'string' && v.trim());
+    const cleaned = value.filter(isAssetImageSource);
     if (cleaned.length === 0) return '';
     return cleaned[Math.floor(Math.random() * cleaned.length)];
   }
-  if (typeof value === 'string' && value.trim()) return value;
+  if (isAssetImageSource(value)) return value;
   return '';
 }
 
@@ -847,8 +842,8 @@ export function getCharacterSlotSources(character, slotName = 'idle') {
   const normalized = normalizeCharacter(character);
   const slot = cleanSlotName(slotName);
   const value = normalized.slots[slot];
-  if (Array.isArray(value)) return value.filter(v => typeof v === 'string' && v.trim());
-  if (typeof value === 'string' && value.trim()) return [value];
+  if (Array.isArray(value)) return value.filter(isAssetImageSource);
+  if (isAssetImageSource(value)) return [value];
   return [];
 }
 
@@ -919,6 +914,10 @@ export function getLevelCharacterPortraitSources(level, registry = loadCharacter
   if (idle && idle !== preferred) sources.push(idle);
   sources.push(DEFAULT_CHARACTER_ASSET.webp, DEFAULT_CHARACTER_ASSET.png);
   return sources;
+}
+
+export function getCharacterSlotDisplayUrl(source) {
+  return assetDisplayUrl(source);
 }
 
 export function readCharacterImageFile(file, maxSize = 512) {

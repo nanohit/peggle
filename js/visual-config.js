@@ -3,6 +3,7 @@
 
 import { DEFAULT_BALL_TRAIL, normalizeBallTrailConfig } from './ball-trail.js';
 import { DEFAULT_SHOCKWAVE_EFFECT, normalizeShockwaveConfig } from './shockwave-effect.js';
+import { normalizeAssetImageValue } from './asset-ref.js';
 
 export const DEFAULT_LIQUID_PROGRESSION = {
   colorBase: null,
@@ -210,8 +211,8 @@ export function normalizeVisuals(raw, _skipSaved) {
       colorTop: typeof bg.colorTop === 'string' ? bg.colorTop : DEFAULT_BACKGROUND.colorTop,
       colorBottom: typeof bg.colorBottom === 'string' ? bg.colorBottom : DEFAULT_BACKGROUND.colorBottom,
       darken: clamp01(bg.darken, DEFAULT_BACKGROUND.darken),
-      image: typeof bg.image === 'string' ? bg.image : DEFAULT_BACKGROUND.image,
-      progressionImage: typeof bg.progressionImage === 'string' ? bg.progressionImage : null,
+      image: normalizeAssetImageValue(bg.image) || DEFAULT_BACKGROUND.image,
+      progressionImage: normalizeAssetImageValue(bg.progressionImage),
       mirrored: bg.mirrored === true,
       liquid: normalizeLiquidBackground(bg.liquid),
     };
@@ -233,7 +234,7 @@ export function normalizeVisuals(raw, _skipSaved) {
     if (slot && typeof slot === 'object') {
       result.slots[def.id] = {
         visible: slot.visible !== false,
-        customSrc: typeof slot.customSrc === 'string' ? slot.customSrc : null,
+        customSrc: normalizeAssetImageValue(slot.customSrc),
         x: typeof slot.x === 'number' ? slot.x : def.defaultX,
         y: typeof slot.y === 'number' ? slot.y : def.defaultY,
         scale: typeof slot.scale === 'number' ? Math.max(0.1, Math.min(5, slot.scale)) : (def.defaultScale || 1),

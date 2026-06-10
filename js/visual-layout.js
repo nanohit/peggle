@@ -5,6 +5,13 @@ import { DEFAULT_SHOCKWAVE_EFFECT, DEFAULT_SHOCKWAVE_VICTORY_SETTINGS, DEFAULT_S
 import { DEFAULT_END_SEQUENCE, SLOT_DEFS, DEFAULT_LAYER_ORDER, resolveAssetPaths, normalizeVisuals } from './visual-config.js';
 import { compressImageFile } from './image-compression.js';
 import { PortraitFlame, FLAME_BOX_EXTENT } from './portrait-flame.js';
+import {
+  assetCacheKey,
+  assetCssUrl,
+  assetDisplayUrl,
+  assetUrlCandidates,
+  isAssetImageSource
+} from './asset-ref.js';
 
 const imageCache = new Map();
 
@@ -25,6 +32,14 @@ async function preloadAsset(basename) {
   img = await loadImage(paths.png);
   if (img) return paths.png;
   return null;
+}
+
+async function resolveImageSource(source) {
+  for (const url of assetUrlCandidates(source)) {
+    const img = await loadImage(url);
+    if (img) return url;
+  }
+  return '';
 }
 
 const FRAME_HEIGHT_RATIO = 17 / 9;
@@ -352,7 +367,7 @@ export class VisualLayout {
     const def = SLOT_DEFS.find(item => item.id === slotId);
     if (!def || def.dynamic) return null;
     const slotCfg = this.config?.slots?.[slotId];
-    if (slotCfg?.customSrc) return slotCfg.customSrc;
+    if (slotCfg?.customSrc) return assetDisplayUrl(slotCfg.customSrc);
     if (this._resolvedAssets[slotId]) return this._resolvedAssets[slotId];
     if (!def.basename) return null;
     return resolveAssetPaths(def.basename).webp;
@@ -372,10 +387,12 @@ export class VisualLayout {
 
   setCharacterPortraitSource(src, options = {}) {
     const el = this.slotElements.character;
-    if (!el || typeof src !== 'string' || !src.trim()) return;
-    const source = src.trim();
+    if (!el || !isAssetImageSource(src)) return;
+    const sourceKey = assetCacheKey(src);
+    const source = assetDisplayUrl(src);
+    if (!sourceKey || !source) return;
     const fadeMs = Math.max(0, Math.min(2000, Number(options.fadeMs) || 0));
-    const cssUrl = this._cssUrl(source);
+    const cssUrl = assetCssUrl(src) || this._cssUrl(source);
 
     if (!this._characterPortraitRuntime) {
       this._characterPortraitRuntime = {
@@ -388,7 +405,7 @@ export class VisualLayout {
     }
 
     const runtime = this._characterPortraitRuntime;
-    if (runtime.activeSrc === source) return;
+    if (runtime.activeSrc === sourceKey) return;
 
     const nextLayer = document.createElement('div');
     nextLayer.className = 'visual-portrait-layer';
@@ -400,7 +417,12 @@ export class VisualLayout {
 
     const previousLayer = runtime.activeLayer;
     runtime.activeLayer = nextLayer;
-    runtime.activeSrc = source;
+    runtime.activeSrc = sourceKey;
+
+    resolveImageSource(src).then(resolvedUrl => {
+      if (!resolvedUrl || runtime.activeSrc !== sourceKey || runtime.activeLayer !== nextLayer) return;
+      nextLayer.style.backgroundImage = this._cssUrl(resolvedUrl);
+    });
 
     if (runtime.cleanupTimer) {
       clearTimeout(runtime.cleanupTimer);
@@ -2218,8 +2240,10 @@ export class VisualLayout {
     // Custom source takes priority
     if (slotCfg?.customSrc) {
       if (def.id === 'character' && this._characterPortraitRuntime) return;
-      el.style.backgroundImage = `url('${slotCfg.customSrc}')`;
-      this._resolvedAssets[def.id] = slotCfg.customSrc;
+      const resolvedUrl = await resolveImageSource(slotCfg.customSrc);
+      if (!resolvedUrl) return;
+      el.style.backgroundImage = this._cssUrl(resolvedUrl);
+      this._resolvedAssets[def.id] = resolvedUrl;
       this._renderPvpOpponentTarget();
       this._renderPvpAimTimer();
       return;
@@ -2228,7 +2252,7 @@ export class VisualLayout {
     // Check cache
     if (this._resolvedAssets[def.id]) {
       if (def.id === 'character' && this._characterPortraitRuntime) return;
-      el.style.backgroundImage = `url('${this._resolvedAssets[def.id]}')`;
+      el.style.backgroundImage = this._cssUrl(this._resolvedAssets[def.id]);
       this._renderPvpOpponentTarget();
       this._renderPvpAimTimer();
       return;
@@ -2238,7 +2262,7 @@ export class VisualLayout {
     if (url) {
       this._resolvedAssets[def.id] = url;
       if (el.dataset.slotId === def.id && !(def.id === 'character' && this._characterPortraitRuntime)) {
-        el.style.backgroundImage = `url('${url}')`;
+        el.style.backgroundImage = this._cssUrl(url);
       }
       this._renderPvpOpponentTarget();
       this._renderPvpAimTimer();
