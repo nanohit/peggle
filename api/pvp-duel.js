@@ -22,6 +22,10 @@ const DISCOVERY_CACHE_TTL_MS = 60000;
 
 let redis;
 let pvpDiscoveryCache = { expiresAt: 0, names: null };
+function isOnlinePvpDuelEnabled() {
+  return process.env.PVP_DUEL_ENABLED === '1' || process.env.ONLINE_PVP_DUEL_ENABLED === '1';
+}
+
 function getRedis() {
   if (!process.env.REDIS_URL) return null;
   if (!redis) redis = new Redis(process.env.REDIS_URL);
@@ -556,6 +560,10 @@ export default async function handler(req, res) {
   try {
     setCorsHeaders(req, res);
     if (req.method === 'OPTIONS') return res.status(204).end();
+    if (!isOnlinePvpDuelEnabled()) {
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(404).json({ error: 'PvP Duel is disabled' });
+    }
 
     if (req.method === 'GET') {
       res.setHeader('Cache-Control', 'no-store');

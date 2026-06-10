@@ -9,7 +9,12 @@ const RESULT_WAIT_POLL_MS = 1200;
 const HEARTBEAT_MS = 15000;
 const DEADLINE_POKE_GRACE_MS = 450;
 
+export function isOnlinePvpDuelEnabled() {
+  return typeof window !== 'undefined' && window.__PEGGLE_ONLINE_PVP_ENABLED__ === true;
+}
+
 export function getPvpDuelRoomCodeFromLocation(locationObj = window.location) {
+  if (!isOnlinePvpDuelEnabled()) return null;
   const params = new URLSearchParams(locationObj.search || '');
   const queryRoom = params.get('room');
   if (/^\d{4}$/.test(queryRoom || '')) return queryRoom;
