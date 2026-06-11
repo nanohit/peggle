@@ -3858,10 +3858,7 @@ export class Renderer {
       height: this.height
     });
     const magnetFieldRings = this._collectMagnetFieldRings(state.pegs, cameraY);
-    const liteFieldFallback = (
-      MAGNET_FIELD_MODE === '2d'
-      || normalizeTrailPerformanceProfile(this.performanceProfile) === 'lite'
-    ) && !shockwaveActive;
+    const liteFieldFallback = MAGNET_FIELD_MODE === '2d' && !shockwaveActive;
     let magnetFieldActive = false;
     if (liteFieldFallback) {
       this._shockwaveEffect.syncFieldRings(this._emptyFieldRings || (this._emptyFieldRings = []));

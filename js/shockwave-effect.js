@@ -312,6 +312,7 @@ export class ShockwaveEffectRenderer {
     this._fieldUniformCount = 0;
     this._baseColor = { hex: '', r: 1, g: 1, b: 1 };
     this._victoryColor = { hex: '', r: 1, g: 1, b: 1 };
+    this._warnedWebGlFailures = new Set();
     this._previewWave = {
       kind: 'victorySplash',
       x: 0,
@@ -349,6 +350,14 @@ export class ShockwaveEffectRenderer {
       return performance.now() / 1000;
     }
     return Date.now() / 1000;
+  }
+
+  _warnWebGlFailure(reason, detail = '') {
+    if (this._warnedWebGlFailures.has(reason)) return;
+    this._warnedWebGlFailures.add(reason);
+    if (typeof console !== 'undefined' && typeof console.warn === 'function') {
+      console.warn(`[shockwave] WebGL unavailable: ${reason}`, detail || '');
+    }
   }
 
   _shouldAcceptEvent(event) {
@@ -436,6 +445,9 @@ export class ShockwaveEffectRenderer {
     gl.shaderSource(shader, source);
     gl.compileShader(shader);
     if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+      if (typeof console !== 'undefined' && typeof console.warn === 'function') {
+        console.warn('[shockwave] WebGL shader compile failed:', gl.getShaderInfoLog(shader) || 'unknown error');
+      }
       gl.deleteShader(shader);
       return null;
     }
@@ -465,6 +477,9 @@ export class ShockwaveEffectRenderer {
     gl.deleteShader(fragment);
 
     if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+      if (typeof console !== 'undefined' && typeof console.warn === 'function') {
+        console.warn('[shockwave] WebGL program link failed:', gl.getProgramInfoLog(program) || 'unknown error');
+      }
       gl.deleteProgram(program);
       return null;
     }
@@ -498,6 +513,7 @@ export class ShockwaveEffectRenderer {
     this._glCanvas = null;
     this._glEventsBound = false;
     this._glUnavailable = false;
+    this._warnedWebGlFailures.clear();
     this.waves.length = 0;
   }
 
@@ -583,6 +599,7 @@ export class ShockwaveEffectRenderer {
     const gl = this._glCanvas.getContext('webgl', attrs) || this._glCanvas.getContext('experimental-webgl', attrs);
     if (!gl) {
       this._glUnavailable = true;
+      this._warnWebGlFailure('context creation failed');
       return null;
     }
 
@@ -592,6 +609,7 @@ export class ShockwaveEffectRenderer {
       if (buffer) gl.deleteBuffer(buffer);
       if (texture) gl.deleteTexture(texture);
       this._glUnavailable = true;
+      this._warnWebGlFailure('buffer or texture creation failed');
       return null;
     }
 
@@ -737,6 +755,7 @@ export class ShockwaveEffectRenderer {
     const bundle = this._getProgramBundle(gl, limits.maxWaves);
     if (!bundle) {
       this._glUnavailable = true;
+      this._warnWebGlFailure('shader program creation failed');
       return false;
     }
     const loc = bundle.locations;
@@ -784,10 +803,11 @@ export class ShockwaveEffectRenderer {
       }
       gl.drawArrays(gl.TRIANGLES, 0, 6);
       return true;
-    } catch (_) {
+    } catch (error) {
       this._glUnavailable = true;
       this._glTextureWidth = 0;
       this._glTextureHeight = 0;
+      this._warnWebGlFailure('render pass failed', error?.message || String(error || 'unknown error'));
       return false;
     }
   }
@@ -805,6 +825,7 @@ export class ShockwaveEffectRenderer {
     const bundle = this._getProgramBundle(gl, limits.maxWaves);
     if (!bundle) {
       this._glUnavailable = true;
+      this._warnWebGlFailure('prewarm shader program creation failed');
       return false;
     }
 
@@ -840,10 +861,11 @@ export class ShockwaveEffectRenderer {
       if (loc.fieldCount) gl.uniform1i(loc.fieldCount, 0);
       gl.drawArrays(gl.TRIANGLES, 0, 6);
       return true;
-    } catch (_) {
+    } catch (error) {
       this._glUnavailable = true;
       this._glTextureWidth = 0;
       this._glTextureHeight = 0;
+      this._warnWebGlFailure('prewarm render pass failed', error?.message || String(error || 'unknown error'));
       return false;
     }
   }
