@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>liquid probe</title></head>
+<body>
+<script type="module">
+import { LiquidBackground } from '/js/liquid-background.js';
+
+const target = document.createElement('canvas');
+target.width = 400; target.height = 600;
+document.body.appendChild(target);
+const ctx = target.getContext('2d');
+
+const lb = new LiquidBackground();
+let glCalls = 0;
+const origGL = lb._rasterizeGL.bind(lb);
+lb._rasterizeGL = () => { glCalls++; return origGL(); };
+
+const cfg = { type: 'liquid', liquid: {} };
+let frames = 0;
+let renders = 0;
+const t0 = performance.now();
+
+function tick(t) {
+  try {
+    const ok = lb.render(ctx, cfg, {
+      renderTimeSeconds: (t - t0) / 1000,
+      balls: [],
+      playState: 'idle',
+      cameraY: 0
+    }, 0);
+    if (ok) renders++;
+  } catch (e) {
+    console.log('[LIQ] ERROR ' + e.message);
+    return;
+  }
+  if (++frames < 240) requestAnimationFrame(tick);
+  else console.log(`[LIQ] done frames=${frames} renders=${renders} glCalls=${glCalls} useGl=${lb._useGlOutput} elapsedMs=${Math.round(t - t0)}`);
+}
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>

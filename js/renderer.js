@@ -908,6 +908,12 @@ export class Renderer {
         return;
       }
       const img = new Image();
+      // This image is drawn onto the game canvas. Without crossOrigin a
+      // CDN-hosted asset taints the canvas, and every later texImage2D from
+      // it (shockwave/magnet WebGL pass) throws SecurityError — killing all
+      // WebGL effects for the rest of the session. CORS-blocked candidates
+      // fall through to the same-origin /api/assets fallback via onerror.
+      img.crossOrigin = 'anonymous';
       img.onload = () => {
         if (this[srcProp] !== key) return;
         this[imageProp] = img;
@@ -1380,6 +1386,8 @@ export class Renderer {
         return;
       }
       const img = new Image();
+      // Drawn onto the game canvas — must not taint it (see _loadBackgroundAsset).
+      img.crossOrigin = 'anonymous';
       this._survivalBgImage = img;
       img.onerror = () => {
         if (this._survivalBgImageSrc !== key) return;

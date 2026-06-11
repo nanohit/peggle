@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><base href="/"><title>magnet perf probe</title>
+<style>body{background:#111;color:#ccc;font:12px monospace} #host{position:relative;width:400px}</style>
+</head>
+<body>
+<div id="host"><canvas id="gameCanvas" width="400" height="600"></canvas></div>
+<pre id="out"></pre>
+<script type="module">
+// Measures the magnet-field WebGL pass cost on the real MAGNETS_BABYY /
+// Gravity Rush peg layouts, across renderer profiles and internal-resolution
+// variants. Synchronous batches (not rAF) — relative numbers only.
+import { Renderer } from '/js/renderer.js';
+import { ShockwaveEffectRenderer } from '/js/shockwave-effect.js';
+
+const log = (s) => {
+  document.getElementById('out').textContent += s + '\n';
+  console.log('[MAG] ' + s);
+};
+
+const fixtures = await (await fetch('/scripts/magnet-probe-fixtures.json')).json();
+const canvas = document.getElementById('gameCanvas');
+const renderer = new Renderer(canvas);
+renderer.resize(400, 600);
+
+function makeState(pegs, t) {
+  return {
+    pegs,
+    hitPegIds: [],
+    balls: [],
+    bucket: null,
+    flippers: null,
+    cameraY: 0,
+    showLauncher: false,
+    trajectory: null,
+    yoyoThreads: null,
+    score: 0,
+    ballsLeft: 5,
+    orangePegsLeft: 1,
+    totalOrangePegs: 1,
+    levelProgress: 0,
+    backgroundEvents: [],
+    playState: 'idle',
+    renderTimeSeconds: t,
+    renderDeltaSeconds: 1 / 60,
+    frameDeltaSeconds: 1 / 60
+  };
+}
+
+const syncPx = new Uint8Array(4);
+function glSync(gl) {
+  // gl.finish() does not reliably block in Chrome; a 1px readback does.
+  if (gl) gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, syncPx);
+}
+
+function benchRenderGame(label, pegs, profile, warm = 30, n = 200) {
+  renderer.setPerformanceProfile(profile);
+  let t = 0;
+  for (let i = 0; i < warm; i++) { renderer.renderGame(makeState(pegs, t += 1 / 60)); glSync(renderer._shockwaveEffect._gl); }
+  const t0 = performance.now();
+  for (let i = 0; i < n; i++) { renderer.renderGame(makeState(pegs, t += 1 / 60)); glSync(renderer._shockwaveEffect._gl); }
+  const ms = (performance.now() - t0) / n;
+  const glLive = !!renderer._shockwaveEffect._gl && !renderer._shockwaveEffect._glUnavailable;
+  log(`${label.padEnd(44)} ${ms.toFixed(3)} ms/frame  (gl:${glLive})`);
+  return ms;
+}
+
+// --- Part A: end-to-end renderGame per profile, real levels ---
+for (const name of ['MAGNETS_BABYY', 'Gravity Rush']) {
+  const level = fixtures[name];
+  if (!level) { log('fixture missing: ' + name); continue; }
+  log(`== ${name} (${level.pegs.length} pegs, magnets: ${level.pegs.filter(p => p.type === 'bombMagnet').length}) ==`);
+  const noMagnets = level.pegs.filter(p => p.type !== 'bombMagnet');
+  benchRenderGame('  baseline: magnets stripped, balanced', noMagnets, 'balanced');
+  benchRenderGame('  lite (2D dashed fallback, no GL pass)', level.pegs, 'lite');
+  benchRenderGame('  balanced (GL pass, <=4 fields)', level.pegs, 'balanced');
+  benchRenderGame('  full (GL pass, <=6 fields)', level.pegs, 'full');
+}
+
+// --- Part B: standalone pass micro-bench (upload + shader + finish) ---
+// Source content = one real rendered frame.
+renderer.setPerformanceProfile('balanced');
+renderer.renderGame(makeState(fixtures.MAGNETS_BABYY.pegs, 999));
+
+function cropScratch(w, h, sx = 0, sy = 0) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  c.getContext('2d').drawImage(canvas, sx, sy, w, h, 0, 0, w, h);
+  return c;
+}
+
+function scaleScratch(scale) {
+  const c = document.createElement('canvas');
+  c.width = Math.ceil(400 * scale); c.height = Math.ceil(600 * scale);
+  c.getContext('2d').drawImage(canvas, 0, 0, c.width, c.height);
+  return c;
+}
+
+const RINGS_BABYY = fixtures.MAGNETS_BABYY.pegs
+  .filter(p => p.type === 'bombMagnet')
+  .map(p => ({ x: p.x, y: p.y, radius: p.magnetRadius || 80, strength: 1, mode: 'attract' }));
+
+function benchPass(label, source, w, h, rings, warm = 30, n = 300) {
+  const fx = new ShockwaveEffectRenderer();
+  fx.setConfig({ enabled: true, magnetField: { enabled: true, intensity: 1 } });
+  fx.syncFieldRings(rings);
+  const opts = { width: w, height: h, profile: 'balanced', timeSeconds: 0, skipPrune: true };
+  let ok = 0;
+  for (let i = 0; i < warm; i++) {
+    opts.timeSeconds += 1 / 60;
+    if (fx.renderToCanvas(source, opts)) ok++;
+    glSync(fx._gl);
+  }
+  const t0 = performance.now();
+  for (let i = 0; i < n; i++) {
+    opts.timeSeconds += 1 / 60;
+    if (fx.renderToCanvas(source, opts)) ok++;
+    glSync(fx._gl);
+  }
+  const ms = (performance.now() - t0) / n;
+  log(`${label.padEnd(44)} ${ms.toFixed(3)} ms/frame  (passes:${ok}/${warm + n})`);
+  fx.dispose();
+  return ms;
+}
+
+log('== standalone field pass (4 rings, balanced) ==');
+benchPass('  full-res 400x600 (status quo)', canvas, 400, 600, RINGS_BABYY);
+
+const half = scaleScratch(0.5);
+benchPass('  half-res 200x300 (pre-scaled src)', half, 200, 300,
+  RINGS_BABYY.map(r => ({ ...r, x: r.x * 0.5, y: r.y * 0.5, radius: r.radius * 0.5 })));
+
+const quarter = scaleScratch(0.25);
+benchPass('  quarter-res 100x150 (pre-scaled src)', quarter, 100, 150,
+  RINGS_BABYY.map(r => ({ ...r, x: r.x * 0.25, y: r.y * 0.25, radius: r.radius * 0.25 })));
+
+// bbox crop: union of MAGNETS_BABYY field disks
+{
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const r of RINGS_BABYY) {
+    const m = r.radius * 0.06 + 7;
+    const outer = r.radius + m * 2.6 + 4;
+    x0 = Math.min(x0, r.x - outer); y0 = Math.min(y0, r.y - outer);
+    x1 = Math.max(x1, r.x + outer); y1 = Math.max(y1, r.y + outer);
+  }
+  x0 = Math.max(0, Math.floor(x0)); y0 = Math.max(0, Math.floor(y0));
+  x1 = Math.min(400, Math.ceil(x1)); y1 = Math.min(600, Math.ceil(y1));
+  const bw = x1 - x0, bh = y1 - y0;
+  log(`  (bbox of MAGNETS_BABYY fields: ${bw}x${bh} at ${x0},${y0} = ${Math.round(100 * bw * bh / 240000)}% of frame)`);
+  const bbox = cropScratch(bw, bh, x0, y0);
+  benchPass(`  bbox crop ${bw}x${bh} full-res`, bbox, bw, bh,
+    RINGS_BABYY.map(r => ({ ...r, x: r.x - x0, y: r.y - y0 })));
+}
+
+// scratch-canvas prep cost (the CPU side of half-res / bbox variants)
+{
+  const c = document.createElement('canvas');
+  c.width = 200; c.height = 300;
+  const cctx = c.getContext('2d');
+  let t0 = performance.now();
+  for (let i = 0; i < 300; i++) cctx.drawImage(canvas, 0, 0, 200, 300);
+  log(`  scratch downscale drawImage 200x300        ${((performance.now() - t0) / 300).toFixed(3)} ms`);
+  const c2 = document.createElement('canvas');
+  c2.width = 300; c2.height = 300;
+  const cctx2 = c2.getContext('2d');
+  t0 = performance.now();
+  for (let i = 0; i < 300; i++) cctx2.drawImage(canvas, 50, 100, 300, 300, 0, 0, 300, 300);
+  log(`  scratch crop drawImage 300x300             ${((performance.now() - t0) / 300).toFixed(3)} ms`);
+}
+
+log('DONE');
+</script>
+</body>
+</html>

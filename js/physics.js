@@ -429,6 +429,13 @@ export class PhysicsEngine {
     this._pegGridDirty = true;
   }
 
+  // True when pegs were added/removed/moved since the grid was last built.
+  // Every per-frame peg mover marks the grid dirty (see the grid invariant),
+  // so this doubles as a cheap "did any peg change" signal for callers.
+  isPegGridDirty() {
+    return !!this._pegGridDirty;
+  }
+
   setFlippers(flippers) {
     this.flippers = flippers;
   }

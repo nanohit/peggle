@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><base href="/"><title>trajectory cache probe</title></head>
+<body>
+<div id="host" style="position:relative"><canvas id="gameCanvas" width="400" height="600"></canvas></div>
+<script type="module">
+// Verifies updateTrajectoryIfStale: static aiming frames must not re-run
+// predictTrajectory; peg motion (grid dirty) and aim changes must.
+import { Game } from '/js/game.js';
+import { PHYSICS_CONFIG } from '/js/physics.js';
+
+const log = (s) => console.log('[TRAJ] ' + s);
+const canvas = document.getElementById('gameCanvas');
+const game = new Game(canvas);
+
+game.pegs = [];
+for (let i = 0; i < 30; i++) {
+  game.pegs.push({ id: 'p' + i, x: 40 + (i % 6) * 60, y: 200 + Math.floor(i / 6) * 60, type: 'blue', shape: 'circle' });
+}
+game.physics.setPegs(game.pegs);
+
+let calls = 0;
+const origPredict = game.physics.predictTrajectory.bind(game.physics);
+game.physics.predictTrajectory = (...args) => { calls++; return origPredict(...args); };
+
+game.state = 'aiming';
+game.aimAngle = Math.PI / 2;
+
+function runFrames(n) {
+  for (let i = 0; i < n; i++) game.update(1000 / 60);
+}
+
+calls = 0;
+runFrames(60);
+log(`static aiming x60 frames: predictTrajectory calls = ${calls} (want 1)`);
+
+calls = 0;
+game.aimAngle += 0.05;
+runFrames(60);
+log(`one aim change then static x60: calls = ${calls} (want 1)`);
+
+calls = 0;
+for (let i = 0; i < 60; i++) { game.physics.markPegGridDirty(); game.update(1000 / 60); }
+log(`pegs moving (grid dirty) x60: calls = ${calls} (want 60)`);
+
+calls = 0;
+runFrames(60);
+log(`static again x60: calls = ${calls} (want 0 or 1)`);
+
+calls = 0;
+const oldGravity = PHYSICS_CONFIG.gravity;
+PHYSICS_CONFIG.gravity = oldGravity + 0.01;
+runFrames(1);
+log(`physics config change x1: calls = ${calls} (want 1)`);
+PHYSICS_CONFIG.gravity = oldGravity;
+runFrames(1);
+
+const flippers = {
+  enabled: true,
+  y: 540,
+  length: 88,
+  width: 12,
+  xOffset: 80,
+  restAngle: 18,
+  flipAngle: 42,
+  scale: 1,
+  bounce: 1.2,
+  _flipperT: 1,
+  _flipperActivated: false
+};
+game.flippers = flippers;
+game.physics.setFlippers(flippers);
+game.updateTrajectory();
+calls = 0;
+runFrames(12);
+log(`settling flippers x12: calls = ${calls} (want >1)`);
+game.flippers = null;
+game.physics.setFlippers(null);
+
+const traj = game.trajectory;
+log(`trajectory present: ${Array.isArray(traj?.points) || !!traj} `);
+log('DONE');
+game.stop();
+</script>
+</body>
+</html>

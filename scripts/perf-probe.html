@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>perf probe</title>
+<style>html,body{margin:0;padding:0}iframe{width:480px;height:900px;border:0}</style>
+</head>
+<body>
+<iframe id="f" src="/player.html?perf=1"></iframe>
+<script>
+// Drives the player with synthetic mouse events so [PERF] logs cover real
+// gameplay (balls in flight), not just the idle aim screen.
+const frame = document.getElementById('f');
+
+function fire(doc, canvas) {
+  const rect = canvas.getBoundingClientRect();
+  const cx = rect.left + rect.width * (0.25 + Math.random() * 0.5);
+  const cy = rect.top + rect.height * (0.45 + Math.random() * 0.35);
+  const opts = (x, y) => ({ bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0 });
+  canvas.dispatchEvent(new MouseEvent('mousedown', opts(cx, cy)));
+  for (let i = 1; i <= 4; i++) {
+    canvas.dispatchEvent(new MouseEvent('mousemove', opts(cx + i, cy + i)));
+  }
+  canvas.dispatchEvent(new MouseEvent('mouseup', opts(cx + 4, cy + 4)));
+  console.log('[PROBE] fired at', Math.round(cx), Math.round(cy));
+}
+
+frame.addEventListener('load', () => {
+  console.log('[PROBE] iframe loaded');
+  setTimeout(() => {
+    const doc = frame.contentDocument;
+    const canvas = doc && doc.getElementById('gameCanvas');
+    if (!canvas) { console.log('[PROBE] no canvas found'); return; }
+    console.log('[PROBE] canvas found, starting autoplay');
+    fire(doc, canvas);
+    setInterval(() => fire(doc, canvas), 6000);
+  }, 8000);
+});
+</script>
+</body>
+</html>

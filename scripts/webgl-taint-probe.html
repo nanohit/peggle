@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><base href="/"><title>webgl taint probe</title></head>
+<body>
+<div id="host" style="position:relative;width:400px"><canvas id="gameCanvas" width="400" height="600"></canvas></div>
+<script type="module">
+// Reproduces the prod "all WebGL effects dead" bug: a CDN background drawn
+// without crossOrigin taints the game canvas, so the shockwave/magnet GL pass
+// throws SecurityError on texImage2D and goes dark forever.
+// Default mode = current code (crossOrigin fix) → GL layer must be VISIBLE.
+// ?taint=1 = simulate the old behavior (draw a no-CORS image first) → GL must fail.
+import { Renderer } from '/js/renderer.js';
+
+const log = (s) => console.log('[TAINT] ' + s);
+const params = new URL(location.href).searchParams;
+const BUNNY_URL = 'https://alea-assets.b-cdn.net/level-assets/backgrounds/2256a3495085cf72e50c41db4e4749ebb87f9f64c9fae930a67b878cee005a45.webp';
+
+const canvas = document.getElementById('gameCanvas');
+const renderer = new Renderer(canvas);
+renderer.resize(400, 600);
+
+if (params.get('taint') === '1') {
+  await new Promise(resolve => {
+    const img = new Image(); // deliberately NO crossOrigin
+    img.onload = () => { canvas.getContext('2d').drawImage(img, 0, 0); log('canvas force-tainted'); resolve(); };
+    img.onerror = () => { log('taint image failed to load'); resolve(); };
+    img.src = BUNNY_URL;
+  });
+} else {
+  renderer.setBackground({
+    type: 'image',
+    image: { kind: 'asset', primaryUrl: BUNNY_URL, url: BUNNY_URL }
+  });
+  await new Promise(r => setTimeout(r, 1500)); // let the bg image load
+  log('bg image loaded: ' + (!!renderer._bgImage));
+}
+
+const pegs = [
+  { id: 'm1', x: 200, y: 300, type: 'bombMagnet', shape: 'circle', magnetRadius: 80, magnetStrength: 1 },
+  { id: 'b1', x: 120, y: 400, type: 'blue', shape: 'circle' }
+];
+
+let t = 0;
+function frame() {
+  t += 1 / 60;
+  renderer.renderGame({
+    pegs, hitPegIds: [], balls: [], bucket: null, flippers: null, cameraY: 0,
+    levelProgress: 0, backgroundEvents: [], playState: 'idle',
+    renderTimeSeconds: t, renderDeltaSeconds: 1 / 60, frameDeltaSeconds: 1 / 60,
+    score: 0, ballsLeft: 5, orangePegsLeft: 1, totalOrangePegs: 1
+  });
+}
+for (let i = 0; i < 30; i++) frame();
+
+const fx = renderer._shockwaveEffect;
+const layer = document.querySelector('.game-shockwave-layer');
+log(`glUnavailable=${fx._glUnavailable} layerVisible=${layer ? layer.style.visibility : 'no-layer'} hasGl=${!!fx._gl}`);
+log('DONE');
+</script>
+</body>
+</html>

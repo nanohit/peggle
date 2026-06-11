@@ -42,6 +42,9 @@ function loadImg(src) {
         return;
       }
       const img = new Image();
+      // Drawn onto the map canvas — keep it untainted (CDN assets send CORS;
+      // a blocked candidate falls through to the same-origin /api/assets one).
+      img.crossOrigin = 'anonymous';
       img.onload = () => {
         const finish = () => {
           entry.image = img;

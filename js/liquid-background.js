@@ -837,6 +837,12 @@ export class LiquidBackground {
 
     if (!frozen) {
       if (this._ensureWebGL()) {
+        // Redraw the GL output only on sim-step frames (~30Hz) or when state
+        // changed; in-between rendered frames reuse the cached GL canvas.
+        // Halves the constant full-frame shader cost on 60fps devices.
+        if (!stepped && !this._dirty && this._useGlOutput) {
+          return;
+        }
         if (this._rasterizeGL()) {
           this._dirty = false;
           return;

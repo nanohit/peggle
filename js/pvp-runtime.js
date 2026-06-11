@@ -13,6 +13,12 @@ import {
 import { isPortalType } from './portal-defaults.js';
 
 const MAX_ROUND_SECONDS = 18;
+// Frame-rate cap (mirrors game.js): >60Hz displays deliver rAF at 90-120Hz,
+// doubling per-frame battery cost for no benefit. `?fps=<hz>` overrides;
+// `?fps=0` disables the cap entirely.
+const PVP_FRAME_RATE_CAP_HZ = 60;
+const PVP_FRAME_CAP_TOLERANCE_MS = 2.5;
+const PVP_FRAME_CAP_RESET_AFTER_MISSED_INTERVALS = 4;
 const FALLBACK_TARGET_RADIUS = 56;
 const AIM_ANGLE_EPSILON = 0.0015;
 const ROUND_END_DELAY_MS = 550;
@@ -27,6 +33,19 @@ function hashString(value) {
     hash = Math.imul(hash, 16777619);
   }
   return hash >>> 0;
+}
+
+function getFrameRateCapOverride() {
+  if (typeof window === 'undefined') return null;
+  let raw = null;
+  try {
+    raw = new URL(window.location.href).searchParams.get('fps');
+  } catch (error) {
+    raw = null;
+  }
+  if (raw == null) return null;
+  const hz = parseFloat(raw);
+  return Number.isFinite(hz) && hz >= 0 ? hz : null;
 }
 
 function mulberry32(seed) {
@@ -84,6 +103,8 @@ export class PvpRuntime {
     this.networkAdapter = options.networkAdapter || null;
     this._networkLaunchKey = null;
     this.showPerfOverlay = false;
+    this.frameRateCapHz = getFrameRateCapOverride() ?? PVP_FRAME_RATE_CAP_HZ;
+    this._nextRunFrameTime = 0;
 
     this.physics = new PhysicsEngine(canvas.width, canvas.height);
     this.physics.setBucketEnabled(false);
@@ -819,6 +840,7 @@ export class PvpRuntime {
     this._stopped = false;
     this._paused = false;
     this.lastTime = 0;
+    this._nextRunFrameTime = 0;
     const loop = (timestamp) => {
       if (!this.running) return;
       this.tick(timestamp || performance.now());
@@ -836,6 +858,7 @@ export class PvpRuntime {
     this.humanBall.active = false;
     this.cpuBall.active = false;
     this.physics.setBalls([]);
+    this._nextRunFrameTime = 0;
     this.abortController.abort();
     this._listeners.clear();
     this.renderer?.dispose?.();
@@ -856,6 +879,7 @@ export class PvpRuntime {
     this._pausedAt = 0;
     this.accumulatorMs = 0;
     this.lastTime = now;
+    this._nextRunFrameTime = 0;
     const loop = (timestamp) => {
       if (!this.running || this._paused) return;
       this.tick(timestamp || performance.now());
@@ -884,8 +908,43 @@ export class PvpRuntime {
     return !!dismissed;
   }
 
+  setFrameRateCap(hz) {
+    this.frameRateCapHz = Number.isFinite(hz) && hz >= 0 ? hz : PVP_FRAME_RATE_CAP_HZ;
+    this._nextRunFrameTime = 0;
+  }
+
+  _shouldRunCappedFrame(now) {
+    if (!(this.frameRateCapHz > 0)) {
+      this._nextRunFrameTime = 0;
+      return true;
+    }
+
+    const intervalMs = 1000 / this.frameRateCapHz;
+    if (!Number.isFinite(intervalMs) || intervalMs <= 0) return true;
+
+    const toleranceMs = Math.min(PVP_FRAME_CAP_TOLERANCE_MS, intervalMs * 0.45);
+    if (!Number.isFinite(this._nextRunFrameTime) || this._nextRunFrameTime <= 0) {
+      this._nextRunFrameTime = now + intervalMs;
+      return true;
+    }
+
+    if (now < this._nextRunFrameTime - toleranceMs) return false;
+
+    if (now - this._nextRunFrameTime > intervalMs * PVP_FRAME_CAP_RESET_AFTER_MISSED_INTERVALS) {
+      this._nextRunFrameTime = now + intervalMs;
+      return true;
+    }
+
+    do {
+      this._nextRunFrameTime += intervalMs;
+    } while (this._nextRunFrameTime <= now - toleranceMs);
+
+    return true;
+  }
+
   tick(timestamp) {
     if (this._paused) return;
+    if (!this._shouldRunCappedFrame(timestamp)) return;
     if (!this.lastTime) this.lastTime = timestamp;
     const rawDeltaMs = Math.max(0, Math.min(250, timestamp - this.lastTime));
     this.lastTime = timestamp;

@@ -138,6 +138,45 @@ function getSimHzOverride() {
   return Number.isFinite(hz) && hz > 0 ? hz : null;
 }
 
+// Default frame-rate cap. High-refresh displays (ProMotion, most modern
+// Android phones) deliver rAF at 90-120Hz, which doubles every per-frame
+// cost (update, full scene redraw, GL passes, compositing) for no gameplay
+// benefit — and cooks phone batteries. `?fps=<hz>` overrides; `?fps=0`
+// disables the cap entirely.
+const FRAME_RATE_CAP_HZ = 60;
+// Skip threshold tolerance: a capped frame runs once the elapsed time reaches
+// (interval - tolerance), so a true 60Hz display's ~16.7ms ticks are never
+// skipped by vsync jitter.
+const FRAME_CAP_TOLERANCE_MS = 2.5;
+const FRAME_CAP_RESET_AFTER_MISSED_INTERVALS = 4;
+
+function getFrameRateCapOverride() {
+  if (typeof window === 'undefined') return null;
+  let raw = null;
+  try {
+    const url = new URL(window.location.href);
+    raw = url.searchParams.get('fps');
+  } catch (error) {
+    raw = null;
+  }
+  if (raw == null) return null;
+  const hz = parseFloat(raw);
+  return Number.isFinite(hz) && hz >= 0 ? hz : null;
+}
+
+// `?perf=1` turns on the periodic [PERF] console log (useful for checking
+// frame pacing on a phone via remote inspector) without the editor overlay.
+function isPerfLogEnabled() {
+  if (typeof window === 'undefined') return false;
+  try {
+    const raw = new URL(window.location.href).searchParams.get('perf');
+    return raw != null && raw !== '0' && raw !== 'false';
+  } catch (error) {
+    return false;
+  }
+}
+const PERF_LOG_ENABLED = isPerfLogEnabled();
+
 export class Game {
   constructor(canvas) {
     this.canvas = canvas;
@@ -250,6 +289,8 @@ export class Game {
     this.animationId = null;
     this.lastTime = 0;
     this.accumulatorMs = 0;
+    this.frameRateCapHz = getFrameRateCapOverride() ?? FRAME_RATE_CAP_HZ;
+    this._nextRunFrameTime = 0;
     this.fixedStepMs = 1000 / 120;
     this.maxFrameSteps = 8;
     this.maxFrameDeltaMs = 250;
@@ -1173,17 +1214,87 @@ export class Game {
     const aimSteps = Math.max(0, Math.round(this.aimLength || 0));
     const steps = showFull ? 1000 : (aimSteps > 0 ? Math.max(2, aimSteps) : 0);
     const stopAtHit = !showFull;
+    const power = this.getCurrentLaunchPower();
+    const environment = this.getTrajectoryEnvironmentSignature();
     this.trajectory = this.physics.predictTrajectory(
       this.launchX,
       this.launchY,
       this.aimAngle,
-      this.getCurrentLaunchPower(),
+      power,
       steps,
       stopAtHit,
       this.isBilliardPhase()
         ? { stopAtWallHit: this.billiardSettings?.wallBounceAim === false }
         : null
     );
+    const sig = this._trajectorySignature || (this._trajectorySignature = {});
+    sig.launchX = this.launchX;
+    sig.launchY = this.launchY;
+    sig.aimAngle = this.aimAngle;
+    sig.power = power;
+    sig.aimLength = this.aimLength;
+    sig.showFull = showFull;
+    sig.environment = environment;
+  }
+
+  getTrajectoryEnvironmentSignature() {
+    const f = this.physics?.flippers || null;
+    const flipperSig = (f && f.enabled)
+      ? [
+          1,
+          Number.isFinite(f.y) ? f.y : '',
+          Number.isFinite(f.length) ? f.length : '',
+          Number.isFinite(f.width) ? f.width : '',
+          Number.isFinite(f.xOffset) ? f.xOffset : '',
+          Number.isFinite(f.restAngle) ? f.restAngle : '',
+          Number.isFinite(f.flipAngle) ? f.flipAngle : '',
+          Number.isFinite(f.scale) ? f.scale : '',
+          Number.isFinite(f.bounce) ? f.bounce : '',
+          Number.isFinite(f._flipperT) ? f._flipperT : 0
+        ].join(',')
+      : '0';
+    return [
+      PHYSICS_CONFIG.gravity,
+      PHYSICS_CONFIG.friction,
+      PHYSICS_CONFIG.bounce,
+      PHYSICS_CONFIG.maxVelocity,
+      PHYSICS_CONFIG.timeScale,
+      PHYSICS_CONFIG.pegRadius,
+      PHYSICS_CONFIG.brickWidth,
+      PHYSICS_CONFIG.brickHeight,
+      Number.isFinite(this.physics?.width) ? this.physics.width : '',
+      Number.isFinite(this.physics?.height) ? this.physics.height : '',
+      Number.isFinite(this.physics?.ballTopY) ? this.physics.ballTopY : '',
+      Number.isFinite(this.physics?.ballLossY) ? this.physics.ballLossY : '',
+      this.isBilliardPhase() ? 1 : 0,
+      this.billiardSettings?.wallBounceAim === false ? 1 : 0,
+      flipperSig
+    ].join('|');
+  }
+
+  // Per-frame aiming refresh: recompute the trajectory only when something
+  // that affects it changed — peg motion (every per-frame peg mover marks the
+  // peg grid dirty, see the grid invariant), launch parameters, or physics
+  // environment (flippers/config/bounds). Input handlers still call
+  // updateTrajectory() directly. Saves a ~300-step rollout per idle aiming
+  // frame on static levels.
+  updateTrajectoryIfStale() {
+    const sig = this._trajectorySignature;
+    if (
+      sig
+      && this.trajectory
+      && !this.physics.isPegGridDirty()
+      && sig.launchX === this.launchX
+      && sig.launchY === this.launchY
+      && sig.aimAngle === this.aimAngle
+      && sig.power === this.getCurrentLaunchPower()
+      && sig.aimLength === this.aimLength
+      && sig.showFull === this.shouldShowFullTrajectory()
+      && sig.environment === this.getTrajectoryEnvironmentSignature()
+    ) {
+      return;
+    }
+    this.updateTrajectory();
   }
 
   shouldShowFullTrajectory() {
@@ -3696,10 +3807,11 @@ export class Game {
       // Keep flippers at rest position when not playing
       this.physics.updateFlippers(dt);
       this.stepDestructionPegs(dt, worldHeight);
-      // Recalculate trajectory every frame during aiming so it reflects
-      // animated peg positions in real-time (not just on mouse move)
+      // Refresh the trajectory during aiming so it reflects animated peg
+      // positions in real-time — but only recompute when pegs or launch
+      // parameters actually changed (static level + still cursor = no work).
       if (this.isAimingState()) {
-        this.updateTrajectory();
+        this.updateTrajectoryIfStale();
       }
       this.processDestructionPileClears();
       this.processTimedHitPegClears();
@@ -4272,9 +4384,52 @@ export class Game {
     });
   }
 
+  setFrameRateCap(hz) {
+    this.frameRateCapHz = Number.isFinite(hz) && hz >= 0 ? hz : FRAME_RATE_CAP_HZ;
+    this._nextRunFrameTime = 0;
+  }
+
+  _shouldRunCappedFrame(now) {
+    if (!(this.frameRateCapHz > 0)) {
+      this._nextRunFrameTime = 0;
+      return true;
+    }
+
+    const intervalMs = 1000 / this.frameRateCapHz;
+    if (!Number.isFinite(intervalMs) || intervalMs <= 0) return true;
+
+    const toleranceMs = Math.min(FRAME_CAP_TOLERANCE_MS, intervalMs * 0.45);
+    if (!Number.isFinite(this._nextRunFrameTime) || this._nextRunFrameTime <= 0) {
+      this._nextRunFrameTime = now + intervalMs;
+      return true;
+    }
+
+    if (now < this._nextRunFrameTime - toleranceMs) return false;
+
+    if (now - this._nextRunFrameTime > intervalMs * FRAME_CAP_RESET_AFTER_MISSED_INTERVALS) {
+      this._nextRunFrameTime = now + intervalMs;
+      return true;
+    }
+
+    do {
+      this._nextRunFrameTime += intervalMs;
+    } while (this._nextRunFrameTime <= now - toleranceMs);
+
+    return true;
+  }
+
   gameLoop(currentTime) {
     if (this._stopped || this.abortController.signal.aborted) return;
     const now = Number.isFinite(currentTime) ? currentTime : performance.now();
+
+    // Frame-rate cap: schedule against an ideal cadence instead of measuring
+    // only the previous executed frame. That preserves an average 60fps on
+    // 75/90/144Hz displays instead of falling to displayHz / 2.
+    if (!this._shouldRunCappedFrame(now)) {
+      this.animationId = requestAnimationFrame((t) => this.gameLoop(t));
+      return;
+    }
+
     const hadLastTime = Number.isFinite(this.lastTime) && this.lastTime !== 0;
     let deltaMs = this.fixedStepMs;
     if (hadLastTime) {
@@ -4333,13 +4488,15 @@ export class Game {
     this._trackPerformanceCap30(now, deltaMs, this._perfUpdateMs + this._perfRenderMs);
     if (!this._perfLog) this._perfLog = { frames: 0, nextDump: now + 2000 };
     this._perfLog.frames++;
-    if (now >= this._perfLog.nextDump) {
+    if ((this.showPerfOverlay || PERF_LOG_ENABLED) && now >= this._perfLog.nextDump) {
       const elapsed = now - (this._perfLog.nextDump - 2000);
+      const avgFrameMs = this._perfLog.frames > 0 ? elapsed / this._perfLog.frames : deltaMs;
       const fps = (this._perfLog.frames / elapsed * 1000).toFixed(1);
       const ctx = this.renderer?.ctx;
       const ctxAttrs = ctx?.canvas ? `${ctx.canvas.width}x${ctx.canvas.height} css:${ctx.canvas.style.width}x${ctx.canvas.style.height}` : '?';
       console.log(
-        `[PERF] fps=${fps} rafDelta=${deltaMs.toFixed(1)}ms update=${this._perfUpdateMs.toFixed(2)}ms render=${this._perfRenderMs.toFixed(2)}ms ` +
+        `[PERF] fps=${fps} avgDelta=${avgFrameMs.toFixed(1)}ms rafDelta=${deltaMs.toFixed(1)}ms cap=${this.frameRateCapHz || 'off'} ` +
+        `update=${this._perfUpdateMs.toFixed(2)}ms render=${this._perfRenderMs.toFixed(2)}ms ` +
         `physSteps=${physicsSteps} pegs=${this.pegs.length} balls=${this.balls.length} state=${this.state} ` +
         `canvas=${ctxAttrs} fixedStep=${this.fixedStepMs.toFixed(2)}ms`
       );
@@ -4359,6 +4516,7 @@ export class Game {
     if (this._stopped) return;
     this._paused = false;
     this.accumulatorMs = 0;
+    this._nextRunFrameTime = 0;
     this.lastTime = performance.now();
     this.animationId = requestAnimationFrame((t) => this.gameLoop(t));
   }
@@ -4371,6 +4529,7 @@ export class Game {
     }
     this._paused = false;
     this.accumulatorMs = 0;
+    this._nextRunFrameTime = 0;
     this._resetPerformanceCap30Detection({ preserveEmitted: true });
     this.uiStateListeners.clear();
     this.performanceEventListeners.clear();
@@ -4391,6 +4550,7 @@ export class Game {
     if (!this._paused || this._stopped || this.abortController.signal.aborted) return;
     this._paused = false;
     this.accumulatorMs = 0;
+    this._nextRunFrameTime = 0;
     this._resetPerformanceCap30Detection({ preserveEmitted: true });
     this.lastTime = performance.now();
     this.animationId = requestAnimationFrame((t) => this.gameLoop(t));
