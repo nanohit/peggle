@@ -1,5 +1,5 @@
 {
-  "buildCommand": null,
+  "buildCommand": "npx esbuild js/player-bootstrap.js --bundle --format=esm --splitting --outdir=dist",
   "functions": {
     "api/*.js": {
       "includeFiles": "data/player/**"
