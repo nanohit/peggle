@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><base href="/"><title>bg fade probe</title></head>
+<body>
+<div id="host" style="position:relative;width:400px"><canvas id="gameCanvas" width="400" height="600"></canvas></div>
+<script type="module">
+// Verifies the late background fade-in: while a CDN background loads the
+// canvas must be BLACK (not the default blue gradient); when the image
+// arrives late it must ramp in over ~450ms; cached/fast loads must appear
+// immediately with no fade; non-image backgrounds keep the gradient.
+import { Renderer } from '/js/renderer.js';
+
+const log = (s) => console.log('[BGFADE] ' + s);
+const canvas = document.getElementById('gameCanvas');
+const ctx2d = canvas.getContext('2d', { alpha: false });
+const renderer = new Renderer(canvas);
+renderer.resize(400, 600);
+
+const BUNNY = 'https://alea-assets.b-cdn.net/level-assets/backgrounds/2256a3495085cf72e50c41db4e4749ebb87f9f64c9fae930a67b878cee005a45.webp';
+
+const state = (t) => ({
+  pegs: [], hitPegIds: [], balls: [], bucket: null, flippers: null, cameraY: 0,
+  levelProgress: 0, backgroundEvents: [], playState: 'idle',
+  renderTimeSeconds: t, renderDeltaSeconds: 1 / 60, frameDeltaSeconds: 1 / 60,
+  score: 0, ballsLeft: 5, orangePegsLeft: 1, totalOrangePegs: 1
+});
+let t = 0;
+const frame = () => renderer.renderGame(state(t += 1 / 60));
+const px = () => {
+  // Average a center region — single pixels can land on a dark image area.
+  const d = ctx2d.getImageData(120, 200, 160, 200).data;
+  let sum = 0;
+  for (let i = 0; i < d.length; i += 4) sum += (d[i] + d[i + 1] + d[i + 2]) / 3;
+  return { lum: sum / (d.length / 4) };
+};
+const busyWait = (ms) => { const s = performance.now(); while (performance.now() - s < ms) { /* spin */ } };
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+// A: default gradient background stays a gradient (not black)
+renderer.setBackground(null);
+frame();
+const grad = px();
+log(`A default-gradient pixel lum=${grad.lum.toFixed(1)} (want > 8, the blue gradient)`);
+
+// B: late CDN load → black placeholder, then fade-in ramp
+const bustedUrl = BUNNY + '?cb=' + Date.now();
+renderer.setBackground({ type: 'image', image: { kind: 'asset', primaryUrl: bustedUrl } });
+frame();
+busyWait(200); // exceed the 150ms grace synchronously — image cannot load during sync JS
+frame();
+const placeholder = px();
+log(`B placeholder while loading lum=${placeholder.lum.toFixed(1)} (want 0 = black), fadePending=${renderer._bgImageFadePending} (want true)`);
+
+let waited = 0;
+while (!renderer._bgImage && waited < 5000) { await sleep(100); waited += 100; }
+log(`B image loaded after ~${waited}ms: ${!!renderer._bgImage}`);
+
+frame(); // fade starts this frame
+const fadeStart = px();
+await sleep(220);
+frame();
+const fadeMid = px();
+await sleep(450);
+frame();
+const fadeEnd = px();
+log(`B fade lum start=${fadeStart.lum.toFixed(1)} mid=${fadeMid.lum.toFixed(1)} end=${fadeEnd.lum.toFixed(1)} (want rising)`);
+log(`B fade ramp ok: ${fadeStart.lum <= fadeMid.lum && fadeMid.lum < fadeEnd.lum && fadeEnd.lum > placeholder.lum}`);
+log(`B fade finished: ${renderer._bgFadeStartMs === 0}`);
+
+// C: SAME url again (now browser-cached) → loads within grace, no fade.
+// Use a different renderer-side cache key (query suffix) so the renderer
+// actually reloads while the browser serves it from cache.
+renderer.setBackground({ type: 'image', image: { kind: 'asset', primaryUrl: bustedUrl } });
+await sleep(120); // cached load resolves quickly, inside the 150ms grace
+frame();
+const cached = px();
+log(`C cached load: imageReady=${!!renderer._bgImage} lum=${cached.lum.toFixed(1)} fadeStarted=${renderer._bgFadeStartMs > 0} fadePending=${renderer._bgImageFadePending}`);
+log(`C ok: ${!!renderer._bgImage && Math.abs(cached.lum - fadeEnd.lum) < 2 && renderer._bgFadeStartMs === 0 && !renderer._bgImageFadePending} (want ready, same lum as B end, no fade)`);
+
+log('DONE');
+</script>
+</body>
+</html>

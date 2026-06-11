@@ -32,6 +32,7 @@ import { topoOrder, buildNodeMap, buildParentMap, buildLevelIndexMap, graphFromL
 import { validateGraph } from './graph/validate.js';
 import { resolveWin, findNextNode, migrateProgress, isUnlocked } from './graph/progression.js';
 import { api } from './api.js';
+import { isAssetImageSource, assetCacheKey, assetPrimaryUrl } from './asset-ref.js';
 import { decodeBakedLevelJsonFromText } from './baked-level-codec.js';
 import {
   createPvpDuelRoomUrl,
@@ -1468,6 +1469,60 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     return new Set([...completedNodes, ...achievedNodes]);
   }
 
+  // --- Background prefetch ---
+  // CDN-hosted backgrounds load slower than the old inline data did, so warm
+  // the browser HTTP cache one level ahead (graph children of the current
+  // node). The prefetch must mirror the renderer's request mode (crossOrigin)
+  // or the cached response can't be reused for the canvas draw.
+  const prefetchedBgKeys = new Set();
+  let bgPrefetchTimer = null;
+
+  function collectLevelBackgroundSources(level) {
+    const sources = [];
+    const bg = level?.visuals?.background;
+    if (bg?.type === 'image') {
+      sources.push(bg.image);
+      if (bg.progressionImage) sources.push(bg.progressionImage);
+    }
+    const survivalBg = level?.survival?.background;
+    if (survivalBg?.type === 'image' && survivalBg.image) sources.push(survivalBg.image);
+    return sources;
+  }
+
+  function prefetchLevelBackgrounds(level) {
+    for (const src of collectLevelBackgroundSources(level)) {
+      if (!isAssetImageSource(src)) continue;
+      const key = assetCacheKey(src);
+      if (!key || prefetchedBgKeys.has(key)) continue;
+      prefetchedBgKeys.add(key);
+      const url = assetPrimaryUrl(src);
+      if (!url || url.startsWith('data:')) continue;
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.src = url;
+    }
+  }
+
+  function prefetchAdjacentLevelBackgrounds(nodeId) {
+    const node = nodeMap.get(nodeId);
+    const children = Array.isArray(node?.children) ? node.children : [];
+    for (const childId of children) {
+      const levelIndex = nodeIdToLevelIndex.get(childId);
+      const level = levelIndex == null ? null : originalLevels[levelIndex];
+      if (level) prefetchLevelBackgrounds(level);
+    }
+  }
+
+  function schedulePrefetchAdjacentLevelBackgrounds(nodeId, delayMs = 1200) {
+    if (bgPrefetchTimer) clearTimeout(bgPrefetchTimer);
+    bgPrefetchTimer = setTimeout(() => {
+      bgPrefetchTimer = null;
+      try {
+        prefetchAdjacentLevelBackgrounds(nodeId);
+      } catch { /* prefetch is best-effort */ }
+    }, delayMs);
+  }
+
   let campaignHydrationPromise = null;
   function startCampaignHydration() {
     if (!campaignData?.partial || !campaignName) return Promise.resolve(campaignData || null);
@@ -1489,6 +1544,7 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
         }
         saveProgress();
         startCharacterRegistryWarmup();
+        schedulePrefetchAdjacentLevelBackgrounds(currentNodeId, 800);
         return fullCampaign;
       })
       .catch(error => {
@@ -2606,6 +2662,9 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
       markPlayerReady();
       startCharacterRegistryWarmup();
     }));
+    if (!preparedLevel) {
+      schedulePrefetchAdjacentLevelBackgrounds(nodeId);
+    }
     return true;
   }
 
@@ -2615,4 +2674,15 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     : (campaignName ? { pegIntro: createPegIntroOptions() } : {})
   );
   requestAnimationFrame(() => schedulePauseAssetsWarmup());
+  // Cold start: the initial campaign payload is partial (level 1 only), so the
+  // next level's background can't be prefetched until the full campaign is
+  // hydrated. Kick hydration during idle time — it must happen before the
+  // first win anyway — then warm the adjacent backgrounds.
+  if (campaignName) {
+    setTimeout(() => {
+      ensureFullCampaignReady()
+        .then(() => prefetchAdjacentLevelBackgrounds(currentNodeId))
+        .catch(() => { /* best-effort */ });
+    }, 4000);
+  }
 }

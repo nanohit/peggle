@@ -26,6 +26,13 @@ const FLIPPER_ASSET_OPAQUE_TOP_RATIO = 1 / 53;
 const FLIPPER_ASSET_OPAQUE_BOTTOM_RATIO = 51 / 53;
 const MAGNET_FIELD_PROFILE_LIMITS = Object.freeze({ full: 6, balanced: 4, lite: 2 });
 
+// Late background-image fade-in: if a CDN-hosted background takes longer than
+// the grace period to arrive, the level renders on black and the image fades
+// in instead of popping over the placeholder. Cached/instant loads (< grace)
+// keep the old immediate appearance.
+const BG_IMAGE_LATE_GRACE_MS = 150;
+const BG_IMAGE_FADE_IN_MS = 450;
+
 // Magnet-field visualization mode. The persistent GL distortion pass costs
 // ~1ms/frame of GPU+pipeline time the whole time a magnet is on screen, and
 // the cost is fixed pipeline overhead (full-canvas texture upload + sync) —
@@ -398,6 +405,9 @@ export class Renderer {
     this._bgVignetteKey = '';
     this._bgImage = null;
     this._bgImageSrc = '';
+    this._bgConfigSetAtMs = 0;
+    this._bgImageFadePending = false;
+    this._bgFadeStartMs = 0;
     this._bgProgressImage = null;
     this._bgProgressImageSrc = '';
     this._bgBlendTarget = 0;
@@ -853,6 +863,9 @@ export class Renderer {
     this._bgVignetteDirty = true;
     this._bgBlendTarget = 0;
     this._bgBlendDisplayed = 0;
+    this._bgConfigSetAtMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    this._bgImageFadePending = false;
+    this._bgFadeStartMs = 0;
     this._loadBackgroundAsset(config?.type === 'image' ? config.image : null, '_bgImage', '_bgImageSrc', '_bgBaseDirty');
     this._loadBackgroundAsset(this._hasProgressionBackground(config) ? config.progressionImage : null, '_bgProgressImage', '_bgProgressImageSrc', '_bgOverlayDirty');
     if (config?.type !== 'liquid') {
@@ -1204,6 +1217,11 @@ export class Renderer {
       } else {
         ctx.drawImage(image, 0, 0, this.width, this.height);
       }
+    } else if (bg?.type === 'image') {
+      // Image background still loading (CDN): hold black instead of the
+      // default gradient; clear() fades the image in when it arrives.
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(0, 0, this.width, this.height);
     } else if (bg?.type === 'solid') {
       ctx.fillStyle = bg.colorTop || COLORS.backgroundGradientTop;
       ctx.fillRect(0, 0, this.width, this.height);
@@ -1350,7 +1368,44 @@ export class Renderer {
     this._ensureBgBaseCache();
     this._ensureBgOverlayCache();
 
-    this.ctx.drawImage(this._bgBaseCanvas, 0, 0);
+    // Late image-background fade-in (see BG_IMAGE_LATE_GRACE_MS). While the
+    // image is missing the base cache holds black; when it arrives late we
+    // ramp its alpha over black instead of swapping abruptly.
+    let baseAlpha = 1;
+    const bgConf = this.backgroundConfig;
+    if (bgConf?.type === 'image') {
+      const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      if (!this._bgImage) {
+        if (nowMs - this._bgConfigSetAtMs > BG_IMAGE_LATE_GRACE_MS) {
+          this._bgImageFadePending = true;
+        }
+      } else if (this._bgImageFadePending) {
+        this._bgImageFadePending = false;
+        this._bgFadeStartMs = nowMs;
+      }
+      if (this._bgFadeStartMs > 0) {
+        const t = (nowMs - this._bgFadeStartMs) / BG_IMAGE_FADE_IN_MS;
+        if (t >= 1) {
+          this._bgFadeStartMs = 0;
+        } else {
+          baseAlpha = this._smoothstep01(t);
+        }
+      }
+    } else {
+      this._bgImageFadePending = false;
+      this._bgFadeStartMs = 0;
+    }
+
+    if (baseAlpha < 1) {
+      this.ctx.fillStyle = '#000000';
+      this.ctx.fillRect(0, 0, this.width, this.height);
+      this.ctx.save();
+      this.ctx.globalAlpha = baseAlpha;
+      this.ctx.drawImage(this._bgBaseCanvas, 0, 0);
+      this.ctx.restore();
+    } else {
+      this.ctx.drawImage(this._bgBaseCanvas, 0, 0);
+    }
 
     const overlayAlpha = progressionBlend;
     if (overlayAlpha > 0.001 && this._bgOverlayCanvas) {

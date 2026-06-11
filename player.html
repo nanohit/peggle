@@ -28,12 +28,33 @@
             .catch(() => null))
           .catch(() => fetch('/data/player/primary.initial.json', { credentials: 'same-origin' })
             .then(res => res.ok ? res.json() : null)
-            .catch(() => null));
+            .catch(() => null))
+          .then(data => {
+            // Start downloading the first level's (CDN) background in parallel
+            // with the JS bundle. crossOrigin must match the renderer's
+            // canvas-bound request mode or the cache entry won't be reused.
+            try {
+              const bg = data && data.levels && data.levels[0] && data.levels[0].visuals
+                ? data.levels[0].visuals.background
+                : null;
+              if (bg && bg.type === 'image') {
+                const ref = bg.image;
+                const url = typeof ref === 'string' ? ref : (ref && (ref.primaryUrl || ref.url));
+                if (url && !/^data:/i.test(url)) {
+                  const img = new Image();
+                  img.crossOrigin = 'anonymous';
+                  img.src = url;
+                }
+              }
+            } catch (_) {}
+            return data;
+          });
       } catch (_) {}
     })();
   </script>
   <link rel="modulepreload" href="/dist/player-bootstrap.js">
-  <link rel="preload" href="/visuals/backgrounds/background1.webp" as="image" fetchpriority="high">
+  <!-- crossorigin matches the renderer's canvas-bound request mode (else the preload is not reused) -->
+  <link rel="preload" href="/visuals/backgrounds/background1.webp" as="image" fetchpriority="high" crossorigin="anonymous">
   <link rel="preload" href="/visuals/assets_webtp/character.webp" as="image">
   <link rel="preload" href="/visuals/assets_webtp/top.webp" as="image">
   <link rel="preload" href="/visuals/bucket.webp" as="image">
