@@ -14,6 +14,7 @@ import {
 import { getPortalScale, isPortalType } from './portal-defaults.js';
 import { FLIPPER_DEFAULTS } from './flipper-defaults.js';
 import { getMagnetRadius, getMagnetStrength, isMagnetForceActive, normalizeMagnetMode } from './magnet-defaults.js';
+import { normalizePegType } from './peg-types.js';
 import {
   assetCacheKey,
   assetUrlCandidates,
@@ -163,6 +164,7 @@ const PEG_COLORS = {
   billiardYellow: { main: COLORS.billiardYellow, hit: COLORS.billiardYellowHit, glow: COLORS.billiardYellowGlow },
   blue: { main: COLORS.blue, hit: COLORS.blueHit, glow: COLORS.blueGlow },
   green: { main: COLORS.green, hit: COLORS.greenHit, glow: COLORS.greenGlow },
+  lime: { main: COLORS.green, hit: COLORS.greenHit, glow: COLORS.greenGlow },
   purple: { main: COLORS.purple, hit: COLORS.purpleHit, glow: COLORS.purpleGlow },
   multi: { main: COLORS.multi, hit: COLORS.multiHit, glow: COLORS.multiGlow },
   gamble: { main: COLORS.gamble, hit: COLORS.gambleHit, glow: COLORS.gambleGlow },
@@ -649,7 +651,7 @@ export class Renderer {
   }
 
   _getPegSurfaceStyle(type) {
-    return PEG_SURFACE_STYLES[type] || null;
+    return PEG_SURFACE_STYLES[normalizePegType(type)] || null;
   }
 
   _pegSurfaceColors(style, isHit = false) {
@@ -1683,7 +1685,8 @@ export class Renderer {
 
   drawPeg(peg, isHit = false, isSelected = false) {
     const ctx = this.ctx;
-    const colors = PEG_COLORS[peg.type] || PEG_COLORS.blue;
+    const pegType = normalizePegType(peg.type);
+    const colors = PEG_COLORS[pegType] || PEG_COLORS.blue;
     const radius = PHYSICS_CONFIG.pegRadius;
 
     // ── Bumper: metallic circle with ring ──
@@ -1908,7 +1911,7 @@ export class Renderer {
     if (peg.shape === 'brick' && peg.curveSlices && peg.curveSlices.length >= 2) {
       const halfH = getEffectiveBrickSize(peg).height / 2;
       const sl = peg.curveSlices;
-      const surfaceStyle = !peg.color ? this._getPegSurfaceStyle(peg.type) : null;
+      const surfaceStyle = !peg.color ? this._getPegSurfaceStyle(pegType) : null;
       ctx.save();
 
       // Main fill
@@ -1943,11 +1946,11 @@ export class Renderer {
     ctx.save();
     ctx.translate(peg.x, peg.y);
     ctx.rotate(peg.angle || 0);
-    const surfaceStyle = !peg.color ? this._getPegSurfaceStyle(peg.type) : null;
+    const surfaceStyle = !peg.color ? this._getPegSurfaceStyle(pegType) : null;
 
     if (peg.shape === 'brick') {
       const { width: w, height: h } = getEffectiveBrickSize(peg);
-      const brickSprite = surfaceStyle ? this._brickPegBodySprite(peg.type, w, h, isHit) : null;
+      const brickSprite = surfaceStyle ? this._brickPegBodySprite(pegType, w, h, isHit) : null;
 
       if (brickSprite) {
         ctx.drawImage(brickSprite.img, -brickSprite.hw, -brickSprite.hh);
@@ -1959,7 +1962,7 @@ export class Renderer {
       }
     } else {
       // Draw circle peg
-      const pegSprite = surfaceStyle ? this._pegBodySprite(peg.type, radius, isHit) : null;
+      const pegSprite = surfaceStyle ? this._pegBodySprite(pegType, radius, isHit) : null;
       if (pegSprite) {
         const angle = peg.angle || 0;
         if (angle) ctx.rotate(-angle);
@@ -3241,8 +3244,9 @@ export class Renderer {
   drawGhostBricks(ghostBricks, brickW, brickH, pegType, pegShape) {
     if (!ghostBricks || ghostBricks.length === 0) return;
     const ctx = this.ctx;
-    const colors = PEG_COLORS[pegType] || PEG_COLORS.blue;
-    const surfaceStyle = this._getPegSurfaceStyle(pegType);
+    const normalizedPegType = normalizePegType(pegType);
+    const colors = PEG_COLORS[normalizedPegType] || PEG_COLORS.blue;
+    const surfaceStyle = this._getPegSurfaceStyle(normalizedPegType);
     const radius = PHYSICS_CONFIG.pegRadius;
     const halfH = brickH / 2;
     ctx.save();
@@ -3260,7 +3264,7 @@ export class Renderer {
         ctx.save();
         ctx.translate(gb.x, gb.y);
         ctx.rotate(gb.angle || 0);
-        const brickSprite = surfaceStyle ? this._brickPegBodySprite(pegType, brickW, brickH, false) : null;
+        const brickSprite = surfaceStyle ? this._brickPegBodySprite(normalizedPegType, brickW, brickH, false) : null;
         if (brickSprite) {
           ctx.drawImage(brickSprite.img, -brickSprite.hw, -brickSprite.hh);
         } else {
@@ -3279,7 +3283,7 @@ export class Renderer {
         // Circle ghost
         ctx.save();
         ctx.translate(gb.x, gb.y);
-        const pegSprite = surfaceStyle ? this._pegBodySprite(pegType, radius, false) : null;
+        const pegSprite = surfaceStyle ? this._pegBodySprite(normalizedPegType, radius, false) : null;
         if (pegSprite) {
           ctx.drawImage(pegSprite.img, -pegSprite.half, -pegSprite.half);
         } else {

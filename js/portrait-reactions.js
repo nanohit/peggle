@@ -5,6 +5,7 @@ import {
   loadCharacterRegistry,
   resolveCharacterForLevel
 } from './character-config.js';
+import { isAssetImageSource } from './asset-ref.js';
 
 const FAILURE_EVENTS = new Set([
   'spin_lose',
@@ -367,9 +368,9 @@ export class PortraitReactionController {
     if (!slot) return false;
     const value = this.character?.slots?.[slot];
     if (Array.isArray(value)) {
-      return value.some(item => typeof item === 'string' && item.trim());
+      return value.some(isAssetImageSource);
     }
-    return typeof value === 'string' && value.trim().length > 0;
+    return isAssetImageSource(value);
   }
 
   _visibleSlots() {

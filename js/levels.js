@@ -18,6 +18,7 @@ import { normalizeLevelHitPegClearSettings } from './hit-peg-clear-settings.js';
 import { isPortalType, normalizePortalPegProperties } from './portal-defaults.js';
 import { ensureLevelBilliard, isBilliardPegType } from './billiard-mode.js';
 import { isBombMagnetType, normalizeMagnetPegProperties } from './magnet-defaults.js';
+import { normalizePegType } from './peg-types.js';
 import {
   ensureLevelDestruction,
   normalizeDestructionPegProperties
@@ -93,6 +94,7 @@ export function normalizeLevelData(level) {
     survival.enabled = false;
   }
   for (const peg of level.pegs) {
+    peg.type = normalizePegType(peg.type);
     if (peg && peg.groupId != null && !validGroupIds.has(peg.groupId)) {
       peg.groupId = null;
     }
@@ -292,7 +294,7 @@ export class LevelManager {
     
     const newPeg = {
       id: Utils.generateId(),
-      type: peg.type || 'blue',
+      type: normalizePegType(peg.type),
       x: peg.x,
       y: peg.y,
       angle: peg.angle || 0,

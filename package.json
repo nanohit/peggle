@@ -5,7 +5,8 @@
     "check": "node --check api/*.js && node --check scripts/*.mjs && node --check js/main.js && node --check js/editor.js && node --check js/physics.js && node --check js/destruction-mode.js && node --check js/player-bootstrap.js && node --check js/image-compression.js && node --check js/visual-layout.js && node --check js/character-config.js",
     "migrate:assets": "node scripts/migrate-assets.mjs",
     "test:assets": "node scripts/asset-store-smoke.mjs",
-    "test:destruction": "node scripts/destruction-smoke.mjs"
+    "test:destruction": "node scripts/destruction-smoke.mjs",
+    "test:player-regression": "node scripts/player-regression-smoke.mjs"
   },
   "dependencies": {
     "ioredis": "^5.10.0",

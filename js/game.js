@@ -36,6 +36,7 @@ import {
   normalizeLevelHitPegClearSettings
 } from './hit-peg-clear-settings.js';
 import { isPortalType, normalizePortalPegProperties } from './portal-defaults.js';
+import { normalizePegType } from './peg-types.js';
 import {
   getMagnetExplosionPower,
   isBombMagnetPeg,
@@ -53,6 +54,7 @@ const SCORE = {
   orange: 100,
   blue: 10,
   green: 50,
+  lime: 50,
   purple: 500,
   multi: 50,
   gamble: 50,
@@ -2424,6 +2426,7 @@ export class Game {
       : [];
     this.pegs = levelData.pegs.map(p => {
       const copy = { ...p };
+      copy.type = normalizePegType(copy.type);
       if (copy.type === 'multi') {
         copy.multiballSpawnCount = normalizeMultiballSpawnCount(copy.multiballSpawnCount);
       }

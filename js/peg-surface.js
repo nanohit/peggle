@@ -41,6 +41,8 @@ export const PEG_SURFACE_STYLES = {
                    hitBright:'#f4f7fb', hitLight:'#c5ccd8', hitMain:'#8b94a3' }
 };
 
+PEG_SURFACE_STYLES.lime = PEG_SURFACE_STYLES.green;
+
 export const DEFAULT_RECIPE = Object.freeze({
   // L1 — inner volume
   volumeMidStop:     0.42,

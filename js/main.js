@@ -3393,7 +3393,7 @@ class PeggleApp {
     if (!row || !picker || !this.editor) return;
 
     const typeColors = {
-      orange: '#ff6b35', billiardRed: '#e84d4d', billiardYellow: '#ffd447', blue: '#4ecdc4', green: '#95d5b2',
+      orange: '#ff6b35', billiardRed: '#e84d4d', billiardYellow: '#ffd447', blue: '#4ecdc4', green: '#95d5b2', lime: '#95d5b2',
       purple: '#c77dff', multi: '#ff4d9d', obstacle: '#6b7280', bomb: '#ff1f2d', bombMagnet: '#22d3ee',
       gamble: '#8cff00', bumper: '#e0e0e0', portalBlue: '#4ecdc4', portalOrange: '#ff8b3d'
     };
