@@ -17,8 +17,8 @@ import { getMagnetRadius, getMagnetStrength, isMagnetForceActive, normalizeMagne
 import { normalizePegType } from './peg-types.js';
 import {
   assetCacheKey,
-  assetUrlCandidates,
-  isAssetImageSource
+  isAssetImageSource,
+  loadImageFromCandidates
 } from './asset-ref.js';
 
 const FLIPPER_ASSET_SRC = 'visuals/assets_webtp/flipper.webp';
@@ -913,34 +913,16 @@ export class Renderer {
     this[imageProp] = null;
     this[dirtyProp] = true;
 
-    const candidates = assetUrlCandidates(src);
-    const loadCandidate = (index) => {
-      const url = candidates[index];
-      if (!url) {
-        if (this[srcProp] !== key) return;
-        this[imageProp] = null;
-        this[dirtyProp] = true;
-        return;
-      }
-      const img = new Image();
-      // This image is drawn onto the game canvas. Without crossOrigin a
-      // CDN-hosted asset taints the canvas, and every later texImage2D from
-      // it (shockwave/magnet WebGL pass) throws SecurityError — killing all
-      // WebGL effects for the rest of the session. CORS-blocked candidates
-      // fall through to the same-origin /api/assets fallback via onerror.
-      img.crossOrigin = 'anonymous';
-      img.onload = () => {
-        if (this[srcProp] !== key) return;
-        this[imageProp] = img;
-        this[dirtyProp] = true;
-      };
-      img.onerror = () => {
-        if (this[srcProp] !== key) return;
-        loadCandidate(index + 1);
-      };
-      img.src = url;
-    };
-    loadCandidate(0);
+    // This image is drawn onto the game canvas. Without crossOrigin a
+    // CDN-hosted asset taints the canvas, and every later texImage2D from
+    // it (shockwave/magnet WebGL pass) throws SecurityError — killing all
+    // WebGL effects for the rest of the session. Failed/hung candidates
+    // fall through to the same-origin /api/assets fallback.
+    loadImageFromCandidates(src, { crossOrigin: 'anonymous' }).then(result => {
+      if (this[srcProp] !== key) return;
+      this[imageProp] = result ? result.img : null;
+      this[dirtyProp] = true;
+    });
   }
 
   _hasProgressionBackground(bg = this.backgroundConfig) {
@@ -1427,32 +1409,23 @@ export class Renderer {
   _getSurvivalBackgroundImage(src) {
     if (!isAssetImageSource(src)) return null;
     const key = assetCacheKey(src);
-    if (this._survivalBgImageSrc === key && this._survivalBgImage) {
+    if (this._survivalBgImageSrc === key) {
+      // Either loaded, or still loading (null) — don't restart the load.
       return this._survivalBgImage;
     }
 
     this._survivalBgImageSrc = key;
     this._survivalBgImage = null;
-    const candidates = assetUrlCandidates(src);
-    const loadCandidate = (index) => {
-      const url = candidates[index];
-      if (!url) {
-        if (this._survivalBgImageSrc !== key) return;
+    // Drawn onto the game canvas — must not taint it (see _loadBackgroundAsset).
+    loadImageFromCandidates(src, { crossOrigin: 'anonymous' }).then(result => {
+      if (this._survivalBgImageSrc !== key) return;
+      if (result) {
+        this._survivalBgImage = result.img;
+      } else {
         this._survivalBgImage = null;
         this._survivalBgImageSrc = '';
-        return;
       }
-      const img = new Image();
-      // Drawn onto the game canvas — must not taint it (see _loadBackgroundAsset).
-      img.crossOrigin = 'anonymous';
-      this._survivalBgImage = img;
-      img.onerror = () => {
-        if (this._survivalBgImageSrc !== key) return;
-        loadCandidate(index + 1);
-      };
-      img.src = url;
-    };
-    loadCandidate(0);
+    });
     return this._survivalBgImage;
   }
 

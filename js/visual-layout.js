@@ -9,8 +9,8 @@ import {
   assetCacheKey,
   assetCssUrl,
   assetDisplayUrl,
-  assetUrlCandidates,
-  isAssetImageSource
+  isAssetImageSource,
+  loadImageFromCandidates
 } from './asset-ref.js';
 
 const imageCache = new Map();
@@ -35,11 +35,8 @@ async function preloadAsset(basename) {
 }
 
 async function resolveImageSource(source) {
-  for (const url of assetUrlCandidates(source)) {
-    const img = await loadImage(url);
-    if (img) return url;
-  }
-  return '';
+  const result = await loadImageFromCandidates(source);
+  return result ? result.url : '';
 }
 
 const FRAME_HEIGHT_RATIO = 17 / 9;

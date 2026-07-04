@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>cdn-fallback-probe</title></head>
+<body>
+<pre id="out">running…</pre>
+<script type="module">
+// Probe for the CDN blackhole fallback path (asset-ref.js).
+// Serve repo root (python3 -m http.server) and open this page; it fakes an
+// unreachable CDN origin and asserts candidates fall back + reorder.
+import {
+  assetUrlCandidates,
+  loadImageFromCandidates,
+  getCdnHealthStatus
+} from '../js/asset-ref.js';
+
+const out = [];
+const log = (line) => { out.push(line); document.getElementById('out').textContent = out.join('\n'); };
+const DEAD_ORIGIN = 'https://10.255.255.1';
+const REF = {
+  kind: 'asset',
+  key: 'probe/fake.webp',
+  primaryUrl: `${DEAD_ORIGIN}/probe/fake.webp`,
+  fallbackUrl: '/visuals/bucket.webp'
+};
+
+(async () => {
+  try {
+    localStorage.removeItem('peggle_cdn_health_v1');
+
+    const before = assetUrlCandidates(REF);
+    log(`candidates before: ${JSON.stringify(before)}`);
+    log(`assert primary first: ${before[0].startsWith(DEAD_ORIGIN) ? 'PASS' : 'FAIL'}`);
+
+    const t0 = performance.now();
+    const result = await loadImageFromCandidates(REF, { timeoutMs: 1500 });
+    const elapsed = Math.round(performance.now() - t0);
+    log(`load result: ${result ? result.url : 'null'} in ${elapsed}ms`);
+    log(`assert fell back to local: ${result && result.url === '/visuals/bucket.webp' ? 'PASS' : 'FAIL'}`);
+
+    // Give the 4s no-cors probe time to abort and mark the origin down.
+    await new Promise(r => setTimeout(r, 5000));
+    const health = getCdnHealthStatus();
+    log(`health: ${JSON.stringify(health)}`);
+    log(`assert marked down: ${health.status === 'down' && health.origin === DEAD_ORIGIN ? 'PASS' : 'FAIL'}`);
+
+    const after = assetUrlCandidates(REF);
+    log(`candidates after: ${JSON.stringify(after)}`);
+    log(`assert local first after down: ${after[0] === '/visuals/bucket.webp' ? 'PASS' : 'FAIL'}`);
+
+    // Second load must now hit the local candidate immediately (no timeout wait).
+    const t1 = performance.now();
+    const again = await loadImageFromCandidates({ ...REF, key: 'probe/fake2.webp' }, { timeoutMs: 1500 });
+    const fastMs = Math.round(performance.now() - t1);
+    log(`reordered load: ${again ? again.url : 'null'} in ${fastMs}ms`);
+    log(`assert fast local load: ${again && again.url === '/visuals/bucket.webp' && fastMs < 1000 ? 'PASS' : 'FAIL'}`);
+
+    log(out.some(l => l.endsWith('FAIL')) ? 'PROBE-RESULT: FAIL' : 'PROBE-RESULT: PASS');
+  } catch (err) {
+    log(`PROBE-RESULT: ERROR ${err}`);
+  }
+})();
+</script>
+</body>
+</html>

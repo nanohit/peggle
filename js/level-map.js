@@ -7,7 +7,7 @@ import { topoOrder } from './graph/core.js';
 import { computeLayout, toPixelPositions } from './graph/layout.js';
 import { getNodeState } from './graph/progression.js';
 import { getLevelCharacterPortraitSources, loadCharacterRegistry, resolveCharacterForLevel } from './character-config.js';
-import { assetCacheKey, assetUrlCandidates } from './asset-ref.js';
+import { assetCacheKey, loadImageFromCandidates } from './asset-ref.js';
 
 const BIG_R = 38;
 const SMALL_R = 24;
@@ -33,36 +33,25 @@ function loadImg(src) {
   const cached = IMAGE_CACHE.get(cacheKey);
   if (cached) return cached.promise;
   const entry = { image: null, promise: null };
-  const candidates = assetUrlCandidates(src);
-  entry.promise = new Promise(resolve => {
-    const tryCandidate = (index) => {
-      const url = candidates[index];
-      if (!url) {
-        resolve(null);
-        return;
-      }
-      const img = new Image();
-      // Drawn onto the map canvas — keep it untainted (CDN assets send CORS;
-      // a blocked candidate falls through to the same-origin /api/assets one).
-      img.crossOrigin = 'anonymous';
-      img.onload = () => {
-        const finish = () => {
-          entry.image = img;
-          resolve(img);
-        };
-        try {
-          const decodePromise = typeof img.decode === 'function' ? img.decode() : null;
-          if (decodePromise && typeof decodePromise.then === 'function') {
-            decodePromise.then(finish, finish);
-            return;
-          }
-        } catch { /* drawImage can still use the loaded image */ }
-        finish();
-      };
-      img.onerror = () => tryCandidate(index + 1);
-      img.src = url;
+  // Drawn onto the map canvas — keep it untainted (CDN assets send CORS;
+  // a blocked/hung candidate falls through to the same-origin /api/assets one).
+  entry.promise = loadImageFromCandidates(src, { crossOrigin: 'anonymous' }).then(result => {
+    if (!result) {
+      IMAGE_CACHE.delete(cacheKey);
+      return null;
+    }
+    const img = result.img;
+    const finish = () => {
+      entry.image = img;
+      return img;
     };
-    tryCandidate(0);
+    try {
+      const decodePromise = typeof img.decode === 'function' ? img.decode() : null;
+      if (decodePromise && typeof decodePromise.then === 'function') {
+        return decodePromise.then(finish, finish);
+      }
+    } catch { /* drawImage can still use the loaded image */ }
+    return finish();
   });
   IMAGE_CACHE.set(cacheKey, entry);
   return entry.promise;
