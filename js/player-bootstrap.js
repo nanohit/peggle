@@ -32,7 +32,7 @@ import { topoOrder, buildNodeMap, buildParentMap, buildLevelIndexMap, graphFromL
 import { validateGraph } from './graph/validate.js';
 import { resolveWin, findNextNode, migrateProgress, isUnlocked } from './graph/progression.js';
 import { api } from './api.js';
-import { isAssetImageSource, assetCacheKey, assetPrimaryUrl } from './asset-ref.js';
+import { isAssetImageSource, assetCacheKey, loadImageFromCandidates } from './asset-ref.js';
 import { decodeBakedLevelJsonFromText } from './baked-level-codec.js';
 import {
   createPvpDuelRoomUrl,
@@ -1495,11 +1495,9 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
       const key = assetCacheKey(src);
       if (!key || prefetchedBgKeys.has(key)) continue;
       prefetchedBgKeys.add(key);
-      const url = assetPrimaryUrl(src);
-      if (!url || url.startsWith('data:')) continue;
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.src = url;
+      // Same candidate walker as real loads: honors CDN health ordering and
+      // never leaves a prefetch hanging on a blackholed host.
+      loadImageFromCandidates(src, { crossOrigin: 'anonymous' });
     }
   }
 

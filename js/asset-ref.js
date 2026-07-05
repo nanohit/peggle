@@ -8,7 +8,7 @@ const REMOTE_API_ORIGIN = 'https://peggle.vercel.app';
 const CDN_HEALTH_STORAGE_KEY = 'peggle_cdn_health_v2';
 const CDN_PROBE_TIMEOUT_MS = 4000;
 const CDN_HEALTH_TTL_MS = 5 * 60 * 1000;
-const IMAGE_CANDIDATE_TIMEOUT_MS = 10000;
+const IMAGE_CANDIDATE_TIMEOUT_MS = 8000;
 
 // Same Bunny pull zone under a hostname DPI filters don't match. For every
 // candidate on the blocked-prone default hostname, an alias candidate with
@@ -65,10 +65,19 @@ function isLocalAssetUrl(url) {
   return !origin || origin === 'null' || origin === location.origin;
 }
 
+// Fired on every probe verdict so in-flight image loads against a
+// just-declared-dead origin can bail out immediately instead of waiting
+// out their own timeout.
+const cdnHealthListeners = new Set();
+
 function noteCdnReachability(origin, reachable) {
   if (!origin) return;
-  cdnHealthByOrigin.set(origin, { status: reachable ? 'ok' : 'down', checkedAt: Date.now() });
+  const status = reachable ? 'ok' : 'down';
+  cdnHealthByOrigin.set(origin, { status, checkedAt: Date.now() });
   persistCdnHealth();
+  for (const listener of [...cdnHealthListeners]) {
+    try { listener(origin, status); } catch { /* listener errors must not break probes */ }
+  }
 }
 
 function getOriginStatus(origin) {
@@ -246,20 +255,32 @@ export function assetCacheKey(value) {
 function loadOneImage(url, crossOrigin, timeoutMs) {
   return new Promise(resolve => {
     let settled = false;
+    let timer = 0;
     const img = new Image();
     if (crossOrigin) img.crossOrigin = crossOrigin;
+    const remoteOrigin = isLocalAssetUrl(url) ? '' : urlOrigin(url);
     const finish = (ok) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       img.onload = null;
       img.onerror = null;
+      if (remoteOrigin) cdnHealthListeners.delete(onHealthChange);
+      if (!ok) {
+        // Cancel the pending request: frees the socket and stops the
+        // browser's page-loading spinner from hanging on a blackholed host.
+        try { img.src = ''; } catch { /* ignore */ }
+      }
       resolve(ok ? img : null);
     };
+    const onHealthChange = (origin, status) => {
+      if (origin === remoteOrigin && status === 'down') finish(false);
+    };
+    if (remoteOrigin) cdnHealthListeners.add(onHealthChange);
     // The timeout is what makes fallback usable on blackholing ISPs: a hung
     // candidate would otherwise stall the chain for the browser's own
     // multi-minute connect timeout.
-    const timer = setTimeout(() => finish(false), timeoutMs);
+    timer = setTimeout(() => finish(false), timeoutMs);
     img.onload = () => finish(true);
     img.onerror = () => finish(false);
     img.src = url;
@@ -280,7 +301,15 @@ export function loadImageFromCandidates(value, options = {}) {
   const cached = imageResultCache.get(cacheKey);
   if (cached) return cached;
   const promise = (async () => {
-    for (const url of assetUrlCandidates(value)) {
+    const candidates = assetUrlCandidates(value);
+    for (let i = 0; i < candidates.length; i++) {
+      const url = candidates[i];
+      // The candidate order was ranked when the list was built; if a probe
+      // has since declared this origin dead, skip it (unless it is the very
+      // last resort) instead of burning the full timeout on it.
+      if (i < candidates.length - 1
+        && !isLocalAssetUrl(url)
+        && getOriginStatus(urlOrigin(url)) === 'down') continue;
       const img = await loadOneImage(url, crossOrigin, timeoutMs);
       if (img) return { img, url };
     }

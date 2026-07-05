@@ -18,6 +18,7 @@
   .badge.wait { background: #2a3245; color: #8a93a6; }
   .badge.ok   { background: #10391f; color: #4ade80; }
   .badge.fail { background: #431a1a; color: #f87171; }
+  .badge.info { background: #1e3a5f; color: #7dd3fc; }
   .test-name { font-weight: 600; }
   .test-detail { color: #8a93a6; font-size: 13px; margin: 6px 0 0 84px; word-break: break-all; }
   .verdict { margin-top: 20px; padding: 14px 16px; border-radius: 10px; font-weight: 600;
@@ -45,13 +46,16 @@
   var ASSET_PATH = '/level-assets/backgrounds/2256a3495085cf72e50c41db4e4749ebb87f9f64c9fae930a67b878cee005a45.webp';
   var API_PATH = '/api/assets?key=level-assets/backgrounds/2256a3495085cf72e50c41db4e4749ebb87f9f64c9fae930a67b878cee005a45.webp';
   var TIMEOUT_MS = 10000;
+  var WATCHDOG_MS = 12000;
 
   var TESTS = [
-    { id: 'api',   name: 'Резервный канал (alea.sh /api/assets)' },
-    { id: 'reach', name: 'CDN отвечает (b-cdn.net, соединение)' },
-    { id: 'fetch', name: 'CDN отдаёт картинку (fetch + CORS)' },
-    { id: 'img',   name: 'CDN картинка через <img> (как в игре)' },
-    { id: 'alias', name: 'Обходной CDN-домен (cdn.alea.sh)' }
+    { id: 'api',      name: 'Резервный канал (alea.sh /api/assets)' },
+    { id: 'reach',    name: 'CDN отвечает (b-cdn.net, соединение)' },
+    { id: 'fetch',    name: 'CDN отдаёт картинку (fetch + CORS)' },
+    { id: 'img',      name: 'CDN картинка через <img> (как в игре)' },
+    { id: 'alias',    name: 'Обходной домен (cdn.alea.sh, fetch)' },
+    { id: 'aliasimg', name: 'Обходной домен через <img> (как в игре)' },
+    { id: 'dns',      name: 'DNS через dns.google (справочно)', info: true }
   ];
 
   var results = {};
@@ -69,13 +73,30 @@
   document.getElementById('meta').textContent =
     new Date().toISOString() + ' · ' + navigator.userAgent;
 
-  function report(id, ok, detail) {
+  function report(id, ok, detail, info) {
+    if (results[id]) return;
     results[id] = { ok: ok, detail: detail };
     var badge = document.getElementById('badge-' + id);
-    badge.className = 'badge ' + (ok ? 'ok' : 'fail');
-    badge.textContent = ok ? 'OK' : 'ОШИБКА';
+    badge.className = 'badge ' + (info ? 'info' : (ok ? 'ok' : 'fail'));
+    badge.textContent = info ? 'ИНФО' : (ok ? 'OK' : 'ОШИБКА');
     document.getElementById('detail-' + id).textContent = detail;
     if (Object.keys(results).length === TESTS.length) finish();
+  }
+
+  // Every test races a hard watchdog: on iOS AbortController does not always
+  // reject a fetch stuck in the connect phase, so without this the page can
+  // hang on «…» forever on a blackholing ISP.
+  function runTest(id, fn, info) {
+    var watchdog = new Promise(function (_, rej) {
+      setTimeout(function () {
+        rej(new Error('завис ' + WATCHDOG_MS + ' мс, даже отмена не сработала — blackhole-блокировка'));
+      }, WATCHDOG_MS);
+    });
+    Promise.race([fn(), watchdog]).then(function (r) {
+      report(id, r.ok !== false, r.detail, info);
+    }, function (e) {
+      report(id, false, e && e.message ? e.message : String(e), info);
+    });
   }
 
   function timedFetch(url, opts) {
@@ -98,60 +119,74 @@
     });
   }
 
-  timedFetch(API_PATH).then(function (r) {
-    return r.res.arrayBuffer().then(function (buf) {
-      report('api', r.res.ok, 'HTTP ' + r.res.status + ' · ' + buf.byteLength + ' байт · ' + r.ms + ' мс');
+  function fetchAsset(url) {
+    return timedFetch(url).then(function (r) {
+      return r.res.arrayBuffer().then(function (buf) {
+        return { ok: r.res.ok, detail: 'HTTP ' + r.res.status + ' · ' + buf.byteLength + ' байт · ' + r.ms + ' мс' };
+      });
     });
-  }).catch(function (e) { report('api', false, e.message); });
+  }
 
-  timedFetch(CDN_HOST + '/', { mode: 'no-cors' }).then(function (r) {
-    report('reach', true, 'сервер ответил · ' + r.ms + ' мс');
-  }).catch(function (e) { report('reach', false, e.message); });
-
-  timedFetch(CDN_HOST + ASSET_PATH).then(function (r) {
-    return r.res.arrayBuffer().then(function (buf) {
-      report('fetch', r.res.ok, 'HTTP ' + r.res.status + ' · ' + buf.byteLength + ' байт · ' + r.ms + ' мс');
+  function imageTest(url) {
+    return new Promise(function (resolve) {
+      var started = performance.now();
+      var done = false;
+      var img = new Image();
+      img.crossOrigin = 'anonymous';
+      var timer = setTimeout(function () {
+        if (done) return; done = true;
+        img.src = '';
+        resolve({ ok: false, detail: 'таймаут ' + TIMEOUT_MS + ' мс (соединение висит — похоже на блокировку)' });
+      }, TIMEOUT_MS);
+      img.onload = function () {
+        if (done) return; done = true; clearTimeout(timer);
+        resolve({ ok: true, detail: img.naturalWidth + '×' + img.naturalHeight + ' · ' + Math.round(performance.now() - started) + ' мс' });
+      };
+      img.onerror = function () {
+        if (done) return; done = true; clearTimeout(timer);
+        resolve({ ok: false, detail: 'ошибка загрузки за ' + Math.round(performance.now() - started) + ' мс' });
+      };
+      img.src = url + '?cb=' + Date.now();
     });
-  }).catch(function (e) { report('fetch', false, e.message); });
+  }
 
-  timedFetch(ALIAS_HOST + ASSET_PATH).then(function (r) {
-    return r.res.arrayBuffer().then(function (buf) {
-      report('alias', r.res.ok, 'HTTP ' + r.res.status + ' · ' + buf.byteLength + ' байт · ' + r.ms + ' мс');
+  function dohLookup(name) {
+    return timedFetch('https://dns.google/resolve?name=' + name + '&type=A').then(function (r) {
+      return r.res.json().then(function (data) {
+        var answers = (data.Answer || []).map(function (a) { return a.data; }).join(', ');
+        return name + ' → ' + (answers || 'нет ответа');
+      });
+    }, function () { return name + ' → dns.google недоступен'; });
+  }
+
+  runTest('api', function () { return fetchAsset(API_PATH); });
+  runTest('reach', function () {
+    return timedFetch(CDN_HOST + '/', { mode: 'no-cors' }).then(function (r) {
+      return { ok: true, detail: 'сервер ответил · ' + r.ms + ' мс' };
     });
-  }).catch(function (e) { report('alias', false, e.message); });
-
-  (function () {
-    var started = performance.now();
-    var done = false;
-    var img = new Image();
-    img.crossOrigin = 'anonymous';
-    var timer = setTimeout(function () {
-      if (done) return; done = true;
-      report('img', false, 'таймаут ' + TIMEOUT_MS + ' мс (соединение висит — похоже на блокировку)');
-    }, TIMEOUT_MS);
-    img.onload = function () {
-      if (done) return; done = true; clearTimeout(timer);
-      report('img', true, img.naturalWidth + '×' + img.naturalHeight + ' · ' + Math.round(performance.now() - started) + ' мс');
-    };
-    img.onerror = function () {
-      if (done) return; done = true; clearTimeout(timer);
-      report('img', false, 'ошибка загрузки за ' + Math.round(performance.now() - started) + ' мс');
-    };
-    img.src = CDN_HOST + ASSET_PATH + '?cb=' + Date.now();
-  })();
+  });
+  runTest('fetch', function () { return fetchAsset(CDN_HOST + ASSET_PATH); });
+  runTest('img', function () { return imageTest(CDN_HOST + ASSET_PATH); });
+  runTest('alias', function () { return fetchAsset(ALIAS_HOST + ASSET_PATH); });
+  runTest('aliasimg', function () { return imageTest(ALIAS_HOST + ASSET_PATH); });
+  runTest('dns', function () {
+    return Promise.all([dohLookup('cdn.alea.sh'), dohLookup('alea-assets.b-cdn.net')])
+      .then(function (parts) { return { ok: true, detail: parts.join(' · ') }; });
+  }, true);
 
   function finish() {
     var v = document.getElementById('verdict');
     var cdnOk = results.reach.ok && results.fetch.ok && results.img.ok;
+    var aliasOk = results.alias.ok || results.aliasimg.ok;
     if (cdnOk && results.api.ok) {
       v.className = 'verdict ok';
       v.textContent = 'Всё доступно: и CDN, и резервный канал. Проблем с этого подключения нет.';
-    } else if (!cdnOk && results.alias.ok) {
+    } else if (!cdnOk && aliasOk) {
       v.className = 'verdict ok';
       v.textContent = 'b-cdn.net заблокирован, но обходной домен cdn.alea.sh работает — игра будет грузиться через него на полной скорости CDN.';
     } else if (!cdnOk && results.api.ok) {
       v.className = 'verdict warn';
-      v.textContent = 'CDN (b-cdn.net) недоступен с этого подключения, но резервный канал через alea.sh работает — игра должна грузиться через него.';
+      v.textContent = 'Заблокированы и b-cdn.net, и cdn.alea.sh (похоже на блокировку по IP-адресам). Игра работает через резервный канал alea.sh.';
     } else if (cdnOk && !results.api.ok) {
       v.className = 'verdict warn';
       v.textContent = 'CDN работает, но резервный канал alea.sh /api/assets не отвечает.';
