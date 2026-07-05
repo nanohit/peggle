@@ -10,11 +10,18 @@ const CDN_PROBE_TIMEOUT_MS = 4000;
 const CDN_HEALTH_TTL_MS = 5 * 60 * 1000;
 const IMAGE_CANDIDATE_TIMEOUT_MS = 8000;
 
-// Same Bunny pull zone under a hostname DPI filters don't match. For every
-// candidate on the blocked-prone default hostname, an alias candidate with
-// the same path is inserted right after it.
+// Alternative delivery fronts for the same content. For every candidate on
+// the blocked-prone default hostname, alias candidates with the same asset
+// path are inserted right after it: cdn.alea.sh pins Bunny EU edge IPs;
+// jsDelivr and GitHub Pages serve the public nanohit/alea-assets mirror
+// (synced via scripts/mirror-assets-to-github.mjs). Per-origin health probes
+// rank whichever fronts are reachable first, so dead ones cost nothing.
 const CDN_ALIAS_ORIGINS = {
-  'https://alea-assets.b-cdn.net': 'https://cdn.alea.sh'
+  'https://alea-assets.b-cdn.net': [
+    'https://cdn.alea.sh',
+    'https://cdn.jsdelivr.net/gh/nanohit/alea-assets@main',
+    'https://nanohit.me/alea-assets'
+  ]
 };
 
 const cdnHealthByOrigin = new Map(); // origin -> { status: 'ok'|'down', checkedAt }
@@ -203,8 +210,9 @@ function withCdnAliases(urls) {
   const expanded = [];
   for (const url of urls) {
     expanded.push(url);
-    for (const [origin, alias] of Object.entries(CDN_ALIAS_ORIGINS)) {
-      if (url.startsWith(`${origin}/`)) expanded.push(alias + url.slice(origin.length));
+    for (const [origin, bases] of Object.entries(CDN_ALIAS_ORIGINS)) {
+      if (!url.startsWith(`${origin}/`)) continue;
+      for (const base of bases) expanded.push(base + url.slice(origin.length));
     }
   }
   return [...new Set(expanded)];

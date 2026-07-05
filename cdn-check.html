@@ -55,6 +55,8 @@
     { id: 'img',      name: 'CDN картинка через <img> (как в игре)' },
     { id: 'alias',    name: 'Обходной домен (cdn.alea.sh, fetch)' },
     { id: 'aliasimg', name: 'Обходной домен через <img> (как в игре)' },
+    { id: 'jsd',      name: 'Зеркало через jsDelivr' },
+    { id: 'pages',    name: 'Зеркало через GitHub Pages' },
     { id: 'dns',      name: 'DNS через dns.google (справочно)', info: true }
   ];
 
@@ -169,6 +171,8 @@
   runTest('img', function () { return imageTest(CDN_HOST + ASSET_PATH); });
   runTest('alias', function () { return fetchAsset(ALIAS_HOST + ASSET_PATH); });
   runTest('aliasimg', function () { return imageTest(ALIAS_HOST + ASSET_PATH); });
+  runTest('jsd', function () { return fetchAsset('https://cdn.jsdelivr.net/gh/nanohit/alea-assets@main' + ASSET_PATH); });
+  runTest('pages', function () { return fetchAsset('https://nanohit.me/alea-assets' + ASSET_PATH); });
   runTest('dns', function () {
     return Promise.all([dohLookup('cdn.alea.sh'), dohLookup('alea-assets.b-cdn.net')])
       .then(function (parts) { return { ok: true, detail: parts.join(' · ') }; });
@@ -177,16 +181,19 @@
   function finish() {
     var v = document.getElementById('verdict');
     var cdnOk = results.reach.ok && results.fetch.ok && results.img.ok;
-    var aliasOk = results.alias.ok || results.aliasimg.ok;
+    var fronts = [];
+    if (results.alias.ok || results.aliasimg.ok) fronts.push('cdn.alea.sh');
+    if (results.jsd.ok) fronts.push('jsDelivr');
+    if (results.pages.ok) fronts.push('GitHub Pages');
     if (cdnOk && results.api.ok) {
       v.className = 'verdict ok';
       v.textContent = 'Всё доступно: и CDN, и резервный канал. Проблем с этого подключения нет.';
-    } else if (!cdnOk && aliasOk) {
+    } else if (!cdnOk && fronts.length) {
       v.className = 'verdict ok';
-      v.textContent = 'b-cdn.net заблокирован, но обходной домен cdn.alea.sh работает — игра будет грузиться через него на полной скорости CDN.';
+      v.textContent = 'b-cdn.net заблокирован, но работает обход: ' + fronts.join(', ') + ' — игра будет грузиться через него на скорости CDN.';
     } else if (!cdnOk && results.api.ok) {
       v.className = 'verdict warn';
-      v.textContent = 'Заблокированы и b-cdn.net, и cdn.alea.sh (похоже на блокировку по IP-адресам). Игра работает через резервный канал alea.sh.';
+      v.textContent = 'Заблокированы все CDN-фронты (похоже на блокировку по IP-адресам). Игра работает через резервный канал alea.sh.';
     } else if (cdnOk && !results.api.ok) {
       v.className = 'verdict warn';
       v.textContent = 'CDN работает, но резервный канал alea.sh /api/assets не отвечает.';
