@@ -41,6 +41,7 @@
 <script>
 (function () {
   var CDN_HOST = 'https://alea-assets.b-cdn.net';
+  var ALIAS_HOST = 'https://cdn.alea.sh';
   var ASSET_PATH = '/level-assets/backgrounds/2256a3495085cf72e50c41db4e4749ebb87f9f64c9fae930a67b878cee005a45.webp';
   var API_PATH = '/api/assets?key=level-assets/backgrounds/2256a3495085cf72e50c41db4e4749ebb87f9f64c9fae930a67b878cee005a45.webp';
   var TIMEOUT_MS = 10000;
@@ -49,7 +50,8 @@
     { id: 'api',   name: 'Резервный канал (alea.sh /api/assets)' },
     { id: 'reach', name: 'CDN отвечает (b-cdn.net, соединение)' },
     { id: 'fetch', name: 'CDN отдаёт картинку (fetch + CORS)' },
-    { id: 'img',   name: 'CDN картинка через <img> (как в игре)' }
+    { id: 'img',   name: 'CDN картинка через <img> (как в игре)' },
+    { id: 'alias', name: 'Обходной CDN-домен (cdn.alea.sh)' }
   ];
 
   var results = {};
@@ -112,6 +114,12 @@
     });
   }).catch(function (e) { report('fetch', false, e.message); });
 
+  timedFetch(ALIAS_HOST + ASSET_PATH).then(function (r) {
+    return r.res.arrayBuffer().then(function (buf) {
+      report('alias', r.res.ok, 'HTTP ' + r.res.status + ' · ' + buf.byteLength + ' байт · ' + r.ms + ' мс');
+    });
+  }).catch(function (e) { report('alias', false, e.message); });
+
   (function () {
     var started = performance.now();
     var done = false;
@@ -138,6 +146,9 @@
     if (cdnOk && results.api.ok) {
       v.className = 'verdict ok';
       v.textContent = 'Всё доступно: и CDN, и резервный канал. Проблем с этого подключения нет.';
+    } else if (!cdnOk && results.alias.ok) {
+      v.className = 'verdict ok';
+      v.textContent = 'b-cdn.net заблокирован, но обходной домен cdn.alea.sh работает — игра будет грузиться через него на полной скорости CDN.';
     } else if (!cdnOk && results.api.ok) {
       v.className = 'verdict warn';
       v.textContent = 'CDN (b-cdn.net) недоступен с этого подключения, но резервный канал через alea.sh работает — игра должна грузиться через него.';

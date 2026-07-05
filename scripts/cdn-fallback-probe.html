@@ -25,7 +25,7 @@ const REF = {
 
 (async () => {
   try {
-    localStorage.removeItem('peggle_cdn_health_v1');
+    localStorage.removeItem('peggle_cdn_health_v2');
 
     const before = assetUrlCandidates(REF);
     log(`candidates before: ${JSON.stringify(before)}`);
@@ -41,7 +41,8 @@ const REF = {
     await new Promise(r => setTimeout(r, 5000));
     const health = getCdnHealthStatus();
     log(`health: ${JSON.stringify(health)}`);
-    log(`assert marked down: ${health.status === 'down' && health.origin === DEAD_ORIGIN ? 'PASS' : 'FAIL'}`);
+    const deadEntry = health.origins && health.origins[DEAD_ORIGIN];
+    log(`assert marked down: ${deadEntry && deadEntry.status === 'down' ? 'PASS' : 'FAIL'}`);
 
     const after = assetUrlCandidates(REF);
     log(`candidates after: ${JSON.stringify(after)}`);

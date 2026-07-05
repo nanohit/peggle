@@ -3,14 +3,22 @@ const REMOTE_API_ORIGIN = 'https://peggle.vercel.app';
 // Some ISPs (notably consumer providers in Russia) blackhole the Bunny CDN
 // hostname: connections hang without an error, so <img> fallback chains stall
 // for the browser's full connect timeout on every asset. A cheap reachability
-// probe flips candidate ordering to the same-origin /api/assets fallback for
-// the whole session instead.
-const CDN_HEALTH_STORAGE_KEY = 'peggle_cdn_health_v1';
+// probe per CDN origin reorders candidates: healthy CDNs first, same-origin
+// /api/assets next, unreachable CDNs last.
+const CDN_HEALTH_STORAGE_KEY = 'peggle_cdn_health_v2';
 const CDN_PROBE_TIMEOUT_MS = 4000;
 const CDN_HEALTH_TTL_MS = 5 * 60 * 1000;
 const IMAGE_CANDIDATE_TIMEOUT_MS = 10000;
 
-const cdnHealth = { origin: '', status: 'unknown', checkedAt: 0, probing: false };
+// Same Bunny pull zone under a hostname DPI filters don't match. For every
+// candidate on the blocked-prone default hostname, an alias candidate with
+// the same path is inserted right after it.
+const CDN_ALIAS_ORIGINS = {
+  'https://alea-assets.b-cdn.net': 'https://cdn.alea.sh'
+};
+
+const cdnHealthByOrigin = new Map(); // origin -> { status: 'ok'|'down', checkedAt }
+const cdnProbesInFlight = new Set();
 
 function loadPersistedCdnHealth() {
   try {
@@ -18,11 +26,15 @@ function loadPersistedCdnHealth() {
     const raw = localStorage.getItem(CDN_HEALTH_STORAGE_KEY);
     if (!raw) return;
     const data = JSON.parse(raw);
-    if (!data || typeof data.origin !== 'string') return;
-    if (data.status !== 'ok' && data.status !== 'down') return;
-    cdnHealth.origin = data.origin;
-    cdnHealth.status = data.status;
-    cdnHealth.checkedAt = Number(data.checkedAt) || 0;
+    const origins = data && typeof data.origins === 'object' ? data.origins : null;
+    if (!origins) return;
+    for (const [origin, entry] of Object.entries(origins)) {
+      if (!entry || (entry.status !== 'ok' && entry.status !== 'down')) continue;
+      cdnHealthByOrigin.set(origin, {
+        status: entry.status,
+        checkedAt: Number(entry.checkedAt) || 0
+      });
+    }
   } catch { /* storage unavailable */ }
 }
 
@@ -30,11 +42,9 @@ loadPersistedCdnHealth();
 
 function persistCdnHealth() {
   try {
-    localStorage.setItem(CDN_HEALTH_STORAGE_KEY, JSON.stringify({
-      origin: cdnHealth.origin,
-      status: cdnHealth.status,
-      checkedAt: cdnHealth.checkedAt
-    }));
+    const origins = {};
+    for (const [origin, entry] of cdnHealthByOrigin) origins[origin] = entry;
+    localStorage.setItem(CDN_HEALTH_STORAGE_KEY, JSON.stringify({ origins }));
   } catch { /* storage unavailable */ }
 }
 
@@ -57,20 +67,21 @@ function isLocalAssetUrl(url) {
 
 function noteCdnReachability(origin, reachable) {
   if (!origin) return;
-  cdnHealth.origin = origin;
-  cdnHealth.status = reachable ? 'ok' : 'down';
-  cdnHealth.checkedAt = Date.now();
+  cdnHealthByOrigin.set(origin, { status: reachable ? 'ok' : 'down', checkedAt: Date.now() });
   persistCdnHealth();
 }
 
+function getOriginStatus(origin) {
+  const entry = cdnHealthByOrigin.get(origin);
+  return entry ? entry.status : 'unknown';
+}
+
 function ensureCdnProbe(origin) {
-  if (!origin || cdnHealth.probing) return;
+  if (!origin || cdnProbesInFlight.has(origin)) return;
   if (typeof fetch !== 'function' || typeof AbortController !== 'function') return;
-  const fresh = cdnHealth.origin === origin
-    && cdnHealth.status !== 'unknown'
-    && (Date.now() - cdnHealth.checkedAt) < CDN_HEALTH_TTL_MS;
-  if (fresh) return;
-  cdnHealth.probing = true;
+  const entry = cdnHealthByOrigin.get(origin);
+  if (entry && (Date.now() - entry.checkedAt) < CDN_HEALTH_TTL_MS) return;
+  cdnProbesInFlight.add(origin);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), CDN_PROBE_TIMEOUT_MS);
   // no-cors: an opaque response (even a 404) still proves the host answers;
@@ -80,12 +91,14 @@ function ensureCdnProbe(origin) {
     .catch(() => noteCdnReachability(origin, false))
     .finally(() => {
       clearTimeout(timer);
-      cdnHealth.probing = false;
+      cdnProbesInFlight.delete(origin);
     });
 }
 
 export function getCdnHealthStatus() {
-  return { origin: cdnHealth.origin, status: cdnHealth.status, checkedAt: cdnHealth.checkedAt };
+  const origins = {};
+  for (const [origin, entry] of cdnHealthByOrigin) origins[origin] = { ...entry };
+  return { origins };
 }
 
 function isPlainObject(value) {
@@ -177,6 +190,24 @@ export function isAssetImageSource(value) {
   return !!normalizeAssetImageValue(value);
 }
 
+function withCdnAliases(urls) {
+  const expanded = [];
+  for (const url of urls) {
+    expanded.push(url);
+    for (const [origin, alias] of Object.entries(CDN_ALIAS_ORIGINS)) {
+      if (url.startsWith(`${origin}/`)) expanded.push(alias + url.slice(origin.length));
+    }
+  }
+  return [...new Set(expanded)];
+}
+
+// 0 = remote believed reachable (or not yet probed), 1 = same-origin
+// fallback, 2 = remote known unreachable. Stable within each rank.
+function candidateRank(url) {
+  if (isLocalAssetUrl(url)) return 1;
+  return getOriginStatus(urlOrigin(url)) === 'down' ? 2 : 0;
+}
+
 export function assetUrlCandidates(value) {
   if (typeof value === 'string') {
     const url = cleanUrl(value);
@@ -184,20 +215,21 @@ export function assetUrlCandidates(value) {
   }
   const asset = normalizeAssetReference(value);
   if (!asset) return [];
-  const candidates = [...new Set([
+  const candidates = withCdnAliases([...new Set([
     asset.primaryUrl,
     asset.url,
     asset.fallbackUrl,
     asset.key ? fallbackUrlForKey(asset.key) : ''
-  ].map(cleanUrl).filter(Boolean))];
-  const remote = candidates.filter(url => !isLocalAssetUrl(url));
-  if (!remote.length) return candidates;
-  ensureCdnProbe(urlOrigin(remote[0]));
-  if (cdnHealth.status === 'down') {
-    const local = candidates.filter(isLocalAssetUrl);
-    if (local.length) return [...local, ...remote];
-  }
-  return candidates;
+  ].map(cleanUrl).filter(Boolean))]);
+  const remoteOrigins = [...new Set(
+    candidates.filter(url => !isLocalAssetUrl(url)).map(urlOrigin).filter(Boolean)
+  )];
+  if (!remoteOrigins.length) return candidates;
+  for (const origin of remoteOrigins) ensureCdnProbe(origin);
+  return candidates
+    .map((url, index) => ({ url, index, rank: candidateRank(url) }))
+    .sort((a, b) => a.rank - b.rank || a.index - b.index)
+    .map(entry => entry.url);
 }
 
 export function assetPrimaryUrl(value) {
