@@ -2208,11 +2208,15 @@ export class Game {
   }
 
   updatePortalPulses(dt) {
+    this._portalPulsesActive = false;
     const decay = Math.max(0, dt) * this._portalFxDecayPerSecond;
     if (decay <= 0 || !Array.isArray(this.pegs)) return;
     for (const peg of this.pegs) {
       if (!peg || !isPortalType(peg.type) || !Number.isFinite(peg._portalPulse)) continue;
-      peg._portalPulse = Math.max(0, peg._portalPulse - decay);
+      if (peg._portalPulse > 0) {
+        peg._portalPulse = Math.max(0, peg._portalPulse - decay);
+        this._portalPulsesActive = true;
+      }
     }
   }
 
@@ -3610,10 +3614,12 @@ export class Game {
   // peg-driven bumper hits (which can occur while idle/settling, not just while a ball
   // is in play) don't leave the bumper stuck enlarged.
   decayBumperHitScales() {
+    this._bumperPulsesActive = false;
     for (const peg of this.pegs) {
       if (peg._bumperHitScale && peg._bumperHitScale > 1.001) {
         peg._bumperHitScale = 1 + (peg._bumperHitScale - 1) * 0.85;
         if (peg._bumperHitScale < 1.005) peg._bumperHitScale = 1;
+        this._bumperPulsesActive = true;
       }
     }
   }
@@ -3756,6 +3762,7 @@ export class Game {
     if (this.deepFreezeSystem.isActive()) {
       this.deepFreezeSystem.syncPegPositions(this.pegs, this.animator.getAnimatedPegIds());
     }
+    this._frameAnimatorMoved = animatorMoved;
     // Only invalidate the peg collision grid when something actually moved a peg.
     // Peg add/remove self-dirties via physics.setPegs(); destruction self-dirties
     // in syncDestructionAnimatedBodies()/stepDestructionPegs(). Billiard and deep
@@ -4196,6 +4203,39 @@ export class Game {
     return lowestPeg;
   }
 
+  _levelHasPortalPegs() {
+    const pegs = this.pegs;
+    const cache = this._portalScanCache;
+    if (!cache || cache.pegs !== pegs || cache.length !== pegs.length) {
+      let has = false;
+      for (const peg of pegs) {
+        if (peg && isPortalType(peg.type)) { has = true; break; }
+      }
+      this._portalScanCache = { pegs, length: pegs.length, has };
+      return has;
+    }
+    return cache.has;
+  }
+
+  // True while anything on the base scene layer (background/pegs/trajectory)
+  // is time-animated this frame. When false, the renderer can prove the layer
+  // unchanged from its input signature and skip the whole redraw.
+  _isBaseSceneDynamic() {
+    return !!(
+      this._frameAnimatorMoved
+      || this._portalPulsesActive
+      || this._bumperPulsesActive
+      || this.isSurvivalMode()
+      || this.isBilliardPhase()
+      || this.deepFreezeSystem.isActive()
+      || (this.isDestructionMode() && this.destructionSystem.needsFixedStep())
+      || this.isUltraAimQteActive()
+      || this._levelHasPortalPegs()
+      // The perf overlay paints directly onto the base canvas every frame.
+      || this.showPerfOverlay
+    );
+  }
+
   render() {
     const allHitIds = [...this.hitPegIds, ...this.turnHitPegIds];
     const ultraAimQteActive = this.isUltraAimQteActive();
@@ -4267,6 +4307,8 @@ export class Game {
       backgroundFxId: this.levelFxId,
       backgroundEvents: this.backgroundEvents,
       playState: this.state,
+      baseSceneDynamic: this._isBaseSceneDynamic(),
+      fgSceneDynamic: false,
       renderTimeSeconds: this.renderTimeSeconds,
       renderDeltaSeconds: this.renderDeltaSeconds,
       frameDeltaSeconds: this.rawFrameDeltaSeconds,
@@ -4497,11 +4539,16 @@ export class Game {
       const fps = (this._perfLog.frames / elapsed * 1000).toFixed(1);
       const ctx = this.renderer?.ctx;
       const ctxAttrs = ctx?.canvas ? `${ctx.canvas.width}x${ctx.canvas.height} css:${ctx.canvas.style.width}x${ctx.canvas.style.height}` : '?';
+      const skip = this.renderer?._frameSkip;
+      const skipInfo = skip && skip.frames > 0
+        ? ` baseDraw=${Math.round(skip.baseDraws / skip.frames * 100)}% fgDraw=${Math.round(skip.fgDraws / skip.frames * 100)}%`
+        : '';
+      if (skip) { skip.frames = 0; skip.baseDraws = 0; skip.fgDraws = 0; }
       console.log(
         `[PERF] fps=${fps} avgDelta=${avgFrameMs.toFixed(1)}ms rafDelta=${deltaMs.toFixed(1)}ms cap=${this.frameRateCapHz || 'off'} ` +
         `update=${this._perfUpdateMs.toFixed(2)}ms render=${this._perfRenderMs.toFixed(2)}ms ` +
         `physSteps=${physicsSteps} pegs=${this.pegs.length} balls=${this.balls.length} state=${this.state} ` +
-        `canvas=${ctxAttrs} fixedStep=${this.fixedStepMs.toFixed(2)}ms`
+        `canvas=${ctxAttrs} fixedStep=${this.fixedStepMs.toFixed(2)}ms${skipInfo}`
       );
       this._perfLog.frames = 0;
       this._perfLog.nextDump = now + 2000;

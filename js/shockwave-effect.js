@@ -298,6 +298,7 @@ export class ShockwaveEffectRenderer {
     this._glTexture = null;
     this._glTextureWidth = 0;
     this._glTextureHeight = 0;
+    this._glTextureSourceCanvas = null;
     this._glViewportWidth = 0;
     this._glViewportHeight = 0;
     this._glUnavailable = false;
@@ -493,6 +494,7 @@ export class ShockwaveEffectRenderer {
     this._glTexture = null;
     this._glTextureWidth = 0;
     this._glTextureHeight = 0;
+    this._glTextureSourceCanvas = null;
     this._glViewportWidth = 0;
     this._glViewportHeight = 0;
   }
@@ -747,7 +749,7 @@ export class ShockwaveEffectRenderer {
     return count;
   }
 
-  _renderWithShader(sourceCanvas, width, height, waveCount, fieldCount, limits) {
+  _renderWithShader(sourceCanvas, width, height, waveCount, fieldCount, limits, sourceDirty = true) {
     const gl = this._ensureWebGl(width, height);
     if (!gl) return false;
     if (typeof gl.isContextLost === 'function' && gl.isContextLost()) return false;
@@ -780,12 +782,22 @@ export class ShockwaveEffectRenderer {
 
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, this._glTexture);
-      if (this._glTextureWidth === width && this._glTextureHeight === height) {
-        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, sourceCanvas);
-      } else {
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, sourceCanvas);
-        this._glTextureWidth = width;
-        this._glTextureHeight = height;
+      // When the caller guarantees the source canvas is unchanged since the
+      // previous upload, keep the cached texture — the full-frame upload is
+      // the dominant fixed cost of this pass.
+      const textureMatches = this._glTextureWidth === width && this._glTextureHeight === height;
+      const canReuseTexture = !sourceDirty
+        && textureMatches
+        && this._glTextureSourceCanvas === sourceCanvas;
+      if (!canReuseTexture) {
+        if (textureMatches) {
+          gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, sourceCanvas);
+        } else {
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, sourceCanvas);
+          this._glTextureWidth = width;
+          this._glTextureHeight = height;
+        }
+        this._glTextureSourceCanvas = sourceCanvas;
       }
 
       gl.uniform1i(loc.texture, 0);
@@ -807,6 +819,7 @@ export class ShockwaveEffectRenderer {
       this._glUnavailable = true;
       this._glTextureWidth = 0;
       this._glTextureHeight = 0;
+      this._glTextureSourceCanvas = null;
       this._warnWebGlFailure('render pass failed', error?.message || String(error || 'unknown error'));
       return false;
     }
@@ -854,6 +867,7 @@ export class ShockwaveEffectRenderer {
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, sourceCanvas);
       this._glTextureWidth = width;
       this._glTextureHeight = height;
+      this._glTextureSourceCanvas = sourceCanvas;
 
       gl.uniform1i(loc.texture, 0);
       gl.uniform2f(loc.resolution, width, height);
@@ -865,6 +879,7 @@ export class ShockwaveEffectRenderer {
       this._glUnavailable = true;
       this._glTextureWidth = 0;
       this._glTextureHeight = 0;
+      this._glTextureSourceCanvas = null;
       this._warnWebGlFailure('prewarm render pass failed', error?.message || String(error || 'unknown error'));
       return false;
     }
@@ -916,7 +931,8 @@ export class ShockwaveEffectRenderer {
     const waveCount = this._prepareWaveUniforms(now, cameraY, width, height, limits, preview);
     const fieldCount = this._prepareFieldUniforms(now, cameraY, width, height, limits);
     if (waveCount <= 0 && fieldCount <= 0) return null;
-    return this._renderWithShader(sourceCanvas, width, height, waveCount, fieldCount, limits) ? this._glCanvas : null;
+    const sourceDirty = options?.sourceDirty !== false;
+    return this._renderWithShader(sourceCanvas, width, height, waveCount, fieldCount, limits, sourceDirty) ? this._glCanvas : null;
   }
 
   render(ctx, sourceCanvas, options = null) {

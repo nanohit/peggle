@@ -337,6 +337,11 @@ const END_MESSAGE_FADE_IN_MS = 260;
 const END_MESSAGE_FADE_OUT_MS = 190;
 const END_MESSAGE_LIFT_PX = 18;
 const PEG_EXIT_SHRINK_MS = 180;
+
+// When a render layer's inputs are unchanged its redraw is skipped; a forced
+// redraw every N frames bounds worst-case staleness if a dirty signal is
+// ever missed (self-heal within ~0.5s at 60fps).
+const LAYER_SKIP_HEARTBEAT_FRAMES = 30;
 const PEG_ENTRY_SWEEP_BEZIER = Object.freeze({ x1: 0.42, y1: 0, x2: 0.58, y2: 1 });
 const PEG_ENTRY_SCALE_BEZIER = Object.freeze({ x1: 0.4, y1: 0, x2: 0.2, y2: 1 });
 
@@ -450,6 +455,24 @@ export class Renderer {
       dismissedKey: ''
     };
 
+    // Layer frame-skip: when a layer's inputs are provably unchanged the whole
+    // redraw (and the compositor texture re-upload it forces) is skipped.
+    // Runtimes opt in by passing baseSceneDynamic:false / fgSceneDynamic:false;
+    // absent flags mean "always dynamic" (editor keeps full per-frame redraw).
+    this._frameSkip = {
+      epoch: 0,          // bumped whenever the backing stores get cleared (resize)
+      baseSig: null,
+      baseScratch: [],
+      baseSkipStreak: 0,
+      fgSig: null,
+      fgScratch: [],
+      fgSkipStreak: 0,
+      // diagnostics (read by the ?perf=1 log)
+      frames: 0,
+      baseDraws: 0,
+      fgDraws: 0
+    };
+
     // Glow sprite cache: pre-rendered blur effects stamped via drawImage()
     // instead of per-frame ctx.shadowBlur (which is software-rasterized on
     // Chrome/Safari and extremely slow).
@@ -485,6 +508,11 @@ export class Renderer {
   resize(width, height) {
     this.width = width;
     this.height = height;
+    // Assigning canvas.width always clears the backing store (even with the
+    // same value), so any skipped-frame content is gone — force full redraws.
+    this._frameSkip.epoch++;
+    this._frameSkip.baseSig = null;
+    this._frameSkip.fgSig = null;
     this.canvas.width = width;
     this.canvas.height = height;
     this.launchX = width / 2;
@@ -3882,6 +3910,148 @@ export class Renderer {
   }
 
   // Render full game frame
+  _sigMatches(prevSig, nextSig) {
+    if (!prevSig || prevSig.length !== nextSig.length) return false;
+    for (let i = 0; i < nextSig.length; i++) {
+      const a = prevSig[i];
+      const b = nextSig[i];
+      if (a !== b && !(Number.isNaN(a) && Number.isNaN(b))) return false;
+    }
+    return true;
+  }
+
+  // A layer is redrawn when (a) anything time-animated could be on it, or
+  // (b) the discrete inputs differ from the previous frame's signature.
+  // A slow heartbeat bounds worst-case staleness if a signal is ever missed.
+  _adoptSigOrSkip(sig, sigProp, scratchProp, streakProp) {
+    const fs = this._frameSkip;
+    if (this._sigMatches(fs[sigProp], sig)) {
+      if (++fs[streakProp] < LAYER_SKIP_HEARTBEAT_FRAMES) return false;
+      fs[streakProp] = 0;
+      return true;
+    }
+    fs[scratchProp] = fs[sigProp] || [];
+    fs[sigProp] = sig;
+    fs[streakProp] = 0;
+    return true;
+  }
+
+  _shouldRedrawBaseScene(state, cameraY, liteFieldFallback, magnetFieldRings) {
+    const fs = this._frameSkip;
+    const bg = this.backgroundConfig;
+    const dynamic =
+      !this._foregroundCtx
+      || state.baseSceneDynamic !== false
+      || state.isEditor
+      || state.showGrid
+      || state.shockwavePreview
+      || state.playState === 'playing'
+      || (bg && bg.type === 'liquid')
+      || this._bgBaseDirty || this._bgOverlayDirty || this._bgVignetteDirty
+      || this._bgBlendTarget !== this._bgBlendDisplayed
+      || this._bgImageFadePending || this._bgFadeStartMs > 0
+      || (bg && bg.type === 'image' && !this._bgImage)
+      || this._pegExitAnimations.size > 0
+      || this._pegEntryAnimations.size > 0
+      || (liteFieldFallback && magnetFieldRings.length > 0)
+      || (state.ghostBricks && state.ghostBricks.length > 0)
+      || (state.yoyoThreads && state.yoyoThreads.length > 0)
+      || state.survivalBackground != null;
+    if (dynamic) {
+      fs.baseSig = null;
+      fs.baseSkipStreak = 0;
+      return true;
+    }
+
+    const sig = fs.baseScratch;
+    sig.length = 0;
+    sig.push(
+      fs.epoch, this.width, this.height, cameraY,
+      state.playState,
+      state.pegs, state.pegs ? state.pegs.length : 0
+    );
+    const hits = state.hitPegIds;
+    const hitCount = hits ? hits.length : 0;
+    sig.push(hitCount, hitCount ? hits[0] : null, hitCount ? hits[hitCount - 1] : null);
+    sig.push(state.wrapCopyPegIds ? state.wrapCopyPegIds.size : -1);
+    sig.push(state.selectedPegIds ? state.selectedPegIds.size : -1);
+    sig.push(state.trajectory || null, state.trajectoryStyle || '', !!state.showFullTrajectory, state.aimLength || 0);
+    sig.push(Number.isFinite(state.pvpMidline) ? state.pvpMidline : null);
+    sig.push(
+      state.levelProgress || 0,
+      this._bgImage, this._bgProgressImage,
+      this._bgBlendDisplayed, this._bgBaseKey, this._bgOverlayKey
+    );
+    return this._adoptSigOrSkip(sig, 'baseSig', 'baseScratch', 'baseSkipStreak');
+  }
+
+  _shouldRedrawForeground(state, cameraY, endMessage) {
+    const fs = this._frameSkip;
+    const msg = this._endMessage;
+    const dynamic =
+      !this._foregroundCtx
+      || state.fgSceneDynamic !== false
+      || state.isEditor
+      || state.playState === 'playing'
+      || state.ballTrailPreview
+      || this._bucketParticles.length > 0
+      || this._ballTrail.trails.size > 0
+      || state.survivalLoseLineY != null
+      || (endMessage != null && msg.phase !== 'visible')
+      || !!state.countdownText;
+    if (dynamic) {
+      fs.fgSig = null;
+      fs.fgSkipStreak = 0;
+      return true;
+    }
+
+    const sig = fs.fgScratch;
+    sig.length = 0;
+    sig.push(fs.epoch, this.width, this.height, cameraY);
+    const balls = state.balls;
+    sig.push(balls ? balls.length : -1);
+    if (balls) {
+      for (const b of balls) {
+        sig.push(b.x, b.y, b.radius, !!b.active, b.launcherSpawnAnim ?? 1, b.side || '');
+      }
+    }
+    const bucket = state.bucket;
+    if (bucket) sig.push(bucket.x, bucket.y, bucket.width, bucket.height, state.bucketFlash || 0);
+    else sig.push(null);
+    const fl = state.flippers;
+    if (fl && fl.enabled) {
+      sig.push(
+        fl._flipperT || 0, fl.y, fl.xOffset, fl.length, fl.width,
+        fl.scale, fl.restAngle, fl.flipAngle, !!state.flipperSelected
+      );
+    } else {
+      sig.push(null);
+    }
+    sig.push(!!state.showLauncher, state.launchX, state.launchY, state.aimAngle, !!state.showAim, state.launcherBallScale ?? 1);
+    const lo = state.launcherOptions;
+    if (lo) {
+      sig.push(
+        !!lo.active, lo.side || '', !!lo.assetLauncher, lo.defaultAngle ?? null,
+        !!lo.showAim, lo.ballScale ?? 1, lo.x ?? null, lo.y ?? null, lo.angle ?? null
+      );
+    } else {
+      sig.push(null);
+    }
+    const secondary = state.secondaryLaunchers;
+    sig.push(Array.isArray(secondary) ? secondary.length : -1);
+    if (Array.isArray(secondary)) {
+      for (const l of secondary) {
+        sig.push(
+          l.x, l.y, l.angle ?? null, !!l.showAim, l.ballScale ?? 1,
+          !!l.active, l.side || '', !!l.assetLauncher, l.defaultAngle ?? null
+        );
+      }
+    }
+    sig.push(!!state.showQteAim, state.qteAimX || 0, state.qteAimY || 0, state.qteAimAngle || 0);
+    sig.push(endMessage ? `${msg.key}|${msg.alpha.toFixed(3)}` : null);
+    return this._adoptSigOrSkip(sig, 'fgSig', 'fgScratch', 'fgSkipStreak');
+  }
+
   renderGame(state) {
     const baseCtx = this.baseCtx || this.canvas.getContext('2d', { alpha: false });
     this.ctx = baseCtx;
@@ -3905,64 +4075,69 @@ export class Renderer {
     } else {
       magnetFieldActive = this._shockwaveEffect.syncFieldRings(magnetFieldRings);
     }
-    this.clear(state.levelProgress, state);
-    
-    const drewSurvivalBackground = this.drawSurvivalBackground(state.survivalBackground, cameraY, state.worldHeight);
-    if (drewSurvivalBackground && this._bgVignetteCanvas) {
-      this.ctx.drawImage(this._bgVignetteCanvas, 0, 0);
-    }
-
-    if (state.showGrid) {
-      this.showGrid = true;
-      this.drawGrid(cameraY);
-      this.drawMagnetRadii(state.pegs, cameraY);
-    }
-    if (liteFieldFallback && !state.showGrid) {
-      this.drawLiteMagnetFields(magnetFieldRings, cameraY, this._renderTimeSeconds);
-    }
-
     const useCamera = Math.abs(cameraY) > 0.001;
-    if (useCamera) {
-      this.ctx.save();
-      this.ctx.translate(0, -cameraY);
-    }
+    this._frameSkip.frames++;
+    const baseRedrawn = this._shouldRedrawBaseScene(state, cameraY, liteFieldFallback, magnetFieldRings);
+    if (baseRedrawn) {
+      this._frameSkip.baseDraws++;
+      this.clear(state.levelProgress, state);
 
-    if (Number.isFinite(state.pvpMidline)) {
-      this.drawPvpMidline(state.pvpMidline);
-    }
-
-    this.drawPegs(
-      state.pegs,
-      state.hitPegIds,
-      state.selectedPegIds || new Set(),
-      state.wrapCopyPegIds || null
-    );
-
-    // Draw ghost preview during draw mode
-    if (state.ghostBricks && state.ghostBricks.length > 0) {
-      this.drawSplinePath(state.drawPath);
-      this.drawGhostBricks(state.ghostBricks, state.brickWidth, state.brickHeight, state.pegType, state.pegShape);
-    }
-
-    // Draw trajectory before ball
-    if (state.trajectory) {
-      if (state.trajectoryStyle === 'qte') {
-        this.drawQteTrajectory(state.trajectory);
-      } else {
-        this.drawTrajectory(state.trajectory, state.showFullTrajectory, state.aimLength);
+      const drewSurvivalBackground = this.drawSurvivalBackground(state.survivalBackground, cameraY, state.worldHeight);
+      if (drewSurvivalBackground && this._bgVignetteCanvas) {
+        this.ctx.drawImage(this._bgVignetteCanvas, 0, 0);
       }
-    }
 
-    if (state.yoyoThreads) {
-      this.drawYoyoThreads(state.yoyoThreads);
-    }
+      if (state.showGrid) {
+        this.showGrid = true;
+        this.drawGrid(cameraY);
+        this.drawMagnetRadii(state.pegs, cameraY);
+      }
+      if (liteFieldFallback && !state.showGrid) {
+        this.drawLiteMagnetFields(magnetFieldRings, cameraY, this._renderTimeSeconds);
+      }
 
-    if (state.pvpCannons) {
-      this.drawPvpCannons(state.pvpCannons);
-    }
+      if (useCamera) {
+        this.ctx.save();
+        this.ctx.translate(0, -cameraY);
+      }
 
-    if (useCamera) {
-      this.ctx.restore();
+      if (Number.isFinite(state.pvpMidline)) {
+        this.drawPvpMidline(state.pvpMidline);
+      }
+
+      this.drawPegs(
+        state.pegs,
+        state.hitPegIds,
+        state.selectedPegIds || new Set(),
+        state.wrapCopyPegIds || null
+      );
+
+      // Draw ghost preview during draw mode
+      if (state.ghostBricks && state.ghostBricks.length > 0) {
+        this.drawSplinePath(state.drawPath);
+        this.drawGhostBricks(state.ghostBricks, state.brickWidth, state.brickHeight, state.pegType, state.pegShape);
+      }
+
+      // Draw trajectory before ball
+      if (state.trajectory) {
+        if (state.trajectoryStyle === 'qte') {
+          this.drawQteTrajectory(state.trajectory);
+        } else {
+          this.drawTrajectory(state.trajectory, state.showFullTrajectory, state.aimLength);
+        }
+      }
+
+      if (state.yoyoThreads) {
+        this.drawYoyoThreads(state.yoyoThreads);
+      }
+
+      if (state.pvpCannons) {
+        this.drawPvpCannons(state.pvpCannons);
+      }
+
+      if (useCamera) {
+        this.ctx.restore();
+      }
     }
 
     if (shockwaveActive || magnetFieldActive) {
@@ -3973,7 +4148,10 @@ export class Renderer {
         profile: this.performanceProfile,
         preview: !!state.shockwavePreview,
         timeSeconds: shockwaveTimeSeconds,
-        skipPrune: true
+        skipPrune: true,
+        // Unchanged base canvas → the GL pass can reuse its cached texture
+        // instead of re-uploading the whole frame.
+        sourceDirty: baseRedrawn
       });
       if (!waveCanvas) {
         if (shockwaveActive) {
@@ -3997,7 +4175,18 @@ export class Renderer {
       this._scheduleShockwavePrewarm();
     }
 
+    // End-message fades must advance every frame even when drawing is skipped.
+    const endMessage = this._updateEndMessageState(state);
+
     const sceneCtx = this.ctx;
+    if (!this._shouldRedrawForeground(state, cameraY, endMessage)) {
+      if (typeof this.onVerticalProgress === 'function') {
+        this.onVerticalProgress(state.verticalProgress || null);
+      }
+      this.ctx = sceneCtx;
+      return;
+    }
+    this._frameSkip.fgDraws++;
     const foregroundCtx = this._prepareForegroundLayer();
     this.ctx = foregroundCtx || sceneCtx;
     if (!foregroundCtx) {
@@ -4143,7 +4332,6 @@ export class Renderer {
     //   this.drawScore(state.score, state.ballsLeft, state.orangePegsLeft, state.totalOrangePegs, state.centerLabel || null);
     // }
 
-    const endMessage = this._updateEndMessageState(state);
     if (state.countdownText) {
       this.drawCountdownOverlay(state.countdownText, state.countdownAlpha);
     }

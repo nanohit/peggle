@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>frame skip probe</title>
+<style>html,body{margin:0;padding:0}iframe{width:480px;height:900px;border:0}</style>
+</head>
+<body>
+<iframe id="f" src="/player.html?perf=1"></iframe>
+<script>
+const frame = document.getElementById('f');
+function log(...args) { console.log('[SKIPPROBE]', ...args); }
+
+function grab(canvas) {
+  const c = document.createElement('canvas');
+  c.width = canvas.width; c.height = canvas.height;
+  c.getContext('2d').drawImage(canvas, 0, 0);
+  return c;
+}
+
+function diffCount(a, b) {
+  const da = a.getContext('2d').getImageData(0, 0, a.width, a.height).data;
+  const db = b.getContext('2d').getImageData(0, 0, b.width, b.height).data;
+  let diff = 0;
+  for (let i = 0; i < da.length; i += 4) {
+    if (Math.abs(da[i] - db[i]) > 2 || Math.abs(da[i+1] - db[i+1]) > 2 || Math.abs(da[i+2] - db[i+2]) > 2) diff++;
+  }
+  return diff;
+}
+
+function composite(doc) {
+  const base = doc.getElementById('gameCanvas');
+  const fg = doc.querySelector('.game-foreground-layer');
+  const c = document.createElement('canvas');
+  c.width = base.width; c.height = base.height;
+  const ctx = c.getContext('2d');
+  ctx.drawImage(base, 0, 0);
+  if (fg) ctx.drawImage(fg, 0, 0);
+  return c;
+}
+
+function fire(doc, canvas) {
+  const rect = canvas.getBoundingClientRect();
+  const cx = rect.left + rect.width * 0.5;
+  const cy = rect.top + rect.height * 0.55;
+  const opts = (x, y) => ({ bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0 });
+  canvas.dispatchEvent(new MouseEvent('mousedown', opts(cx, cy)));
+  for (let i = 1; i <= 4; i++) canvas.dispatchEvent(new MouseEvent('mousemove', opts(cx + i, cy + i)));
+  canvas.dispatchEvent(new MouseEvent('mouseup', opts(cx + 4, cy + 4)));
+}
+
+frame.addEventListener('load', () => {
+  setTimeout(async () => {
+    const doc = frame.contentDocument;
+    const base = doc.getElementById('gameCanvas');
+    if (!base) { log('FAIL no canvas'); return; }
+
+    // 1) Idle: base canvas across heartbeat redraws must be pixel-identical.
+    const snapA = grab(base);
+    await new Promise(r => setTimeout(r, 800));
+    const snapB = grab(base);
+    log('idle base diff px (expect 0):', diffCount(snapA, snapB));
+    log('IDLE_SHOT', composite(doc).toDataURL('image/png'));
+
+    // 2) Fire a ball, capture mid-flight composite.
+    fire(doc, base);
+    await new Promise(r => setTimeout(r, 1400));
+    log('FLIGHT_SHOT', composite(doc).toDataURL('image/png'));
+
+    // 3) After the turn resolves, idle again: check base settles + stays static.
+    await new Promise(r => setTimeout(r, 9000));
+    const snapC = grab(base);
+    await new Promise(r => setTimeout(r, 800));
+    const snapD = grab(base);
+    log('post-shot idle base diff px (expect 0):', diffCount(snapC, snapD));
+    log('AFTER_SHOT', composite(doc).toDataURL('image/png'));
+    log('DONE');
+  }, 12000);
+});
+</script>
+</body>
+</html>

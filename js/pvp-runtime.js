@@ -1276,6 +1276,20 @@ export class PvpRuntime {
     };
   }
 
+  _levelHasPortalPegs() {
+    const pegs = this.pegs;
+    const cache = this._portalScanCache;
+    if (!cache || cache.pegs !== pegs || cache.length !== pegs.length) {
+      let has = false;
+      for (const peg of pegs) {
+        if (peg && isPortalType(peg.type)) { has = true; break; }
+      }
+      this._portalScanCache = { pegs, length: pegs.length, has };
+      return has;
+    }
+    return cache.has;
+  }
+
   getRenderState() {
     const activeBalls = this._renderBalls;
     activeBalls.length = 0;
@@ -1331,6 +1345,8 @@ export class PvpRuntime {
       backgroundFxId: this.level ? `pvp:${this.level.id || 'level'}` : 'pvp',
       backgroundEvents: [],
       playState: this.state,
+      baseSceneDynamic: this.state === 'playing' || this._levelHasPortalPegs(),
+      fgSceneDynamic: false,
       renderTimeSeconds: this.renderTimeSeconds,
       renderDeltaSeconds: this.renderDeltaSeconds,
       frameDeltaSeconds: this.rawFrameDeltaSeconds,
