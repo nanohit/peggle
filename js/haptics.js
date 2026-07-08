@@ -42,6 +42,17 @@ export function isMuted() { return muted; }
 export function setMuted(v) {
   muted = !!v;
   try { localStorage.setItem(MUTE_KEY, muted ? '1' : '0'); } catch { /* no-op */ }
+  if (muted) {
+    // Release the audio session immediately — no reason to keep the
+    // hardware pipeline warm while muted.
+    if (audioCtx && audioCtx.state === 'running') {
+      audioCtx.suspend().catch(() => {});
+    }
+  } else {
+    // Unmute happens inside a user gesture (pause-menu tap), which is the
+    // one place a suspended/locked context is guaranteed resumable.
+    initAudio();
+  }
 }
 
 // ─── Peg hit sounds (Peggle-style ascending scale) ──────────────
@@ -58,11 +69,43 @@ function ensureAudioCtx() {
   return audioCtx;
 }
 
+// A running AudioContext keeps the device audio hardware (and on iOS a
+// realtime audio thread) active for the whole session even while silent — a
+// constant battery/heat cost. Suspend after a stretch of silence; initAudio()
+// runs from user-gesture input handlers and on shot launch, so the context is
+// running again before the next hit sound. pegHitSound() also self-resumes.
+const AUDIO_IDLE_SUSPEND_MS = 15000;
+let lastAudibleAt = 0;
+let audioIdleTimer = null;
+
+function scheduleAudioIdleSuspend() {
+  if (audioIdleTimer) clearTimeout(audioIdleTimer);
+  audioIdleTimer = setTimeout(() => {
+    audioIdleTimer = null;
+    if (!audioCtx || audioCtx.state !== 'running') return;
+    const idleFor = performance.now() - lastAudibleAt;
+    if (idleFor >= AUDIO_IDLE_SUSPEND_MS - 100) {
+      audioCtx.suspend().catch(() => {});
+    } else {
+      scheduleAudioIdleSuspend();
+    }
+  }, AUDIO_IDLE_SUSPEND_MS + 200);
+}
+
+function markAudioActive() {
+  lastAudibleAt = performance.now();
+  scheduleAudioIdleSuspend();
+}
+
 export function initAudio() {
+  // While muted, keep the audio session released entirely; unmuting (a
+  // pause-menu gesture) re-initializes via setMuted(false) below.
+  if (muted) return;
   const ctx = ensureAudioCtx();
   if (ctx && ctx.state === 'suspended') {
     ctx.resume().catch(() => {});
   }
+  markAudioActive();
 }
 
 // C major scale from C4 up ~3 octaves (22 notes)
@@ -89,6 +132,7 @@ export function pegHitSound() {
   if (muted) { hitIndex = Math.min(hitIndex + 1, SCALE_NOTES.length - 1); return; }
   const ctx = ensureAudioCtx();
   if (!ctx) return;
+  markAudioActive();
   if (ctx.state === 'suspended') { ctx.resume().catch(() => {}); return; }
   if (ctx.state !== 'running') return;
 

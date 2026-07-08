@@ -914,6 +914,10 @@ async function bootPvpDuelRoom(roomCode) {
       publishRoundResult: (result) => controller?.publishRoundResult(result)
     };
 
+    // onVisualState fires every frame; only redo the portrait resolution
+    // (registry normalization) when HP or the registry actually change.
+    let roomPortraitKey = '';
+    let roomPortraitRegistry = null;
     game = new PvpRuntime(canvas, {
       settings: pvp,
       localSide: initialRoom.side,
@@ -922,21 +926,26 @@ async function bootPvpDuelRoom(roomCode) {
       onVisualState: (state) => {
         if (!state) return;
         const maxHp = state.maxHp || 3;
-        const portraits = resolvePvpPortraitCharacters(level, roomCharacterRegistry, initialRoom.side);
-        const localSrc = getCharacterPvpPortraitSource(portraits.local, { hp: state.playerHp, maxHp });
-        const remoteSrc = getCharacterPvpPortraitSource(portraits.remote, { hp: state.cpuHp, maxHp });
-        if (localSrc) {
-          visualLayout.setCharacterPortraitSource(localSrc, {
-            fadeMs: 160,
-            slotName: `pvp:${initialRoom.side}:${state.playerHp}`
+        const portraitKey = `${state.playerHp}|${state.cpuHp}|${maxHp}`;
+        if (roomPortraitKey !== portraitKey || roomPortraitRegistry !== roomCharacterRegistry) {
+          roomPortraitKey = portraitKey;
+          roomPortraitRegistry = roomCharacterRegistry;
+          const portraits = resolvePvpPortraitCharacters(level, roomCharacterRegistry, initialRoom.side);
+          const localSrc = getCharacterPvpPortraitSource(portraits.local, { hp: state.playerHp, maxHp });
+          const remoteSrc = getCharacterPvpPortraitSource(portraits.remote, { hp: state.cpuHp, maxHp });
+          if (localSrc) {
+            visualLayout.setCharacterPortraitSource(localSrc, {
+              fadeMs: 160,
+              slotName: `pvp:${initialRoom.side}:${state.playerHp}`
+            });
+          }
+          visualLayout.setPvpOpponentTarget?.({
+            visible: true,
+            hp: state.cpuHp,
+            maxHp,
+            portraitSrc: remoteSrc
           });
         }
-        visualLayout.setPvpOpponentTarget?.({
-          visible: true,
-          hp: state.cpuHp,
-          maxHp,
-          portraitSrc: remoteSrc
-        });
         visualLayout.setPvpAimTimer?.(
           state.timerVisible
             ? { visible: true, ratio: state.timerRatio }
@@ -2425,13 +2434,22 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
 
     const pvp = ensureLevelPvp(levelData);
     visualLayout.setPvpMode?.(pvp.enabled);
+    // onVisualState fires every frame; resolving portrait characters involves
+    // registry normalization, so only redo it when HP or the registry change.
+    let pvpPortraitKey = '';
+    let pvpPortraitRegistry = null;
     game = pvp.enabled
       ? new PvpRuntime(canvas, {
         settings: pvp,
         getTargetCircle: () => visualLayout.getCanvasSlotCircle?.('characterCircle', canvas),
         onVisualState: (state) => {
           if (!state) return;
-          updatePvpPortraitVisuals(levelData, state, 'human');
+          const portraitKey = `${state.playerHp}|${state.cpuHp}|${state.maxHp}`;
+          if (pvpPortraitKey !== portraitKey || pvpPortraitRegistry !== characterRegistry) {
+            pvpPortraitKey = portraitKey;
+            pvpPortraitRegistry = characterRegistry;
+            updatePvpPortraitVisuals(levelData, state, 'human');
+          }
           visualLayout.setPvpAimTimer?.(
             state.timerVisible
               ? { visible: true, ratio: state.timerRatio }

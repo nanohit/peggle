@@ -2507,13 +2507,25 @@ export class VisualLayout {
       }
       return;
     }
-    this._pvpOpponentTargetState = {
+    const next = {
       hp: Math.max(0, Number.isFinite(state.hp) ? state.hp : 3),
       maxHp: Math.max(1, Number.isFinite(state.maxHp) ? state.maxHp : 3),
       portraitSrc: typeof state.portraitSrc === 'string' && state.portraitSrc.trim()
         ? state.portraitSrc.trim()
         : null
     };
+    // This is called every frame from the pvp loop; the full re-render does a
+    // burst of getBoundingClientRect/getComputedStyle (forced layout) per call.
+    // Skip when nothing changed — layout-affecting paths re-render explicitly.
+    const prev = this._pvpOpponentTargetState;
+    if (prev
+      && prev.hp === next.hp
+      && prev.maxHp === next.maxHp
+      && prev.portraitSrc === next.portraitSrc
+      && this._pvpTargetLayer) {
+      return;
+    }
+    this._pvpOpponentTargetState = next;
     this._renderPvpOpponentTarget();
   }
 
@@ -2643,12 +2655,25 @@ export class VisualLayout {
   setPvpAimTimer(state = null) {
     if (!state || state.visible === false || !Number.isFinite(state.ratio)) {
       this._pvpAimTimerState = null;
+      this._pvpAimTimerHasGeom = false;
       if (this._pvpAimTimerRing) this._pvpAimTimerRing.style.opacity = '0';
       return;
     }
     this._pvpAimTimerState = {
       ratio: Math.max(0, Math.min(1, state.ratio))
     };
+    // Per-frame fast path: while the ring stays anchored to the same slot
+    // geometry only the arc progress changes — two CSS vars, no layout reads.
+    // Layout-affecting paths call _renderPvpAimTimer() directly, which
+    // recomputes geometry and re-arms this cache.
+    if (this._pvpAimTimerHasGeom && this._pvpAimTimerRing) {
+      const ring = this._pvpAimTimerRing;
+      const ratio = this._pvpAimTimerState.ratio;
+      ring.style.setProperty('--pvp-timer-ratio', ratio.toFixed(4));
+      ring.style.setProperty('--pvp-timer-dash-offset', (138.5 * (1 - ratio)).toFixed(3));
+      ring.style.opacity = '1';
+      return;
+    }
     this._renderPvpAimTimer();
   }
 
@@ -2670,6 +2695,7 @@ export class VisualLayout {
   }
 
   _renderPvpAimTimer() {
+    this._pvpAimTimerHasGeom = false;
     const state = this._pvpAimTimerState;
     const ring = this._ensurePvpAimTimerRing();
     if (!ring) return;
@@ -2699,6 +2725,7 @@ export class VisualLayout {
     ring.style.setProperty('--pvp-timer-ratio', state.ratio.toFixed(4));
     ring.style.setProperty('--pvp-timer-dash-offset', (138.5 * (1 - state.ratio)).toFixed(3));
     ring.style.opacity = '1';
+    this._pvpAimTimerHasGeom = true;
   }
 
   hideHealthBar() {
@@ -2862,6 +2889,8 @@ export class VisualLayout {
   _applySlotTransform(slotId) {
     const el = this.slotElements[slotId];
     if (!el) return;
+    // Slot moved — the cached pvp aim-timer anchor geometry may be stale.
+    this._pvpAimTimerHasGeom = false;
     const def = SLOT_DEFS.find(d => d.id === slotId);
     const fx = this._slotRuntimeFx[slotId];
     let transform = 'translate(-50%, -50%)';
