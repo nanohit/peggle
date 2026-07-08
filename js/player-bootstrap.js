@@ -1881,7 +1881,11 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
       closable: allowClose,
       onSelect: onSelectOverride || (async (nodeId) => {
         if (!nodeIdToLevelIndex.has(nodeId)) return;
-        const isCurrent = String(nodeId) === String(currentNodeId);
+        // "Resume without restart" only applies when the running game IS the
+        // campaign level for that node. In CPU-duel mode the running game is a
+        // pvp level that replaced it, so tapping the current node must start
+        // the campaign level instead of resuming the duel.
+        const isCurrent = String(nodeId) === String(currentNodeId) && !activeCpuDuelMode;
         if (isCurrent && allowClose) {
           // Resume current run without restart.
           const closingMap = activeLevelMap;
