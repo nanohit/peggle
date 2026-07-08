@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>cdn race probe</title></head>
+<body>
+<script type="module">
+import { assetUrlCandidates, loadImageFromCandidates, getCdnHealthStatus } from '../js/asset-ref.js';
+
+function log(...args) { console.log('[CDNPROBE]', ...args); }
+
+localStorage.removeItem('peggle_cdn_health_v2');
+
+const ref = {
+  kind: 'asset',
+  key: 'test/foo.webp',
+  primaryUrl: 'https://alea-assets.b-cdn.net/test/foo.webp'
+};
+
+log('tz=', Intl.DateTimeFormat().resolvedOptions().timeZone, 'langs=', JSON.stringify(navigator.languages));
+log('order:', JSON.stringify(assetUrlCandidates(ref), null, 0));
+
+// Race behavior: dead blackhole origin first, then a real loadable asset.
+const raceRef = {
+  kind: 'asset',
+  key: 'visuals/bucket.webp',
+  // 10.255.255.1 hangs (non-routable) — emulates the RU blackhole.
+  primaryUrl: 'http://10.255.255.1/visuals/bucket.webp',
+  fallbackUrl: location.origin + '/visuals/bucket.webp'
+};
+log('race order:', JSON.stringify(assetUrlCandidates(raceRef)));
+const t0 = performance.now();
+const result = await loadImageFromCandidates(raceRef, { timeoutMs: 8000 });
+log('race result:', result ? result.url : null, 'in', Math.round(performance.now() - t0), 'ms');
+
+// API last-resort defer: hung CDN + /api fallback. The API request must not
+// join the race on the normal 650ms stagger — expect launch no earlier than
+// stagger (650) + API_RACE_EXTRA_DELAY_MS (1800) ≈ 2450ms, so total > 2450.
+// No `key`: assetCacheKey falls back to primaryUrl, so this does not reuse
+// the previous race's cached result.
+const apiRef = {
+  kind: 'asset',
+  primaryUrl: 'http://10.255.255.1/visuals/bucket2.webp',
+  fallbackUrl: '/api/assets?key=visuals/bucket.webp'
+};
+log('api-defer order:', JSON.stringify(assetUrlCandidates(apiRef)));
+const t1 = performance.now();
+const apiResult = await loadImageFromCandidates(apiRef, { timeoutMs: 8000 });
+const apiMs = Math.round(performance.now() - t1);
+log('api-defer result:', apiResult ? apiResult.url : null, 'in', apiMs, 'ms',
+    apiMs > 2450 ? '(deferred OK)' : '(TOO EARLY — defer broken)');
+
+setTimeout(() => {
+  log('health:', JSON.stringify(getCdnHealthStatus()));
+  log('DONE');
+}, 4500);
+</script>
+</body>
+</html>

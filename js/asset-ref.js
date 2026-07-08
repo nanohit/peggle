@@ -3,12 +3,24 @@ const REMOTE_API_ORIGIN = 'https://peggle.vercel.app';
 // Some ISPs (notably consumer providers in Russia) blackhole the Bunny CDN
 // hostname: connections hang without an error, so <img> fallback chains stall
 // for the browser's full connect timeout on every asset. A cheap reachability
-// probe per CDN origin reorders candidates: healthy CDNs first, same-origin
-// /api/assets next, unreachable CDNs last.
+// probe per CDN origin reorders candidates: healthy CDNs/mirrors first; the
+// Vercel-served /api/assets fallback is a strict last resort (it costs paid
+// function invocations + bandwidth), tried only after every CDN and mirror
+// front; known-unreachable origins go last.
 const CDN_HEALTH_STORAGE_KEY = 'peggle_cdn_health_v2';
 const CDN_PROBE_TIMEOUT_MS = 4000;
 const CDN_HEALTH_TTL_MS = 5 * 60 * 1000;
 const IMAGE_CANDIDATE_TIMEOUT_MS = 8000;
+// Happy-eyeballs stagger: if the leading candidate hasn't answered in this
+// window, the next one starts in parallel — first success wins, losers are
+// cancelled. A blackholed CDN then costs one stagger step instead of a
+// multi-second timeout on every asset.
+const IMAGE_RACE_STAGGER_MS = 650;
+// The /api/assets candidate does NOT join the race on the normal stagger:
+// while any CDN/mirror attempt is still in flight it waits this extra grace
+// period, so a merely-slow jsDelivr response doesn't burn a Vercel request.
+// It still starts immediately once every earlier candidate has hard-failed.
+const API_RACE_EXTRA_DELAY_MS = 1800;
 
 // Alternative delivery fronts for the same content. For every candidate on
 // the blocked-prone default hostname, alias candidates with the same asset
@@ -23,6 +35,45 @@ const CDN_ALIAS_ORIGINS = {
     'https://nanohit.me/alea-assets'
   ]
 };
+
+// Russian residential ISPs blackhole Bunny's edge IPs (b-cdn.net AND the
+// pinned cdn.alea.sh alias — the block is by IP, not hostname). Until a live
+// probe verdict exists, clients that look like they're on a Russian network
+// skip those origins in favor of the jsDelivr/GitHub-Pages mirrors, so the
+// first session never waits out a blackholed connection. A probe that later
+// proves Bunny reachable (VPN, unblocked ISP) restores it to the front.
+const RU_SUSPECT_ORIGINS = new Set([
+  'https://alea-assets.b-cdn.net',
+  'https://cdn.alea.sh'
+]);
+
+const RU_TIMEZONES = new Set([
+  'Europe/Kaliningrad', 'Europe/Moscow', 'Europe/Simferopol', 'Europe/Volgograd',
+  'Europe/Kirov', 'Europe/Astrakhan', 'Europe/Saratov', 'Europe/Ulyanovsk',
+  'Europe/Samara', 'Asia/Yekaterinburg', 'Asia/Omsk', 'Asia/Novosibirsk',
+  'Asia/Barnaul', 'Asia/Tomsk', 'Asia/Novokuznetsk', 'Asia/Krasnoyarsk',
+  'Asia/Irkutsk', 'Asia/Chita', 'Asia/Yakutsk', 'Asia/Khandyga',
+  'Asia/Vladivostok', 'Asia/Ust-Nera', 'Asia/Magadan', 'Asia/Sakhalin',
+  'Asia/Srednekolymsk', 'Asia/Kamchatka', 'Asia/Anadyr'
+]);
+
+let likelyRuClientCached = null;
+function isLikelyRuClient() {
+  if (likelyRuClientCached !== null) return likelyRuClientCached;
+  let ru = false;
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+    if (RU_TIMEZONES.has(tz)) ru = true;
+  } catch { /* Intl unavailable */ }
+  if (!ru) {
+    try {
+      const langs = (typeof navigator !== 'undefined' && (navigator.languages || [navigator.language])) || [];
+      ru = langs.some(lang => /^ru\b/i.test(String(lang || '')));
+    } catch { /* navigator unavailable */ }
+  }
+  likelyRuClientCached = ru;
+  return ru;
+}
 
 const cdnHealthByOrigin = new Map(); // origin -> { status: 'ok'|'down', checkedAt }
 const cdnProbesInFlight = new Set();
@@ -72,6 +123,20 @@ function isLocalAssetUrl(url) {
   return !origin || origin === 'null' || origin === location.origin;
 }
 
+// The Vercel-served asset fallback. Matched by path, not origin: on prod it
+// is same-origin '/api/assets?...', in dev resolveApiPath rewrites it to the
+// remote API origin — both must rank as the paid last resort.
+function isApiFallbackUrl(url) {
+  if (typeof url !== 'string' || !url) return false;
+  if (url.startsWith('data:') || url.startsWith('blob:')) return false;
+  try {
+    const base = typeof location !== 'undefined' ? location.href : 'https://alea.sh/';
+    return new URL(url, base).pathname.startsWith('/api/');
+  } catch {
+    return false;
+  }
+}
+
 // Fired on every probe verdict so in-flight image loads against a
 // just-declared-dead origin can bail out immediately instead of waiting
 // out their own timeout.
@@ -116,6 +181,25 @@ export function getCdnHealthStatus() {
   for (const [origin, entry] of cdnHealthByOrigin) origins[origin] = { ...entry };
   return { origins };
 }
+
+// Probe every known delivery front at startup instead of lazily on the first
+// asset reference: verdicts are usually in before gameplay assets are even
+// requested, so candidate ordering is correct from the first real load.
+// ensureCdnProbe respects the persisted TTL, so this is at most one tiny
+// no-cors request per origin per 5 minutes.
+function warmKnownCdnProbes() {
+  if (typeof location === 'undefined' || typeof fetch !== 'function') return;
+  const origins = new Set();
+  for (const [origin, bases] of Object.entries(CDN_ALIAS_ORIGINS)) {
+    origins.add(origin);
+    for (const base of bases) origins.add(urlOrigin(base));
+  }
+  for (const origin of origins) {
+    if (origin && origin !== location.origin) ensureCdnProbe(origin);
+  }
+}
+
+warmKnownCdnProbes();
 
 function isPlainObject(value) {
   return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -218,11 +302,20 @@ function withCdnAliases(urls) {
   return [...new Set(expanded)];
 }
 
-// 0 = remote believed reachable (or not yet probed), 1 = same-origin
-// fallback, 2 = remote known unreachable. Stable within each rank.
+// 0 = inline data/blob or a remote origin probed alive, 1 = unprobed
+// CDN/mirror (benefit of the doubt), 2 = the Vercel /api/assets fallback —
+// strictly after every CDN and mirror front, 3 = unprobed origin that RU
+// networks are known to blackhole (a worse bet than the paid fallback),
+// 4 = remote known unreachable. Stable within each rank.
 function candidateRank(url) {
-  if (isLocalAssetUrl(url)) return 1;
-  return getOriginStatus(urlOrigin(url)) === 'down' ? 2 : 0;
+  if (typeof url === 'string' && (url.startsWith('data:') || url.startsWith('blob:'))) return 0;
+  if (isApiFallbackUrl(url) || isLocalAssetUrl(url)) return 2;
+  const origin = urlOrigin(url);
+  const status = getOriginStatus(origin);
+  if (status === 'down') return 4;
+  if (status === 'ok') return 0;
+  if (RU_SUSPECT_ORIGINS.has(origin) && isLikelyRuClient()) return 3;
+  return 1;
 }
 
 export function assetUrlCandidates(value) {
@@ -260,7 +353,7 @@ export function assetCacheKey(value) {
   return asset.key || asset.primaryUrl || asset.url || asset.fallbackUrl || JSON.stringify(asset);
 }
 
-function loadOneImage(url, crossOrigin, timeoutMs) {
+function loadOneImage(url, crossOrigin, timeoutMs, registerCancel) {
   return new Promise(resolve => {
     let settled = false;
     let timer = 0;
@@ -285,6 +378,7 @@ function loadOneImage(url, crossOrigin, timeoutMs) {
       if (origin === remoteOrigin && status === 'down') finish(false);
     };
     if (remoteOrigin) cdnHealthListeners.add(onHealthChange);
+    if (typeof registerCancel === 'function') registerCancel(() => finish(false));
     // The timeout is what makes fallback usable on blackholing ISPs: a hung
     // candidate would otherwise stall the chain for the browser's own
     // multi-minute connect timeout.
@@ -292,6 +386,111 @@ function loadOneImage(url, crossOrigin, timeoutMs) {
     img.onload = () => finish(true);
     img.onerror = () => finish(false);
     img.src = url;
+  });
+}
+
+// A successful asset load is itself a health verdict — refresh it so the
+// ordering stays warm without waiting for the next probe cycle. Throttled to
+// avoid a localStorage write per image.
+function noteOriginAliveFromAssetLoad(url) {
+  if (isLocalAssetUrl(url) || isApiFallbackUrl(url)) return;
+  const origin = urlOrigin(url);
+  if (!origin) return;
+  const entry = cdnHealthByOrigin.get(origin);
+  if (entry && entry.status === 'ok' && (Date.now() - entry.checkedAt) < CDN_HEALTH_TTL_MS / 2) return;
+  noteCdnReachability(origin, true);
+}
+
+// Staggered parallel race over the ranked candidate list (happy eyeballs):
+// candidate N+1 starts IMAGE_RACE_STAGGER_MS after N unless N already
+// answered; any failure pulls the next candidate in immediately; the first
+// success wins and cancels the rest. Known-dead origins are skipped outright
+// unless they are the final fallback. The /api/assets candidate is held back
+// while any CDN/mirror attempt is still pending until API_RACE_EXTRA_DELAY_MS
+// has passed — Vercel only pays when the free fronts fail or truly stall.
+function raceImageCandidates(candidates, crossOrigin, timeoutMs) {
+  return new Promise(resolve => {
+    let settled = false;
+    let nextIndex = 0;
+    let pending = 0;
+    let staggerTimer = 0;
+    let lastSkippedUrl = null;
+    let lastResortTried = false;
+    let apiDeferUntil = 0;
+    const cancels = [];
+
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(staggerTimer);
+      for (const cancel of cancels) {
+        try { cancel(); } catch { /* ignore */ }
+      }
+      resolve(result);
+    };
+
+    const launch = (url) => {
+      pending++;
+      loadOneImage(url, crossOrigin, timeoutMs, cancel => cancels.push(cancel)).then(img => {
+        pending--;
+        if (settled) return;
+        if (img) {
+          noteOriginAliveFromAssetLoad(url);
+          finish({ img, url });
+          return;
+        }
+        if (nextIndex < candidates.length) {
+          startNext();
+        } else if (pending === 0) {
+          handleExhausted();
+        }
+      });
+    };
+
+    // Every candidate either failed or was skipped as known-dead. Before
+    // giving up, try one skipped origin anyway — health data can be stale.
+    const handleExhausted = () => {
+      if (settled) return;
+      if (lastSkippedUrl && !lastResortTried) {
+        lastResortTried = true;
+        launch(lastSkippedUrl);
+        return;
+      }
+      finish(null);
+    };
+
+    const scheduleStagger = () => {
+      if (settled || nextIndex >= candidates.length) return;
+      clearTimeout(staggerTimer);
+      staggerTimer = setTimeout(startNext, IMAGE_RACE_STAGGER_MS);
+    };
+
+    const startNext = () => {
+      if (settled) return;
+      while (nextIndex < candidates.length) {
+        const url = candidates[nextIndex];
+        if (isApiFallbackUrl(url) && pending > 0) {
+          const now = Date.now();
+          if (!apiDeferUntil) apiDeferUntil = now + API_RACE_EXTRA_DELAY_MS;
+          if (now < apiDeferUntil) {
+            clearTimeout(staggerTimer);
+            staggerTimer = setTimeout(startNext, apiDeferUntil - now);
+            return;
+          }
+        }
+        nextIndex++;
+        if (!isLocalAssetUrl(url) && getOriginStatus(urlOrigin(url)) === 'down') {
+          lastSkippedUrl = url;
+          continue;
+        }
+        launch(url);
+        scheduleStagger();
+        return;
+      }
+      if (pending === 0) handleExhausted();
+    };
+
+    startNext();
   });
 }
 
@@ -310,18 +509,8 @@ export function loadImageFromCandidates(value, options = {}) {
   if (cached) return cached;
   const promise = (async () => {
     const candidates = assetUrlCandidates(value);
-    for (let i = 0; i < candidates.length; i++) {
-      const url = candidates[i];
-      // The candidate order was ranked when the list was built; if a probe
-      // has since declared this origin dead, skip it (unless it is the very
-      // last resort) instead of burning the full timeout on it.
-      if (i < candidates.length - 1
-        && !isLocalAssetUrl(url)
-        && getOriginStatus(urlOrigin(url)) === 'down') continue;
-      const img = await loadOneImage(url, crossOrigin, timeoutMs);
-      if (img) return { img, url };
-    }
-    return null;
+    if (candidates.length === 0) return null;
+    return await raceImageCandidates(candidates, crossOrigin, timeoutMs);
   })();
   imageResultCache.set(cacheKey, promise);
   promise.then(result => {
