@@ -55,6 +55,12 @@
 .level-map-content {
   position: relative;
   flex-shrink: 0;
+  /* The scroll container is a single-line flex row with a definite height, so
+     the default align-items:stretch pins this item to the viewport height and
+     a taller node-tree canvas gets clipped by overflow:hidden — the map then
+     stops scrolling where the background image ends. Size from content
+     instead; min-height still guarantees full-viewport background coverage. */
+  align-self: flex-start;
   box-sizing: border-box;
   min-height: max(100%, var(--level-map-min-bg-height, 100%));
   padding-bottom: 20px;

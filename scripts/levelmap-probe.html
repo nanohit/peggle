@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>level map probe</title>
+<style>html,body{margin:0;padding:0}iframe{width:430px;height:860px;border:0}</style>
+</head>
+<body>
+<iframe id="f" src="/player.html"></iframe>
+<script>
+const frame = document.getElementById('f');
+
+function log(...args) { console.log('[MAPPROBE]', ...args); }
+
+function clickEl(el) {
+  const rect = el.getBoundingClientRect();
+  const opts = {
+    bubbles: true, cancelable: true,
+    clientX: rect.left + rect.width / 2,
+    clientY: rect.top + rect.height / 2,
+    button: 0
+  };
+  el.dispatchEvent(new MouseEvent('mousedown', opts));
+  el.dispatchEvent(new MouseEvent('mouseup', opts));
+  el.dispatchEvent(new MouseEvent('click', opts));
+}
+
+frame.addEventListener('load', () => {
+  log('iframe loaded');
+  setTimeout(() => {
+    const doc = frame.contentDocument;
+    const win = frame.contentWindow;
+    const pauseTrigger = doc.querySelector('.visual-slot[data-slot-id="topLeft"]');
+    if (!pauseTrigger) { log('FAIL no pause trigger'); return; }
+    clickEl(pauseTrigger);
+    setTimeout(() => {
+      const levelBtn = doc.getElementById('pauseLevelBtn');
+      if (!levelBtn) { log('FAIL no level btn'); return; }
+      clickEl(levelBtn);
+      setTimeout(() => {
+        const overlay = doc.querySelector('.level-map-overlay');
+        const scroll = doc.querySelector('.level-map-scroll');
+        const content = doc.querySelector('.level-map-content');
+        const canvas = doc.querySelector('.level-map-canvas');
+        if (!overlay || !scroll || !content || !canvas) {
+          log('FAIL map elements', !!overlay, !!scroll, !!content, !!canvas);
+          return;
+        }
+        const cs = win.getComputedStyle(content);
+        const before = win.getComputedStyle(content, '::before');
+        const after = win.getComputedStyle(content, '::after');
+        log('overlay rect', JSON.stringify(overlay.getBoundingClientRect()));
+        log('scroll client/scrollHeight', scroll.clientHeight, scroll.scrollHeight);
+        log('content offsetHeight', content.offsetHeight, 'minHeight:', cs.minHeight);
+        log('canvas cssHeight', canvas.style.height, 'attrHeight', canvas.height);
+        log('vars', 'bg-width=', cs.getPropertyValue('--level-map-bg-width'),
+            'top-h=', cs.getPropertyValue('--level-map-top-bg-height'),
+            'repeat-h=', cs.getPropertyValue('--level-map-repeat-bg-height'),
+            'repeat-y=', cs.getPropertyValue('--level-map-repeat-bg-y'),
+            'min-bg-h=', cs.getPropertyValue('--level-map-min-bg-height'));
+        log('::before size=', before.backgroundSize, 'repeat=', before.backgroundRepeat, 'top=', before.top, 'bottom=', before.bottom, 'image=', before.backgroundImage.slice(0, 80));
+        log('::after size=', after.backgroundSize, 'height=', after.height);
+        // How far can we actually scroll vs how tall is the node tree?
+        scroll.scrollTop = 1e6;
+        setTimeout(() => {
+          log('maxScrollTop reached', scroll.scrollTop, 'of content', scroll.scrollHeight - scroll.clientHeight);
+          log('DONE');
+        }, 300);
+      }, 2500);
+    }, 800);
+  }, 9000);
+});
+</script>
+</body>
+</html>
