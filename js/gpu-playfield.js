@@ -34,6 +34,10 @@ const CURVE_FLOATS = 13;
 const EMIT_SCALE = 12.0;
 // Full-white in the height channel, in logical canvas pixels.
 const HEIGHT_SCALE = 15.0;
+const DEFAULT_SKY_TOP = Object.freeze([0.052, 0.128, 0.205]);
+const DEFAULT_SKY_BOTTOM = Object.freeze([0.012, 0.028, 0.048]);
+const QUALITY_ORDER = Object.freeze(['low', 'medium', 'high']);
+const ZERO_CLEAR = new Float32Array(4);
 
 const SHAPE_DOME = 0;
 const SHAPE_BOX = 1;
@@ -762,6 +766,7 @@ void main() {
 
 const SEED_FS = `#version 300 es
 precision highp float;
+#define ENCODE_SEEDS __ENCODE_SEEDS__
 in vec2 vUv;
 out vec4 outColor;
 uniform sampler2D uScene;
@@ -777,29 +782,59 @@ void main() {
     bool n = texture(uScene, vUv + o * uTexel).a > 0.06;
     if (n != solid) boundary = true;
   }
-  outColor = boundary ? vec4(vUv, 0.0, 1.0) : vec4(-1.0, -1.0, 0.0, 1.0);
+  // RGBA8 fallback targets cannot store the usual -1 invalid sentinel. Pack
+  // valid UVs into 0.5..1 there and reserve zero for invalid; float targets
+  // retain the original representation and precision.
+  vec2 validSeed = ENCODE_SEEDS ? vUv * 0.5 + 0.5 : vUv;
+  vec2 invalidSeed = ENCODE_SEEDS ? vec2(0.0) : vec2(-1.0);
+  outColor = boundary ? vec4(validSeed, 0.0, 1.0) : vec4(invalidSeed, 0.0, 1.0);
 }`;
 
 const JFA_FS = `#version 300 es
 precision highp float;
+#define ENCODE_SEEDS __ENCODE_SEEDS__
 in vec2 vUv;
 out vec4 outColor;
 uniform sampler2D uSeed;
 uniform vec2 uTexel;
 uniform float uStep;
+uniform vec2 uCanvas;
+uniform float uDistanceScale;
+uniform float uOutputDistance;
+
+vec2 unpackSeed(vec2 stored) {
+  if (!ENCODE_SEEDS) return stored;
+  return stored.x < 0.25 ? vec2(-1.0) : (stored - 0.5) * 2.0;
+}
+
+vec2 packSeed(vec2 seed) {
+  if (!ENCODE_SEEDS) return seed;
+  return seed.x < 0.0 ? vec2(0.0) : seed * 0.5 + 0.5;
+}
+
 void main() {
   vec2 best = vec2(-1.0);
   float bestDist = 1e9;
   for (int y = -1; y <= 1; y++) {
     for (int x = -1; x <= 1; x++) {
       vec2 sampleUv = vUv + vec2(float(x), float(y)) * uStep * uTexel;
-      vec2 seed = texture(uSeed, sampleUv).rg;
+      vec2 seed = unpackSeed(texture(uSeed, sampleUv).rg);
       if (seed.x < 0.0) continue;
       float dist = distance(seed, vUv);
       if (dist < bestDist) { bestDist = dist; best = seed; }
     }
   }
-  outColor = vec4(best, 0.0, 1.0);
+  if (uOutputDistance > 0.5) {
+    // The final jump-flood pass has already found the nearest seed. Store its
+    // scalar pixel distance once; every cascade ray can then consume one value
+    // instead of rebuilding this length thousands of times per frame.
+    float pixelDistance = best.x < 0.0
+      ? uDistanceScale
+      : length((best - vUv) * uCanvas);
+    outColor = vec4(clamp(pixelDistance / uDistanceScale, 0.0, 1.0), 0.0, 0.0, 1.0);
+  } else {
+    outColor = vec4(packSeed(best), 0.0, 1.0);
+  }
 }`;
 
 // ── 4. Radiance cascades ────────────────────────────────────────────────────
@@ -823,6 +858,7 @@ uniform float uHeightScale;
 uniform float uEmitScale;
 uniform float uElevation;
 uniform float uMinStep;
+uniform float uDistanceScale;
 uniform vec3 uSkyTop;
 uniform vec3 uSkyBottom;
 
@@ -841,8 +877,7 @@ vec4 marchRay(vec2 origin, vec2 dir, float t0, float t1) {
       return vec4(skyRadiance(dir), 0.0);
     }
     vec2 uv = canvasToUv(p, uCanvas);
-    vec2 seed = texture(uSdf, uv).rg;
-    float d = seed.x < 0.0 ? 1e4 : length((seed - uv) * uCanvas);
+    float d = texture(uSdf, uv).r * uDistanceScale;
     vec4 scene = texture(uScene, uv);
     float surfaceH = scene.a * uHeightScale;
     // Emission is collected independently of height, so a fixture can light the
@@ -869,27 +904,25 @@ vec4 mergeUpper(vec2 probeIdx, float dirIndex) {
   vec2 parentCounts = floor(uCascadeSize / parentBlock);
   // Bilinear across the four parent probes surrounding this probe's position.
   vec2 parentCoord = (probeIdx + 0.5) * 0.5 - 0.5;
-  vec2 base = floor(parentCoord);
-  vec2 f = parentCoord - base;
+  vec2 sampleCoord = clamp(parentCoord, vec2(0.0), parentCounts - 1.0);
   vec4 acc = vec4(0.0);
   for (int k = 0; k < 4; k++) {
     float childDir = dirIndex * 4.0 + float(k);
     vec2 childXY = vec2(mod(childDir, parentBlock), floor(childDir / parentBlock));
-    for (int c = 0; c < 4; c++) {
-      vec2 corner = vec2(float(c & 1), float((c >> 1) & 1));
-      float w = (corner.x > 0.5 ? f.x : 1.0 - f.x) * (corner.y > 0.5 ? f.y : 1.0 - f.y);
-      vec2 pIdx = clamp(base + corner, vec2(0.0), parentCounts - 1.0);
-      vec2 uv = (pIdx * parentBlock + childXY + 0.5) / uCascadeSize;
-      acc += texture(uUpper, uv) * w;
-    }
+    // Directions occupy tiles and probes are contiguous inside each tile.
+    // LINEAR filtering therefore performs the same four-corner interpolation
+    // as the old inner loop in one fetch instead of four.
+    vec2 uv = (childXY * parentCounts + sampleCoord + 0.5) / uCascadeSize;
+    acc += texture(uUpper, uv);
   }
   return acc * 0.25;
 }
 
 void main() {
   vec2 texel = floor(gl_FragCoord.xy);
-  vec2 probeIdx = floor(texel / uBlock);
-  vec2 dirXY = mod(texel, uBlock);
+  vec2 probeCounts = floor(uCascadeSize / uBlock);
+  vec2 dirXY = floor(texel / probeCounts);
+  vec2 probeIdx = texel - dirXY * probeCounts;
   float dirCount = uBlock * uBlock;
   float dirIndex = dirXY.x + dirXY.y * uBlock;
   float angle = (dirIndex + 0.5) / dirCount * TAU;
@@ -924,15 +957,19 @@ uniform float uBlock;
 // on adjacent probes and bilinear upsampling turns that into blobs. Smoothing
 // in probe space fixes it spatially, which is what lets the temporal blend stay
 // light instead of having to hide the artifact by smearing it over time.
-vec4 probeSmoothed(vec2 uv) {
-  vec2 texel = 1.0 / uCascadeSize;
-  vec2 stride = texel * uBlock;
+vec4 probeSmoothed() {
+  vec2 texelCoord = floor(gl_FragCoord.xy);
+  vec2 probeCounts = floor(uCascadeSize / uBlock);
+  vec2 dirXY = floor(texelCoord / probeCounts);
+  vec2 probeIdx = texelCoord - dirXY * probeCounts;
   vec4 sum = vec4(0.0);
   float total = 0.0;
   for (int y = -1; y <= 1; y++) {
     for (int x = -1; x <= 1; x++) {
       float w = (x == 0 ? 2.0 : 1.0) * (y == 0 ? 2.0 : 1.0);
-      sum += texture(uCurrent, uv + vec2(float(x), float(y)) * stride) * w;
+      vec2 p = clamp(probeIdx + vec2(float(x), float(y)), vec2(0.0), probeCounts - 1.0);
+      vec2 uv = (dirXY * probeCounts + p + 0.5) / uCascadeSize;
+      sum += texture(uCurrent, uv) * w;
       total += w;
     }
   }
@@ -940,7 +977,7 @@ vec4 probeSmoothed(vec2 uv) {
 }
 
 void main() {
-  vec4 current = probeSmoothed(vUv);
+  vec4 current = probeSmoothed();
   vec4 history = texture(uHistory, vUv);
   float change = abs(luma(current.rgb) - luma(history.rgb));
   float responsive = smoothstep(0.05, 0.45, change);
@@ -976,6 +1013,7 @@ uniform vec2 uKeyDir;
 uniform float uKeyElevation;
 uniform float uSkyRef;
 uniform float uSpecFloor;
+uniform float uDistanceScale;
 
 struct Field {
   vec3 irradiance;   // mean radiance over the probe's directions
@@ -985,22 +1023,14 @@ struct Field {
 
 Field sampleField(vec2 p) {
   vec2 pc = vec2(p.x / uSpacing, (uCanvas.y - p.y) / uSpacing) - 0.5;
-  vec2 base = floor(pc);
-  vec2 f = pc - base;
   vec2 counts = floor(uCascadeSize / 2.0);
+  vec2 sampleCoord = clamp(pc, vec2(0.0), counts - 1.0);
 
   vec3 radiance[4];
-  for (int d = 0; d < 4; d++) radiance[d] = vec3(0.0);
-
-  for (int c = 0; c < 4; c++) {
-    vec2 corner = vec2(float(c & 1), float((c >> 1) & 1));
-    float w = (corner.x > 0.5 ? f.x : 1.0 - f.x) * (corner.y > 0.5 ? f.y : 1.0 - f.y);
-    vec2 pIdx = clamp(base + corner, vec2(0.0), counts - 1.0);
-    for (int d = 0; d < 4; d++) {
-      vec2 dirXY = vec2(float(d & 1), float((d >> 1) & 1));
-      vec2 uv = (pIdx * 2.0 + dirXY + 0.5) / uCascadeSize;
-      radiance[d] += texture(uCascade0, uv).rgb * w;
-    }
+  for (int d = 0; d < 4; d++) {
+    vec2 dirXY = vec2(float(d & 1), float((d >> 1) & 1));
+    vec2 uv = (dirXY * counts + sampleCoord + 0.5) / uCascadeSize;
+    radiance[d] = texture(uCascade0, uv).rgb;
   }
 
   Field field;
@@ -1108,8 +1138,7 @@ void main() {
   // Contact occlusion from the real distance field: how much of the immediate
   // neighbourhood is blocked, biased toward the incoming light.
   vec2 sdfUv = canvasToUv(p, uCanvas);
-  vec2 seed = texture(uSdf, sdfUv).rg;
-  float edgeDist = seed.x < 0.0 ? 1e4 : length((seed - sdfUv) * uCanvas);
+  float edgeDist = texture(uSdf, sdfUv).r * uDistanceScale;
   float sceneH = texture(uScene, sdfUv).a * uHeightScale;
   float contact = 1.0;
   if (height * uHeightScale < 1.5) {
@@ -1423,7 +1452,10 @@ class Program {
 function createTexture(gl, width, height, internalFormat, format, type, filter) {
   const texture = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, texture);
-  gl.texImage2D(gl.TEXTURE_2D, 0, internalFormat, width, height, 0, format, type, null);
+  // Every target has one fixed-size mip level for its whole lifetime. Immutable
+  // storage lets the driver allocate it once and skip the redefinition checks
+  // texImage2D would otherwise carry into framebuffer validation.
+  gl.texStorage2D(gl.TEXTURE_2D, 1, internalFormat, width, height);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -1474,6 +1506,21 @@ export class GpuPlayfieldRenderer {
     this.ownsBackingStore = true;
 
     this.quality = options.quality || 'high';
+    this.adaptiveQuality = options.adaptiveQuality !== false;
+    this.forceLdr = options.forceLdr === true;
+    this._gpuTimer = null;
+    this._gpuTimingQuery = null;
+    this._gpuTimingActive = false;
+    this._gpuTimingFrame = 0;
+    this._gpuSlowSamples = 0;
+    this._gpuTimingCooldown = 0;
+    this._lastGpuMs = null;
+    this._cadenceEmaMs = 0;
+    this._cadenceSamples = 0;
+    // Kept as an option so the benchmark can A/B both storage layouts through
+    // identical shaders and driver state. Production uses the compact path.
+    this.compactTargets = options.compactTargets !== false;
+    this.reuseDistanceField = options.reuseDistanceField !== false;
     this._ratio = 1;
     this._renderWidth = 0;
     this._renderHeight = 0;
@@ -1484,6 +1531,17 @@ export class GpuPlayfieldRenderer {
     this._curveCount = 0;
     this._instanceCapacity = 0;
     this._curveCapacity = 0;
+    this._instanceUpload = new Float32Array(0);
+    this._curveUpload = new Float32Array(0);
+    // The expensive jump-flood solve depends only on solid silhouettes and
+    // height, not on light, colour, hit flashes, or portal flow. Keep an exact
+    // (collision-free) snapshot of that geometry so emission-only frames can
+    // reuse the existing distance field.
+    this._sdfGeometry = [];
+    this._sdfGeometryScratch = [];
+    this._sdfReady = false;
+    this._sdfBuilds = 0;
+    this._sdfReuses = 0;
 
     this._programs = {};
     this._targets = null;
@@ -1499,6 +1557,12 @@ export class GpuPlayfieldRenderer {
     this.marchSteps = null;
     this.marchMinStep = null;
     this._lastTime = 0;
+    this._scaledSkyTop = [0, 0, 0];
+    this._scaledSkyBottom = [0, 0, 0];
+    this._resolvedKeyDir = [0, 0];
+    this._waveA = new Float32Array(16);
+    this._waveB = new Float32Array(16);
+    this._waveC = new Float32Array(12);
     this.config = createDefaultLighting();
   }
 
@@ -1523,6 +1587,10 @@ export class GpuPlayfieldRenderer {
   /** Switching quality changes the probe grid and cascade count, so the render
    *  targets have to be rebuilt at the next resize. */
   setQuality(quality) {
+    this._applyQuality(QUALITY_ORDER.includes(quality) ? quality : 'high');
+  }
+
+  _applyQuality(quality) {
     if (quality === this.quality) return;
     this.quality = quality;
     if (this.gl && this._targets) {
@@ -1587,12 +1655,20 @@ export class GpuPlayfieldRenderer {
       });
       if (!gl) throw new Error('WebGL2 unavailable');
       this.gl = gl;
+      this._gpuTimer = this.adaptiveQuality
+        ? gl.getExtension('EXT_disjoint_timer_query_webgl2')
+        : null;
+      this._gpuTimingQuery = null;
+      this._gpuTimingActive = false;
+      this._gpuTimingFrame = 0;
+      this._gpuSlowSamples = 0;
+      this._gpuTimingCooldown = 0;
 
       // Half-float targets keep radiance linear and unclamped. Without them the
       // pipeline still runs, with emission scaled into an 8-bit range.
       const floatColor = gl.getExtension('EXT_color_buffer_float')
         || gl.getExtension('EXT_color_buffer_half_float');
-      this._hdr = !!floatColor;
+      this._hdr = !this.forceLdr && !!floatColor;
       this._colorInternal = this._hdr ? gl.RGBA16F : gl.RGBA8;
       this._colorType = this._hdr ? gl.HALF_FLOAT : gl.UNSIGNED_BYTE;
 
@@ -1603,13 +1679,16 @@ export class GpuPlayfieldRenderer {
 
       // Submit every program before reading any status — see Program.verify.
       const shaderCache = new Map();
+      const encodeSeeds = this._hdr ? 'false' : 'true';
+      const seedFragment = SEED_FS.replace('__ENCODE_SEEDS__', encodeSeeds);
+      const jfaFragment = JFA_FS.replace('__ENCODE_SEEDS__', encodeSeeds);
       const programs = {
         board: new Program(gl, FULLSCREEN_VS, BOARD_FS, shaderCache),
         object: new Program(gl, OBJECT_VS, OBJECT_FS, shaderCache),
         curve: new Program(gl, CURVE_VS, CURVE_FS, shaderCache),
         downsample: new Program(gl, FULLSCREEN_VS, DOWNSAMPLE_FS, shaderCache),
-        seed: new Program(gl, FULLSCREEN_VS, SEED_FS, shaderCache),
-        jfa: new Program(gl, FULLSCREEN_VS, JFA_FS, shaderCache),
+        seed: new Program(gl, FULLSCREEN_VS, seedFragment, shaderCache),
+        jfa: new Program(gl, FULLSCREEN_VS, jfaFragment, shaderCache),
         cascade: new Program(gl, FULLSCREEN_VS, CASCADE_FS, shaderCache),
         cascadeBlend: new Program(gl, FULLSCREEN_VS, CASCADE_BLEND_FS, shaderCache),
         shade: new Program(gl, FULLSCREEN_VS, SHADE_FS, shaderCache),
@@ -1670,6 +1749,78 @@ export class GpuPlayfieldRenderer {
     return { spacing: 4, cascades: 5, sdfDivisor: 2, minRatio: 1.5, maxRatio: 2 };
   }
 
+  _lowerQuality() {
+    const index = QUALITY_ORDER.indexOf(this.quality);
+    if (index <= 0) return false;
+    this._applyQuality(QUALITY_ORDER[index - 1]);
+    this._gpuSlowSamples = 0;
+    this._gpuTimingCooldown = 2;
+    this._cadenceEmaMs = 0;
+    this._cadenceSamples = 0;
+    return true;
+  }
+
+  _observeGpuTime(milliseconds) {
+    if (!Number.isFinite(milliseconds) || milliseconds <= 0 || milliseconds > 100) return;
+    this._lastGpuMs = milliseconds;
+    if (this._gpuTimingCooldown > 0) {
+      this._gpuTimingCooldown--;
+      return;
+    }
+    const threshold = this.quality === 'high' ? 10.5 : (this.quality === 'medium' ? 13.5 : Infinity);
+    this._gpuSlowSamples = milliseconds > threshold
+      ? this._gpuSlowSamples + 1
+      : Math.max(0, this._gpuSlowSamples - 1);
+    if (this._gpuSlowSamples >= 2) this._lowerQuality();
+  }
+
+  _pollGpuTimer() {
+    const gl = this.gl;
+    const timer = this._gpuTimer;
+    const query = this._gpuTimingQuery;
+    if (!gl || !timer || !query) return;
+    if (!gl.getQueryParameter(query, gl.QUERY_RESULT_AVAILABLE)) return;
+    const disjoint = gl.getParameter(timer.GPU_DISJOINT_EXT);
+    const nanoseconds = gl.getQueryParameter(query, gl.QUERY_RESULT);
+    gl.deleteQuery(query);
+    this._gpuTimingQuery = null;
+    if (!disjoint) this._observeGpuTime(nanoseconds / 1e6);
+  }
+
+  _beginGpuTimer() {
+    const gl = this.gl;
+    const timer = this._gpuTimer;
+    if (!gl || !timer || this._gpuTimingQuery || this._gpuTimingActive) return;
+    if (++this._gpuTimingFrame % 30 !== 0) return;
+    if (typeof document !== 'undefined' && document.hidden) return;
+    const query = gl.createQuery();
+    if (!query) return;
+    this._gpuTimingQuery = query;
+    gl.beginQuery(timer.TIME_ELAPSED_EXT, query);
+    this._gpuTimingActive = true;
+  }
+
+  _endGpuTimer() {
+    if (!this._gpuTimingActive || !this.gl || !this._gpuTimer) return;
+    this.gl.endQuery(this._gpuTimer.TIME_ELAPSED_EXT);
+    this._gpuTimingActive = false;
+  }
+
+  // Safari does not currently expose timer queries consistently. In that case
+  // use sustained delivered cadence, never a device-name guess, as the fallback
+  // signal. It is deliberately slower to react than the direct GPU timer.
+  _observeFrameCadence(frameDeltaSeconds) {
+    if (this._gpuTimer || this.quality === 'low') return;
+    const milliseconds = Number(frameDeltaSeconds) * 1000;
+    if (!Number.isFinite(milliseconds) || milliseconds < 8 || milliseconds > 80) return;
+    if (typeof document !== 'undefined' && document.hidden) return;
+    this._cadenceEmaMs = this._cadenceSamples === 0
+      ? milliseconds
+      : this._cadenceEmaMs * 0.94 + milliseconds * 0.06;
+    this._cadenceSamples++;
+    if (this._cadenceSamples >= 90 && this._cadenceEmaMs > 20.0) this._lowerQuality();
+  }
+
   resize(width, height) {
     if (!this.canvas || !this.gl) return;
     const w = Math.max(1, Math.round(width));
@@ -1709,12 +1860,20 @@ export class GpuPlayfieldRenderer {
     const sdfWidth = Math.max(8, Math.ceil(rw / settings.sdfDivisor));
     const sdfHeight = Math.max(8, Math.ceil(rh / settings.sdfDivisor));
 
-    const color = (w, h) => createTexture(gl, w, h, this._colorInternal, gl.RGBA, this._colorType, gl.LINEAR);
+    // Jump-flood seeds contain two coordinates, so RG16F carries the exact same
+    // half-float values as RGBA16F without reading or writing two dead channels.
+    // Keep every visible G-buffer attachment at the original precision.
+    const color = (w, h) => createTexture(
+      gl, w, h, this._colorInternal, gl.RGBA, this._colorType, gl.LINEAR
+    );
     // The jump-flood field stores coordinates, not colour; nearest sampling
     // keeps seed positions exact through the flood.
-    const coords = (w, h) => createTexture(
+    const coords = (w, h) => this._hdr && this.compactTargets
+      ? createTexture(gl, w, h, gl.RG16F, gl.RG, gl.HALF_FLOAT, gl.NEAREST)
+      : createTexture(gl, w, h, this._colorInternal, gl.RGBA, this._colorType, gl.NEAREST);
+    const distance = (w, h) => createTexture(
       gl, w, h,
-      this._hdr ? gl.RGBA16F : gl.RGBA8, gl.RGBA,
+      this._hdr ? gl.R16F : gl.R8, gl.RED,
       this._hdr ? gl.HALF_FLOAT : gl.UNSIGNED_BYTE, gl.NEAREST
     );
 
@@ -1732,6 +1891,7 @@ export class GpuPlayfieldRenderer {
       scene: color(sdfWidth, sdfHeight),
       seedA: coords(sdfWidth, sdfHeight),
       seedB: coords(sdfWidth, sdfHeight),
+      sdfDistance: distance(sdfWidth, sdfHeight),
       lit: color(rw, rh),
       litPrev: color(rw, rh),
       fieldA: color(cascadeWidth, cascadeHeight),
@@ -1765,9 +1925,19 @@ export class GpuPlayfieldRenderer {
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       throw new Error('G-buffer framebuffer incomplete');
     }
+
+    // The downsample pass reads last frame's lighting on frame one. Texture
+    // storage is intentionally uninitialised by WebGL, so seed that history
+    // explicitly instead of letting driver memory become a one-frame flash (or
+    // nondeterministic benchmark noise).
+    gl.bindFramebuffer(gl.FRAMEBUFFER, targets.fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, targets.litPrev, 0);
+    gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+    gl.clearBufferfv(gl.COLOR, 0, ZERO_CLEAR);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
     this._targets = targets;
+    this._sdfReady = false;
   }
 
   _releaseTargets() {
@@ -1775,7 +1945,7 @@ export class GpuPlayfieldRenderer {
     const t = this._targets;
     if (!gl || !t) return;
     const owned = ['albedo', 'normal', 'emission', 'material', 'scene',
-      'seedA', 'seedB', 'lit', 'litPrev', 'fieldA', 'fieldB'];
+      'seedA', 'seedB', 'sdfDistance', 'lit', 'litPrev', 'fieldA', 'fieldB'];
     for (const key of owned) {
       if (t[key]) gl.deleteTexture(t[key]);
     }
@@ -1784,6 +1954,7 @@ export class GpuPlayfieldRenderer {
     if (t.fbo) gl.deleteFramebuffer(t.fbo);
     if (t.gbufferFbo) gl.deleteFramebuffer(t.gbufferFbo);
     this._targets = null;
+    this._sdfReady = false;
   }
 
   _bindTarget(texture, width, height) {
@@ -2194,25 +2365,88 @@ export class GpuPlayfieldRenderer {
     this._curveCount = Math.floor(this.curveVertices.length / CURVE_FLOATS);
 
     if (this._instanceCount > 0) {
-      const data = new Float32Array(this.instances);
-      gl.bindBuffer(gl.ARRAY_BUFFER, this._instanceBuffer);
-      if (data.length > this._instanceCapacity) {
-        gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW);
-        this._instanceCapacity = data.length;
-      } else {
-        gl.bufferSubData(gl.ARRAY_BUFFER, 0, data);
+      const length = this.instances.length;
+      if (this._instanceUpload.length < length) {
+        this._instanceUpload = new Float32Array(1 << Math.ceil(Math.log2(length)));
       }
+      this._instanceUpload.set(this.instances, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this._instanceBuffer);
+      if (this._instanceUpload.length > this._instanceCapacity) {
+        gl.bufferData(gl.ARRAY_BUFFER, this._instanceUpload.byteLength, gl.DYNAMIC_DRAW);
+        this._instanceCapacity = this._instanceUpload.length;
+      }
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, this._instanceUpload, 0, length);
     }
     if (this._curveCount > 0) {
-      const data = new Float32Array(this.curveVertices);
+      const length = this.curveVertices.length;
+      if (this._curveUpload.length < length) {
+        this._curveUpload = new Float32Array(1 << Math.ceil(Math.log2(length)));
+      }
+      this._curveUpload.set(this.curveVertices, 0);
       gl.bindBuffer(gl.ARRAY_BUFFER, this._curveBuffer);
-      if (data.length > this._curveCapacity) {
-        gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW);
-        this._curveCapacity = data.length;
-      } else {
-        gl.bufferSubData(gl.ARRAY_BUFFER, 0, data);
+      if (this._curveUpload.length > this._curveCapacity) {
+        gl.bufferData(gl.ARRAY_BUFFER, this._curveUpload.byteLength, gl.DYNAMIC_DRAW);
+        this._curveCapacity = this._curveUpload.length;
+      }
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, this._curveUpload, 0, length);
+    }
+  }
+
+  /**
+   * Returns true only when data that can change the SDF has changed. This is an
+   * exact value comparison rather than a hash: a false reuse would corrupt
+   * lighting, while a few thousand scalar comparisons are cheap and allocate
+   * nothing once the arrays have reached their high-water mark.
+   */
+  _distanceGeometryChanged() {
+    const next = this._sdfGeometryScratch;
+    next.length = 0;
+
+    const instances = this.instances;
+    let solidInstances = 0;
+    next.push(0); // patched with the count after emitters have been skipped
+    for (let i = 0; i < instances.length; i += INSTANCE_FLOATS) {
+      const shape = instances[i + 5];
+      const material = instances[i + 7];
+      // Light strips write a fixed height of 0.05 and hidden emitters write
+      // zero. Both sit below the seed shader's 0.06 solid threshold.
+      if (shape === SHAPE_EMITTER || material === MAT_HIDDEN_EMITTER) continue;
+      solidInstances++;
+      next.push(
+        instances[i], instances[i + 1],       // centre
+        instances[i + 2], instances[i + 3],   // extent
+        instances[i + 4], shape,               // orientation / profile
+        instances[i + 12], instances[i + 13]   // height scale / emergence
+      );
+    }
+    next[0] = solidInstances;
+
+    const curves = this.curveVertices;
+    next.push(curves.length / CURVE_FLOATS);
+    for (let i = 0; i < curves.length; i += CURVE_FLOATS) {
+      next.push(
+        curves[i], curves[i + 1],       // centreline position
+        curves[i + 2], curves[i + 3],   // normal
+        curves[i + 4], curves[i + 5],   // side / half width
+        curves[i + 12]                  // emergence
+      );
+    }
+
+    const previous = this._sdfGeometry;
+    let changed = next.length !== previous.length;
+    if (!changed) {
+      for (let i = 0; i < next.length; i++) {
+        if (next[i] !== previous[i]) {
+          changed = true;
+          break;
+        }
       }
     }
+    if (changed) {
+      this._sdfGeometry = next;
+      this._sdfGeometryScratch = previous;
+    }
+    return changed;
   }
 
   // ── passes ────────────────────────────────────────────────────────────────
@@ -2270,7 +2504,7 @@ export class GpuPlayfieldRenderer {
     gl.bindVertexArray(null);
   }
 
-  _renderDistanceField() {
+  _renderDistanceField(rebuild) {
     const gl = this.gl;
     const t = this._targets;
 
@@ -2284,6 +2518,15 @@ export class GpuPlayfieldRenderer {
       .f('uEmitScale', EMIT_SCALE);
     this._blit();
 
+    // Scene radiance above changes with every portal shimmer and hit flash, but
+    // the distance texture does not. Avoid seed + O(log maxDimension) flood
+    // passes when the exact solid geometry snapshot is unchanged.
+    if (!rebuild && this._sdfReady) {
+      this._sdfReuses++;
+      return;
+    }
+    this._sdfBuilds++;
+
     this._bindTarget(t.seedA, t.sdfWidth, t.sdfHeight);
     this._programs.seed.use()
       .tex('uScene', 0, t.scene)
@@ -2294,6 +2537,11 @@ export class GpuPlayfieldRenderer {
     let destination = t.seedB;
     const passes = Math.ceil(Math.log2(Math.max(t.sdfWidth, t.sdfHeight)));
     const jfa = this._programs.jfa;
+    const distanceScale = Math.max(this.width, this.height);
+    jfa.use()
+      .v2('uCanvas', this.width, this.height)
+      .f('uDistanceScale', distanceScale)
+      .f('uOutputDistance', 0);
     for (let i = 0; i < passes; i++) {
       const step = Math.pow(2, passes - 1 - i);
       this._bindTarget(destination, t.sdfWidth, t.sdfHeight);
@@ -2305,10 +2553,14 @@ export class GpuPlayfieldRenderer {
       const swap = source; source = destination; destination = swap;
     }
     // One final unit step cleans up the classic jump-flood corner artifacts.
-    this._bindTarget(destination, t.sdfWidth, t.sdfHeight);
-    jfa.use().tex('uSeed', 0, source).f('uStep', 1);
+    this._bindTarget(t.sdfDistance, t.sdfWidth, t.sdfHeight);
+    jfa.use()
+      .tex('uSeed', 0, source)
+      .f('uStep', 1)
+      .f('uOutputDistance', 1);
     this._blit();
-    t.sdf = destination;
+    t.sdf = t.sdfDistance;
+    this._sdfReady = true;
   }
 
   _renderCascades() {
@@ -2323,6 +2575,7 @@ export class GpuPlayfieldRenderer {
       .f('uHeightScale', HEIGHT_SCALE)
       .f('uEmitScale', EMIT_SCALE)
       .f('uElevation', this._elevation)
+      .f('uDistanceScale', Math.max(this.width, this.height))
       .v3('uSkyTop', this._skyTop[0], this._skyTop[1], this._skyTop[2])
       .v3('uSkyBottom', this._skyBottom[0], this._skyBottom[1], this._skyBottom[2])
       .tex('uSdf', 0, t.sdf)
@@ -2396,6 +2649,7 @@ export class GpuPlayfieldRenderer {
       .f('uKeyElevation', this._keyElevation)
       .f('uSkyRef', this._skyRef)
       .f('uSpecFloor', this._specFloor);
+    this._programs.shade.f('uDistanceScale', Math.max(this.width, this.height));
     this._blit();
   }
 
@@ -2446,14 +2700,16 @@ export class GpuPlayfieldRenderer {
     const program = this._programs.composite;
     gl.uniform1i(program.loc('uWaveCount'), count);
     if (count > 0) {
-      const a = new Float32Array(16);
-      const b = new Float32Array(16);
-      const c = new Float32Array(12);
+      const a = this._waveA;
+      const b = this._waveB;
+      const c = this._waveC;
       for (let i = 0; i < count; i++) {
         const w = waves[i];
-        a.set([w.x, w.y, w.radius, w.band], i * 4);
-        b.set([w.amp, w.ringAlpha, w.ripple, w.weight], i * 4);
-        c.set(w.color, i * 3);
+        const i4 = i * 4;
+        const i3 = i * 3;
+        a[i4] = w.x; a[i4 + 1] = w.y; a[i4 + 2] = w.radius; a[i4 + 3] = w.band;
+        b[i4] = w.amp; b[i4 + 1] = w.ringAlpha; b[i4 + 2] = w.ripple; b[i4 + 3] = w.weight;
+        c[i3] = w.color[0]; c[i3 + 1] = w.color[1]; c[i3 + 2] = w.color[2];
       }
       gl.uniform4fv(program.loc('uWaveA[0]'), a);
       gl.uniform4fv(program.loc('uWaveB[0]'), b);
@@ -2464,6 +2720,8 @@ export class GpuPlayfieldRenderer {
 
   render(pegs, hitPegIds, options = {}) {
     if (!this.ready || !this.gl) return false;
+    this._pollGpuTimer();
+    this._observeFrameCadence(options.frameDeltaSeconds);
     const width = Math.max(1, Number(options.width) || this.width || 400);
     const height = Math.max(1, Number(options.height) || this.height || 600);
     this.resize(width, height);
@@ -2491,29 +2749,41 @@ export class GpuPlayfieldRenderer {
     this._giBlend = pick('giBlend', cfg.giBlend);
     this._waves = Array.isArray(options.waves) ? options.waves : null;
     const skyScale = pick('skyIntensity', cfg.skyIntensity);
-    this._skyTop = (options.skyTop || [0.052, 0.128, 0.205]).map(v => v * skyScale);
-    this._skyBottom = (options.skyBottom || [0.012, 0.028, 0.048]).map(v => v * skyScale);
+    const skyTop = options.skyTop || DEFAULT_SKY_TOP;
+    const skyBottom = options.skyBottom || DEFAULT_SKY_BOTTOM;
+    for (let i = 0; i < 3; i++) {
+      this._scaledSkyTop[i] = skyTop[i] * skyScale;
+      this._scaledSkyBottom[i] = skyBottom[i] * skyScale;
+    }
+    this._skyTop = this._scaledSkyTop;
+    this._skyBottom = this._scaledSkyBottom;
     this._domeColor = options.domeColor || cfg.domeColor;
     this._domeIntensity = pick('domeIntensity', cfg.domeIntensity);
-    this._keyDir = options.keyDir || [cfg.keyDirX, cfg.keyDirY];
+    const keyDir = options.keyDir;
+    this._resolvedKeyDir[0] = keyDir ? keyDir[0] : cfg.keyDirX;
+    this._resolvedKeyDir[1] = keyDir ? keyDir[1] : cfg.keyDirY;
+    this._keyDir = this._resolvedKeyDir;
     this._keyElevation = pick('keyElevation', cfg.keyElevation);
     // Reference level for "fully open to the sky", used to normalise openness.
     const sky = this._skyTop;
     this._skyRef = Math.max(1e-4, 0.2126 * sky[0] + 0.7152 * sky[1] + 0.0722 * sky[2]) * 0.75;
 
     this._buildScene(pegs, hitPegIds, options, dt);
+    const sdfGeometryChanged = this._distanceGeometryChanged();
     this._uploadBuffers();
 
     const gl = this.gl;
     gl.disable(gl.DEPTH_TEST);
     gl.disable(gl.CULL_FACE);
 
+    this._beginGpuTimer();
     this._renderGBuffer();
-    this._renderDistanceField();
+    this._renderDistanceField(!this.reuseDistanceField || sdfGeometryChanged);
     this._renderCascades();
     this._renderShading();
     this._renderBloom();
     this._renderComposite();
+    this._endGpuTimer();
 
     // This frame's lit result becomes next frame's bounce source.
     const t = this._targets;
@@ -2526,6 +2796,9 @@ export class GpuPlayfieldRenderer {
   }
 
   dispose() {
+    if (this.gl && this._gpuTimingQuery) this.gl.deleteQuery(this._gpuTimingQuery);
+    this._gpuTimingQuery = null;
+    this._gpuTimingActive = false;
     this._releaseTargets();
     if (this.canvas?.parentNode) this.canvas.parentNode.removeChild(this.canvas);
     this.canvas = null;

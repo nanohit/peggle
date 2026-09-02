@@ -1,0 +1,357 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>GPU playfield benchmark</title>
+<style>
+  html, body { margin: 0; min-height: 100%; background: #05070d; color: #cfe6f2;
+    font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  body { display: flex; gap: 16px; align-items: flex-start; padding: 12px; }
+  #host { position: relative; width: 400px; height: 600px; flex: none; overflow: hidden; }
+  #out { margin: 0; width: 440px; white-space: pre-wrap; }
+  .ok { color: #7fe08a; }
+</style>
+<div id="host"></div>
+<pre id="out">warming GPU...</pre>
+<script type="module">
+import { GpuPlayfieldRenderer } from '../js/gpu-playfield.js';
+
+const params = new URLSearchParams(location.search);
+const W = Number(params.get('width')) || 400;
+const H = Number(params.get('height')) || 600;
+const forcedRatio = Math.max(0.5, Number(params.get('ratio')) || 1);
+const quality = params.get('quality') || 'high';
+const compactTargets = params.get('compact') !== '0';
+const reuseDistanceField = params.get('reuse') !== '0';
+const forceLdr = params.get('ldr') === '1';
+const warmupFrames = Math.max(4, Number(params.get('warmup')) || 24);
+const measuredFrames = Math.max(12, Number(params.get('frames')) || 90);
+const batchFrames = Math.max(8, Number(params.get('batch')) || 60);
+const active = params.get('mode') !== 'static';
+const dense = params.get('scene') !== 'typical';
+const out = document.getElementById('out');
+const host = document.getElementById('host');
+host.style.width = W + 'px';
+host.style.height = H + 'px';
+
+function arc(id, type, cx, cy, radius, from, to, thickness, steps) {
+  const slices = [];
+  for (let i = 0; i <= steps; i++) {
+    const a = from + (to - from) * (i / steps);
+    slices.push({
+      x: cx + Math.cos(a) * radius,
+      y: cy + Math.sin(a) * radius,
+      nx: Math.cos(a),
+      ny: Math.sin(a)
+    });
+  }
+  return { id, type, shape: 'brick', x: cx, y: cy, width: radius, height: thickness, curveSlices: slices };
+}
+
+function buildScene() {
+  const pegs = [];
+  let id = 1;
+  const rows = dense ? 10 : 7;
+  const columns = dense ? 9 : 7;
+  const gapX = W / (columns + 1);
+  const gapY = (H - 150) / (rows + 1);
+  const types = ['orange', 'blue', 'green', 'purple', 'obstacle'];
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < columns; col++) {
+      const x = gapX * (col + 1) + ((row & 1) ? gapX * 0.22 : 0);
+      if (x > W - 12) continue;
+      const type = types[(row * columns + col) % types.length];
+      pegs.push({
+        id: id++,
+        x,
+        y: 88 + gapY * row,
+        type,
+        shape: type === 'obstacle' && (col % 3 === 0) ? 'brick' : 'circle',
+        width: 34,
+        height: 10,
+        angle: (col - columns * 0.5) * 0.035
+      });
+    }
+  }
+  pegs.push(
+    arc(id++, 'orange', W * 0.27, H * 0.38, 76, Math.PI * 0.55, Math.PI * 1.74, 11, 22),
+    arc(id++, 'blue', W * 0.70, H * 0.63, 82, Math.PI * 1.18, Math.PI * 2.34, 12, 24)
+  );
+  if (dense) {
+    pegs.push(
+      { id: id++, x: W * 0.25, y: H * 0.52, type: 'portalBlue', shape: 'circle', angle: 0.35 },
+      { id: id++, x: W * 0.75, y: H * 0.78, type: 'portalOrange', shape: 'circle', angle: -0.42 }
+    );
+  }
+  return pegs;
+}
+
+const pegs = buildScene();
+const renderer = new GpuPlayfieldRenderer({
+  quality,
+  compactTargets,
+  reuseDistanceField,
+  forceLdr,
+  // The harness owns timer queries and must keep the tested preset fixed.
+  adaptiveQuality: false
+});
+const nativeQualitySettings = renderer._qualitySettings.bind(renderer);
+renderer._qualitySettings = () => {
+  const settings = nativeQualitySettings();
+  return { ...settings, minRatio: forcedRatio, maxRatio: forcedRatio };
+};
+
+const attachStart = performance.now();
+const attached = renderer.attach(host);
+const attachMs = performance.now() - attachStart;
+if (!attached) throw new Error('WebGL2 playfield failed to attach');
+Object.assign(renderer.canvas.style, {
+  position: 'absolute',
+  inset: '0',
+  width: W + 'px',
+  height: H + 'px'
+});
+
+const gl = renderer.gl;
+const timer = gl.getExtension('EXT_disjoint_timer_query_webgl2');
+const debug = gl.getExtension('WEBGL_debug_renderer_info');
+const passNames = [
+  '_renderGBuffer',
+  '_renderDistanceField',
+  '_renderCascades',
+  '_renderShading',
+  '_renderBloom',
+  '_renderComposite'
+];
+const cpuNames = ['_buildScene', '_uploadBuffers', ...passNames];
+const cpuSamples = Object.fromEntries(cpuNames.map(name => [name, []]));
+const gpuSamples = Object.fromEntries(passNames.map(name => [name, []]));
+const pendingQueries = [];
+let measuring = false;
+let timerDisjoint = false;
+
+for (const name of cpuNames) {
+  const original = renderer[name].bind(renderer);
+  renderer[name] = (...args) => {
+    let query = null;
+    const shouldTimeGpu = measuring && timer && passNames.includes(name);
+    if (shouldTimeGpu) {
+      query = gl.createQuery();
+      gl.beginQuery(timer.TIME_ELAPSED_EXT, query);
+    }
+    const start = performance.now();
+    const result = original(...args);
+    const elapsed = performance.now() - start;
+    if (measuring) cpuSamples[name].push(elapsed);
+    if (query) {
+      gl.endQuery(timer.TIME_ELAPSED_EXT);
+      pendingQueries.push({ name, query });
+    }
+    return result;
+  };
+}
+
+function collectQueries() {
+  if (!timer) return;
+  if (gl.getParameter(timer.GPU_DISJOINT_EXT)) timerDisjoint = true;
+  for (let i = pendingQueries.length - 1; i >= 0; i--) {
+    const entry = pendingQueries[i];
+    if (!gl.getQueryParameter(entry.query, gl.QUERY_RESULT_AVAILABLE)) continue;
+    const nanoseconds = gl.getQueryParameter(entry.query, gl.QUERY_RESULT);
+    gpuSamples[entry.name].push(nanoseconds / 1e6);
+    gl.deleteQuery(entry.query);
+    pendingQueries.splice(i, 1);
+  }
+}
+
+function percentile(values, fraction) {
+  if (!values.length) return null;
+  const sorted = values.slice().sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * fraction))];
+}
+
+function summarize(values) {
+  if (!values.length) return null;
+  const sum = values.reduce((total, value) => total + value, 0);
+  return {
+    samples: values.length,
+    meanMs: +(sum / values.length).toFixed(4),
+    p50Ms: +percentile(values, 0.50).toFixed(4),
+    p95Ms: +percentile(values, 0.95).toFixed(4),
+    maxMs: +Math.max(...values).toFixed(4)
+  };
+}
+
+function propsFor(frame) {
+  const time = frame / 60;
+  const phase = active ? time : 0;
+  return [
+    {
+      shape: 'ball',
+      x: W * 0.5 + Math.sin(phase * 2.4) * W * 0.33,
+      y: 130 + (phase * 95) % (H - 220),
+      radius: 8.5,
+      color: [0.74, 0.94, 1.0],
+      emissive: 0.36
+    },
+    { shape: 'capsule', x: W * 0.5, y: 36, halfW: 27, halfH: 7, angle: Math.sin(phase) * 0.62, metal: true, color: [0.52, 0.61, 0.67] },
+    { shape: 'box', x: W * 0.5 + Math.sin(phase * 0.8) * 90, y: H - 28, halfW: 31, halfH: 8, metal: true, color: [0.44, 0.54, 0.60] }
+  ];
+}
+
+function optionsFor(frame) {
+  const time = active ? frame / 60 : 2;
+  return {
+    width: W,
+    height: H,
+    timeSeconds: time,
+    props: propsFor(frame),
+    progress: 0.42
+  };
+}
+
+function nextFrame() {
+  return new Promise(resolve => requestAnimationFrame(resolve));
+}
+
+function framebufferHash(frame) {
+  renderer.render(pegs, new Set(), optionsFor(frame));
+  const pixels = new Uint8Array(renderer.canvas.width * renderer.canvas.height * 4);
+  gl.readPixels(0, 0, renderer.canvas.width, renderer.canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+  let hash = 2166136261;
+  let sum = 0;
+  for (let i = 0; i < pixels.length; i++) {
+    hash ^= pixels[i];
+    hash = Math.imul(hash, 16777619);
+    sum += pixels[i];
+  }
+  return {
+    fnv1a: (hash >>> 0).toString(16).padStart(8, '0'),
+    byteMean: +(sum / pixels.length).toFixed(4)
+  };
+}
+
+async function run() {
+  const firstStart = performance.now();
+  renderer.render(pegs, new Set(), optionsFor(0));
+  const firstSubmitMs = performance.now() - firstStart;
+
+  for (let i = 1; i <= warmupFrames; i++) {
+    await nextFrame();
+    renderer.render(pegs, new Set(), optionsFor(i));
+  }
+
+  const frameCpu = [];
+  const rafDelta = [];
+  let previousRaf = performance.now();
+  measuring = true;
+  for (let i = 0; i < measuredFrames; i++) {
+    const rafNow = await nextFrame();
+    rafDelta.push(rafNow - previousRaf);
+    previousRaf = rafNow;
+    const start = performance.now();
+    renderer.render(pegs, new Set(), optionsFor(warmupFrames + i + 1));
+    frameCpu.push(performance.now() - start);
+    collectQueries();
+  }
+  measuring = false;
+
+  const queryDeadline = performance.now() + 5000;
+  while (pendingQueries.length && performance.now() < queryDeadline) {
+    await nextFrame();
+    collectQueries();
+  }
+
+  // A short saturated batch removes desktop GPU clock-gating from the result.
+  // Per-pass queries above explain where time goes; this single outer query is
+  // the stable before/after throughput number used to accept a change.
+  let batchGpuMs = null;
+  let batchSubmitMs = null;
+  if (timer) {
+    const query = gl.createQuery();
+    gl.beginQuery(timer.TIME_ELAPSED_EXT, query);
+    const batchStart = performance.now();
+    for (let i = 0; i < batchFrames; i++) {
+      renderer.render(pegs, new Set(), optionsFor(warmupFrames + measuredFrames + i + 1));
+    }
+    batchSubmitMs = performance.now() - batchStart;
+    gl.endQuery(timer.TIME_ELAPSED_EXT);
+    gl.flush();
+    const deadline = performance.now() + 10000;
+    while (!gl.getQueryParameter(query, gl.QUERY_RESULT_AVAILABLE) && performance.now() < deadline) {
+      await nextFrame();
+    }
+    if (gl.getQueryParameter(query, gl.QUERY_RESULT_AVAILABLE)) {
+      batchGpuMs = gl.getQueryParameter(query, gl.QUERY_RESULT) / 1e6;
+    }
+    gl.deleteQuery(query);
+  }
+
+  const hash = framebufferHash(warmupFrames + measuredFrames + batchFrames);
+  const targets = renderer._targets;
+  const cpu = Object.fromEntries(cpuNames.map(name => [name.replace(/^_render|^_/, ''), summarize(cpuSamples[name])]));
+  const gpu = Object.fromEntries(passNames.map(name => [name.replace(/^_render/, ''), summarize(gpuSamples[name])]));
+  const gpuMeanTotalMs = Object.values(gpu).reduce((total, value) => total + (value?.meanMs || 0), 0);
+  const result = {
+    version: 1,
+    query: {
+      quality,
+      compactTargets,
+      reuseDistanceField,
+      forceLdr,
+      ratio: forcedRatio,
+      mode: active ? 'active' : 'static',
+      scene: dense ? 'dense' : 'typical',
+      warmupFrames,
+      measuredFrames,
+      batchFrames
+    },
+    device: {
+      userAgent: navigator.userAgent,
+      devicePixelRatio,
+      renderer: debug ? gl.getParameter(debug.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER),
+      vendor: debug ? gl.getParameter(debug.UNMASKED_VENDOR_WEBGL) : gl.getParameter(gl.VENDOR),
+      timerQuery: !!timer,
+      hdr: renderer._hdr,
+      glError: `0x${gl.getError().toString(16)}`
+    },
+    surface: {
+      logical: [renderer.width, renderer.height],
+      backing: [renderer.canvas.width, renderer.canvas.height],
+      sdf: [targets.sdfWidth, targets.sdfHeight],
+      cascades: [targets.cascadeWidth, targets.cascadeHeight, targets.cascadeCount],
+      instances: renderer._instanceCount,
+      curveVertices: renderer._curveCount
+    },
+    distanceField: {
+      builds: renderer._sdfBuilds,
+      reuses: renderer._sdfReuses
+    },
+    cold: {
+      attachMs: +attachMs.toFixed(3),
+      firstSubmitMs: +firstSubmitMs.toFixed(3)
+    },
+    frame: {
+      cpu: summarize(frameCpu),
+      raf: summarize(rafDelta),
+      gpuMeanTotalMs: +gpuMeanTotalMs.toFixed(4),
+      batchGpuMs: batchGpuMs == null ? null : +batchGpuMs.toFixed(4),
+      batchGpuPerFrameMs: batchGpuMs == null ? null : +(batchGpuMs / batchFrames).toFixed(4),
+      batchSubmitMs: batchSubmitMs == null ? null : +batchSubmitMs.toFixed(4),
+      gpuTimerDisjoint: timerDisjoint,
+      pendingQueries: pendingQueries.length
+    },
+    cpuPasses: cpu,
+    gpuPasses: gpu,
+    pixels: hash
+  };
+  window.__GPU_BENCH_RESULT__ = result;
+  document.documentElement.dataset.benchmark = 'done';
+  out.className = 'ok';
+  out.textContent = JSON.stringify(result, null, 2);
+}
+
+run().catch(error => {
+  window.__GPU_BENCH_ERROR__ = String(error?.stack || error);
+  document.documentElement.dataset.benchmark = 'failed';
+  out.textContent = window.__GPU_BENCH_ERROR__;
+});
+</script>

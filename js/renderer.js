@@ -4619,6 +4619,7 @@ export class Renderer {
           height: this.height,
           cameraY,
           timeSeconds: this._renderTimeSeconds,
+          frameDeltaSeconds: state.frameDeltaSeconds,
           progress: state.levelProgress,
           props: this._collectPlayfieldProps(state),
           ...this._collectPegLifecycle(),
