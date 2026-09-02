@@ -15,6 +15,18 @@ import { getPortalScale, isPortalType } from './portal-defaults.js';
 import { FLIPPER_DEFAULTS } from './flipper-defaults.js';
 import { getMagnetRadius, getMagnetStrength, isMagnetForceActive, normalizeMagnetMode } from './magnet-defaults.js';
 import { normalizePegType } from './peg-types.js';
+import { paintGlassOrb, PEG_SURFACE_STYLES as GLASS_PEG_STYLES } from './peg-surface.js';
+import { GpuPlayfieldRenderer } from './gpu-playfield.js';
+import {
+  drawMachineAtmosphere,
+  drawMachineBackdrop,
+  drawMachineBall,
+  drawMachineBumper,
+  drawMachineCatcher,
+  drawMachineFlipper,
+  drawMachineLauncher,
+  drawPegContactShadow
+} from './neon-machine.js';
 import {
   assetCacheKey,
   isAssetImageSource,
@@ -337,6 +349,10 @@ const END_MESSAGE_FADE_IN_MS = 260;
 const END_MESSAGE_FADE_OUT_MS = 190;
 const END_MESSAGE_LIFT_PX = 18;
 const PEG_EXIT_SHRINK_MS = 180;
+// How long a knocked-out peg keeps lighting the board after its body is gone.
+// A light that switches off in the same frame the peg stops existing reads as a
+// pop; a short tail reads as the peg being extinguished.
+const PEG_EXIT_GLOW_MS = 420;
 
 // When a render layer's inputs are unchanged its redraw is skipped; a forced
 // redraw every N frames bounds worst-case staleness if a dirty signal is
@@ -383,7 +399,7 @@ function cubicBezierTimeForProgress(progress, curve = PEG_ENTRY_SWEEP_BEZIER) {
 export class Renderer {
   constructor(canvas) {
     this.canvas = canvas;
-    this.ctx = canvas.getContext('2d', { alpha: false });
+    this.ctx = canvas.getContext('2d', { alpha: true });
     this.baseCtx = this.ctx;
     this.width = canvas.width;
     this.height = canvas.height;
@@ -427,6 +443,8 @@ export class Renderer {
     this._shockwaveLayerCanvas = null;
     this._foregroundCanvas = null;
     this._foregroundCtx = null;
+    this._gpuPlayfield = new GpuPlayfieldRenderer();
+    this._gpuSceneActive = false;
     this._renderLayerHost = null;
     this._renderLayerHostReady = false;
     this._layerLayoutState = new WeakMap();
@@ -478,16 +496,10 @@ export class Renderer {
     // Chrome/Safari and extremely slow).
     this._glowCache = new Map();
 
-    // Bucket image asset
+    // Asset-free gameplay materials. Keeping these fields null preserves the
+    // existing renderer contract while forcing the procedural fallbacks.
     this._bucketImg = null;
-    const bucketImg = new Image();
-    bucketImg.onload = () => { this._bucketImg = bucketImg; };
-    bucketImg.src = 'visuals/bucket.webp';
-
     this._flipperImg = null;
-    const flipperImg = new Image();
-    flipperImg.onload = () => { this._flipperImg = flipperImg; };
-    flipperImg.src = FLIPPER_ASSET_SRC;
 
     // Bucket catch particle system
     this._bucketParticles = [];
@@ -497,12 +509,6 @@ export class Renderer {
       top: null,
       circle: null
     };
-    const billiardTopImg = new Image();
-    billiardTopImg.onload = () => { this._billiardCannonImages.top = billiardTopImg; };
-    billiardTopImg.src = 'visuals/assets_webtp/top.webp';
-    const billiardCircleImg = new Image();
-    billiardCircleImg.onload = () => { this._billiardCannonImages.circle = billiardCircleImg; };
-    billiardCircleImg.src = 'visuals/assets_webtp/character_circle.webp';
   }
 
   resize(width, height) {
@@ -521,6 +527,7 @@ export class Renderer {
     this._bgVignetteDirty = true;
     this._shockwavePrewarmKey = '';
     this._syncRenderLayers();
+    this._gpuPlayfield?.resize(width, height);
   }
 
   getEndOverlayInteractDelayMs() {
@@ -715,6 +722,24 @@ export class Renderer {
     const c = size / 2;
     const tau = Math.PI * 2;
 
+    paintGlassOrb(g, {
+      cx: c,
+      cy: c,
+      r: rr,
+      style: GLASS_PEG_STYLES[normalizePegType(type)] || GLASS_PEG_STYLES.blue,
+      ambient: [66, 222, 246],
+      hitMix: isHit ? 1 : 0,
+      recipe: {
+        candleAlpha: isHit ? 0.5 : 0.3,
+        botHaloAlpha: isHit ? 0.78 : 0.54,
+        specMainAlpha: 1,
+        microSpecAlpha: 0.72
+      }
+    });
+
+    e = { img: oc, half: c };
+    return this._storeGlowCache(key, e);
+
     g.beginPath();
     g.arc(c, c, rr, 0, tau);
     g.fillStyle = colors.shadow;
@@ -896,8 +921,13 @@ export class Renderer {
     this._bgConfigSetAtMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
     this._bgImageFadePending = false;
     this._bgFadeStartMs = 0;
-    this._loadBackgroundAsset(config?.type === 'image' ? config.image : null, '_bgImage', '_bgImageSrc', '_bgBaseDirty');
-    this._loadBackgroundAsset(this._hasProgressionBackground(config) ? config.progressionImage : null, '_bgProgressImage', '_bgProgressImageSrc', '_bgOverlayDirty');
+    // Authored backgrounds remain in the level data for compatibility, but the
+    // player skin is now one coherent procedural machine well. Avoid fetching
+    // large CDN images that are intentionally no longer shown.
+    this._bgImage = null;
+    this._bgImageSrc = '';
+    this._bgProgressImage = null;
+    this._bgProgressImageSrc = '';
     if (config?.type !== 'liquid') {
       this._liquidBackground.reset();
     }
@@ -924,6 +954,9 @@ export class Renderer {
     if (nextProfile !== this.performanceProfile) {
       this.performanceProfile = nextProfile;
       this._shockwavePrewarmKey = '';
+      // The lighting solve is fragment-bound: fewer cascades and a coarser
+      // probe grid are what keep it inside frame budget on weak hardware.
+      this._gpuPlayfield?.setQuality(nextProfile === 'lite' ? 'low' : 'high');
     }
   }
 
@@ -992,11 +1025,26 @@ export class Renderer {
         host.style.position = 'relative';
       }
       if (!this.canvas.style.position) this.canvas.style.position = 'relative';
-      if (this.canvas.style.zIndex !== '1') this.canvas.style.zIndex = '1';
+      this._applySceneLayerOrder();
       this._renderLayerHostReady = true;
     }
 
     return host;
+  }
+
+  // The shockwave pass composites an opaque distorted copy of whichever layer
+  // holds the scene, so it has to sit directly above that layer — the GPU
+  // playfield when it is active, the 2D canvas when it is not.
+  _sceneLayerZ() {
+    return this._gpuSceneActive
+      ? { main: 2, shockwave: 1, foreground: 3 }
+      : { main: 1, shockwave: 2, foreground: 3 };
+  }
+
+  _applySceneLayerOrder() {
+    const z = this._sceneLayerZ();
+    const main = String(z.main);
+    if (this.canvas && this.canvas.style.zIndex !== main) this.canvas.style.zIndex = main;
   }
 
   _ensureRenderLayers() {
@@ -1013,9 +1061,34 @@ export class Renderer {
       host.appendChild(this._foregroundCanvas);
     }
 
-    this._applyLayerLayout(this._foregroundCanvas, 3);
+    this._applyLayerLayout(this._foregroundCanvas, this._sceneLayerZ().foreground);
     this._applyLayerVisibility(this._foregroundCanvas, true);
     return !!this._foregroundCtx;
+  }
+
+  _ensureGpuPlayfield() {
+    const host = this._ensureLayerHost();
+    if (!host || !this._gpuPlayfield?.attach(host)) return false;
+    this._applyLayerLayout(this._gpuPlayfield.canvas, 0);
+    this._applyLayerVisibility(this._gpuPlayfield.canvas, true);
+    this._installPlayfieldTuner();
+    return true;
+  }
+
+  // Loaded as its own chunk so the tuner never sits in the hot path. It applies
+  // any saved lighting preset on load and binds Ctrl+Shift+L; it only shows the
+  // panel when asked (?tune=1 or the shortcut).
+  _installPlayfieldTuner() {
+    if (this._tunerRequested || typeof window === 'undefined') return;
+    this._tunerRequested = true;
+    import('./playfield-tuner.js')
+      .then(module => module.installPlayfieldTuner(this._gpuPlayfield, {
+        getHostCanvas: () => this._gpuPlayfield?.canvas,
+        // Lighting edits change the base scene, which is otherwise only
+        // redrawn when gameplay state changes.
+        onChange: () => { this._frameSkip.epoch++; }
+      }))
+      .catch(error => console.warn('[playfield-tuner] unavailable:', error));
   }
 
   _ensureShockwaveLayer() {
@@ -1036,7 +1109,8 @@ export class Renderer {
       this._layerLayoutState.delete(shockwaveCanvas);
     }
 
-    this._applyLayerLayout(shockwaveCanvas, 2);
+    // Between the GPU playfield it distorts and the 2D layer above it.
+    this._applyLayerLayout(shockwaveCanvas, this._sceneLayerZ().shockwave);
     return true;
   }
 
@@ -1070,11 +1144,11 @@ export class Renderer {
     const transition = this.canvas.style.transition || '';
     const borderRadius = this.canvas.style.borderRadius || '4px';
     const prev = this._layerLayoutState.get(canvas);
+    const ownsBackingStore = canvas.dataset.ownsBackingStore === '1';
 
     if (
       prev
-      && canvas.width === this.width
-      && canvas.height === this.height
+      && (ownsBackingStore || (canvas.width === this.width && canvas.height === this.height))
       && prev.width === this.width
       && prev.height === this.height
       && prev.displayWidth === displayWidth
@@ -1100,8 +1174,12 @@ export class Renderer {
     next.zIndex = zIndex;
     if (!prev) this._layerLayoutState.set(canvas, next);
 
-    if (canvas.width !== this.width) canvas.width = this.width;
-    if (canvas.height !== this.height) canvas.height = this.height;
+    // The GPU playfield sizes its own backing store: it supersamples above the
+    // logical resolution, so forcing width/height here would undo that.
+    if (canvas.dataset.ownsBackingStore !== '1') {
+      if (canvas.width !== this.width) canvas.width = this.width;
+      if (canvas.height !== this.height) canvas.height = this.height;
+    }
 
     const style = canvas.style;
     style.position = 'absolute';
@@ -1129,12 +1207,16 @@ export class Renderer {
   }
 
   _syncRenderLayers() {
+    if (this._gpuPlayfield?.canvas) {
+      this._applyLayerLayout(this._gpuPlayfield.canvas, 0);
+      this._applyLayerVisibility(this._gpuPlayfield.canvas, this._gpuSceneActive);
+    }
     if (this._shockwaveLayerCanvas) {
-      this._applyLayerLayout(this._shockwaveLayerCanvas, 2);
+      this._applyLayerLayout(this._shockwaveLayerCanvas, this._sceneLayerZ().shockwave);
       this._applyLayerVisibility(this._shockwaveLayerCanvas, this._shockwaveLayerVisible);
     }
     if (this._foregroundCanvas) {
-      this._applyLayerLayout(this._foregroundCanvas, 3);
+      this._applyLayerLayout(this._foregroundCanvas, this._sceneLayerZ().foreground);
       this._applyLayerVisibility(this._foregroundCanvas, true);
     }
   }
@@ -1199,6 +1281,8 @@ export class Renderer {
     }
     this._foregroundCanvas = null;
     this._foregroundCtx = null;
+    this._gpuPlayfield?.dispose();
+    this._gpuSceneActive = false;
     this._shockwaveEffect.dispose();
     this._shockwaveLayerCanvas = null;
     this.ctx = this.baseCtx;
@@ -1218,6 +1302,9 @@ export class Renderer {
 
   _drawBackgroundLayer(ctx, bg, image) {
     ctx.clearRect(0, 0, this.width, this.height);
+
+    drawMachineBackdrop(ctx, this.width, this.height);
+    return;
 
     if (bg?.type === 'image' && image) {
       if (bg.mirrored) {
@@ -1265,7 +1352,7 @@ export class Renderer {
 
   _ensureBgBaseCache() {
     const bg = this.backgroundConfig;
-    const key = `${this.width}|${this.height}|${bg?.type}|${bg?.colorTop}|${bg?.colorBottom}|${assetCacheKey(bg?.image) || ''}|${bg?.mirrored ? 1 : 0}`;
+    const key = `${this.width}|${this.height}|neon-machine-v1`;
     if (!this._bgBaseDirty && this._bgBaseKey === key && this._bgBaseCanvas) return;
 
     const canvas = this._ensureBackgroundCanvas('_bgBaseCanvas');
@@ -1277,8 +1364,8 @@ export class Renderer {
 
   _ensureBgOverlayCache() {
     const bg = this.backgroundConfig;
-    const hasProgression = this._hasProgressionBackground(bg);
-    const key = `${this.width}|${this.height}|${hasProgression ? (assetCacheKey(bg.progressionImage) || '') : ''}|${bg?.mirrored ? 1 : 0}`;
+    const hasProgression = false;
+    const key = `${this.width}|${this.height}|neon-machine-overlay`;
     if (!this._bgOverlayDirty && this._bgOverlayKey === key && this._bgOverlayCanvas) return;
 
     const canvas = this._ensureBackgroundCanvas('_bgOverlayCanvas');
@@ -1307,10 +1394,11 @@ export class Renderer {
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, this.width, this.height);
 
-    // Strong edge vignette — dark fade from frame into game area
+    // Restrained edge vignette: the generated well already contains its own
+    // recess, so this only adds depth instead of swallowing the playfield.
     const edgeV = 68;
     const edgeH = 30;
-    const edgeAlpha = 0.84;
+    const edgeAlpha = 0.38;
 
     const topFade = ctx.createLinearGradient(0, 0, 0, edgeV);
     topFade.addColorStop(0, `rgba(0,0,0,${edgeAlpha})`);
@@ -1364,6 +1452,23 @@ export class Renderer {
   }
 
   clear(progressRatio = 0, reactiveState = null) {
+    if (this._gpuSceneActive) {
+      this.ctx.clearRect(0, 0, this.width, this.height);
+      return;
+    }
+    this._ensureBgBaseCache();
+    this._ensureBgVignetteCache();
+    this.ctx.drawImage(this._bgBaseCanvas, 0, 0);
+    drawMachineAtmosphere(
+      this.ctx,
+      this.width,
+      this.height,
+      (this._renderTimeSeconds || 0) * 1000,
+      progressRatio
+    );
+    if (this._bgVignetteCanvas) this.ctx.drawImage(this._bgVignetteCanvas, 0, 0);
+    return;
+
     this._ensureBgVignetteCache();
     const progressionBlend = this._updateBackgroundBlend(progressRatio);
     const bgDarken = this._backgroundDarkenAmount(this.backgroundConfig);
@@ -1458,6 +1563,10 @@ export class Renderer {
   }
 
   drawSurvivalBackground(background, cameraY = 0, worldHeight = this.height) {
+    // Survival levels share the same scalable procedural well; their camera and
+    // physics still operate normally, only the legacy image layer is skipped.
+    return false;
+
     if (!background || background.type !== 'image' || !background.image) return false;
     const image = this._getSurvivalBackgroundImage(background.image);
     if (!image || !image.complete || image.naturalWidth <= 0 || image.naturalHeight <= 0) return false;
@@ -1598,20 +1707,18 @@ export class Renderer {
       const y = (Number.isFinite(ring.y) ? ring.y : 0) - cameraY;
       const mode = normalizeMagnetMode(ring.mode);
       const pulse = 0.5 + 0.5 * Math.sin(phase + radius * 0.013 + x * 0.01);
+      // The reach indicator is a gameplay hint, not scenery: keep it faint
+      // enough that it does not compete with the lit board.
       ctx.strokeStyle = mode === 'repel'
-        ? `rgba(255, 82, 68, ${0.18 + pulse * 0.08})`
-        : `rgba(34, 211, 238, ${0.18 + pulse * 0.08})`;
+        ? `rgba(255, 82, 68, ${0.06 + pulse * 0.035})`
+        : `rgba(34, 211, 238, ${0.06 + pulse * 0.035})`;
       ctx.setLineDash([7, 9]);
       ctx.beginPath();
       ctx.arc(x, y, radius, 0, Math.PI * 2);
       ctx.stroke();
       ctx.setLineDash([]);
-      ctx.strokeStyle = mode === 'repel'
-        ? 'rgba(255, 170, 120, 0.38)'
-        : 'rgba(180, 252, 255, 0.38)';
-      ctx.beginPath();
-      ctx.arc(x, y, Math.max(4, PHYSICS_CONFIG.pegRadius + 3), 0, Math.PI * 2);
-      ctx.stroke();
+      // No outline ring around the ball itself — the magnet is lit geometry in
+      // the GPU pass, and a painted circle on top of it just flattens it.
     }
     ctx.restore();
   }
@@ -1689,6 +1796,29 @@ export class Renderer {
     const pegType = normalizePegType(peg.type);
     const colors = PEG_COLORS[pegType] || PEG_COLORS.blue;
     const radius = PHYSICS_CONFIG.pegRadius;
+
+    if (!peg.curveSlices && !isPortalType(peg.type)) {
+      const size = peg.shape === 'brick' ? getEffectiveBrickSize(peg) : null;
+      const shadowRadius = peg.type === 'bumper'
+        ? radius * (peg.bumperScale || 1) * (peg._bumperHitScale || 1)
+        : radius;
+      drawPegContactShadow(
+        ctx,
+        peg.x,
+        peg.y,
+        shadowRadius,
+        peg.shape,
+        size?.width || 0,
+        size?.height || 0,
+        peg.angle || 0
+      );
+    }
+
+    if (peg.type === 'bumper') {
+      const bumperRadius = radius * (peg.bumperScale || 1) * (peg._bumperHitScale || 1);
+      drawMachineBumper(ctx, peg, bumperRadius, isHit);
+      return;
+    }
 
     // ── Bumper: metallic circle with ring ──
     if (peg.type === 'bumper') {
@@ -2168,6 +2298,10 @@ export class Renderer {
       : (this._renderTimeSeconds || 0) * 1000;
 
     for (const [pegId, anim] of this._pegExitAnimations) {
+      // Anything the GPU pass can draw is sinking through the board there, lit
+      // by the same solve as everything else. Drawing a flat 2D copy over it
+      // would both double it up and swap its material mid-animation.
+      if (this._gpuSceneActive && this._gpuPlayfield?.isSupported(anim.peg)) continue;
       const elapsed = Math.max(0, nowMs - anim.startMs);
       const t = Math.max(0, Math.min(1, elapsed / PEG_EXIT_SHRINK_MS));
       if (t >= 1) {
@@ -2181,6 +2315,72 @@ export class Renderer {
       const alpha = t < 0.68 ? 1 : Math.max(0, (1 - t) / 0.32);
       this.drawPegScaled(anim.peg, true, false, scale, alpha);
     }
+  }
+
+  // The GPU path can't use the 2D entry animation, because scaling a canvas
+  // draw has nothing to do with how a solid comes up through the board. It
+  // takes the raw progress instead and rises the real geometry: the board
+  // plane cuts each peg, so the cap you see widens and its height — and the
+  // shadow the solve throws from it — grow together.
+  //
+  // Expiring finished entries here is also what keeps the base scene from
+  // redrawing forever, since GPU-drawn pegs never reach drawPegEntryAnimation.
+  // Entering and exiting pegs share one channel, because they are the same
+  // motion: a solid moving through the board plane, one way or the other.
+  _collectPegLifecycle() {
+    const map = this._pegEmergence || (this._pegEmergence = new Map());
+    map.clear();
+    this._fillPegEmergence(map);
+    const exits = this._collectPegExits(map);
+    return { emergence: map.size > 0 ? map : null, exits };
+  }
+
+  _fillPegEmergence(map) {
+    const animations = this._pegEntryAnimations;
+    if (!animations || animations.size === 0) return;
+    const nowMs = typeof performance !== 'undefined'
+      ? performance.now()
+      : (this._renderTimeSeconds || 0) * 1000;
+
+    for (const [pegId, anim] of animations) {
+      const elapsed = nowMs - anim.startMs;
+      if (elapsed < 0) { map.set(pegId, 0); continue; }
+      const durationMs = Math.max(1, anim.durationMs || PEG_EXIT_SHRINK_MS);
+      const t = Math.min(1, elapsed / durationMs);
+      if (t >= 1) { animations.delete(pegId); continue; }
+      map.set(pegId, cubicBezierEase(t));
+    }
+  }
+
+  // A knocked-out peg leaves the game's peg list immediately, so without this
+  // the GPU scene loses it — and its shadow and its glow — in one frame, while
+  // a flat 2D sprite shrinks on top. Instead it stays in the scene and sinks
+  // back through the board (the level intro's rise, run backwards), so the cap
+  // narrows, the height drops and the cast shadow retreats together. Its light
+  // then outlives the body by a short tail.
+  //
+  // Returns the exiting pegs and writes their sink progress into `emergence`,
+  // which is the same channel the intro uses.
+  _collectPegExits(emergence) {
+    const animations = this._pegExitAnimations;
+    if (!animations || animations.size === 0) return null;
+    const nowMs = typeof performance !== 'undefined'
+      ? performance.now()
+      : (this._renderTimeSeconds || 0) * 1000;
+
+    const list = this._pegExitList || (this._pegExitList = []);
+    list.length = 0;
+    for (const [pegId, anim] of animations) {
+      const elapsed = Math.max(0, nowMs - anim.startMs);
+      if (elapsed >= PEG_EXIT_GLOW_MS) { animations.delete(pegId); continue; }
+      if (!this._gpuPlayfield?.isSupported(anim.peg)) continue;
+      const sink = 1 - Math.min(1, elapsed / PEG_EXIT_SHRINK_MS);
+      // Squared, so the glow holds through the sink and then falls away.
+      const fade = 1 - elapsed / PEG_EXIT_GLOW_MS;
+      list.push({ peg: anim.peg, sink, glow: fade * fade });
+      if (sink > 0) emergence?.set(pegId, sink);
+    }
+    return list.length > 0 ? list : null;
   }
 
   drawPegEntryAnimation(peg, isHit = false, isSelected = false) {
@@ -2256,6 +2456,30 @@ export class Renderer {
   drawPegs(pegs, hitPegIds = [], selectedIds = new Set(), wrapCopyPegIds = null) {
     const hitSet = new Set(hitPegIds);
     const wrapSet = wrapCopyPegIds instanceof Set ? wrapCopyPegIds : null;
+
+    if (this._gpuSceneActive) {
+      for (const peg of pegs) {
+        if (this._gpuPlayfield.isSupported(peg)) continue;
+        const isHit = hitSet.has(peg.id);
+        const isSelected = selectedIds.has(peg.id);
+        if (this.drawPegEntryAnimation(peg, isHit, isSelected)) continue;
+        if (!peg._wrapHideMain) this.drawPeg(peg, isHit, isSelected);
+        if (peg._wrapCopies) {
+          for (const copy of peg._wrapCopies) {
+            this.drawPegWithOffset(peg, copy.x - peg.x, copy.y - peg.y, isHit, isSelected, 1);
+          }
+        }
+      }
+      // The gamble peg's body is lit by the GPU pass, but its knockback arrow
+      // is a glyph rather than geometry, so it stays a 2D overlay on top.
+      for (const peg of pegs) {
+        if (peg.type !== 'gamble' || !peg.gambleKnockbackEnabled) continue;
+        if (hitSet.has(peg.id) || peg._wrapHideMain) continue;
+        this.drawGambleKnockbackArrow(peg);
+      }
+      this.drawPegExitAnimations();
+      return;
+    }
     
     for (const peg of pegs) {
       const isHit = hitSet.has(peg.id);
@@ -2278,6 +2502,36 @@ export class Renderer {
     this.drawPegExitAnimations();
   }
 
+  // The downward arrow that marks a knockback gamble peg. Extracted so the GPU
+  // path can overlay it without redrawing the peg body underneath.
+  drawGambleKnockbackArrow(peg) {
+    const ctx = this.ctx;
+    const radius = PHYSICS_CONFIG.pegRadius;
+    const arrowWidth = Math.max(2.8, radius * 0.34);
+    const shaftTop = -radius * 0.66;
+    const tipY = radius * 0.67;
+    const shoulderY = radius * 0.17;
+    const shoulderX = radius * 0.5;
+
+    ctx.save();
+    ctx.translate(peg.x, peg.y);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(0, shaftTop);
+    ctx.lineTo(0, tipY);
+    ctx.lineTo(-shoulderX, shoulderY);
+    ctx.moveTo(0, tipY);
+    ctx.lineTo(shoulderX, shoulderY);
+    ctx.strokeStyle = 'rgba(20, 57, 0, 0.82)';
+    ctx.lineWidth = arrowWidth;
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(244, 255, 226, 0.92)';
+    ctx.lineWidth = Math.max(1.1, arrowWidth * 0.44);
+    ctx.stroke();
+    ctx.restore();
+  }
+
   drawBall(ball) {
     if (!ball) return;
 
@@ -2285,6 +2539,12 @@ export class Renderer {
     const spawnT = ball.active ? 1 : Math.max(0, Math.min(1, Number.isFinite(ball.launcherSpawnAnim) ? ball.launcherSpawnAnim : 1));
     const spawnScale = ball.active ? 1 : (0.22 + (1 - Math.pow(1 - spawnT, 3)) * 0.78);
     const radius = ball.radius * spawnScale;
+
+    // The GPU playfield renders the ball as lit geometry; painting it here too
+    // would double it and flatten it.
+    if (this._gpuSceneActive) return;
+    drawMachineBall(ctx, ball, radius);
+    return;
 
     // Ball glow (cached sprite)
     const bg = this._circleGlow(COLORS.ballGlow, radius, 15);
@@ -2316,6 +2576,33 @@ export class Renderer {
   }
 
   drawLauncher(x, y, angle, showAim = true, ballScale = 1, options = null) {
+    {
+      // Hardware comes from the GPU playfield when it is live; only the aim
+      // beam stays on the 2D layer, because it is UI rather than a machine part.
+      if (!this._gpuSceneActive) {
+        const previewRadius = getBallRadius() * Math.max(0.2, Math.min(1, Number.isFinite(ballScale) ? ballScale : 1));
+        drawMachineLauncher(this.ctx, x, y, angle, previewRadius, options);
+      }
+      if (showAim) {
+        const beamLength = 34;
+        const x2 = x + Math.cos(angle) * beamLength;
+        const y2 = y + Math.sin(angle) * beamLength;
+        this.ctx.save();
+        const beam = this.ctx.createLinearGradient(x, y, x2, y2);
+        beam.addColorStop(0, 'rgba(150, 248, 255, 0.2)');
+        beam.addColorStop(1, 'rgba(97, 235, 255, 0.92)');
+        this.ctx.strokeStyle = beam;
+        this.ctx.lineWidth = 1.6;
+        this.ctx.lineCap = 'round';
+        this.ctx.beginPath();
+        this.ctx.moveTo(x, y);
+        this.ctx.lineTo(x2, y2);
+        this.ctx.stroke();
+        this.ctx.restore();
+      }
+    }
+    return;
+
     if (options?.assetLauncher) {
       this.drawBilliardAssetLauncher(x, y, angle, showAim, ballScale, options);
       return;
@@ -2489,9 +2776,10 @@ export class Renderer {
 
     if (fullPath) {
       // Draw full trajectory path
-      ctx.strokeStyle = COLORS.trajectoryLine;
-      ctx.lineWidth = 1;
-      ctx.setLineDash([4, 4]);
+      ctx.strokeStyle = 'rgba(102, 235, 255, 0.42)';
+      ctx.lineWidth = 1.2;
+      ctx.lineCap = 'round';
+      ctx.setLineDash([2, 7]);
       ctx.beginPath();
       ctx.moveTo(points[0].x, points[0].y);
 
@@ -2502,7 +2790,7 @@ export class Renderer {
       ctx.setLineDash([]);
 
       // Draw dots at intervals
-      ctx.fillStyle = COLORS.trajectoryDot;
+      ctx.fillStyle = 'rgba(178, 250, 255, 0.82)';
       for (let i = 0; i < points.length; i += 10) {
         ctx.beginPath();
         ctx.arc(points[i].x, points[i].y, 2, 0, Math.PI * 2);
@@ -2518,9 +2806,10 @@ export class Renderer {
       }
     } else {
       // Draw trajectory to first hit only (dotted line)
-      ctx.strokeStyle = COLORS.trajectoryLine;
-      ctx.lineWidth = 2;
-      ctx.setLineDash([6, 6]);
+      ctx.strokeStyle = 'rgba(98, 237, 255, 0.5)';
+      ctx.lineWidth = 1.7;
+      ctx.lineCap = 'round';
+      ctx.setLineDash([2, 8]);
       ctx.beginPath();
       ctx.moveTo(points[0].x, points[0].y);
 
@@ -2533,9 +2822,9 @@ export class Renderer {
       // Draw the endpoint marker for both default and editor-shortened aim.
       if (points.length > 1) {
         const endPoint = points[points.length - 1];
-        ctx.fillStyle = COLORS.trajectoryDot;
+        ctx.fillStyle = 'rgba(205, 252, 255, 0.92)';
         ctx.beginPath();
-        ctx.arc(endPoint.x, endPoint.y, 4, 0, Math.PI * 2);
+        ctx.arc(endPoint.x, endPoint.y, 3.2, 0, Math.PI * 2);
         ctx.fill();
       }
     }
@@ -2565,6 +2854,8 @@ export class Renderer {
 
   drawYoyoThreads(threads) {
     if (!Array.isArray(threads) || threads.length === 0) return;
+    // Rendered as lit geometry by the GPU playfield when it is active.
+    if (this._gpuSceneActive) return;
 
     const ctx = this.ctx;
     ctx.save();
@@ -2755,6 +3046,10 @@ export class Renderer {
   }
 
   drawBucket(bucket, flash = 0) {
+    if (this._gpuSceneActive) return;
+    drawMachineCatcher(this.ctx, bucket, flash);
+    return;
+
     const ctx = this.ctx;
     const { x, y, width, height } = bucket;
     const intensity = Math.max(0, Math.min(1, flash || 0));
@@ -2888,6 +3183,10 @@ export class Renderer {
   }
 
   drawSingleFlipper(pivotX, pivotY, angle, length, width, t, selected, flipAssetY = false) {
+    if (this._gpuSceneActive) return;
+    drawMachineFlipper(this.ctx, pivotX, pivotY, angle, length, width, t, selected);
+    return;
+
     if (this._drawFlipperAsset(pivotX, pivotY, angle, length, width, t, selected, flipAssetY)) {
       return;
     }
@@ -3936,6 +4235,209 @@ export class Renderer {
     return true;
   }
 
+  // The machine's hardware is handed to the GPU playfield as geometry so the
+  // same solve lights it. Anything left painted on a 2D layer above would read
+  // as a sticker on top of a lit board.
+  // `loaded` controls only whether a ball sits in the barrel. The cannon itself
+  // is permanent hardware — it does not vanish because the shot left it.
+  _pushLauncherProps(props, x, y, angle, ballScale, options, loaded = true) {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    const active = !!options?.active;
+    const enemy = options?.side === 'cpu' || options?.enemy === true;
+    const accent = enemy ? [1.0, 0.16, 0.30] : [0.30, 0.88, 1.0];
+    const outer = active ? 30 : 27;
+    const aim = Number.isFinite(angle) ? angle : Math.PI * 0.5;
+
+    props.push({ shape: 'ring', x, y, halfW: outer, halfH: 5.5, metal: true,
+      color: [0.60, 0.68, 0.74] });
+    props.push({ shape: 'ring', x, y, halfW: outer - 8.5, halfH: 1.3,
+      color: accent, emissive: active ? 1.5 : (loaded ? 0.85 : 0.4) });
+    props.push({
+      shape: 'capsule',
+      x: x + Math.cos(aim) * 26.5,
+      y: y + Math.sin(aim) * 26.5,
+      halfW: 14.5, halfH: 6.5, angle: aim, metal: true,
+      color: [0.52, 0.60, 0.66]
+    });
+
+    if (!loaded) return;
+    const previewRadius = getBallRadius()
+      * Math.max(0.2, Math.min(1, Number.isFinite(ballScale) ? ballScale : 1));
+    props.push({ shape: 'ball', x, y, radius: previewRadius,
+      color: enemy ? [0.98, 0.42, 0.48] : [0.96, 0.98, 1.0], emissive: 0.55 });
+  }
+
+  // The yo-yo line is physical rope, so it goes through the solve as a chain of
+  // short capsules rather than a flat stroke: it catches the key light and casts
+  // along its length like the pegs do.
+  _pushYoyoProps(props, threads) {
+    if (!Array.isArray(threads)) return;
+    for (const thread of threads) {
+      const points = thread?.points;
+      if (!points) continue;
+      const flat = !!thread.flatPoints || ArrayBuffer.isView(points);
+      const count = flat
+        ? Math.floor(Number.isFinite(thread.pointCount) ? thread.pointCount : points.length / 2)
+        : (Array.isArray(points) ? points.length : 0);
+      if (count < 2) continue;
+      const at = i => (flat
+        ? { x: points[i * 2], y: points[i * 2 + 1] }
+        : points[i]);
+
+      // Sparse sampling: one capsule per few points is enough at this scale and
+      // keeps a long rope from flooding the instance buffer.
+      const stride = count > 48 ? 3 : (count > 24 ? 2 : 1);
+      let previous = at(0);
+      for (let i = stride; i < count; i += stride) {
+        const next = at(i);
+        if (!next) break;
+        const dx = next.x - previous.x;
+        const dy = next.y - previous.y;
+        const length = Math.hypot(dx, dy);
+        if (length > 0.5) {
+          props.push({
+            shape: 'capsule',
+            x: (previous.x + next.x) * 0.5,
+            y: (previous.y + next.y) * 0.5,
+            halfW: length * 0.5 + 1.1,
+            halfH: 2.4,
+            angle: Math.atan2(dy, dx),
+            // Braided steel rather than a glowing line. It has to be
+            // non-emissive to cast: emitting surfaces are excluded from the
+            // shadow march, which is why the old rope threw none.
+            metal: true,
+            color: [0.62, 0.68, 0.74],
+            emissive: 0
+          });
+        }
+        previous = next;
+      }
+    }
+  }
+
+  _collectPlayfieldProps(state) {
+    const props = this._playfieldProps || (this._playfieldProps = []);
+    props.length = 0;
+    this._pushYoyoProps(props, state.yoyoThreads);
+
+    if (state.balls) {
+      for (const ball of state.balls) {
+        if (!ball) continue;
+        const spawn = ball.launcherSpawnAnim ?? 1;
+        const scale = ball.active ? 1 : (0.22 + (1 - Math.pow(1 - spawn, 3)) * 0.78);
+        const enemy = ball.side === 'cpu';
+        props.push({
+          shape: 'ball',
+          x: ball.x,
+          y: ball.y,
+          radius: (ball.radius || getBallRadius()) * scale,
+          // White and self-lit, but still a lit sphere: the emissive term is
+          // low enough that the rig's highlight and rim survive on top of it.
+          color: enemy ? [0.99, 0.40, 0.46] : [0.97, 0.99, 1.0],
+          emissive: 0.85
+        });
+      }
+    }
+
+    const bucket = state.bucket;
+    if (bucket) {
+      const flash = Math.max(0, Math.min(1, state.bucketFlash || 0));
+      const visualWidth = Math.max((bucket.width || 24) * 1.38, 78);
+      const visualHeight = Math.max((bucket.height || 12) * 2.35, 30);
+      const half = visualWidth * 0.5;
+      // Two machined cheeks flanking a lit slot, rather than one blank pill —
+      // the mouth has to read as an opening the ball can drop into.
+      for (const side of [-1, 1]) {
+        props.push({
+          shape: 'capsule',
+          x: bucket.x + side * half * 0.72,
+          y: bucket.y,
+          halfW: half * 0.30,
+          halfH: visualHeight * 0.46,
+          angle: side * 0.10,
+          metal: true,
+          color: [0.34, 0.42, 0.48]
+        });
+      }
+      props.push({
+        shape: 'box',
+        x: bucket.x,
+        y: bucket.y + visualHeight * 0.30,
+        halfW: half * 0.62,
+        halfH: visualHeight * 0.16,
+        metal: true,
+        color: [0.24, 0.30, 0.35]
+      });
+      props.push({
+        shape: 'emitter',
+        x: bucket.x,
+        y: bucket.y - visualHeight * 0.34,
+        halfW: half * 0.52,
+        halfH: 2.6,
+        color: [0.45, 0.92, 1.0],
+        emissive: 0.85 + flash * 3.0
+      });
+    }
+
+    const flippers = state.flippers;
+    if (flippers && flippers.enabled) {
+      const centerX = this.width / 2;
+      const t = flippers._flipperT || 0;
+      const toRad = Math.PI / 180;
+      const restRad = (Number.isFinite(flippers.restAngle) ? flippers.restAngle : FLIPPER_DEFAULTS.restAngle) * toRad;
+      const flipRad = (Number.isFinite(flippers.flipAngle) ? flippers.flipAngle : FLIPPER_DEFAULTS.flipAngle) * toRad;
+      const sc = Number.isFinite(flippers.scale) ? flippers.scale : FLIPPER_DEFAULTS.scale;
+      const len = (Number.isFinite(flippers.length) ? flippers.length : FLIPPER_DEFAULTS.length) * sc;
+      const w = (Number.isFinite(flippers.width) ? flippers.width : FLIPPER_DEFAULTS.width) * sc;
+      const xOffset = Number.isFinite(flippers.xOffset) ? flippers.xOffset : FLIPPER_DEFAULTS.xOffset;
+      const y = Number.isFinite(flippers.y) ? flippers.y : (this.height - 55);
+      const leftAngle = restRad - t * (restRad + flipRad);
+      for (const [pivotX, pivotAngle] of [
+        [centerX - xOffset, leftAngle],
+        [centerX + xOffset, Math.PI - leftAngle]
+      ]) {
+        props.push({
+          shape: 'capsule',
+          x: pivotX + Math.cos(pivotAngle) * len * 0.5,
+          y: y + Math.sin(pivotAngle) * len * 0.5,
+          halfW: len * 0.5,
+          halfH: w * 0.5,
+          angle: pivotAngle,
+          metal: true,
+          color: [0.50, 0.60, 0.66]
+        });
+        props.push({ shape: 'ring', x: pivotX, y, halfW: w * 0.44, halfH: w * 0.14,
+          color: [0.30, 0.88, 1.0], emissive: t > 0.5 ? 1.6 : 0.7 });
+      }
+    }
+
+    // Draw the cannon whenever a position is known, loaded or not. `lastLaunch`
+    // remembers where it sits through the shot, when showLauncher goes false.
+    if (state.showLauncher && Number.isFinite(state.launchX)) {
+      this._lastLaunch = {
+        x: state.launchX,
+        y: state.launchY,
+        angle: state.aimAngle,
+        options: state.launcherOptions || null
+      };
+    }
+    const launcher = state.showLauncher && Number.isFinite(state.launchX)
+      ? { x: state.launchX, y: state.launchY, angle: state.aimAngle,
+          options: state.launcherOptions || null, loaded: true }
+      : (this._lastLaunch ? { ...this._lastLaunch, loaded: false } : null);
+    if (launcher) {
+      this._pushLauncherProps(props, launcher.x, launcher.y, launcher.angle,
+        state.launcherBallScale, launcher.options, launcher.loaded);
+    }
+    if (Array.isArray(state.secondaryLaunchers)) {
+      for (const secondary of state.secondaryLaunchers) {
+        this._pushLauncherProps(props, secondary.x, secondary.y,
+          secondary.angle ?? Math.PI / 2, secondary.ballScale, secondary, true);
+      }
+    }
+    return props;
+  }
+
   _shouldRedrawBaseScene(state, cameraY, liteFieldFallback, magnetFieldRings) {
     const fs = this._frameSkip;
     const bg = this.backgroundConfig;
@@ -3954,6 +4456,11 @@ export class Renderer {
       || this._pegExitAnimations.size > 0
       || this._pegEntryAnimations.size > 0
       || (liteFieldFallback && magnetFieldRings.length > 0)
+      || this._waveActive
+      // A moving light leaves the solved field settling for a few frames, so
+      // keep drawing until the temporal blend has caught up.
+      || (this._gpuSceneActive && this._gpuPlayfield?.pendingFlashCount() > 0)
+      || (this._gpuSceneActive && this._gpuPlayfield?.hasAnimatedContent())
       || (state.ghostBricks && state.ghostBricks.length > 0)
       || (state.yoyoThreads && state.yoyoThreads.length > 0)
       || state.survivalBackground != null;
@@ -3977,6 +4484,22 @@ export class Renderer {
     sig.push(state.selectedPegIds ? state.selectedPegIds.size : -1);
     sig.push(state.trajectory || null, state.trajectoryStyle || '', !!state.showFullTrajectory, state.aimLength || 0);
     sig.push(Number.isFinite(state.pvpMidline) ? state.pvpMidline : null);
+    if (this._gpuSceneActive) {
+      // The GPU playfield draws the machine hardware and the flash decay of
+      // struck pegs, so the base layer has to follow all of it.
+      const balls = state.balls;
+      sig.push(balls ? balls.length : -1);
+      if (balls) {
+        for (const b of balls) sig.push(b.x, b.y, b.radius, !!b.active, b.launcherSpawnAnim ?? 1, b.side || '');
+      }
+      const bucket = state.bucket;
+      sig.push(bucket ? bucket.x : null, bucket ? bucket.y : null, state.bucketFlash || 0);
+      const fl = state.flippers;
+      sig.push(fl && fl.enabled ? (fl._flipperT || 0) : null, fl ? fl.y : null);
+      sig.push(!!state.showLauncher, state.launchX, state.launchY, state.aimAngle, state.launcherBallScale ?? 1);
+      sig.push(state.launcherOptions ? !!state.launcherOptions.active : null);
+      sig.push(this._gpuPlayfield ? this._gpuPlayfield.pendingFlashCount() : 0);
+    }
     sig.push(
       state.levelProgress || 0,
       this._bgImage, this._bgProgressImage,
@@ -4053,7 +4576,7 @@ export class Renderer {
   }
 
   renderGame(state) {
-    const baseCtx = this.baseCtx || this.canvas.getContext('2d', { alpha: false });
+    const baseCtx = this.baseCtx || this.canvas.getContext('2d', { alpha: true });
     this.ctx = baseCtx;
     this._renderTimeSeconds = Number.isFinite(state.renderTimeSeconds)
       ? state.renderTimeSeconds
@@ -4076,10 +4599,43 @@ export class Renderer {
       magnetFieldActive = this._shockwaveEffect.syncFieldRings(magnetFieldRings);
     }
     const useCamera = Math.abs(cameraY) > 0.001;
+    this._gpuSceneActive = !state.isEditor && !state.showGrid && this._ensureGpuPlayfield();
+    if (!this._gpuSceneActive && this._gpuPlayfield?.canvas) {
+      this._applyLayerVisibility(this._gpuPlayfield.canvas, false);
+    }
+    // Which layer holds the scene decides the stacking, and that can flip at
+    // runtime (editor, grid view, or a GPU init failure).
+    this._applySceneLayerOrder();
+    // The GPU composite applies the waves, so the base scene has to keep
+    // redrawing for as long as one is alive.
+    this._waveActive = shockwaveActive || magnetFieldActive;
     this._frameSkip.frames++;
     const baseRedrawn = this._shouldRedrawBaseScene(state, cameraY, liteFieldFallback, magnetFieldRings);
     if (baseRedrawn) {
       this._frameSkip.baseDraws++;
+      if (this._gpuSceneActive) {
+        this._gpuSceneActive = this._gpuPlayfield.render(state.pegs, state.hitPegIds, {
+          width: this.width,
+          height: this.height,
+          cameraY,
+          timeSeconds: this._renderTimeSeconds,
+          progress: state.levelProgress,
+          props: this._collectPlayfieldProps(state),
+          ...this._collectPegLifecycle(),
+          // Applied inside the composite at full resolution, so a shockwave no
+          // longer swaps the whole board for a downscaled copy of itself.
+          waves: shockwaveActive
+            ? this._shockwaveEffect.collectWaveState({
+              timeSeconds: shockwaveTimeSeconds,
+              cameraY,
+              width: this.width,
+              height: this.height,
+              maxWaves: 4
+            })
+            : null
+        });
+        this._applyLayerVisibility(this._gpuPlayfield.canvas, this._gpuSceneActive);
+      }
       this.clear(state.levelProgress, state);
 
       const drewSurvivalBackground = this.drawSurvivalBackground(state.survivalBackground, cameraY, state.worldHeight);
@@ -4140,8 +4696,14 @@ export class Renderer {
       }
     }
 
-    if (shockwaveActive || magnetFieldActive) {
-      const waveCanvas = this._shockwaveEffect.renderToCanvas(this.canvas, {
+    // With the GPU playfield active the shockwave is already applied inside its
+    // composite at full resolution. Running the legacy layer as well would
+    // re-composite a downscaled copy of the board over the top, which is what
+    // flattened the scene for the duration of every effect.
+    const legacyDistortion = !this._gpuSceneActive && (shockwaveActive || magnetFieldActive);
+    if (legacyDistortion) {
+      const distortionSource = this.canvas;
+      const waveCanvas = this._shockwaveEffect.renderToCanvas(distortionSource, {
         cameraY,
         width: this.width,
         height: this.height,
@@ -4155,7 +4717,7 @@ export class Renderer {
       });
       if (!waveCanvas) {
         if (shockwaveActive) {
-          this._shockwaveEffect.render(this.ctx, this.canvas, {
+          this._shockwaveEffect.render(this.ctx, distortionSource, {
             cameraY,
             width: this.width,
             height: this.height,
@@ -4172,7 +4734,12 @@ export class Renderer {
       this._setShockwaveLayerVisible(!!waveCanvas);
     } else {
       this._setShockwaveLayerVisible(false);
-      this._scheduleShockwavePrewarm();
+      // Magnet field rings still want their 2D pass when the GPU composite is
+      // handling the waves; only the full-screen distortion copy is dropped.
+      if (magnetFieldActive && this._gpuSceneActive && !state.showGrid) {
+        this.drawLiteMagnetFields(magnetFieldRings, cameraY, shockwaveTimeSeconds);
+      }
+      if (!shockwaveActive && !magnetFieldActive) this._scheduleShockwavePrewarm();
     }
 
     // End-message fades must advance every frame even when drawing is skipped.

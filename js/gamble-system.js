@@ -3,30 +3,13 @@ import { lightTap } from './haptics.js';
 import { DEEP_FREEZE_SHOTS_PER_USE } from './perk-deep-freeze.js';
 
 const STORAGE_KEY = 'peggle_gamble_settings_v1';
-const SLOTS_BOARD_ASSET = '/visuals/slots_background.webp';
-const SPIN_BUTTON_ASSET = '/visuals/spin_button.webp';
-const SPIN_BUTTON_PRESSED_ASSET = '/visuals/spin_button_pressed.webp';
-const ARROW_UP_ASSET = '/visuals/arrow_up.webp';
-const ARROW_DOWN_ASSET = '/visuals/arrow_down.webp';
-const PERK_SLOT_ASSET_DIR = '/visuals/perks/slots/webp';
-const PERK_IDLE_ASSET_DIR = '/visuals/perks/idle/webp';
-const PERK_ACTIVE_ASSET_DIR = '/visuals/perks/active/webp';
 const CHIP_ACTIVE_ANIMATION_MS = 260;
-const PRELOADED_UI_ASSETS = new Set();
-
-function perkAssets(fileName) {
-  return {
-    slot: `${PERK_SLOT_ASSET_DIR}/${fileName}.webp`,
-    idle: `${PERK_IDLE_ASSET_DIR}/${fileName}.webp`,
-    active: `${PERK_ACTIVE_ASSET_DIR}/${fileName}.webp`
-  };
-}
 
 export const PERK_DEFINITIONS = [
   {
     id: 'perk_multi',
     name: 'Multiball',
-    assets: perkAssets('multiball'),
+    glyph: '×3',
     color: '#a855f7',
     glowColor: '#9270d8',
     glowSoft: 'rgba(146, 112, 216, 0.2)',
@@ -35,7 +18,7 @@ export const PERK_DEFINITIONS = [
   {
     id: 'perk_aim',
     name: 'Ultra Aim',
-    assets: perkAssets('ultraaim'),
+    glyph: '◎',
     color: '#45a3ff',
     glowColor: '#78b5e8',
     glowSoft: 'rgba(120, 181, 232, 0.2)',
@@ -44,7 +27,7 @@ export const PERK_DEFINITIONS = [
   {
     id: 'perk_flippers',
     name: 'Flippers',
-    assets: perkAssets('flippers'),
+    glyph: '↔',
     color: '#b8bec8',
     glowColor: '#aeb4bc',
     glowSoft: 'rgba(174, 180, 188, 0.18)',
@@ -53,7 +36,7 @@ export const PERK_DEFINITIONS = [
   {
     id: 'perk_yoyo',
     name: 'Yo-yo Thread',
-    assets: perkAssets('yoyo'),
+    glyph: '∞',
     color: '#55df7a',
     glowColor: '#75c88b',
     glowSoft: 'rgba(117, 200, 139, 0.2)',
@@ -62,7 +45,7 @@ export const PERK_DEFINITIONS = [
   {
     id: 'perk_bomb',
     name: 'Bomb Shockwave',
-    assets: perkAssets('bomb'),
+    glyph: '✦',
     color: '#ff982f',
     glowColor: '#df9a58',
     glowSoft: 'rgba(223, 154, 88, 0.22)',
@@ -71,7 +54,7 @@ export const PERK_DEFINITIONS = [
   {
     id: 'perk_freeze',
     name: 'Deep Freeze',
-    assets: perkAssets('deep_freeze'),
+    glyph: '❄',
     color: '#a7ecff',
     glowColor: '#bde7f2',
     glowSoft: 'rgba(189, 231, 242, 0.2)',
@@ -101,32 +84,6 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-function resolveUiAssetUrl(rawUrl) {
-  if (!rawUrl) return rawUrl;
-  if (/^(data:|blob:|https?:|\/)/.test(rawUrl)) return rawUrl;
-  try {
-    return new URL(rawUrl, window.location.href).href;
-  } catch (_) {
-    return rawUrl;
-  }
-}
-
-function preloadUiAsset(url) {
-  if (!url || PRELOADED_UI_ASSETS.has(url)) return;
-  PRELOADED_UI_ASSETS.add(url);
-  const img = new Image();
-  img.decoding = 'async';
-  img.src = url;
-}
-
-function preloadPerkAssets(perkDefinitions) {
-  for (const perk of perkDefinitions || []) {
-    for (const asset of Object.values(perk.assets || {})) {
-      preloadUiAsset(resolveUiAssetUrl(asset));
-    }
-  }
-}
-
 function setPerkVisualVars(element, perk) {
   element.style.setProperty('--cell-color', perk?.color || '#6e7681');
   element.style.setProperty('--cell-glow', perk?.glowColor || perk?.color || '#ffffff');
@@ -134,17 +91,14 @@ function setPerkVisualVars(element, perk) {
 }
 
 function createPerkImage(perk, assetState, className, alt = '') {
-  const asset = perk?.assets?.[assetState];
-  if (!asset) return null;
-
-  const img = document.createElement('img');
-  img.className = className;
-  img.src = resolveUiAssetUrl(asset);
-  img.alt = alt;
-  img.decoding = 'async';
-  img.draggable = false;
-  if (!alt) img.setAttribute('aria-hidden', 'true');
-  return img;
+  if (!perk) return null;
+  const symbol = document.createElement('span');
+  symbol.className = className;
+  symbol.textContent = perk.glyph || '•';
+  symbol.dataset.perkState = assetState || 'idle';
+  if (alt) symbol.setAttribute('aria-label', alt);
+  else symbol.setAttribute('aria-hidden', 'true');
+  return symbol;
 }
 
 function renderPerkAsset(element, perk, assetState, className, alt = '') {
@@ -920,33 +874,11 @@ export class GambleSystem {
 
   applyThemeAssets() {
     if (!this.ui?.root) return;
-    const arrowUpAsset = resolveUiAssetUrl(ARROW_UP_ASSET);
-    const arrowDownAsset = resolveUiAssetUrl(ARROW_DOWN_ASSET);
-    const boardAsset = resolveUiAssetUrl(SLOTS_BOARD_ASSET);
-    const spinAsset = resolveUiAssetUrl(SPIN_BUTTON_ASSET);
-    const spinPressedAsset = resolveUiAssetUrl(SPIN_BUTTON_PRESSED_ASSET);
-    const assetKey = [
-      arrowUpAsset,
-      arrowDownAsset,
-      boardAsset,
-      spinAsset,
-      spinPressedAsset
-    ].join('|');
-    if (this._themeAssetRoot !== this.ui.root || this._themeAssetKey !== assetKey) {
-      this.ui.root.style.setProperty('--gamble-arrow-asset', `url("${arrowUpAsset}")`);
-      this.ui.root.style.setProperty('--gamble-arrow-down-asset', `url("${arrowDownAsset}")`);
-      this.ui.root.style.setProperty('--gamble-board-asset', `url("${boardAsset}")`);
-      this.ui.root.style.setProperty('--gamble-spin-asset', `url("${spinAsset}")`);
-      this.ui.root.style.setProperty('--gamble-spin-pressed-asset', `url("${spinPressedAsset}")`);
-      this._themeAssetKey = assetKey;
-      this._themeAssetRoot = this.ui.root;
-    }
-    preloadUiAsset(arrowUpAsset);
-    preloadUiAsset(arrowDownAsset);
-    preloadUiAsset(boardAsset);
-    preloadUiAsset(spinAsset);
-    preloadUiAsset(spinPressedAsset);
-    preloadPerkAssets(this.perkDefinitions);
+    this.ui.root.style.setProperty('--gamble-arrow-asset', 'none');
+    this.ui.root.style.setProperty('--gamble-arrow-down-asset', 'none');
+    this.ui.root.style.setProperty('--gamble-board-asset', 'none');
+    this.ui.root.style.setProperty('--gamble-spin-asset', 'none');
+    this.ui.root.style.setProperty('--gamble-spin-pressed-asset', 'none');
   }
 
   syncOverlayLayout() {
@@ -1454,7 +1386,7 @@ export class GambleSystem {
     const currencyPlural = isSurvival ? 'spin balls' : 'balls';
     this.ui.spinButton.style.display = '';
     this.ui.spinButton.disabled = !canSpin;
-    this.ui.spinButton.textContent = 'Spin';
+    this.ui.spinButton.textContent = 'SPIN';
     this.ui.spinButton.title = `Spin slots (-${this.settings.ballCost} ${this.settings.ballCost === 1 ? currencySingular : currencyPlural})`;
     if (this.ui.autoLuckToggle) {
       this.ui.autoLuckToggle.checked = !!this.settings.autoLuckEnabled;

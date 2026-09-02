@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<!--
+  Amplified difference between two screenshots. Isolating what a single change
+  actually added to the frame beats eyeballing two dark images side by side.
+
+  ?a=<url>&b=<url>&gain=20&x=&y=&w=&h=
+-->
+<meta charset="utf-8">
+<title>diff probe</title>
+<style>
+  body { margin: 0; background: #05070d; color: #cfe6f2; font: 13px ui-monospace, monospace; }
+  #out { padding: 10px; white-space: pre; }
+  .row { display: flex; gap: 12px; padding: 0 10px; align-items: flex-start; }
+  figcaption { color: #7fe3ff; padding-bottom: 4px; }
+  canvas { border: 1px solid #24405a; }
+</style>
+<body>
+<pre id="out">loading…</pre>
+<div class="row" id="row"></div>
+<script>
+const p = new URLSearchParams(location.search);
+const out = document.getElementById('out');
+const lines = [];
+const say = m => { lines.push(m); out.textContent = lines.join('\n'); };
+const GAIN = Number(p.get('gain')) || 20;
+
+const load = src => new Promise((res, rej) => {
+  const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src;
+});
+
+(async () => {
+  try {
+    const [ia, ib] = await Promise.all([load(p.get('a')), load(p.get('b'))]);
+    const x = Number(p.get('x')) || 0, y = Number(p.get('y')) || 0;
+    const w = Number(p.get('w')) || Math.min(ia.width, ib.width);
+    const h = Number(p.get('h')) || Math.min(ia.height, ib.height);
+    const grab = img => {
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      const g = c.getContext('2d', { willReadFrequently: true });
+      g.drawImage(img, x, y, w, h, 0, 0, w, h);
+      return g.getImageData(0, 0, w, h).data;
+    };
+    const A = grab(ia), B = grab(ib);
+
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const g = c.getContext('2d');
+    const img = g.createImageData(w, h);
+    let maxAbs = 0, sumAbs = 0;
+    for (let i = 0; i < w * h; i++) {
+      let l = 0;
+      for (let ch = 0; ch < 3; ch++) {
+        const d = B[i * 4 + ch] - A[i * 4 + ch];
+        // Signed, centred on mid grey: darker than A reads dark, brighter reads light.
+        img.data[i * 4 + ch] = Math.max(0, Math.min(255, 128 + d * GAIN));
+        l += Math.abs(d);
+      }
+      l /= 3;
+      maxAbs = Math.max(maxAbs, l); sumAbs += l;
+    }
+    for (let i = 0; i < w * h; i++) img.data[i * 4 + 3] = 255;
+    g.putImageData(img, 0, 0);
+
+    say(`crop ${w}x${h} at ${x},${y}   gain x${GAIN}`);
+    say(`mean |B-A|  ${(sumAbs / (w * h)).toFixed(3)} / 255`);
+    say(`max  |B-A|  ${maxAbs.toFixed(1)} / 255`);
+    const fig = document.createElement('figure');
+    const cap = document.createElement('figcaption');
+    cap.textContent = `B - A, amplified x${GAIN} (mid grey = no change)`;
+    fig.append(cap, c);
+    document.getElementById('row').appendChild(fig);
+  } catch (e) {
+    say('FAILED ' + (e?.message || e));
+  }
+})();
+</script>
+</body>

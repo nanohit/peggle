@@ -29,41 +29,17 @@
           .catch(() => fetch('/data/player/primary.initial.json', { credentials: 'same-origin' })
             .then(res => res.ok ? res.json() : null)
             .catch(() => null))
-          .then(data => {
-            // Start downloading the first level's (CDN) background in parallel
-            // with the JS bundle. crossOrigin must match the renderer's
-            // canvas-bound request mode or the cache entry won't be reused.
-            try {
-              const bg = data && data.levels && data.levels[0] && data.levels[0].visuals
-                ? data.levels[0].visuals.background
-                : null;
-              if (bg && bg.type === 'image') {
-                const ref = bg.image;
-                const url = typeof ref === 'string' ? ref : (ref && (ref.primaryUrl || ref.url));
-                if (url && !/^data:/i.test(url)) {
-                  const img = new Image();
-                  img.crossOrigin = 'anonymous';
-                  img.src = url;
-                }
-              }
-            } catch (_) {}
-            return data;
-          });
+          .then(data => data);
       } catch (_) {}
     })();
   </script>
-  <link rel="modulepreload" href="/dist/player-bootstrap.js">
-  <!-- crossorigin matches the renderer's canvas-bound request mode (else the preload is not reused) -->
-  <link rel="preload" href="/visuals/backgrounds/background1.webp" as="image" fetchpriority="high" crossorigin="anonymous">
-  <link rel="preload" href="/visuals/assets_webtp/character.webp" as="image">
-  <link rel="preload" href="/visuals/assets_webtp/top.webp" as="image">
-  <link rel="preload" href="/visuals/bucket.webp" as="image">
-  <link rel="preload" href="/visuals/loadscreen_logo.webp" as="image">
+  <link rel="modulepreload" href="/dist/player-bootstrap.js?v=neon-machine-2">
   <link rel="stylesheet" href="/css/styles.css">
   <link rel="stylesheet" href="/css/visual-layout.css">
+  <link rel="stylesheet" href="/css/neon-machine.css?v=neon-machine-3">
   <style>
     /* Player overrides — body is the sole layout root (no .app wrapper) */
-    html, body { background: #000; }
+    html, body { background: #020712; }
     body { display: flex; justify-content: center; align-items: center; width: 100%; height: 100%; }
     .visual-viewport { width: 100%; height: 100%; background: #000; }
     .canvas-container { position: relative; }
@@ -75,7 +51,9 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      background: #000;
+      background:
+        radial-gradient(circle at 50% 42%, rgba(17, 188, 255, 0.14), transparent 26%),
+        linear-gradient(160deg, #061426, #020610 70%);
       transition: opacity 180ms ease;
     }
     .boot-loader {
@@ -83,15 +61,37 @@
       width: 108px;
       height: 108px;
     }
-    .boot-logo {
+    .boot-mark {
       position: absolute;
       left: 50%;
       top: 50%;
-      width: 54px;
-      height: auto;
+      width: 66px;
+      height: 66px;
       transform: translate(-50%, -50%);
-      opacity: 0.96;
-      filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.55));
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      border: 1px solid rgba(144, 231, 255, 0.66);
+      background: radial-gradient(circle at 35% 28%, #e7fbff 0 4%, #4ad8ff 8%, #06699c 34%, #031424 70%);
+      box-shadow: inset 0 -10px 18px rgba(0, 2, 12, 0.72), 0 0 28px rgba(20, 203, 255, 0.3);
+    }
+    .boot-mark::before {
+      content: '';
+      position: absolute;
+      inset: 7px 16px 32px 13px;
+      border-radius: 50%;
+      background: linear-gradient(145deg, rgba(255,255,255,.94), rgba(175,238,255,.08));
+      filter: blur(.2px);
+    }
+    .boot-mark b {
+      position: absolute;
+      top: 76px;
+      width: 150px;
+      text-align: center;
+      font: 800 10px/1 system-ui, sans-serif;
+      letter-spacing: .32em;
+      color: #94e8ff;
+      text-shadow: 0 0 12px rgba(45, 211, 255, .6);
     }
     .boot-orbit {
       position: absolute;
@@ -105,8 +105,8 @@
       width: 7px;
       height: 7px;
       border-radius: 50%;
-      background: #fff;
-      box-shadow: 0 0 5px rgba(255, 255, 255, 0.52);
+      background: #b8f3ff;
+      box-shadow: 0 0 8px rgba(48, 211, 255, 0.82);
       transform:
         translate(-50%, -50%)
         rotate(calc(var(--i) * 36deg))
@@ -125,7 +125,7 @@
 <body>
   <div id="bootCover" aria-live="polite" aria-label="Loading Peggle">
     <div class="boot-loader" aria-hidden="true">
-      <img class="boot-logo" src="/visuals/loadscreen_logo.webp" alt="" draggable="false">
+      <div class="boot-mark"><b>NEON DROP</b></div>
       <div class="boot-orbit">
         <span class="boot-ball" style="--i: 0; --o: 0.42"></span>
         <span class="boot-ball" style="--i: 1; --o: 0.48"></span>
@@ -143,6 +143,6 @@
   <div id="canvasContainer" class="canvas-container">
     <canvas id="gameCanvas"></canvas>
   </div>
-  <script type="module" src="/dist/player-bootstrap.js"></script>
+  <script type="module" src="/dist/player-bootstrap.js?v=neon-machine-2"></script>
 </body>
 </html>

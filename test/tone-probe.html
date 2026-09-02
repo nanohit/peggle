@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<!--
+  Tone probe. Loads a screenshot, crops the playfield, and prints its luminance
+  distribution large enough for the headless screenshot to read back. Answers
+  "is it too dark" with numbers instead of an impression.
+
+  ?src=<url>&x=&y=&w=&h=   crop rect in image pixels
+-->
+<meta charset="utf-8">
+<title>tone probe</title>
+<style>
+  body { margin: 0; background: #0b0d12; color: #d8e6ff; font: 15px ui-monospace, monospace; }
+  #out { padding: 16px; white-space: pre; font-size: 17px; line-height: 1.65; }
+  b { color: #ffd479; }
+  .bar { color: #6ee7a8; }
+</style>
+<body>
+<div id="out">loading…</div>
+<script>
+const p = new URLSearchParams(location.search);
+const out = document.getElementById('out');
+const lines = [];
+const say = (m) => { lines.push(m); out.innerHTML = lines.join('\n'); };
+
+const img = new Image();
+img.onload = () => {
+  const x = Number(p.get('x')) || 0, y = Number(p.get('y')) || 0;
+  const w = Number(p.get('w')) || img.width, h = Number(p.get('h')) || img.height;
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(img, x, y, w, h, 0, 0, w, h);
+  const d = ctx.getImageData(0, 0, w, h).data;
+
+  // Perceptual (sRGB) luma, which is what the eye judges "dark" by — not the
+  // linear radiance the renderer works in.
+  const hist = new Array(256).fill(0);
+  let sum = 0, n = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    const l = Math.round(0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2]);
+    hist[l]++; sum += l; n++;
+  }
+  const pct = (q) => {
+    let acc = 0;
+    for (let i = 0; i < 256; i++) { acc += hist[i]; if (acc >= n * q) return i; }
+    return 255;
+  };
+  say(`image ${img.width}x${img.height}  crop ${w}x${h} at ${x},${y}`);
+  say(`mean luma      <b>${(sum / n).toFixed(1)}</b> / 255   (<b>${(sum / n / 2.55).toFixed(1)}%</b>)`);
+  say(`p01 ${pct(0.01)}   p05 <b>${pct(0.05)}</b>   p25 <b>${pct(0.25)}</b>   median <b>${pct(0.5)}</b>`);
+  say(`p75 <b>${pct(0.75)}</b>   p95 <b>${pct(0.95)}</b>   p99 ${pct(0.99)}   max ${pct(1)}`);
+
+  // What fraction of the frame sits in each band. A field that is almost all
+  // "deep shadow" is what actually reads as murky, even at a fine mean.
+  const band = (a, b) => {
+    let s = 0; for (let i = a; i <= b; i++) s += hist[i];
+    return (s / n * 100);
+  };
+  say('');
+  say(`deep shadow  0- 24  ${band(0, 24).toFixed(1).padStart(5)}%`);
+  say(`shadow      25- 59  ${band(25, 59).toFixed(1).padStart(5)}%`);
+  say(`midtone     60-139  ${band(60, 139).toFixed(1).padStart(5)}%`);
+  say(`highlight  140-219  ${band(140, 219).toFixed(1).padStart(5)}%`);
+  say(`specular   220-255  ${band(220, 255).toFixed(1).padStart(5)}%`);
+
+  say('');
+  const step = 8;
+  for (let i = 0; i < 256; i += step) {
+    let s = 0; for (let k = i; k < i + step; k++) s += hist[k];
+    const frac = s / n;
+    say(`${String(i).padStart(3)} <span class="bar">${'#'.repeat(Math.min(70, Math.round(frac * 400)))}</span> ${(frac * 100).toFixed(1)}%`);
+  }
+};
+img.onerror = () => say('FAILED to load ' + img.src);
+img.src = p.get('src') || '';
+</script>
+</body>

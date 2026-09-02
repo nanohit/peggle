@@ -1,13 +1,12 @@
 // Level Map — Canvas-based campaign tree visualization.
 // Renders levels as connected nodes in a scrollable vertical tree.
-// Nodes show character portraits (big) or ornamental icons (small).
+// Nodes are rendered procedurally as illuminated machine controls.
 // States: completed, current, next, secret.
 
 import { topoOrder } from './graph/core.js';
 import { computeLayout, toPixelPositions } from './graph/layout.js';
 import { getNodeState } from './graph/progression.js';
-import { getLevelCharacterPortraitSources, loadCharacterRegistry, resolveCharacterForLevel } from './character-config.js';
-import { assetCacheKey, loadImageFromCandidates } from './asset-ref.js';
+import { loadCharacterRegistry, resolveCharacterForLevel } from './character-config.js';
 
 const BIG_R = 38;
 const SMALL_R = 24;
@@ -16,68 +15,6 @@ const COL_GAP = 104;
 const PAD_TOP = 58;
 const PAD_BOTTOM = 80;
 const LINE_W = 3;
-
-const ASSET_PATHS = {
-  topBackground: 'visuals/top_level_background.webp',
-  repeatBackground: 'visuals/level_backgroun.webp',
-  secret: 'visuals/Level_graph/secret.webp',
-  completed: 'visuals/Level_graph/completed_level.webp',
-  completedSmall: 'visuals/Level_graph/completed_level_small.webp',
-  locked: 'visuals/Level_graph/locked_level.webp',
-};
-const IMAGE_CACHE = new Map();
-
-function loadImg(src) {
-  const cacheKey = assetCacheKey(src);
-  if (!cacheKey || typeof Image === 'undefined') return Promise.resolve(null);
-  const cached = IMAGE_CACHE.get(cacheKey);
-  if (cached) return cached.promise;
-  const entry = { image: null, promise: null };
-  // Drawn onto the map canvas — keep it untainted (CDN assets send CORS;
-  // a blocked/hung candidate falls through to the same-origin /api/assets one).
-  entry.promise = loadImageFromCandidates(src, { crossOrigin: 'anonymous' }).then(result => {
-    if (!result) {
-      IMAGE_CACHE.delete(cacheKey);
-      return null;
-    }
-    const img = result.img;
-    const finish = () => {
-      entry.image = img;
-      return img;
-    };
-    try {
-      const decodePromise = typeof img.decode === 'function' ? img.decode() : null;
-      if (decodePromise && typeof decodePromise.then === 'function') {
-        return decodePromise.then(finish, finish);
-      }
-    } catch { /* drawImage can still use the loaded image */ }
-    return finish();
-  });
-  IMAGE_CACHE.set(cacheKey, entry);
-  return entry.promise;
-}
-
-function getLoadedImg(src) {
-  return IMAGE_CACHE.get(assetCacheKey(src))?.image || null;
-}
-
-async function loadFirstImg(candidates) {
-  for (const src of candidates || []) {
-    if (!src) continue;
-    const img = await loadImg(src);
-    if (img) return img;
-  }
-  return null;
-}
-
-function getFirstLoadedImg(candidates) {
-  for (const src of candidates || []) {
-    if (!src) continue;
-    const img = getLoadedImg(src);
-    if (img) return img;
-  }
-  return null;
-}
 
 function resolveLevelForNode(levels, node) {
   if (!node) return null;
@@ -93,24 +30,12 @@ function resolveLevelForNode(levels, node) {
 
 function characterPortraitKey(level) {
   const character = resolveCharacterForLevel(level, loadCharacterRegistry());
-  const idle = character?.slots?.idle;
-  return `${character?.id || 'character'}:${idle || '__default_character__'}`;
+  return character?.id || 'character';
 }
 
-function characterPortraitSources(level) {
-  return getLevelCharacterPortraitSources(level, loadCharacterRegistry(), 'idle');
-}
-
-export function prewarmLevelMapAssets(levels = [], graph = { nodes: [] }, options = {}) {
-  const includePortraits = options.includePortraits === true;
-  const staticLoads = Object.values(ASSET_PATHS).map(src => loadImg(src));
-  if (!includePortraits) return Promise.all(staticLoads);
-  const nodes = Array.isArray(graph?.nodes) ? graph.nodes : [];
-  const portraitLoads = nodes.map(node => {
-    const level = resolveLevelForNode(levels, node);
-    return loadFirstImg(characterPortraitSources(level));
-  });
-  return Promise.all([...staticLoads, ...portraitLoads]);
+export function prewarmLevelMapAssets() {
+  // Kept for API compatibility. The map has no raster assets to prewarm.
+  return Promise.resolve([]);
 }
 
 export class LevelMap {
@@ -141,9 +66,6 @@ export class LevelMap {
     this.canvasW = 0;
     this.canvasH = 0;
 
-    this._assets = {};
-    this._portraits = new Map();      // nodeId → Image
-
     this._overlay = null;
     this._scrollEl = null;
     this._contentEl = null;
@@ -168,15 +90,6 @@ export class LevelMap {
 
   async show(parent) {
     if (!this.graph?.nodes?.length) return;
-    this._loadAssets()
-      .then(() => {
-        if (!this._disposed) {
-          this._applyScrollingBackground();
-          this._render();
-        }
-      })
-      .catch(error => console.warn('[level-map] Asset load failed', error));
-    this._primeAssetsFromCache();
     this._buildDOM(parent);
     if (this._disposed) return;
     this._render();
@@ -318,43 +231,6 @@ export class LevelMap {
     return characterPortraitKey(level);
   }
 
-  _characterPortraitSources(level) {
-    return characterPortraitSources(level);
-  }
-
-  // ─── Asset loading ───────────────────────────────────────
-
-  async _loadAssets() {
-    const entries = Object.entries(ASSET_PATHS);
-    const staticLoads = Promise.all(entries.map(([, p]) => loadImg(p))).then(imgs => {
-      entries.forEach(([k], i) => { this._assets[k] = imgs[i]; });
-    });
-
-    const portraitLoads = [];
-    for (const node of this.graph.nodes) {
-      const level = this._resolveLevel(node);
-      portraitLoads.push(
-        loadFirstImg(this._characterPortraitSources(level)).then(img => {
-          if (img) this._portraits.set(node.id, img);
-        })
-      );
-    }
-    await Promise.all([staticLoads, ...portraitLoads]);
-  }
-
-  _primeAssetsFromCache() {
-    for (const [key, path] of Object.entries(ASSET_PATHS)) {
-      const img = getLoadedImg(path);
-      if (img) this._assets[key] = img;
-    }
-
-    for (const node of this.graph.nodes) {
-      const level = this._resolveLevel(node);
-      const img = getFirstLoadedImg(this._characterPortraitSources(level));
-      if (img) this._portraits.set(node.id, img);
-    }
-  }
-
   // ─── DOM ─────────────────────────────────────────────────
 
   _buildDOM(parent) {
@@ -451,25 +327,10 @@ export class LevelMap {
 
   _applyScrollingBackground() {
     if (!this._contentEl) return;
-    const topImg = this._assets.topBackground;
-    const repeatImg = this._assets.repeatBackground;
     const width = Math.max(1, Math.ceil(this.canvasW || this.boundsRect?.width || 1));
-    const topHeight = this._scaledBackgroundHeight(topImg, width);
-    const repeatHeight = this._scaledBackgroundHeight(repeatImg, width);
     const scrollHeight = Math.max(0, Math.ceil(this._scrollEl?.clientHeight || this.boundsRect?.height || 0));
-    const minBackgroundHeight = Math.max(topHeight + repeatHeight, scrollHeight + repeatHeight);
-
     this._contentEl.style.setProperty('--level-map-bg-width', `${width}px`);
-    this._contentEl.style.setProperty('--level-map-top-bg-height', `${topHeight}px`);
-    this._contentEl.style.setProperty('--level-map-repeat-bg-height', `${repeatHeight}px`);
-    this._contentEl.style.setProperty('--level-map-repeat-bg-y', `${topHeight}px`);
-    this._contentEl.style.setProperty('--level-map-min-bg-height', `${minBackgroundHeight}px`);
-  }
-
-  _scaledBackgroundHeight(img, width) {
-    const sourceW = Math.max(1, img?.naturalWidth || img?.width || 941);
-    const sourceH = Math.max(1, img?.naturalHeight || img?.height || 1672);
-    return Math.max(1, Math.ceil(width * sourceH / sourceW));
+    this._contentEl.style.setProperty('--level-map-min-bg-height', `${Math.max(this.canvasH, scrollHeight)}px`);
   }
 
   _drawConnections(ctx) {
@@ -485,31 +346,63 @@ export class LevelMap {
         const to = this.nodePositions.get(cid);
         if (!to) continue;
         const toR = to.big ? BIG_R : SMALL_R;
-        this._drawCurve(ctx, from.x, from.y + fromR + 2, to.x, to.y - toR - 2);
+        const fromState = this._getNodeState(node.id);
+        const toState = this._getNodeState(cid);
+        const energized = fromState === 'completed'
+          || fromState === 'current'
+          || toState === 'current';
+        this._drawCurve(ctx, from.x, from.y + fromR + 2, to.x, to.y - toR - 2, energized);
       }
     }
   }
 
-  _drawCurve(ctx, x1, y1, x2, y2) {
+  _drawCurve(ctx, x1, y1, x2, y2, energized = false) {
     const midY = (y1 + y2) / 2;
 
-    // Outer stroke (dark border)
+    // Recessed cable trench.
     ctx.beginPath();
     ctx.moveTo(x1, y1);
     ctx.bezierCurveTo(x1, midY, x2, midY, x2, y2);
-    ctx.strokeStyle = '#333';
-    ctx.lineWidth = LINE_W + 3;
+    ctx.strokeStyle = 'rgba(0, 3, 9, 0.9)';
+    ctx.lineWidth = LINE_W + 7;
     ctx.lineCap = 'round';
     ctx.stroke();
 
-    // Inner stroke (lighter)
     ctx.beginPath();
     ctx.moveTo(x1, y1);
     ctx.bezierCurveTo(x1, midY, x2, midY, x2, y2);
-    ctx.strokeStyle = '#777';
-    ctx.lineWidth = LINE_W;
-    ctx.lineCap = 'round';
+    ctx.strokeStyle = energized ? 'rgba(13, 87, 113, 0.92)' : 'rgba(20, 42, 55, 0.76)';
+    ctx.lineWidth = LINE_W + 3;
     ctx.stroke();
+
+    const cable = ctx.createLinearGradient(x1, y1, x2, y2);
+    cable.addColorStop(0, energized ? '#8df5ff' : '#395b68');
+    cable.addColorStop(0.5, energized ? '#2ac7e4' : '#183745');
+    cable.addColorStop(1, energized ? '#8df5ff' : '#395b68');
+    ctx.save();
+    if (energized) {
+      ctx.shadowColor = 'rgba(70, 224, 255, 0.72)';
+      ctx.shadowBlur = 10;
+    }
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.bezierCurveTo(x1, midY, x2, midY, x2, y2);
+    ctx.strokeStyle = cable;
+    ctx.lineWidth = energized ? 2.2 : 1.5;
+    ctx.stroke();
+    ctx.restore();
+
+    if (energized) {
+      const pulseX = (x1 + x2) * 0.5;
+      ctx.save();
+      ctx.shadowColor = '#8df5ff';
+      ctx.shadowBlur = 12;
+      ctx.fillStyle = '#e9feff';
+      ctx.beginPath();
+      ctx.arc(pulseX, midY, 2.1, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
   }
 
   _drawNode(ctx, node, pos) {
@@ -537,82 +430,105 @@ export class LevelMap {
   _drawLockOverlay(ctx, pos) {
     const r = pos.big ? BIG_R : SMALL_R;
     const { x, y } = pos;
-    const asset = this._assets.locked;
-    if (asset) {
-      const s = r * 0.7;
-      ctx.globalAlpha = 0.8;
-      ctx.drawImage(asset, x - s, y - s, s * 2, s * 2);
-      ctx.globalAlpha = 1;
-    } else {
-      ctx.save();
-      ctx.fillStyle = 'rgba(0,0,0,0.5)';
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#888';
-      ctx.font = `bold ${r * 0.6}px sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('🔒', x, y);
-      ctx.restore();
-    }
+    ctx.save();
+    ctx.fillStyle = 'rgba(0, 5, 11, 0.62)';
+    ctx.beginPath();
+    ctx.arc(x, y, r - 3, 0, Math.PI * 2);
+    ctx.fill();
+
+    const lockW = r * 0.72;
+    const lockH = r * 0.56;
+    ctx.strokeStyle = 'rgba(106, 153, 171, 0.7)';
+    ctx.lineWidth = Math.max(2, r * 0.11);
+    ctx.beginPath();
+    ctx.arc(x, y - lockH * 0.42, lockW * 0.29, Math.PI, 0);
+    ctx.stroke();
+    const body = ctx.createLinearGradient(x, y - 2, x, y + lockH);
+    body.addColorStop(0, '#58788a');
+    body.addColorStop(0.35, '#243e4c');
+    body.addColorStop(1, '#09141d');
+    ctx.fillStyle = body;
+    ctx.beginPath();
+    ctx.roundRect(x - lockW * 0.5, y - 2, lockW, lockH, r * 0.1);
+    ctx.fill();
+    ctx.fillStyle = '#93c7d3';
+    ctx.beginPath();
+    ctx.arc(x, y + lockH * 0.22, Math.max(1.5, r * 0.07), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
   }
 
   _drawBigNode(ctx, node, pos, state) {
     const r = BIG_R;
     const { x, y } = pos;
+    const current = state === 'current';
+    const completed = state === 'completed';
+    const accent = current ? '#71efff' : completed ? '#ff7a24' : '#31586b';
+    const accentSoft = current ? 'rgba(58, 220, 255, 0.72)' : completed ? 'rgba(255, 91, 24, 0.55)' : 'rgba(47, 85, 104, 0.34)';
     ctx.save();
 
-    // Glow for current level
-    if (state === 'current') {
-      ctx.shadowColor = 'rgba(255, 255, 255, 0.5)';
-      ctx.shadowBlur = 22;
-    }
+    // Physical cast shadow and dark lower sidewall.
+    const shadow = ctx.createRadialGradient(x + 4, y + r * 0.72, 1, x + 4, y + r * 0.72, r * 1.28);
+    shadow.addColorStop(0, 'rgba(0, 0, 0, 0.72)');
+    shadow.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = shadow;
+    ctx.beginPath();
+    ctx.ellipse(x + 4, y + r * 0.72, r * 1.18, r * 0.56, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#030a11';
+    ctx.beginPath();
+    ctx.arc(x + 2.8, y + 4.8, r, 0, Math.PI * 2);
+    ctx.fill();
 
-    // Base circle (from asset or fallback)
-    const base = this._assets.completed;
-    if (base) {
-      ctx.drawImage(base, x - r, y - r, r * 2, r * 2);
-    } else {
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fillStyle = '#1a1a1f';
-      ctx.fill();
+    if (current || completed) {
+      ctx.shadowColor = accentSoft;
+      ctx.shadowBlur = current ? 24 : 13;
     }
-
+    const metal = ctx.createLinearGradient(x - r, y - r, x + r, y + r);
+    metal.addColorStop(0, '#d8f7fb');
+    metal.addColorStop(0.13, '#4f788b');
+    metal.addColorStop(0.38, '#0b1d2a');
+    metal.addColorStop(0.62, '#7ea4b1');
+    metal.addColorStop(0.78, '#162f3d');
+    metal.addColorStop(1, '#02070d');
+    ctx.fillStyle = metal;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
     ctx.shadowColor = 'transparent';
     ctx.shadowBlur = 0;
 
-    // Portrait
-    const portrait = this._portraits.get(node.id);
-    if (portrait) {
-      const maxW = r * 1.48;
-      const maxH = r * 1.86;
-      const aspect = portrait.width / portrait.height;
-      let dw = maxW;
-      let dh = dw / aspect;
-      if (dh > maxH) {
-        dh = maxH;
-        dw = dh * aspect;
-      }
-      const bottom = y + r - 5;
-      ctx.drawImage(portrait, x - dw / 2, bottom - dh, dw, dh);
-
-      // Darken for future levels
-      if (state === 'next') {
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
-        ctx.beginPath();
-        ctx.arc(x, y, r - 3, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-
-    // Border ring
+    ctx.fillStyle = accent;
     ctx.beginPath();
-    ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.strokeStyle = state === 'current' ? '#fff' : state === 'completed' ? '#999' : '#444';
-    ctx.lineWidth = state === 'current' ? 3 : 2;
+    ctx.arc(x, y, r * 0.79, 0, Math.PI * 2);
+    ctx.fill();
+    const glass = ctx.createRadialGradient(x - r * 0.29, y - r * 0.35, r * 0.04, x, y, r * 0.72);
+    glass.addColorStop(0, current ? '#c9fbff' : completed ? '#ffc081' : '#456979');
+    glass.addColorStop(0.13, current ? '#37c7de' : completed ? '#e24b12' : '#1b3c4e');
+    glass.addColorStop(0.48, '#071722');
+    glass.addColorStop(1, '#01050a');
+    ctx.fillStyle = glass;
+    ctx.beginPath();
+    ctx.arc(x, y, r * 0.68, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = 'rgba(225, 253, 255, 0.74)';
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    ctx.arc(x, y, r * 0.83, Math.PI * 1.08, Math.PI * 1.78);
     ctx.stroke();
+
+    const index = Math.max(1, this.playOrder.indexOf(node.id) + 1);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = current || completed ? '#eafcff' : '#7093a3';
+    ctx.font = `800 ${r * 0.62}px ui-sans-serif, system-ui, sans-serif`;
+    ctx.fillText(String(index).padStart(2, '0'), x, y + 1);
+    ctx.fillStyle = current ? '#72efff' : completed ? '#ff8940' : '#547482';
+    ctx.font = `700 ${r * 0.16}px ui-sans-serif, system-ui, sans-serif`;
+    ctx.fillText(current ? 'LIVE' : completed ? 'CLEAR' : 'STAGE', x, y + r * 0.43);
+
+    if (completed) this._drawCheck(ctx, x + r * 0.69, y + r * 0.64, r * 0.22);
 
     ctx.restore();
   }
@@ -620,44 +536,59 @@ export class LevelMap {
   _drawSmallNode(ctx, pos, state) {
     const r = SMALL_R;
     const { x, y } = pos;
+    const current = state === 'current';
+    const completed = state === 'completed';
+    const accent = current ? '#65edff' : completed ? '#ff7024' : '#315365';
     ctx.save();
 
-    if (state === 'current') {
-      ctx.shadowColor = 'rgba(255, 255, 255, 0.45)';
-      ctx.shadowBlur = 16;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.58)';
+    ctx.beginPath();
+    ctx.ellipse(x + 2, y + r * 0.72, r * 0.94, r * 0.43, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    if (current || completed) {
+      ctx.shadowColor = current ? 'rgba(74, 226, 255, 0.8)' : 'rgba(255, 88, 24, 0.56)';
+      ctx.shadowBlur = current ? 18 : 10;
     }
-
-    // Ornamental asset
-    const asset = this._assets.completedSmall;
-    if (asset) {
-      // Dim for future
-      if (state === 'next') ctx.globalAlpha = 0.4;
-      ctx.drawImage(asset, x - r, y - r, r * 2, r * 2);
-      ctx.globalAlpha = 1;
-    } else {
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fillStyle = '#1a1a1f';
-      ctx.fill();
-    }
-
-    ctx.shadowColor = 'transparent';
-    ctx.shadowBlur = 0;
-
-    // White center dot
-    if (state === 'completed' || state === 'current') {
-      ctx.beginPath();
-      ctx.arc(x, y, 4, 0, Math.PI * 2);
-      ctx.fillStyle = state === 'current' ? '#fff' : '#aaa';
-      ctx.fill();
-    }
-
-    // Border
+    const ring = ctx.createLinearGradient(x - r, y - r, x + r, y + r);
+    ring.addColorStop(0, '#bcecf2');
+    ring.addColorStop(0.24, '#24495c');
+    ring.addColorStop(0.55, '#07141e');
+    ring.addColorStop(0.78, '#628797');
+    ring.addColorStop(1, '#02070c');
+    ctx.fillStyle = ring;
     ctx.beginPath();
     ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.strokeStyle = state === 'current' ? '#fff' : state === 'completed' ? '#666' : '#333';
-    ctx.lineWidth = state === 'current' ? 2.5 : 1.5;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    ctx.fillStyle = accent;
+    ctx.beginPath();
+    ctx.arc(x, y, r * 0.72, 0, Math.PI * 2);
+    ctx.fill();
+    const lens = ctx.createRadialGradient(x - r * 0.26, y - r * 0.3, 1, x, y, r * 0.63);
+    lens.addColorStop(0, current ? '#e8feff' : completed ? '#ffd0a7' : '#7292a0');
+    lens.addColorStop(0.2, accent);
+    lens.addColorStop(0.62, '#071620');
+    lens.addColorStop(1, '#010409');
+    ctx.fillStyle = lens;
+    ctx.beginPath();
+    ctx.arc(x, y, r * 0.58, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(225, 253, 255, 0.64)';
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.arc(x, y, r * 0.75, Math.PI * 1.08, Math.PI * 1.74);
     ctx.stroke();
+
+    if (completed) {
+      this._drawCheck(ctx, x, y, r * 0.36);
+    } else {
+      ctx.fillStyle = current ? '#f4ffff' : '#7794a1';
+      ctx.beginPath();
+      ctx.arc(x, y, current ? 3.4 : 2.6, 0, Math.PI * 2);
+      ctx.fill();
+    }
 
     ctx.restore();
   }
@@ -665,23 +596,46 @@ export class LevelMap {
   _drawSecretNode(ctx, pos) {
     const r = SMALL_R;
     const { x, y } = pos;
+    ctx.save();
+    ctx.shadowColor = 'rgba(223, 52, 255, 0.72)';
+    ctx.shadowBlur = 18;
+    const body = ctx.createRadialGradient(x - r * 0.3, y - r * 0.34, 1, x, y, r);
+    body.addColorStop(0, '#fff1ff');
+    body.addColorStop(0.18, '#e64cff');
+    body.addColorStop(0.52, '#501578');
+    body.addColorStop(1, '#090213');
+    ctx.fillStyle = body;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = 'rgba(246, 206, 255, 0.8)';
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    ctx.arc(x, y, r - 2, Math.PI * 1.05, Math.PI * 1.82);
+    ctx.stroke();
+    ctx.fillStyle = '#fff4ff';
+    ctx.font = `800 ${r * 0.9}px ui-sans-serif, system-ui, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('?', x, y + 1);
+    ctx.restore();
+  }
 
-    const asset = this._assets.secret;
-    if (asset) {
-      ctx.drawImage(asset, x - r, y - r, r * 2, r * 2);
-    } else {
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fillStyle = '#1a1a1f';
-      ctx.fill();
-      ctx.fillStyle = '#888';
-      ctx.font = 'bold 20px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('?', x, y);
-      ctx.restore();
-    }
+  _drawCheck(ctx, x, y, size) {
+    ctx.save();
+    ctx.strokeStyle = '#f4ffff';
+    ctx.lineWidth = Math.max(1.6, size * 0.28);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.shadowColor = 'rgba(98, 239, 255, 0.82)';
+    ctx.shadowBlur = 6;
+    ctx.beginPath();
+    ctx.moveTo(x - size * 0.6, y);
+    ctx.lineTo(x - size * 0.15, y + size * 0.45);
+    ctx.lineTo(x + size * 0.68, y - size * 0.48);
+    ctx.stroke();
+    ctx.restore();
   }
 
   // ─── Scroll ──────────────────────────────────────────────

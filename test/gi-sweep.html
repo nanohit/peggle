@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<!--
+  Blotch metric.
+
+  A single small peg should darken only its own neighbourhood. Anything it does
+  to the far side of the board is solver error. So: solve an empty board, solve
+  the same board with one peg, and measure how much the FAR field changed.
+
+  `far` excludes a disc around the peg, so the peg's real contact shadow and
+  spill are not counted. Lower is better; empty-vs-empty gives the noise floor.
+
+  Each config is solved in its own renderer so nothing carries over.
+-->
+<meta charset="utf-8">
+<title>gi sweep</title>
+<style>
+  body { margin: 0; background: #05070d; color: #cfe6f2; font: 14px ui-monospace, monospace; }
+  #out { padding: 12px; white-space: pre; line-height: 1.6; }
+  .best { color: #6ee7a8; } .bad { color: #ff9b9b; }
+  #host { position: absolute; left: -9999px; width: 460px; height: 780px; }
+</style>
+<body>
+<pre id="out">running…</pre>
+<div id="host"></div>
+<script type="module">
+import { GpuPlayfieldRenderer, createDefaultLighting } from '../js/gpu-playfield.js';
+
+const p = new URLSearchParams(location.search);
+const out = document.getElementById('out');
+const lines = [];
+const say = m => { lines.push(m); out.innerHTML = lines.join('\n'); };
+const W = 460, H = 780;
+const EXCLUDE = 150;            // radius around the peg to ignore, canvas px
+
+function solve(cfg, withPeg) {
+  const host = document.getElementById('host');
+  host.innerHTML = '';
+  const r = new GpuPlayfieldRenderer();
+  if (cfg.cascades || cfg.spacing || cfg.sdf) {
+    const inner = r._qualitySettings.bind(r);
+    r._qualitySettings = () => {
+      const s = inner();
+      if (cfg.cascades) s.cascades = cfg.cascades;
+      if (cfg.spacing) s.spacing = cfg.spacing;
+      if (cfg.sdf) s.sdfDivisor = cfg.sdf;
+      return s;
+    };
+  }
+  if (cfg.msteps != null) r.marchSteps = cfg.msteps;
+  if (cfg.mminstep != null) r.marchMinStep = cfg.mminstep;
+  r.attach(host);
+  const L = createDefaultLighting();
+  L.boardColor = [0.022, 0.040, 0.062];
+  L.boardStyle = 2; L.boardTexture = 0; L.vignette = 0;
+  L.domeIntensity = 0; L.bounce = 0;
+  Object.assign(L, cfg.light || {});
+  r.setLighting(L);
+  const pegs = withPeg ? [{ id: 1, x: W / 2, y: H / 2, type: 'orange' }] : [];
+  for (let f = 0; f < 20; f++) {
+    r.render(pegs, new Set(), { width: W, height: H, timeSeconds: f * 0.016 });
+  }
+  // Read the shaded target, not the canvas: the drawing buffer is not
+  // preserved, so reading it back after the frame returns undefined content
+  // (which makes every config look identical). `lit` is also the honest signal
+  // — linear radiance, before the tonemap quantises it to 8 bits.
+  const gl = r.gl;
+  const t = r._targets;
+  const w = r._renderWidth, h = r._renderHeight;
+  const fbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t.lit, 0);
+  if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+    throw new Error('cannot read lit target');
+  }
+  const px = new Float32Array(w * h * 4);
+  gl.readPixels(0, 0, w, h, gl.RGBA, gl.FLOAT, px);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  const ratio = w / W;
+  r.dispose?.();
+  return { px, w, h, ratio };
+}
+
+// Relative error, because the absolute radiance is tiny and what matters is
+// how far off the far field is compared to how bright it should be.
+function farDiff(a, b) {
+  const cx = a.w / 2, cy = a.h / 2, rr = (EXCLUDE * a.ratio) ** 2;
+  let sum = 0, n = 0, max = 0, ref = 0;
+  for (let y = 0; y < a.h; y++) {
+    for (let x = 0; x < a.w; x++) {
+      if ((x - cx) ** 2 + (y - cy) ** 2 < rr) continue;
+      const i = (y * a.w + x) * 4;
+      const la = 0.2126 * a.px[i] + 0.7152 * a.px[i + 1] + 0.0722 * a.px[i + 2];
+      const lb = 0.2126 * b.px[i] + 0.7152 * b.px[i + 1] + 0.0722 * b.px[i + 2];
+      const d = Math.abs(lb - la);
+      sum += d; ref += la; n++; max = Math.max(max, d);
+    }
+  }
+  const mean = ref > 0 ? sum / ref * 100 : 0;   // percent of the unoccluded level
+  return { mean, max: ref > 0 ? max / (ref / n) * 100 : 0 };
+}
+
+const CONFIGS = [
+  { name: 'noise floor (empty vs empty)', control: true },
+  { name: 'shipped (5 cascades)' },
+  { name: '4 cascades', cascades: 4 },
+  { name: '3 cascades', cascades: 3 },
+  { name: 'minStep 1.5', mminstep: 1.5 },
+  { name: 'minStep 1.5, 64 steps', mminstep: 1.5, msteps: 64 },
+  { name: 'minStep 6', mminstep: 6 },
+  { name: '64 steps', msteps: 64 },
+  { name: 'sdf full res', sdf: 1 },
+  { name: 'spacing 2', spacing: 2 },
+  { name: 'spacing 8', spacing: 8 },
+  { name: 'giBlend 1 (no history)', light: { giBlend: 1 } }
+];
+
+try {
+  say(`far-field error from ONE peg, excluding r<${EXCLUDE}px around it`);
+  say('(percent of the unoccluded level; lower is better)');
+  say('');
+  const results = [];
+  for (const cfg of CONFIGS) {
+    const a = solve(cfg, false);
+    const b = solve(cfg, cfg.control ? false : true);
+    const d = farDiff(a, b);
+    results.push({ cfg, d });
+    say(`${cfg.name.padEnd(30)} mean ${d.mean.toFixed(2).padStart(6)}%  peak ${d.max.toFixed(1).padStart(6)}%`);
+  }
+  const floor = results[0].d.mean;
+  const base = results[1].d.mean;
+  say('');
+  say(`noise floor ${floor.toFixed(2)}%   shipped ${base.toFixed(2)}%`);
+  const ranked = results.slice(2).sort((a, b) => a.d.mean - b.d.mean);
+  say('');
+  say('best first:');
+  for (const r of ranked) {
+    const cls = r.d.mean < base * 0.5 ? 'best' : (r.d.mean > base ? 'bad' : '');
+    say(`  <span class="${cls}">${r.cfg.name.padEnd(28)} ${(r.d.mean / base * 100).toFixed(0)}% of shipped</span>`);
+  }
+  say('');
+  say('DONE');
+} catch (e) {
+  say('THREW ' + (e?.message || e));
+  say(e?.stack || '');
+}
+</script>
+</body>

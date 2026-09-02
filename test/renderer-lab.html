@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Renderer lab</title>
+<style>
+  html, body { margin: 0; min-height: 100%; background: #06080c; color: #cfe6f2;
+    font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  body { display: flex; gap: 18px; align-items: flex-start; padding: 18px; }
+  #stage { position: relative; width: 400px; height: 600px; flex: none; }
+  aside { display: flex; flex-direction: column; gap: 6px; width: 260px; }
+  button { background: #14293a; color: #cfe6f2; border: 1px solid #2b556f;
+    border-radius: 4px; padding: 5px 8px; cursor: pointer; font: inherit; text-align: left; }
+  button:hover { background: #1d3c53; }
+  label { display: flex; gap: 8px; align-items: center; }
+  #err { color: #ff9b9b; white-space: pre-wrap; }
+  h1 { font-size: 12px; margin: 0; letter-spacing: .12em; text-transform: uppercase; }
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="gameCanvas"></canvas></div>
+<aside>
+  <h1>Renderer lab</h1>
+  <label><input type="checkbox" id="anim" checked> animate</label>
+  <label><input type="checkbox" id="gpu" checked> gpu playfield</label>
+  <button id="shock">fire shockwave</button>
+  <button id="victory">victory splash</button>
+  <div id="status"></div>
+  <div id="err"></div>
+</aside>
+
+<script type="module">
+import { Renderer } from '../js/renderer.js';
+import { PHYSICS_CONFIG } from '../js/physics.js';
+
+const W = 400, H = 600;
+const stage = document.getElementById('stage');
+const canvas = document.getElementById('gameCanvas');
+canvas.width = W; canvas.height = H;
+canvas.style.width = W + 'px';
+canvas.style.height = H + 'px';
+
+const err = document.getElementById('err');
+const status = document.getElementById('status');
+window.addEventListener('error', e => { err.textContent += '\n' + e.message; });
+window.addEventListener('unhandledrejection', e => { err.textContent += '\nrejection: ' + e.reason; });
+
+const renderer = new Renderer(canvas);
+renderer.resize(W, H);
+
+// One of every peg family that the GPU path does NOT own, so the 2D fallback
+// paths are all exercised: portals, magnets, gamble, plus normal/brick/bumper.
+const pegs = [
+  { id: 'o1', x: 90,  y: 120, type: 'orange', shape: 'circle' },
+  { id: 'o2', x: 150, y: 120, type: 'orange', shape: 'circle' },
+  { id: 'b1', x: 210, y: 120, type: 'blue',   shape: 'circle' },
+  { id: 'g1', x: 270, y: 120, type: 'green',  shape: 'circle' },
+  { id: 'bump', x: 330, y: 120, type: 'bumper', shape: 'circle', bumperScale: 1.4 },
+
+  { id: 'pb', x: 110, y: 230, type: 'portalBlue',   shape: 'circle', angle: 0.35 },
+  { id: 'po', x: 290, y: 230, type: 'portalOrange', shape: 'circle', angle: -0.35 },
+
+  { id: 'mag1', x: 200, y: 330, type: 'bombMagnet', shape: 'circle' },
+  { id: 'mag2', x: 110, y: 400, type: 'bombMagnet', shape: 'circle' },
+
+  { id: 'gam', x: 290, y: 400, type: 'gamble', shape: 'circle' },
+
+  { id: 'brick', x: 200, y: 470, type: 'obstacle', shape: 'brick', width: 90, height: 12, angle: 0.12 }
+];
+
+const balls = [{ x: 200, y: 200, vx: 70, vy: 120, radius: PHYSICS_CONFIG.pegRadius, active: true }];
+const bucket = { x: 200, y: 560, width: 56, height: 14 };
+
+// A yo-yo thread: a polyline from the launcher down to a swinging bob.
+function yoyoThread(t) {
+  const anchor = { x: 200, y: 60 };
+  const bob = { x: 200 + Math.sin(t * 1.6) * 90, y: 300 + Math.cos(t * 1.2) * 40 };
+  const points = [];
+  const segments = 14;
+  for (let i = 0; i <= segments; i++) {
+    const k = i / segments;
+    points.push({
+      x: anchor.x + (bob.x - anchor.x) * k,
+      y: anchor.y + (bob.y - anchor.y) * k + Math.sin(k * Math.PI) * 26
+    });
+  }
+  return [{ points, pointCount: points.length }];
+}
+
+let events = [];
+document.getElementById('shock').onclick = () => {
+  events.push({ x: 200, y: 300, radius: 110, kind: 'bombSplash' });
+};
+document.getElementById('victory').onclick = () => {
+  events.push({ x: 200, y: 300, radius: 150, kind: 'victorySplash' });
+};
+
+const ui = id => document.getElementById(id);
+let t0 = performance.now();
+
+function frame(now) {
+  const t = (now - t0) / 1000;
+  const b = balls[0];
+  if (ui('anim').checked) {
+    b.vy += 180 / 60;
+    b.x += b.vx / 60; b.y += b.vy / 60;
+    if (b.x < 16 || b.x > W - 16) b.vx *= -1;
+    if (b.y > H - 40) { b.y = 80; b.vy = 60; }
+  }
+
+  const state = {
+    pegs,
+    hitPegIds: (Math.floor(t * 2) % 4 === 0) ? ['o1', 'b1'] : [],
+    selectedPegIds: new Set(),
+    balls,
+    bucket,
+    bucketFlash: 0,
+    yoyoThreads: yoyoThread(t),
+    trajectory: null,
+    showLauncher: true,
+    launchX: 200, launchY: 46,
+    aimAngle: Math.PI / 2 + Math.sin(t * 0.8) * 0.5,
+    showAim: true,
+    launcherBallScale: 1,
+    backgroundEvents: events,
+    cameraY: 0,
+    levelProgress: 0.4,
+    playState: 'playing',
+    renderTimeSeconds: t,
+    frameDeltaSeconds: 1 / 60,
+    isEditor: false,
+    showGrid: false
+  };
+  events = [];
+
+  try {
+    renderer.renderGame(state);
+  } catch (e) {
+    err.textContent = String(e && e.stack || e);
+    return;
+  }
+  status.textContent = `gpuScene: ${renderer._gpuSceneActive}`;
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+ui('gpu').onchange = () => {
+  // Force the 2D fallback so the two paths can be compared directly.
+  renderer._gpuDisabled = !ui('gpu').checked;
+  if (renderer._gpuDisabled && renderer._gpuPlayfield?.canvas) {
+    renderer._gpuPlayfield.canvas.style.display = 'none';
+  } else if (renderer._gpuPlayfield?.canvas) {
+    renderer._gpuPlayfield.canvas.style.display = 'block';
+  }
+};
+</script>
+</body>
+</html>

@@ -4,7 +4,9 @@
   position: absolute;
   inset: 0;
   z-index: 600;
-  background: #0E0E0E;
+  background:
+    radial-gradient(ellipse at 50% -8%, rgba(46, 170, 213, .20), transparent 42%),
+    linear-gradient(180deg, #071522 0%, #020912 55%, #01050a 100%);
   border-radius: inherit;
   display: flex;
   flex-direction: column;
@@ -13,6 +15,24 @@
   pointer-events: auto;
   transition: none;
   overflow: hidden;
+  box-shadow:
+    inset 0 0 0 1px rgba(107, 220, 243, .15),
+    inset 0 0 36px rgba(0, 0, 0, .78);
+}
+
+.level-map-overlay::before {
+  content: 'CAMPAIGN  //  ROUTE MATRIX';
+  position: absolute;
+  z-index: 4;
+  top: 3.5%;
+  left: 50%;
+  transform: translateX(-50%);
+  color: rgba(184, 240, 250, .78);
+  font: 700 clamp(7px, 1.7vw, 10px)/1.1 ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: .22em;
+  white-space: nowrap;
+  text-shadow: 0 0 12px rgba(77, 220, 248, .48);
+  pointer-events: none;
 }
 
 .level-map-overlay--slide-up {
@@ -66,7 +86,10 @@
   padding-bottom: 20px;
   overflow: hidden;
   isolation: isolate;
-  background-color: #0E0E0E;
+  background:
+    radial-gradient(ellipse at 24% 6%, rgba(54, 196, 235, .13), transparent 26%),
+    radial-gradient(ellipse at 78% 19%, rgba(44, 132, 184, .10), transparent 30%),
+    linear-gradient(180deg, rgba(7, 25, 39, .96), rgba(2, 9, 17, .98));
 }
 
 .level-map-content::before,
@@ -81,20 +104,23 @@
 
 .level-map-content::after {
   top: 0;
-  height: var(--level-map-top-bg-height, 100%);
-  background-image: url('../visuals/top_level_background.webp');
-  background-size: var(--level-map-bg-width, 100%) var(--level-map-top-bg-height, auto);
-  background-position: center top;
-  background-repeat: no-repeat;
+  bottom: 0;
+  background:
+    repeating-linear-gradient(90deg, transparent 0 31px, rgba(87, 177, 201, .035) 31px 32px),
+    repeating-linear-gradient(0deg, transparent 0 35px, rgba(87, 177, 201, .03) 35px 36px);
+  -webkit-mask-image: linear-gradient(180deg, rgba(0,0,0,.8), rgba(0,0,0,.25));
+  mask-image: linear-gradient(180deg, rgba(0,0,0,.8), rgba(0,0,0,.25));
 }
 
 .level-map-content::before {
-  top: var(--level-map-repeat-bg-y, 0);
+  top: 0;
   bottom: 0;
-  background-image: url('../visuals/level_backgroun.webp');
-  background-size: var(--level-map-bg-width, 100%) var(--level-map-repeat-bg-height, auto);
-  background-position: center top;
-  background-repeat: repeat-y;
+  background:
+    linear-gradient(103deg, transparent 0 13%, rgba(71, 202, 235, .045) 13.3% 13.7%, transparent 14% 86%, rgba(71, 202, 235, .04) 86.3% 86.7%, transparent 87%),
+    radial-gradient(ellipse at center, transparent 45%, rgba(0, 2, 7, .66) 100%);
+  box-shadow:
+    inset 12px 0 18px rgba(0, 0, 0, .44),
+    inset -12px 0 18px rgba(0, 0, 0, .44);
 }
 
 /* ─── Editor campaign tree preview ─── */

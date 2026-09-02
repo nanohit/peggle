@@ -17,7 +17,6 @@ import {
   createCharacterRefSnapshot,
   createDefaultCharacter,
   DEFAULT_CHARACTER_ID,
-  getCharacterPvpPortraitSource,
   getCharacterSlotSource,
   loadCharacterRegistry,
   normalizeCharacter,
@@ -32,7 +31,6 @@ import { topoOrder, buildNodeMap, buildParentMap, buildLevelIndexMap, graphFromL
 import { validateGraph } from './graph/validate.js';
 import { resolveWin, findNextNode, migrateProgress, isUnlocked } from './graph/progression.js';
 import { api } from './api.js';
-import { isAssetImageSource, assetCacheKey, loadImageFromCandidates } from './asset-ref.js';
 import { decodeBakedLevelJsonFromText } from './baked-level-codec.js';
 import {
   createPvpDuelRoomUrl,
@@ -106,7 +104,7 @@ function ensureLevelMapCss() {
     levelMapCssPromise = new Promise(resolve => {
       const link = document.createElement('link');
       link.rel = 'stylesheet';
-      link.href = 'css/level-map.css';
+      link.href = 'css/level-map.css?v=neon-machine-2';
       link.onload = () => resolve();
       link.onerror = () => {
         // Clear cache so next call retries; remove failed <link> so we don't accumulate stale nodes
@@ -365,25 +363,6 @@ async function fetchCharacterRegistryWithFallback(options = {}) {
   return registry;
 }
 
-function resolvePvpEnemyCharacterForLevel(level, registry = loadCharacterRegistry()) {
-  const normalizedRegistry = normalizeCharacterRegistry(registry);
-  const assignment = normalizeLevelCharacterAssignment(level?.pvp?.enemyCharacter);
-  return normalizeCharacter(
-    normalizedRegistry.characters[assignment.characterId]
-    || assignment.snapshot
-    || normalizedRegistry.characters[DEFAULT_CHARACTER_ID]
-    || createDefaultCharacter()
-  );
-}
-
-function resolvePvpPortraitCharacters(level, registry = loadCharacterRegistry(), localSide = 'human') {
-  const human = resolveCharacterForLevel(level, registry);
-  const cpu = resolvePvpEnemyCharacterForLevel(level, registry);
-  return localSide === 'cpu'
-    ? { local: cpu, remote: human }
-    : { local: human, remote: cpu };
-}
-
 /*
  * Player data uses the same shared API as the editor, with static JSON as a
  * seed/fallback. That keeps peggle.vercel.app editing and alea.sh/al3a.vercel.app play
@@ -610,45 +589,34 @@ function createPauseOverlay() {
   overlay.className = 'pause-overlay';
   overlay.id = 'pauseOverlay';
 
-  const BASE = 'visuals/pause_menu/webp/';
-
   overlay.innerHTML = `
-    <div class="pause-character-nav" id="pauseCharacterNav">
-      <button class="pause-character-arrow pause-character-arrow--prev" id="pauseCharacterPrevBtn" type="button" aria-label="Previous character">‹</button>
-      <button class="pause-character-arrow pause-character-arrow--next" id="pauseCharacterNextBtn" type="button" aria-label="Next character">›</button>
-    </div>
     <div class="pause-panel">
-      <img class="pause-bg" data-src="${BASE}pause_modal_background.webp" alt="" draggable="false">
       <div class="pause-content">
+        <div class="pause-kicker">SYSTEM // HOLD</div>
         <div class="pause-title" id="pauseTitleText">Пауза</div>
         <button class="pause-img-btn" id="pauseResumeBtn">
-          <img class="pause-img-btn__normal" data-src="${BASE}continue.webp" alt="Продолжить" draggable="false">
-          <img class="pause-img-btn__pressed" data-src="${BASE}continue_pressed1.webp" alt="" draggable="false">
+          <span class="pause-btn-icon">▶</span><span>Продолжить</span>
         </button>
         <button class="pause-img-btn" id="pauseRestartBtn">
-          <img class="pause-img-btn__normal" data-src="${BASE}again.webp" alt="Заново" draggable="false">
-          <img class="pause-img-btn__pressed" data-src="${BASE}again_pressed.webp" alt="" draggable="false">
+          <span class="pause-btn-icon">↻</span><span>Заново</span>
         </button>
         <div class="pause-hint">
           <span class="pause-hint__text" id="pauseHintText">Второе нажатие<br>для выстрела</span>
           <label class="pause-check" id="pauseConfirmCheck">
             <input type="checkbox" id="pauseConfirmInput">
-            <img class="pause-check__off" data-src="${BASE}check.webp" alt="" draggable="false">
-            <img class="pause-check__on" data-src="${BASE}check_checked.webp" alt="" draggable="false">
+            <span class="pause-check-box" aria-hidden="true"></span>
           </label>
         </div>
         <button class="pause-img-btn" id="pauseLevelBtn">
-          <img class="pause-img-btn__normal" data-src="${BASE}level.webp" alt="Уровни" draggable="false">
-          <img class="pause-img-btn__pressed" data-src="${BASE}level_pressed.webp" alt="" draggable="false">
+          <span class="pause-btn-icon">⌗</span><span>Уровни</span>
         </button>
         <button class="pause-img-btn" id="pausePvpDuelBtn">
-          <img class="pause-img-btn__normal" data-src="${BASE}pvp_button.webp" alt="Дуэль" draggable="false">
-          <img class="pause-img-btn__pressed" data-src="${BASE}pvp_button_pressed.webp" alt="" draggable="false">
+          <span class="pause-btn-icon">⚡</span><span>Дуэль</span>
         </button>
       </div>
       <button class="pause-sound-btn" id="pauseSoundBtn">
-        <img class="pause-sound-btn__on" data-src="visuals/pause_menu/sound_on.webp" alt="Звук вкл" draggable="false">
-        <img class="pause-sound-btn__off" data-src="visuals/pause_menu/sound_off.webp" alt="Звук выкл" draggable="false">
+        <span class="pause-sound-btn__on">♪</span>
+        <span class="pause-sound-btn__off">×</span>
       </button>
     </div>
   `;
@@ -723,7 +691,7 @@ async function resolve() {
 
 async function bootPvpDuelRoom(roomCode) {
   const canvas = document.getElementById('gameCanvas');
-  canvas.getContext('2d', { alpha: false });
+  canvas.getContext('2d', { alpha: true });
 
   const visualLayout = new VisualLayout({
     includePanel: false,
@@ -914,10 +882,6 @@ async function bootPvpDuelRoom(roomCode) {
       publishRoundResult: (result) => controller?.publishRoundResult(result)
     };
 
-    // onVisualState fires every frame; only redo the portrait resolution
-    // (registry normalization) when HP or the registry actually change.
-    let roomPortraitKey = '';
-    let roomPortraitRegistry = null;
     game = new PvpRuntime(canvas, {
       settings: pvp,
       localSide: initialRoom.side,
@@ -926,26 +890,11 @@ async function bootPvpDuelRoom(roomCode) {
       onVisualState: (state) => {
         if (!state) return;
         const maxHp = state.maxHp || 3;
-        const portraitKey = `${state.playerHp}|${state.cpuHp}|${maxHp}`;
-        if (roomPortraitKey !== portraitKey || roomPortraitRegistry !== roomCharacterRegistry) {
-          roomPortraitKey = portraitKey;
-          roomPortraitRegistry = roomCharacterRegistry;
-          const portraits = resolvePvpPortraitCharacters(level, roomCharacterRegistry, initialRoom.side);
-          const localSrc = getCharacterPvpPortraitSource(portraits.local, { hp: state.playerHp, maxHp });
-          const remoteSrc = getCharacterPvpPortraitSource(portraits.remote, { hp: state.cpuHp, maxHp });
-          if (localSrc) {
-            visualLayout.setCharacterPortraitSource(localSrc, {
-              fadeMs: 160,
-              slotName: `pvp:${initialRoom.side}:${state.playerHp}`
-            });
-          }
-          visualLayout.setPvpOpponentTarget?.({
-            visible: true,
-            hp: state.cpuHp,
-            maxHp,
-            portraitSrc: remoteSrc
-          });
-        }
+        visualLayout.setPvpOpponentTarget?.({
+          visible: true,
+          hp: state.cpuHp,
+          maxHp
+        });
         visualLayout.setPvpAimTimer?.(
           state.timerVisible
             ? { visible: true, ratio: state.timerRatio }
@@ -1021,7 +970,7 @@ async function bootPvpDuelRoom(roomCode) {
 async function bootWithLevels(levels, campaignName, campaignData, options = {}) {
 
   const canvas = document.getElementById('gameCanvas');
-  canvas.getContext('2d', { alpha: false });
+  canvas.getContext('2d', { alpha: true });
 
   // Mount visual layout (frame + slots + HUD)
   const visualLayout = new VisualLayout({
@@ -1201,23 +1150,13 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     applyActiveCharacterVisuals(0);
   }
 
-  function updatePvpPortraitVisuals(levelData, state, localSide = 'human') {
+  function updatePvpTargetVisuals(levelData, state) {
     if (!levelData || !state) return;
     const maxHp = state.maxHp || 3;
-    const portraits = resolvePvpPortraitCharacters(levelData, characterRegistry, localSide);
-    const localSrc = getCharacterPvpPortraitSource(portraits.local, { hp: state.playerHp, maxHp });
-    const remoteSrc = getCharacterPvpPortraitSource(portraits.remote, { hp: state.cpuHp, maxHp });
-    if (localSrc) {
-      visualLayout.setCharacterPortraitSource(localSrc, {
-        fadeMs: 160,
-        slotName: `pvp:${localSide}:${state.playerHp}`
-      });
-    }
     visualLayout.setPvpOpponentTarget?.({
       visible: true,
       hp: state.cpuHp,
-      maxHp,
-      portraitSrc: remoteSrc
+      maxHp
     });
   }
 
@@ -1474,61 +1413,27 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     }
   }
 
+  // A node unlocks once all its parents are complete, so reporting every node
+  // as complete opens the whole campaign. This only affects what the map lets
+  // you pick — real progress is still tracked in `completedNodes` and saved
+  // normally, so turning it off restores the gated order with nothing lost.
+  // Set to false (or pass ?progression=1) to re-gate the campaign.
+  const UNLOCK_ALL_LEVELS = (() => {
+    try {
+      return new URLSearchParams(location.search).get('progression') !== '1';
+    } catch { return true; }
+  })();
+
   function mapCompletedNodes() {
+    if (UNLOCK_ALL_LEVELS) return new Set(nodeMap.keys());
     return new Set([...completedNodes, ...achievedNodes]);
   }
 
-  // --- Background prefetch ---
-  // CDN-hosted backgrounds load slower than the old inline data did, so warm
-  // the browser HTTP cache one level ahead (graph children of the current
-  // node). The prefetch must mirror the renderer's request mode (crossOrigin)
-  // or the cached response can't be reused for the canvas draw.
-  const prefetchedBgKeys = new Set();
-  let bgPrefetchTimer = null;
-
-  function collectLevelBackgroundSources(level) {
-    const sources = [];
-    const bg = level?.visuals?.background;
-    if (bg?.type === 'image') {
-      sources.push(bg.image);
-      if (bg.progressionImage) sources.push(bg.progressionImage);
-    }
-    const survivalBg = level?.survival?.background;
-    if (survivalBg?.type === 'image' && survivalBg.image) sources.push(survivalBg.image);
-    return sources;
-  }
-
-  function prefetchLevelBackgrounds(level) {
-    for (const src of collectLevelBackgroundSources(level)) {
-      if (!isAssetImageSource(src)) continue;
-      const key = assetCacheKey(src);
-      if (!key || prefetchedBgKeys.has(key)) continue;
-      prefetchedBgKeys.add(key);
-      // Same candidate walker as real loads: honors CDN health ordering and
-      // never leaves a prefetch hanging on a blackholed host.
-      loadImageFromCandidates(src, { crossOrigin: 'anonymous' });
-    }
-  }
-
-  function prefetchAdjacentLevelBackgrounds(nodeId) {
-    const node = nodeMap.get(nodeId);
-    const children = Array.isArray(node?.children) ? node.children : [];
-    for (const childId of children) {
-      const levelIndex = nodeIdToLevelIndex.get(childId);
-      const level = levelIndex == null ? null : originalLevels[levelIndex];
-      if (level) prefetchLevelBackgrounds(level);
-    }
-  }
-
-  function schedulePrefetchAdjacentLevelBackgrounds(nodeId, delayMs = 1200) {
-    if (bgPrefetchTimer) clearTimeout(bgPrefetchTimer);
-    bgPrefetchTimer = setTimeout(() => {
-      bgPrefetchTimer = null;
-      try {
-        prefetchAdjacentLevelBackgrounds(nodeId);
-      } catch { /* prefetch is best-effort */ }
-    }, delayMs);
-  }
+  // Legacy image backgrounds remain in serialized levels, but the player
+  // deliberately never fetches them. Keep these hooks as no-ops because the
+  // campaign hydration flow still calls them after graph transitions.
+  function prefetchAdjacentLevelBackgrounds() {}
+  function schedulePrefetchAdjacentLevelBackgrounds() {}
 
   let campaignHydrationPromise = null;
   function startCampaignHydration() {
@@ -1705,7 +1610,6 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
   let activeLevelMap = null;
   let activeLevelMapAllowClose = false;
   let levelMapOpening = false;
-  const LEVEL_MAP_EXIT_ICON = 'visuals/assets_webtp/left_circle_cross.webp';
 
   function setHudLockedByMap(locked) {
     if (gambleSystem?.ui?.root) {
@@ -1729,13 +1633,12 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     if (!leftCircleEl) return;
     if (active) {
       leftCircleEl.dataset.levelMapExit = '1';
-      leftCircleEl.style.backgroundImage = `url('${LEVEL_MAP_EXIT_ICON}')`;
+      leftCircleEl.style.backgroundImage = 'none';
       return;
     }
     if (!leftCircleEl.dataset.levelMapExit) return;
     delete leftCircleEl.dataset.levelMapExit;
-    const restoreUrl = visualLayout.getSlotAssetUrl('leftCircle');
-    leftCircleEl.style.backgroundImage = restoreUrl ? `url('${restoreUrl}')` : '';
+    leftCircleEl.style.backgroundImage = 'none';
   }
 
   function getLevelMapBoundsRect() {
@@ -1748,12 +1651,20 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     if (leftCol && rightCol) {
       const leftRect = leftCol.getBoundingClientRect();
       const rightRect = rightCol.getBoundingClientRect();
-      const bleed = 12;
-      const left = Math.max(0, Math.round(leftRect.right - frameRect.left) - bleed);
-      const right = Math.min(Math.round(frameRect.width), Math.round(rightRect.left - frameRect.left) + bleed);
-      const width = Math.max(0, right - left);
-      if (width > 0) {
-        return { left, top: 0, width, height: Math.round(frameRect.height) };
+      // The procedural skin intentionally hides the legacy side-column slots.
+      // Hidden elements report a zero-sized rect at the viewport origin; using
+      // those coordinates used to collapse the mobile map to a 12px strip.
+      const anchorsAreUsable = leftRect.width > 2
+        && rightRect.width > 2
+        && rightRect.left - leftRect.right > frameRect.width * 0.45;
+      if (anchorsAreUsable) {
+        const bleed = 12;
+        const left = Math.max(0, Math.round(leftRect.right - frameRect.left) - bleed);
+        const right = Math.min(Math.round(frameRect.width), Math.round(rightRect.left - frameRect.left) + bleed);
+        const width = Math.max(0, right - left);
+        if (width > frameRect.width * 0.45) {
+          return { left, top: 0, width, height: Math.round(frameRect.height) };
+        }
       }
     }
 
@@ -2438,21 +2349,17 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
 
     const pvp = ensureLevelPvp(levelData);
     visualLayout.setPvpMode?.(pvp.enabled);
-    // onVisualState fires every frame; resolving portrait characters involves
-    // registry normalization, so only redo it when HP or the registry change.
-    let pvpPortraitKey = '';
-    let pvpPortraitRegistry = null;
+    let pvpTargetKey = '';
     game = pvp.enabled
       ? new PvpRuntime(canvas, {
         settings: pvp,
         getTargetCircle: () => visualLayout.getCanvasSlotCircle?.('characterCircle', canvas),
         onVisualState: (state) => {
           if (!state) return;
-          const portraitKey = `${state.playerHp}|${state.cpuHp}|${state.maxHp}`;
-          if (pvpPortraitKey !== portraitKey || pvpPortraitRegistry !== characterRegistry) {
-            pvpPortraitKey = portraitKey;
-            pvpPortraitRegistry = characterRegistry;
-            updatePvpPortraitVisuals(levelData, state, 'human');
+          const targetKey = `${state.playerHp}|${state.cpuHp}|${state.maxHp}`;
+          if (pvpTargetKey !== targetKey) {
+            pvpTargetKey = targetKey;
+            updatePvpTargetVisuals(levelData, state);
           }
           visualLayout.setPvpAimTimer?.(
             state.timerVisible
@@ -2467,7 +2374,7 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     }
     game.confirmShoot = !!localStorage.getItem('peggle_confirmShoot');
 
-    // Portrait ignite flame builds up live as the in-progress shot clears pegs.
+    // Kept for dialogue/gameplay compatibility; the machine skin has no portrait.
     game.onShotHeat = (h) => visualLayout.setFlameHeat(h);
 
     // Apply visuals (background + frame + slots)

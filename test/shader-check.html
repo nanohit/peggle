@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<!--
+  Headless render check for the playfield pipeline.
+
+  Builds the real renderer against an offscreen host and draws a board holding
+  one of every shape, so each program is linked and actually used. GLSL errors
+  surface as text in #out, which the headless screenshot picks up, so shader
+  breakage is caught without opening a browser.
+
+  ?emerge=0.35  freezes the level-intro rise at that progress
+  ?pulse=1      drives the portals at full energy
+  ?scene=arcs   two long curved runs on a lifted board — the layout that shows
+                GI blotching most clearly, because a bright board has nothing
+                to hide low-frequency error behind
+  ?bright=1     board albedo from light-test preset B
+-->
+<meta charset="utf-8">
+<title>shader check</title>
+<style>
+  body { margin: 0; background: #05070d; color: #7fe08a; font: 12px ui-monospace, monospace; }
+  #out { position: fixed; left: 8px; top: 8px; z-index: 5; white-space: pre; }
+  #host { position: absolute; left: 0; top: 0; width: 460px; height: 780px; }
+</style>
+<body>
+<pre id="out">running</pre>
+<div id="host"></div>
+<script type="module">
+import { GpuPlayfieldRenderer, createDefaultLighting } from '../js/gpu-playfield.js';
+
+const lines = [];
+const say = (m) => { lines.push(m); document.getElementById('out').textContent = lines.join('\n'); };
+const params = new URLSearchParams(location.search);
+const W = 460, H = 780;
+
+try {
+  const renderer = new GpuPlayfieldRenderer();
+  // ?cascades=4&spacing=8&sdf=2 — probe layout overrides, so the artifact can
+  // be tied to a specific cascade level rather than guessed at.
+  if (params.has('cascades') || params.has('spacing') || params.has('sdf')) {
+    const inner = renderer._qualitySettings.bind(renderer);
+    renderer._qualitySettings = () => {
+      const s = inner();
+      if (params.has('cascades')) s.cascades = Number(params.get('cascades'));
+      if (params.has('spacing')) s.spacing = Number(params.get('spacing'));
+      if (params.has('sdf')) s.sdfDivisor = Number(params.get('sdf'));
+      return s;
+    };
+  }
+  // ?msteps=64&mminstep=2 — cascade ray-march overrides.
+  if (params.has('msteps')) renderer.marchSteps = Number(params.get('msteps'));
+  if (params.has('mminstep')) renderer.marchMinStep = Number(params.get('mminstep'));
+  const ok = renderer.attach(document.getElementById('host'));
+  say(`attach=${ok} ready=${renderer.ready}`);
+  if (!ok) throw new Error('attach failed');
+  const gl = renderer.gl;
+  say(`programs=${Object.keys(renderer._programs || {}).length} hdr=${renderer._hdr}`);
+  const lighting = createDefaultLighting();
+  if (params.get('bright')) lighting.boardColor = [0.022, 0.040, 0.062];
+  // Strip the board's own mottling, so anything left on the surface is the
+  // lighting solve rather than authored texture.
+  if (params.get('flat')) { lighting.boardStyle = 2; lighting.boardTexture = 0; }
+  if (params.get('novig')) lighting.vignette = 0;
+  // ?set=domeIntensity:0,skyIntensity:2 — poke any rig value, so a suspect
+  // contribution can be switched off and the artifact bisected.
+  for (const pair of (params.get('set') || '').split(',').filter(Boolean)) {
+    const [k, v] = pair.split(':');
+    if (k && v !== undefined) lighting[k] = Number(v);
+  }
+  renderer.setLighting(lighting);
+  say(`board ${lighting.boardColor.map(v => v.toFixed(3)).join(',')} `
+    + `dome ${lighting.domeIntensity} sky ${lighting.skyIntensity} vig ${lighting.vignette}`);
+
+  const pulse = Number(params.get('pulse')) || 0;
+
+  // A brick whose body is an arc of slices, matching what the editor emits.
+  function curvedBrick(id, type, x, y, span, sag, height) {
+    const slices = [];
+    const steps = 14;
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const sx = x + span * t;
+      const sy = y + sag * Math.sin(t * Math.PI);
+      // Slice normals are perpendicular to the local tangent.
+      const dx = span / steps;
+      const dy = sag * Math.PI / steps * Math.cos(t * Math.PI);
+      const len = Math.hypot(dx, dy) || 1;
+      slices.push({ x: sx, y: sy, nx: -dy / len, ny: dx / len });
+    }
+    return { id, type, shape: 'brick', x, y, width: span, height, curveSlices: slices };
+  }
+  // One of every peg type the assembler knows, both portal orientations, and a
+  // row of bumpers at increasing authored scale — the case where detail used to
+  // zoom with the object.
+  const pegs = [
+    { id: 1, x: 55, y: 70, type: 'orange' },
+    { id: 2, x: 110, y: 70, type: 'blue' },
+    { id: 3, x: 165, y: 70, type: 'green' },
+    { id: 4, x: 220, y: 70, type: 'purple' },
+    { id: 5, x: 275, y: 70, type: 'gamble' },
+    { id: 6, x: 330, y: 70, type: 'obstacle' },
+    { id: 7, x: 385, y: 70, type: 'bombMagnet' },
+
+    // All three bumper kinds, so the core colour that says "must clear /
+    // optional / permanent" is visible next to the same steel collar.
+    { id: 20, x: 55, y: 190, type: 'bumper', bumperScale: 1.3, bumperOrange: true },
+    { id: 21, x: 150, y: 190, type: 'bumper', bumperScale: 1.3, bumperDisappear: true },
+    { id: 22, x: 245, y: 190, type: 'bumper', bumperScale: 1.3 },
+    { id: 23, x: 370, y: 190, type: 'bumper', bumperScale: 2.4, bumperOrange: true },
+
+    { id: 30, x: 110, y: 330, type: 'obstacle', shape: 'brick', width: 90, height: 14, angle: 0.28 },
+    { id: 31, x: 320, y: 330, type: 'obstacle', shape: 'brick', width: 70, height: 20, angle: -0.5 },
+    // Curved brick runs — the shape most real bricks actually are, and the one
+    // that took its own path through the assembler.
+    curvedBrick(32, 'orange', 60, 400, 200, 40, 16),
+    curvedBrick(33, 'blue', 250, 415, 170, -34, 12),
+
+    // Charged magnets: the flash is a plasma core, not a white blowout.
+    { id: 50, x: 60, y: 545, type: 'bombMagnet' },
+    { id: 51, x: 130, y: 545, type: 'bombMagnet' },
+
+    { id: 40, x: 150, y: 470, type: 'portalBlue', angle: 0, _portalPulse: pulse },
+    { id: 41, x: 330, y: 470, type: 'portalOrange', angle: 0.85, portalOneWay: true, _portalPulse: pulse },
+    { id: 42, x: 150, y: 600, type: 'portalOrange', angle: 0, _portalPulse: pulse },
+    { id: 43, x: 330, y: 620, type: 'portalBlue', angle: -0.55, portalOneWay: true, portalOneWayFlip: true, _portalPulse: pulse }
+  ];
+
+  // A ring of curved brick, like the long arcs a real level is built from.
+  function arc(id, type, cx, cy, radius, from, to, thickness) {
+    const slices = [];
+    const steps = 26;
+    for (let i = 0; i <= steps; i++) {
+      const a = from + (to - from) * (i / steps);
+      slices.push({
+        x: cx + Math.cos(a) * radius, y: cy + Math.sin(a) * radius,
+        nx: Math.cos(a), ny: Math.sin(a)
+      });
+    }
+    return { id, type, shape: 'brick', x: cx, y: cy, width: radius, height: thickness, curveSlices: slices };
+  }
+
+  // Nothing on the board at all. Any patchiness here is the solve's own
+  // sampling error, with no occlusion to explain it away.
+  if (params.get('scene') === 'empty') pegs.length = 0;
+
+  // A single small occluder in the open, so its shadow can be judged on its own.
+  if (params.get('scene') === 'one') {
+    pegs.length = 0;
+    pegs.push({ id: 1, x: W / 2, y: H / 2, type: 'orange' });
+  }
+
+  if (params.get('scene') === 'arcs') {
+    pegs.length = 0;
+    pegs.push(
+      arc(60, 'orange', 150, 300, 110, Math.PI * 0.55, Math.PI * 1.85, 13),
+      arc(61, 'blue', 150, 300, 68, Math.PI * 1.15, Math.PI * 2.35, 13),
+      arc(62, 'blue', 310, 520, 118, Math.PI * 1.35, Math.PI * 2.7, 13),
+      arc(63, 'orange', 310, 520, 74, Math.PI * 0.05, Math.PI * 1.3, 13)
+    );
+    // Scattered pegs, so the board has small occluders on it too.
+    let id = 70;
+    for (let r = 0; r < 6; r++) {
+      for (let c = 0; c < 5; c++) {
+        const x = 40 + c * 95 + (r % 2) * 40;
+        const y = 60 + r * 130;
+        if (x > W - 30) continue;
+        pegs.push({ id: id++, x, y, type: r % 3 === 0 ? 'blue' : 'orange' });
+      }
+    }
+  }
+
+  // Knocked-out pegs mid-exit. ?exit=0.4 freezes the sink at that progress so
+  // the body, its shadow and its afterglow can be judged together.
+  let exits = null;
+  if (params.has('exit')) {
+    const e = Math.max(0, Math.min(1, Number(params.get('exit')) || 0));
+    const taken = pegs.splice(0, Math.min(4, pegs.length));
+    exits = taken.map((peg, i) => {
+      // Stagger them, so one frame shows several stages of the same motion.
+      const u = Math.max(0, Math.min(1, e + i * 0.22));
+      const sink = 1 - Math.min(1, u / 0.43);   // body gone at 43% of the glow window
+      return { peg, sink, glow: (1 - u) * (1 - u) };
+    });
+  }
+
+  // Level-intro rise. Without ?emerge everything is fully up.
+  let emergence = null;
+  if (params.has('emerge')) {
+    const e = Math.max(0, Math.min(1, Number(params.get('emerge')) || 0));
+    emergence = new Map();
+    // Bottom-up, the way the intro staggers it: the lower a peg sits, the
+    // further along its own rise it is.
+    for (const peg of pegs) {
+      const rank = 1 - peg.y / H;
+      emergence.set(peg.id, Math.max(0, Math.min(1, e * 2.0 - rank)));
+    }
+  }
+
+  // Which pass first raises a GL error. Wrapping the passes is the only way to
+  // localise it, since a single getError at the end reports the whole frame.
+  for (const name of ['_renderGBuffer', '_renderDistanceField', '_renderCascades',
+    '_renderShading', '_renderBloom', '_renderComposite', '_uploadBuffers']) {
+    const original = renderer[name].bind(renderer);
+    renderer[name] = (...args) => {
+      gl.getError();
+      const out = original(...args);
+      const e = gl.getError();
+      if (e !== 0 && !renderer.__reported) {
+        renderer.__reported = true;
+        say(`first GL error in ${name}: 0x${e.toString(16)}`);
+      }
+      return out;
+    };
+  }
+
+  // Several frames so the portal clocks integrate and the temporal GI settles.
+  for (let frame = 0; frame < 24; frame++) {
+    const hits = frame > 18 ? new Set([1, 20, 32, 50, 51]) : new Set();
+    // Exiting pegs carry their sink progress through the same channel the
+    // intro uses, so the renderer needs both together.
+    if (exits) {
+      emergence = emergence || new Map();
+      for (const x of exits) if (x.sink > 0) emergence.set(x.peg.id, x.sink);
+    }
+    renderer.render(pegs, hits, {
+      width: W, height: H, timeSeconds: frame * 0.016, emergence, exits
+    });
+  }
+
+  // The renderer only sizes its backing store; laying the canvas out is the
+  // host's job, and without it the element displays at its device size and the
+  // board no longer maps 1:1 to the coordinates above.
+  Object.assign(renderer.canvas.style, {
+    position: 'absolute', left: '0', top: '0', width: W + 'px', height: H + 'px'
+  });
+
+  const err = gl.getError();
+  say(`instances=${renderer._instanceCount} curves=${renderer._curveCount}`);
+  say(`gl.getError=0x${err.toString(16)}`);
+  say(err === 0 ? 'RESULT: OK' : 'RESULT: GL ERROR');
+} catch (error) {
+  say('RESULT: FAIL ' + (error && error.message ? error.message : String(error)));
+}
+</script>
+</body>

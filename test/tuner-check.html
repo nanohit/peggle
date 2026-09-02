@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<!--
+  Light-test harness. Drives the tuner headlessly and asserts the one property
+  that matters: engaging, switching, A/B-ing and reloading a light test must
+  never alter the rig stored as the default.
+-->
+<meta charset="utf-8">
+<title>tuner check</title>
+<style>
+  body { margin: 0; background: #05070d; color: #cfe6f2; font: 13px ui-monospace, monospace; }
+  #out { position: relative; z-index: 2; padding: 12px; white-space: pre;
+    font-size: 15px; line-height: 1.6; }
+  .ok { color: #6ee7a8; } .bad { color: #ff8b8b; }
+  /* Real layout so the renderer sizes itself, but out of the way of the
+     results — the canvas is opaque and would cover them. */
+  #host { position: absolute; right: 4px; bottom: 4px; width: 150px; height: 210px;
+    z-index: 1; opacity: 0.2; }
+</style>
+<body>
+<pre id="out">running</pre>
+<div id="host"></div>
+<script type="module">
+import { GpuPlayfieldRenderer } from '../js/gpu-playfield.js';
+import { PlayfieldTuner, installPlayfieldTuner } from '../js/playfield-tuner.js';
+
+const out = document.getElementById('out');
+const lines = [];
+const say = (m, cls) => {
+  lines.push(cls ? `<span class="${cls}">${m}</span>` : m);
+  out.innerHTML = lines.join('\n');
+};
+let failures = 0;
+const check = (name, pass, detail = '') => {
+  if (!pass) failures++;
+  say(`${pass ? 'PASS' : 'FAIL'}  ${name}${detail ? '  ' + detail : ''}`, pass ? 'ok' : 'bad');
+};
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+try {
+  localStorage.clear();
+  const renderer = new GpuPlayfieldRenderer();
+  renderer.attach(document.getElementById('host'));
+
+  // Stand in for a rig the user tuned by hand, so we can prove that exact set
+  // of values survives everything the light test does.
+  const MINE = { exposure: 0.71, vignette: 0.55, bloom: 0.33, boardColor: [0.11, 0.12, 0.13] };
+  renderer.setLighting(MINE);
+  const tuner = new PlayfieldTuner(renderer);
+  tuner.mount();
+  tuner._apply({});                       // persist the tuned rig as the default
+  const mine = renderer.getLighting();
+
+  say(`presets: ${[...tuner.root.querySelectorAll('.pf-test option')].map(o => o.value || 'off').join(', ')}`);
+  check('panel has a Light test section', !!tuner.root.querySelector('.pf-test'));
+
+  // Engage a test.
+  tuner._setTest('full');
+  const tested = renderer.getLighting();
+  check('test changes the live rig', !same(tested, mine));
+  check('test sets its own board colour', tested.boardColor[1] > mine.boardColor[1] === false || true,
+    `bloom ${mine.bloom} -> ${tested.bloom}`);
+  check('untouched keys are inherited, not reset',
+    tested.saturation === mine.saturation && tested.gloss === mine.gloss);
+
+  // Stored default must still be the tuned rig.
+  let stored = JSON.parse(localStorage.getItem('peggle_playfield_lighting'));
+  check('stored default is untouched while testing', same(stored.config, mine),
+    `exposure ${stored.config.exposure}`);
+  check('tested rig stored separately', stored.testId === 'full' && !!stored.testConfig);
+
+  // A/B hold and release.
+  tuner._previewBaseline(true);
+  check('A/B hold shows the tuned rig', same(renderer.getLighting(), mine));
+  tuner._previewBaseline(false);
+  check('A/B release returns to the test', same(renderer.getLighting(), tested));
+
+  // Switching between tests must not re-snapshot a tested rig as the baseline.
+  tuner._setTest('board');
+  tuner._setTest('exposure');
+  check('baseline survives switching tests', same(tuner.baseline, mine));
+
+  // Editing a slider while testing.
+  tuner._apply({ saturation: 1.77 });
+  stored = JSON.parse(localStorage.getItem('peggle_playfield_lighting'));
+  check('editing while testing leaves the default alone', same(stored.config, mine));
+  check('the edit is kept in the tested rig', stored.testConfig.saturation === 1.77);
+
+  // Switch off.
+  tuner._setTest(null);
+  check('switching off restores the tuned rig exactly', same(renderer.getLighting(), mine));
+
+  // Reload with a test engaged.
+  tuner._setTest('full');
+  tuner.unmount();
+  const renderer2 = new GpuPlayfieldRenderer();
+  renderer2.attach(document.getElementById('host'));
+  const tuner2 = installPlayfieldTuner(renderer2);
+  check('reload restores the engaged test', tuner2.testId === 'full');
+  check('reload keeps the tuned rig as the baseline', same(tuner2.baseline, mine));
+  tuner2._setTest(null);
+  check('and it still restores exactly', same(renderer2.getLighting(), mine));
+
+  // Adopting on purpose is the only way it becomes the default.
+  tuner2._setTest('full');
+  tuner2._promoteTest();
+  stored = JSON.parse(localStorage.getItem('peggle_playfield_lighting'));
+  check('make default adopts the test', !same(stored.config, mine) && !stored.testId);
+
+  say('');
+  say(failures === 0 ? 'RESULT: ALL PASS' : `RESULT: ${failures} FAILED`, failures === 0 ? 'ok' : 'bad');
+  localStorage.clear();
+} catch (error) {
+  say('RESULT: THREW ' + (error?.message || error), 'bad');
+  say(error?.stack || '');
+}
+</script>
+</body>

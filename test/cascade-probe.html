@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<!--
+  Reads the radiance-cascade textures back and paints each level as its
+  per-probe mean radiance. That is what the shading pass ultimately integrates,
+  so patchiness visible here is patchiness in the solve rather than in the
+  material or the tonemap.
+
+  ?scene=one|empty|arcs   which board to solve
+  ?gain=40                exposure applied to the readback, so the far cascades
+                          (which carry small values) are legible
+-->
+<meta charset="utf-8">
+<title>cascade probe</title>
+<style>
+  body { margin: 0; background: #05070d; color: #cfe6f2; font: 12px ui-monospace, monospace; }
+  #out { padding: 10px; white-space: pre; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; padding: 0 10px 10px; }
+  figure { margin: 0; }
+  figcaption { padding: 3px 0; color: #7fe3ff; }
+  canvas { image-rendering: pixelated; border: 1px solid #24405a; }
+  #host { position: absolute; left: -9999px; width: 460px; height: 780px; }
+</style>
+<body>
+<pre id="out">running</pre>
+<div class="row" id="row"></div>
+<div id="host"></div>
+<script type="module">
+import { GpuPlayfieldRenderer, createDefaultLighting } from '../js/gpu-playfield.js';
+
+const p = new URLSearchParams(location.search);
+const out = document.getElementById('out');
+const row = document.getElementById('row');
+const lines = [];
+const say = (m) => { lines.push(m); out.textContent = lines.join('\n'); };
+const W = 460, H = 780;
+const GAIN = Number(p.get('gain')) || 40;
+
+try {
+  const renderer = new GpuPlayfieldRenderer();
+  renderer.attach(document.getElementById('host'));
+  const gl = renderer.gl;
+  const lighting = createDefaultLighting();
+  lighting.boardColor = [0.022, 0.040, 0.062];
+  lighting.boardStyle = 2; lighting.boardTexture = 0; lighting.vignette = 0;
+  lighting.domeIntensity = 0;                  // ambient/sky path only
+  renderer.setLighting(lighting);
+
+  const scene = p.get('scene') || 'one';
+  const pegs = scene === 'empty' ? []
+    : scene === 'one' ? [{ id: 1, x: W / 2, y: H / 2, type: 'orange' }]
+    : [];
+  for (let f = 0; f < 20; f++) {
+    renderer.render(pegs, new Set(), { width: W, height: H, timeSeconds: f * 0.016 });
+  }
+
+  const t = renderer._targets;
+  say(`cascade texture ${t.cascadeWidth}x${t.cascadeHeight}  levels ${t.cascadeCount}  spacing ${t.spacing}`);
+
+  const fbo = gl.createFramebuffer();
+  const readTexture = (texture, w, h) => {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+    const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+    if (status !== gl.FRAMEBUFFER_COMPLETE) { say(`  FBO incomplete 0x${status.toString(16)}`); return null; }
+    const px = new Float32Array(w * h * 4);
+    gl.readPixels(0, 0, w, h, gl.RGBA, gl.FLOAT, px);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return px;
+  };
+
+  // Per-probe mean over the level's uBlock x uBlock direction tile.
+  const show = (title, px, texW, texH, block) => {
+    if (!px) return;
+    const pw = Math.floor(texW / block), ph = Math.floor(texH / block);
+    const c = document.createElement('canvas');
+    c.width = pw; c.height = ph;
+    const img = c.getContext('2d').createImageData(pw, ph);
+    let lo = 1e9, hi = -1e9;
+    const mean = new Float32Array(pw * ph * 3);
+    for (let py = 0; py < ph; py++) {
+      for (let px2 = 0; px2 < pw; px2++) {
+        let r = 0, g = 0, b = 0;
+        for (let by = 0; by < block; by++) {
+          for (let bx = 0; bx < block; bx++) {
+            // readPixels is bottom-up; flip so the image matches the board.
+            const sy = texH - 1 - (py * block + by);
+            const i = (sy * texW + px2 * block + bx) * 4;
+            r += px[i]; g += px[i + 1]; b += px[i + 2];
+          }
+        }
+        const n = block * block;
+        const k = (py * pw + px2) * 3;
+        mean[k] = r / n; mean[k + 1] = g / n; mean[k + 2] = b / n;
+        const l = 0.2126 * mean[k] + 0.7152 * mean[k + 1] + 0.0722 * mean[k + 2];
+        lo = Math.min(lo, l); hi = Math.max(hi, l);
+      }
+    }
+    // Contrast stretch maps [lo, hi] across the full range, so a field that
+    // varies by 1% still shows its shape. Without it every level clips white
+    // and a real pattern is invisible.
+    const stretch = p.has('stretch');
+    for (let i = 0; i < pw * ph; i++) {
+      for (let ch = 0; ch < 3; ch++) {
+        const v = mean[i * 3 + ch];
+        img.data[i * 4 + ch] = stretch
+          ? Math.max(0, Math.min(255, Math.round((v - lo) / Math.max(hi - lo, 1e-9) * 255)))
+          : Math.max(0, Math.min(255, Math.round(v * GAIN * 255)));
+      }
+      img.data[i * 4 + 3] = 255;
+    }
+    c.getContext('2d').putImageData(img, 0, 0);
+    const scale = Math.max(1, Math.round(150 / pw));
+    c.style.width = `${pw * scale}px`;
+    c.style.height = `${ph * scale}px`;
+    const fig = document.createElement('figure');
+    const cap = document.createElement('figcaption');
+    // Relative spread is the number that says "patchy": a flat field on a board
+    // with one small peg should be near zero.
+    cap.textContent = `${title}  ${pw}x${ph}  spread ${(hi > 0 ? (hi - lo) / hi * 100 : 0).toFixed(1)}%`;
+    fig.append(cap, c);
+    row.appendChild(fig);
+    say(`${title.padEnd(12)} probes ${String(pw).padStart(3)}x${String(ph).padStart(3)}  `
+      + `luma ${lo.toExponential(2)} .. ${hi.toExponential(2)}  spread ${(hi > 0 ? (hi - lo) / hi * 100 : 0).toFixed(1)}%`);
+  };
+
+  for (let i = t.cascadeCount - 1; i >= 0; i--) {
+    const block = Math.pow(2, i + 1);
+    show(`cascade ${i}`, readTexture(t.cascades[i], t.cascadeWidth, t.cascadeHeight),
+      t.cascadeWidth, t.cascadeHeight, block);
+  }
+  const blended = readTexture(t.fieldB, t.cascadeWidth, t.cascadeHeight);
+  show('blended c0', blended, t.cascadeWidth, t.cascadeHeight, 2);
+
+  // The shading pass does not use the mean alone. It reduces the four cascade-0
+  // buckets to a dominant direction and uses its LENGTH (`aniso`) to scale a
+  // second, directional term at 2.4x. Reproduce that here: a ratio of small
+  // differences between four coarse buckets is where a smooth field can still
+  // turn into a patchy one.
+  if (blended) {
+    const pw = Math.floor(t.cascadeWidth / 2), ph = Math.floor(t.cascadeHeight / 2);
+    const c = document.createElement('canvas');
+    c.width = pw; c.height = ph;
+    const img = c.getContext('2d').createImageData(pw, ph);
+    const vals = new Float32Array(pw * ph);
+    let lo = 1e9, hi = -1e9;
+    for (let py = 0; py < ph; py++) {
+      for (let px2 = 0; px2 < pw; px2++) {
+        let vx = 0, vy = 0, total = 0;
+        for (let d = 0; d < 4; d++) {
+          const dx = d & 1, dy = (d >> 1) & 1;
+          const sy = t.cascadeHeight - 1 - (py * 2 + dy);
+          const i = (sy * t.cascadeWidth + px2 * 2 + dx) * 4;
+          const l = 0.2126 * blended[i] + 0.7152 * blended[i + 1] + 0.0722 * blended[i + 2];
+          const a = (d + 0.5) / 4 * Math.PI * 2;
+          vx += Math.cos(a) * l; vy += Math.sin(a) * l; total += l;
+        }
+        const aniso = Math.hypot(vx, vy) / Math.max(total, 1e-4);
+        vals[py * pw + px2] = aniso;
+        lo = Math.min(lo, aniso); hi = Math.max(hi, aniso);
+      }
+    }
+    for (let i = 0; i < pw * ph; i++) {
+      const v = Math.round((vals[i] - lo) / Math.max(hi - lo, 1e-9) * 255);
+      img.data[i * 4] = v; img.data[i * 4 + 1] = v; img.data[i * 4 + 2] = v;
+      img.data[i * 4 + 3] = 255;
+    }
+    c.getContext('2d').putImageData(img, 0, 0);
+    const scale = Math.max(1, Math.round(150 / pw));
+    c.style.width = `${pw * scale}px`; c.style.height = `${ph * scale}px`;
+    const fig = document.createElement('figure');
+    const cap = document.createElement('figcaption');
+    cap.textContent = `aniso (stretched)  ${lo.toFixed(4)} .. ${hi.toFixed(4)}`;
+    fig.append(cap, c);
+    row.appendChild(fig);
+    say(`aniso        ${lo.toFixed(4)} .. ${hi.toFixed(4)}   `
+      + `x2.4 into 'direct', so this is what the board's brightness rides on`);
+  }
+  say('DONE');
+} catch (error) {
+  say('THREW ' + (error?.message || error));
+}
+</script>
+</body>

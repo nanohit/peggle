@@ -689,6 +689,39 @@ export class ShockwaveEffectRenderer {
     return true;
   }
 
+  /**
+   * The packed wave state for this instant, so another renderer can apply the
+   * distortion inside its own composite instead of this class rendering a
+   * separate full-screen copy of the scene and layering it on top.
+   * Returns [{ x, y, radius, band, amp, ringAlpha, ripple, weight, color }].
+   */
+  collectWaveState(options = null) {
+    const now = Number.isFinite(options?.timeSeconds) ? options.timeSeconds : this._timeSeconds();
+    const cameraY = Number(options?.cameraY) || 0;
+    const width = Number(options?.width) || 400;
+    const height = Number(options?.height) || 600;
+    const max = Math.max(1, Math.min(MAX_SHADER_WAVES, Number(options?.maxWaves) || 4));
+
+    const out = [];
+    const start = Math.max(0, this.waves.length - max);
+    for (let i = start; i < this.waves.length && out.length < max; i++) {
+      if (!this._writeWaveUniform(this.waves[i], now, cameraY, width, height, out.length)) continue;
+      const offset = out.length * 4;
+      out.push({
+        x: this._waveA[offset],
+        y: this._waveA[offset + 1],
+        radius: this._waveA[offset + 2],
+        band: this._waveA[offset + 3],
+        amp: this._waveB[offset],
+        ringAlpha: this._waveB[offset + 1],
+        ripple: this._waveB[offset + 2],
+        weight: this._waveB[offset + 3],
+        color: [this._waveC[offset], this._waveC[offset + 1], this._waveC[offset + 2]]
+      });
+    }
+    return out;
+  }
+
   _prepareWaveUniforms(now, cameraY, width, height, limits, preview) {
     const maxCount = Math.max(1, Math.min(MAX_SHADER_WAVES, limits.maxWaves));
     let count = 0;

@@ -70,6 +70,9 @@ export class VisualLayout {
     this._abortController = null;
     this._slotRuntimeFx = {};
     this._characterPortraitRuntime = null;
+    this._machineChrome = null;
+    this._machineObjectiveValue = null;
+    this._machineObjectiveFill = null;
     this._survivalProgressIndicator = null;
     this._survivalProgressState = null;
     this.gambleUiMode = false;
@@ -153,12 +156,10 @@ export class VisualLayout {
       this.slotElements[def.id] = el;
     }
 
-    // Ignite flame — white bonfire that engulfs the portrait circle and licks
-    // upward (z-index 500 via CSS: in front of the banner/game field, behind the
-    // portrait group). The canvas is a square box centred on the character circle
-    // (see _layoutFlame).
-    this._flame = new PortraitFlame(this._slotClip);
-    this._layoutFlame();
+    // One scalable procedural chrome layer replaces the raster frame pieces
+    // and character portrait stack.
+    this._mountMachineChrome();
+    this._flame = null;
 
     // Build theme panel (editor only)
     if (this._includePanel) {
@@ -174,6 +175,29 @@ export class VisualLayout {
     }
 
     this.mounted = true;
+  }
+
+  _mountMachineChrome() {
+    if (!this.frame || this._machineChrome) return;
+    const chrome = document.createElement('div');
+    chrome.className = 'machine-chrome';
+    chrome.setAttribute('aria-hidden', 'true');
+    chrome.innerHTML = `
+      <div class="machine-top-bridge">
+        <div class="machine-wordmark"><span>NEON</span><b>DROP</b></div>
+        <div class="machine-objective">
+          <div class="machine-objective-value">0</div>
+          <div class="machine-objective-copy">TARGETS</div>
+          <div class="machine-objective-track"><i></i></div>
+        </div>
+      </div>
+      <div class="machine-corner machine-corner--bl"></div>
+      <div class="machine-corner machine-corner--br"></div>
+    `;
+    this.frame.appendChild(chrome);
+    this._machineChrome = chrome;
+    this._machineObjectiveValue = chrome.querySelector('.machine-objective-value');
+    this._machineObjectiveFill = chrome.querySelector('.machine-objective-track i');
   }
 
   // ─── Ignite flame (white fire corona around the portrait circle) ─────────
@@ -383,6 +407,11 @@ export class VisualLayout {
   }
 
   setCharacterPortraitSource(src, options = {}) {
+    // Portrait imagery is intentionally disabled by the machine skin. Keeping
+    // this API as a no-op preserves dialogue and campaign compatibility without
+    // hidden image downloads or background work.
+    return;
+
     const el = this.slotElements.character;
     if (!el || !isAssetImageSource(src)) return;
     const sourceKey = assetCacheKey(src);
@@ -2187,7 +2216,7 @@ export class VisualLayout {
       if (slotCfg?.darken > 0) {
         el.style.filter = `brightness(${1 - slotCfg.darken / 100})`;
       }
-      this._loadSlotAsset(def);
+      el.style.backgroundImage = 'none';
       this._positionSlot(def.id);
     }
     this._applyLayerOrder();
@@ -2446,6 +2475,15 @@ export class VisualLayout {
 
   updateHealthBar(orangeLeft, totalOrange) {
     this._healthBarState = { orangeLeft, totalOrange };
+    if (this._machineObjectiveValue) {
+      this._machineObjectiveValue.textContent = String(Math.max(0, Math.round(Number(orangeLeft) || 0)));
+    }
+    if (this._machineObjectiveFill) {
+      const total = Math.max(0, Number(totalOrange) || 0);
+      const left = Math.max(0, Number(orangeLeft) || 0);
+      const complete = total > 0 ? Math.max(0, Math.min(1, (total - left) / total)) : 1;
+      this._machineObjectiveFill.style.transform = `scaleX(${complete.toFixed(4)})`;
+    }
     this._updateHealthCircle(orangeLeft, totalOrange);
     this._updateHealthCharCircle(orangeLeft, totalOrange);
     this._renderPvpOpponentTarget();
@@ -2509,10 +2547,7 @@ export class VisualLayout {
     }
     const next = {
       hp: Math.max(0, Number.isFinite(state.hp) ? state.hp : 3),
-      maxHp: Math.max(1, Number.isFinite(state.maxHp) ? state.maxHp : 3),
-      portraitSrc: typeof state.portraitSrc === 'string' && state.portraitSrc.trim()
-        ? state.portraitSrc.trim()
-        : null
+      maxHp: Math.max(1, Number.isFinite(state.maxHp) ? state.maxHp : 3)
     };
     // This is called every frame from the pvp loop; the full re-render does a
     // burst of getBoundingClientRect/getComputedStyle (forced layout) per call.
@@ -2521,7 +2556,6 @@ export class VisualLayout {
     if (prev
       && prev.hp === next.hp
       && prev.maxHp === next.maxHp
-      && prev.portraitSrc === next.portraitSrc
       && this._pvpTargetLayer) {
       return;
     }
@@ -2578,7 +2612,7 @@ export class VisualLayout {
     if (!layer || !canvasRect || !canvasRect.width || !canvasRect.height) return;
 
     const ratio = Math.max(0, Math.min(1, state.hp / state.maxHp));
-    const slotIds = ['characterCircle', 'healthCircle', 'healthCharCircle', 'character'];
+    const slotIds = ['characterCircle', 'healthCircle'];
     const visibleSlotIds = new Set();
     const sourceAnchor = this.slotElements?.characterCircle?.getBoundingClientRect?.();
     if (!sourceAnchor || !sourceAnchor.width || !sourceAnchor.height) return;
@@ -2634,14 +2668,10 @@ export class VisualLayout {
         clip.style.filter = ratio > 0 ? `drop-shadow(0 0 ${Math.round(5 * ratio + 3)}px ${color})` : 'none';
       } else {
         clone.innerHTML = '';
-        if (slotId === 'character' && state.portraitSrc) {
-          clone.style.backgroundImage = `url("${state.portraitSrc.replace(/"/g, '\\"')}")`;
-        } else {
-          const computedBg = getComputedStyle(source).backgroundImage;
-          clone.style.backgroundImage = computedBg && computedBg !== 'none'
-            ? computedBg
-            : source.style.backgroundImage;
-        }
+        const computedBg = getComputedStyle(source).backgroundImage;
+        clone.style.backgroundImage = computedBg && computedBg !== 'none'
+          ? computedBg
+          : source.style.backgroundImage;
       }
     }
 
@@ -2704,7 +2734,7 @@ export class VisualLayout {
       return;
     }
     const frameRect = this.frame.getBoundingClientRect();
-    const sourceRects = ['characterCircle', 'healthCircle', 'healthCharCircle']
+    const sourceRects = ['characterCircle', 'healthCircle']
       .map(slotId => this.slotElements?.[slotId])
       .filter(el => el && el.style.display !== 'none')
       .map(el => el.getBoundingClientRect())
@@ -2717,7 +2747,7 @@ export class VisualLayout {
       Math.max(rect.width, rect.height) > Math.max(best.width, best.height) ? rect : best
     ), sourceRects[0]);
     const characterRect = this.slotElements?.characterCircle?.getBoundingClientRect?.() || widest;
-    const size = Math.max(widest.width, widest.height) + 14;
+    const size = Math.max(widest.width, widest.height) + 8;
     ring.style.left = `${characterRect.left + characterRect.width / 2 - frameRect.left}px`;
     ring.style.top = `${characterRect.top + characterRect.height / 2 - frameRect.top}px`;
     ring.style.width = `${size}px`;

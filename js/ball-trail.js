@@ -227,17 +227,29 @@ class TrailBuffer {
       }
     }
 
-    const smooth = Math.max(0, Math.min(0.82, smoothing * 0.72));
-    const sx = Number.isFinite(this.lastX) ? this.lastX * smooth + x * (1 - smooth) : x;
-    const sy = Number.isFinite(this.lastY) ? this.lastY * smooth + y * (1 - smooth) : y;
-
-    this.x[this.head] = sx;
-    this.y[this.head] = sy;
-    this.t[this.head] = time;
+    // The head is pinned to the ball's real position. Smoothing an exponential
+    // average into the newest sample makes the trail lag behind the ball by a
+    // fraction of its per-frame travel, which opens a visible gap at speed.
+    const written = this.head;
+    this.x[written] = x;
+    this.y[written] = y;
+    this.t[written] = time;
     this.head = (this.head + 1) % MAX_TRAIL_SAMPLES;
     this.count = Math.min(MAX_TRAIL_SAMPLES, this.count + 1);
-    this.lastX = sx;
-    this.lastY = sy;
+
+    // De-jitter the sample now behind the head instead, by easing it toward the
+    // midpoint of its neighbours. That keeps the path smooth without moving
+    // where the trail meets the ball.
+    if (this.count >= 3) {
+      const middle = (written - 1 + MAX_TRAIL_SAMPLES) % MAX_TRAIL_SAMPLES;
+      const before = (written - 2 + MAX_TRAIL_SAMPLES) % MAX_TRAIL_SAMPLES;
+      const weight = Math.max(0, Math.min(1, smoothing)) * 0.45;
+      this.x[middle] += ((this.x[before] + x) * 0.5 - this.x[middle]) * weight;
+      this.y[middle] += ((this.y[before] + y) * 0.5 - this.y[middle]) * weight;
+    }
+
+    this.lastX = x;
+    this.lastY = y;
     this.lastTime = time;
     this.lastSeen = time;
   }

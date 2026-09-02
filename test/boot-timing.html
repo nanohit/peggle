@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<!--
+  Boot-cost harness. Loads player.html in a same-origin iframe and reports the
+  milestones between navigation start and the boot cover being dismissed, drawn
+  large so `chrome --headless --screenshot` can read them back.
+
+  Note the GPU here is SwiftShader, which links shaders far faster than a real
+  driver, so this measures everything *except* the driver's compile stall.
+-->
+<meta charset="utf-8">
+<title>boot timing</title>
+<style>
+  body { margin: 0; background: #06080f; color: #cfe6ff; font: 15px ui-monospace, monospace; }
+  #out { padding: 14px 18px; white-space: pre; font-size: 17px; line-height: 1.7; }
+  iframe { position: fixed; right: 0; bottom: 0; width: 420px; height: 640px; border: 0; opacity: 0.25; }
+  b { color: #ffd479; }
+</style>
+<body>
+<div id="out">loading…</div>
+<iframe id="f" src="/player.html"></iframe>
+<script>
+const out = document.getElementById('out');
+const frame = document.getElementById('f');
+const lines = [];
+const say = (m) => { lines.push(m); out.innerHTML = lines.join('\n'); };
+
+const t0 = performance.now();
+let readyAt = null;
+
+frame.addEventListener('load', () => {
+  const doc = frame.contentDocument;
+  const win = frame.contentWindow;
+  const started = win.__PEGGLE_BOOT_STARTED_AT__;
+
+  const poll = () => {
+    if (doc.documentElement.classList.contains('player-ready')) {
+      readyAt = performance.now();
+      const nav = win.performance.getEntriesByType('navigation')[0];
+      say(`iframe onload      <b>${(performance.now() - t0).toFixed(0)}ms</b> after harness start`);
+      if (nav) {
+        say(`  domInteractive   <b>${nav.domInteractive.toFixed(0)}ms</b>`);
+        say(`  domComplete      <b>${nav.domComplete.toFixed(0)}ms</b>`);
+      }
+      if (Number.isFinite(started)) {
+        say(`player-ready       <b>${(win.performance.now() - started).toFixed(0)}ms</b> after boot start`);
+      }
+      // Slowest resources, so a stalled fetch shows up rather than being
+      // blamed on script work.
+      const res = win.performance.getEntriesByType('resource')
+        .slice().sort((a, b) => b.duration - a.duration).slice(0, 6);
+      say('slowest requests:');
+      for (const r of res) {
+        say(`  ${r.duration.toFixed(0).padStart(6)}ms  ${r.name.replace(location.origin, '')}`);
+      }
+      return;
+    }
+    if (performance.now() - t0 > 30000) { say('TIMEOUT: never became ready'); return; }
+    requestAnimationFrame(poll);
+  };
+  poll();
+});
+</script>
+</body>
