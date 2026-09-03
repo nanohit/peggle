@@ -12,9 +12,9 @@ import {
 
 function parseArgs(argv) {
   const options = {
-    manifest: path.resolve(argv[0] || 'research/generated/repair-pilot-v0/manifest.json'),
-    repairedDirectory: path.resolve(argv[1] || 'research/generated/repair-pilot-v0/repaired'),
-    output: path.resolve(argv[2] || 'research/generated/repair-pilot-v0/repair-summary.json')
+    manifest: path.resolve(argv[0] || 'research/generated/repair-pilot-v1/manifest.json'),
+    repairedDirectory: path.resolve(argv[1] || 'research/generated/repair-pilot-v1/repaired'),
+    output: path.resolve(argv[2] || 'research/generated/repair-pilot-v1/repair-summary.json')
   };
   return options;
 }
@@ -67,7 +67,9 @@ async function main() {
       replay,
       publishedPair: {
         replayAccuracy: replay.replayAccuracy,
-        fallbackFraction: replay.fallbackFraction
+        repairFallbackFraction: replay.repairFallbackFraction,
+        stateFallbackFraction: replay.stateFallbackFraction,
+        stateProgramCoverage: replay.stateProgramCoverage
       }
     });
   }
@@ -78,10 +80,11 @@ async function main() {
       strata[name].push(pair);
     }
   }
-  const byStratum = Object.fromEntries(Object.entries(strata).map(([name, values]) => [name, {
+  const descriptiveByStratum = Object.fromEntries(Object.entries(strata).map(([name, values]) => [name, {
     pairCount: values.length,
-    meanReplayAccuracy: average(values.map(value => value.replay.replayAccuracy)),
-    meanFallbackFraction: average(values.map(value => value.replay.fallbackFraction)),
+    replayAccuracyValues: values.map(value => value.replay.replayAccuracy),
+    repairFallbackFractionValues: values.map(value => value.replay.repairFallbackFraction),
+    stateFallbackFractionValues: values.map(value => value.replay.stateFallbackFraction),
     fallbackReasonCounts: values.reduce((counts, value) => {
       for (const [reason, count] of Object.entries(value.replay.fallbackReasonCounts || {})) {
         counts[reason] = (counts[reason] || 0) + count;
@@ -95,24 +98,38 @@ async function main() {
       return counts;
     }, {})
   }]));
+  const exploratory = String(manifest.phase || '').startsWith('exploratory');
+  const confirmationByStratum = exploratory ? null : Object.fromEntries(Object.entries(strata).map(([name, values]) => [name, {
+    pairCount: values.length,
+    meanReplayAccuracy: average(values.map(value => value.replay.replayAccuracy)),
+    meanRepairFallbackFraction: average(values.map(value => value.replay.repairFallbackFraction)),
+    meanStateFallbackFraction: average(values.map(value => value.replay.stateFallbackFraction))
+  }]));
   const report = {
     format: 'bezier-repair-summary',
     version: 1,
     phase: manifest.phase,
-    confirmationEligible: manifest.phase !== 'exploratory-do-not-include-in-confirmatory-metrics',
-    warning: 'Replay accuracy and fallback fraction are inseparable; do not report either alone.',
+    confirmationEligible: !exploratory,
+    warning: 'Replay accuracy, repair fallback, and final-state fallback answer different questions and must be published together.',
     repairedPairCount: pairs.length,
     missing,
-    aggregate: {
-      meanReplayAccuracy: average(pairs.map(value => value.replay.replayAccuracy)),
-      meanFallbackFraction: average(pairs.map(value => value.replay.fallbackFraction))
+    descriptiveOverall: {
+      replayAccuracyValues: pairs.map(value => value.replay.replayAccuracy),
+      repairFallbackFractionValues: pairs.map(value => value.replay.repairFallbackFraction),
+      stateFallbackFractionValues: pairs.map(value => value.replay.stateFallbackFraction)
     },
-    byStratum,
+    aggregate: exploratory ? null : {
+      meanReplayAccuracy: average(pairs.map(value => value.replay.replayAccuracy)),
+      meanRepairFallbackFraction: average(pairs.map(value => value.replay.repairFallbackFraction)),
+      meanStateFallbackFraction: average(pairs.map(value => value.replay.stateFallbackFraction))
+    },
+    descriptiveByStratum,
+    confirmationByStratum,
     pairs
   };
   await fs.mkdir(path.dirname(options.output), { recursive: true });
   await fs.writeFile(options.output, `${JSON.stringify(report, null, 2)}\n`);
-  console.log(JSON.stringify({ repairedPairCount: pairs.length, missing, aggregate: report.aggregate }, null, 2));
+  console.log(JSON.stringify({ repairedPairCount: pairs.length, missing, confirmationAggregate: report.aggregate }, null, 2));
 }
 
 await main();

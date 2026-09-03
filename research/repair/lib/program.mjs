@@ -119,9 +119,16 @@ export function evaluateStaticCandidate(level, options = {}) {
     return bounds.minX < 0 || bounds.maxX > width || bounds.minY < 0 || bounds.maxY > height;
   }).map(({ peg }) => peg.id);
   const overlaps = [];
+  const sourceStrokeByGroup = new Map(Object.entries(level?.metadata?.generatorProgram?.nodes || {})
+    .map(([groupId, node]) => [groupId, node?.source?.strokeId || null]));
   for (let left = 0; left < padded.length; left++) {
     for (let right = left + 1; right < padded.length; right++) {
       if (padded[left].peg.bezierGroupId === padded[right].peg.bezierGroupId) continue;
+      const leftSourceStroke = sourceStrokeByGroup.get(padded[left].peg.bezierGroupId);
+      const rightSourceStroke = sourceStrokeByGroup.get(padded[right].peg.bezierGroupId);
+      // Cubic segmentation is an implementation detail. Adjacent segments of
+      // one source arc are allowed to meet exactly as they did in the source.
+      if (leftSourceStroke && leftSourceStroke === rightSourceStroke) continue;
       if (collisionFootprintsOverlap(padded[left].shape, padded[right].shape)) {
         overlaps.push([padded[left].peg.id, padded[right].peg.id]);
       }
