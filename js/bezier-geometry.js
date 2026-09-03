@@ -121,7 +121,7 @@ export function applySimilarityTransform(point, transform = {}) {
   const cos = Math.cos(angle);
   const sin = Math.sin(angle);
   const x = finite(point?.x) * scale;
-  const y = finite(point?.y) * scale;
+  const y = finite(point?.y) * scale * (transform.reflect === true ? -1 : 1);
   return {
     ...point,
     x: x * cos - y * sin + finite(transform.tx),
@@ -135,47 +135,57 @@ export function estimateSimilarityTransformFromPairs(pairs, options = {}) {
     && Number.isFinite(pair?.dx) && Number.isFinite(pair?.dy)
   ));
   if (valid.length === 0) return null;
-  let sourceX = 0, sourceY = 0, destinationX = 0, destinationY = 0;
-  for (const pair of valid) {
-    sourceX += pair.sx;
-    sourceY += pair.sy;
-    destinationX += pair.dx;
-    destinationY += pair.dy;
-  }
-  sourceX /= valid.length;
-  sourceY /= valid.length;
-  destinationX /= valid.length;
-  destinationY /= valid.length;
+  const fitOrientation = reflect => {
+    let sourceX = 0, sourceY = 0, destinationX = 0, destinationY = 0;
+    for (const pair of valid) {
+      sourceX += pair.sx;
+      sourceY += reflect ? -pair.sy : pair.sy;
+      destinationX += pair.dx;
+      destinationY += pair.dy;
+    }
+    sourceX /= valid.length;
+    sourceY /= valid.length;
+    destinationX /= valid.length;
+    destinationY /= valid.length;
 
-  let dot = 0, cross = 0, sourceNorm = 0;
-  for (const pair of valid) {
-    const ax = pair.sx - sourceX;
-    const ay = pair.sy - sourceY;
-    const bx = pair.dx - destinationX;
-    const by = pair.dy - destinationY;
-    dot += ax * bx + ay * by;
-    cross += ax * by - ay * bx;
-    sourceNorm += ax * ax + ay * ay;
-  }
-  const angle = Math.atan2(cross, dot);
-  const inferredScale = sourceNorm > 1e-12 ? Math.hypot(dot, cross) / sourceNorm : 1;
-  const scale = options.allowScale === false ? 1 : inferredScale;
-  const cos = Math.cos(angle);
-  const sin = Math.sin(angle);
-  const tx = destinationX - scale * (sourceX * cos - sourceY * sin);
-  const ty = destinationY - scale * (sourceX * sin + sourceY * cos);
-  const transform = { angle, scale, tx, ty };
-  const residuals = valid.map(pair => {
-    const transformed = applySimilarityTransform({ x: pair.sx, y: pair.sy }, transform);
-    return Math.hypot(transformed.x - pair.dx, transformed.y - pair.dy);
-  });
-  return {
-    ...transform,
-    pairCount: valid.length,
-    residuals,
-    maxResidualPx: Math.max(0, ...residuals),
-    rmsResidualPx: Math.sqrt(residuals.reduce((sum, value) => sum + value * value, 0) / residuals.length)
+    let dot = 0, cross = 0, sourceNorm = 0;
+    for (const pair of valid) {
+      const ax = pair.sx - sourceX;
+      const ay = (reflect ? -pair.sy : pair.sy) - sourceY;
+      const bx = pair.dx - destinationX;
+      const by = pair.dy - destinationY;
+      dot += ax * bx + ay * by;
+      cross += ax * by - ay * bx;
+      sourceNorm += ax * ax + ay * ay;
+    }
+    const angle = Math.atan2(cross, dot);
+    const inferredScale = sourceNorm > 1e-12 ? Math.hypot(dot, cross) / sourceNorm : 1;
+    const scale = options.allowScale === false ? 1 : inferredScale;
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    const tx = destinationX - scale * (sourceX * cos - sourceY * sin);
+    const ty = destinationY - scale * (sourceX * sin + sourceY * cos);
+    const transform = { angle, scale, tx, ty, reflect };
+    const residuals = valid.map(pair => {
+      const transformed = applySimilarityTransform({ x: pair.sx, y: pair.sy }, transform);
+      return Math.hypot(transformed.x - pair.dx, transformed.y - pair.dy);
+    });
+    return {
+      ...transform,
+      determinantSign: reflect ? -1 : 1,
+      pairCount: valid.length,
+      residuals,
+      maxResidualPx: Math.max(0, ...residuals),
+      rmsResidualPx: Math.sqrt(residuals.reduce((sum, value) => sum + value * value, 0) / residuals.length)
+    };
   };
+
+  const direct = fitOrientation(false);
+  if (options.allowReflection !== true) return direct;
+  const reflected = fitOrientation(true);
+  // Prefer the orientation-preserving fit on a tie. Collinear point sets do
+  // not contain enough information to distinguish a mirror from a rotation.
+  return reflected.rmsResidualPx + 1e-12 < direct.rmsResidualPx ? reflected : direct;
 }
 
 export function transformBezierCurve(curve, transform) {
@@ -187,7 +197,10 @@ export function transformBezierCurve(curve, transform) {
     transformed.refPoints = curve.refPoints.map(point => applySimilarityTransform(point, transform));
   }
   if (Number.isFinite(curve?.spacingPx) && Number.isFinite(transform?.scale)) {
-    transformed.spacingPx = curve.spacingPx * transform.scale;
+    transformed.spacingPx = curve.spacingPx * Math.abs(transform.scale);
+  }
+  if (transform?.reflect === true && Number.isFinite(curve?.rotationOffset)) {
+    transformed.rotationOffset = -curve.rotationOffset;
   }
   return transformed;
 }
@@ -203,7 +216,10 @@ export function auditBezierGroup(curve, pegs, options = {}) {
     if (!reference || !Number.isFinite(peg?.x) || !Number.isFinite(peg?.y)) continue;
     pairs.push({ sx: reference.x, sy: reference.y, dx: peg.x, dy: peg.y, index: peg.bezierIndex });
   }
-  const fit = estimateSimilarityTransformFromPairs(pairs, { allowScale: options.allowScale !== false });
+  const fit = estimateSimilarityTransformFromPairs(pairs, {
+    allowScale: options.allowScale !== false,
+    allowReflection: options.allowReflection === true
+  });
   const outlierIndices = [];
   const residuals = [];
   if (fit) {
@@ -214,9 +230,16 @@ export function auditBezierGroup(curve, pegs, options = {}) {
   }
   return {
     pairCount: pairs.length,
+    sufficientLineage: pairs.length >= 3,
     pegCount: Array.isArray(pegs) ? pegs.length : 0,
     thresholdPx,
-    transform: fit ? { angle: fit.angle, scale: fit.scale, tx: fit.tx, ty: fit.ty } : null,
+    transform: fit ? {
+      angle: fit.angle,
+      scale: fit.scale,
+      tx: fit.tx,
+      ty: fit.ty,
+      reflect: fit.reflect === true
+    } : null,
     rmsResidualPx: fit?.rmsResidualPx ?? null,
     maxResidualPx: fit?.maxResidualPx ?? null,
     outlierCount: outlierIndices.length,

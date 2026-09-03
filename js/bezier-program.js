@@ -71,6 +71,7 @@ export function writeBezierIntegrityDiagnostic(level, bezierGroupId, diagnostic)
   const node = ensureBezierNode(level, bezierGroupId);
   node.integrity = {
     pairCount: Number(diagnostic?.pairCount || 0),
+    sufficientLineage: diagnostic?.sufficientLineage === true,
     pegCount: Number(diagnostic?.pegCount || 0),
     thresholdPx: Number(diagnostic?.thresholdPx || 0),
     rmsResidualPx: Number.isFinite(diagnostic?.rmsResidualPx) ? diagnostic.rmsResidualPx : null,

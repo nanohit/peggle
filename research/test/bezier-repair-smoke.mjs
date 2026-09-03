@@ -75,15 +75,28 @@ const after = captureBezierSemanticState(moved);
 const patch = diffBezierSemanticStates(before, after, { commandHints: ['move-selection'] });
 assert.equal(patch.operations.length, 1);
 assert.equal(patch.operations[0].type, 'transform-stroke');
-assert.equal(patch.metrics.fallbackFraction, 0);
+assert.equal(patch.metrics.repairFallbackFraction, 0);
+assert.equal(patch.metrics.stateFallbackFraction, 0);
 const replayed = applyBezierSemanticPatch(before, patch);
-assert.deepEqual(replayed, after);
 assert.deepEqual(semanticReplayReport(after, replayed, patch), {
   exact: true,
   replayAccuracy: 1,
-  fallbackFraction: 0,
+  strokeAccuracy: 1,
+  memberAccuracy: 1,
+  repairFallbackFraction: 0,
+  stateFallbackFraction: 0,
+  stateProgramCoverage: 1,
   fallbackReasonCounts: {}
 });
+
+// D1 regression: replay must execute the operation, not copy operation.after.
+const corruptedType = clone(patch);
+corruptedType.operations[0].type = 'object-exception';
+assert.equal(semanticReplayReport(after, applyBezierSemanticPatch(before, corruptedType), corruptedType).exact, false);
+const corruptedTransform = clone(patch);
+corruptedTransform.operations[0].transform = { angle: 999, scale: -7, tx: 1e6, ty: -1e6 };
+assert.equal(semanticReplayReport(after, applyBezierSemanticPatch(before, corruptedTransform), corruptedTransform).exact, false);
+assert.equal('after' in patch.operations[0], false);
 
 const changedShape = clone(moved);
 changedShape.bezierCurves.curve.pegShape = 'circle';
@@ -93,10 +106,99 @@ assert.equal(resample.operations[0].type, 'resample-stroke');
 
 const atomic = clone(moved);
 atomic.pegs[1].x += 4;
+atomic.metadata.generatorProgram.nodes.curve.exceptions.overrides['1'] = {
+  kind: 'position', x: atomic.pegs[1].x, y: atomic.pegs[1].y, residualPx: 4
+};
 const fallback = diffBezierSemanticStates(after, captureBezierSemanticState(atomic));
 assert.equal(fallback.operations[0].type, 'object-exception');
-assert.equal(fallback.metrics.fallbackFraction, 1);
+assert.equal(fallback.metrics.repairFallbackFraction, 1);
+assert.equal(fallback.metrics.stateFallbackFraction, 1 / 3);
 assert.equal(fallback.metrics.fallbackReasonCounts['atomic-object-edit'], 1);
+assert.equal(semanticReplayReport(
+  captureBezierSemanticState(atomic), applyBezierSemanticPatch(after, fallback), fallback
+).exact, true);
+
+const fiftyFour = compileBezierProgram({
+  id: 'metric-denominator', name: 'Metric denominator', pegRadius: 8.5,
+  strokes: [{
+    groupId: 'long', pegShape: 'circle', spacingPx: 18.7,
+    start: { x: 0, y: 500 }, h1: { x: 333.333333333, y: 500 },
+    h2: { x: 666.666666667, y: 500 }, end: { x: 1000, y: 500 }
+  }]
+});
+assert.equal(fiftyFour.pegs.length, 54);
+const fiftyFourEdited = clone(fiftyFour);
+fiftyFourEdited.pegs[20].y -= 5;
+fiftyFourEdited.metadata.generatorProgram.nodes.long.exceptions.overrides['20'] = {
+  kind: 'position', x: fiftyFourEdited.pegs[20].x, y: fiftyFourEdited.pegs[20].y
+};
+const denominatorPatch = diffBezierSemanticStates(
+  captureBezierSemanticState(fiftyFour), captureBezierSemanticState(fiftyFourEdited)
+);
+assert.equal(denominatorPatch.metrics.repairFallbackFraction, 1);
+assert.equal(denominatorPatch.metrics.stateFallbackFraction, 1 / 54);
+assert.equal(denominatorPatch.metrics.stateProgramCoverage, 53 / 54);
+
+// D3/D5 regression: a genuine curved reflection is parameterized, never a
+// catch-all update operation.
+const curvedProgram = {
+  id: 'curved-mirror', name: 'Curved mirror', pegRadius: 8.5,
+  strokes: [{
+    groupId: 's-curve', pegShape: 'brick', pegType: 'blue', rotationOffset: 0.2,
+    start: { x: 60, y: 160 }, h1: { x: 300, y: 80 }, h2: { x: 80, y: 330 }, end: { x: 330, y: 400 }
+  }]
+};
+const curved = compileBezierProgram(curvedProgram);
+const mirrored = clone(curved);
+for (const key of ['start', 'end', 'h1', 'h2']) mirrored.bezierCurves['s-curve'][key].x = 400 - mirrored.bezierCurves['s-curve'][key].x;
+for (const point of mirrored.bezierCurves['s-curve'].refPoints) point.x = 400 - point.x;
+mirrored.bezierCurves['s-curve'].rotationOffset *= -1;
+for (const peg of mirrored.pegs) { peg.x = 400 - peg.x; peg.angle = -(peg.angle || 0); }
+const mirrorPatch = diffBezierSemanticStates(
+  captureBezierSemanticState(curved), captureBezierSemanticState(mirrored), { thresholdPx: 0.01 }
+);
+assert.deepEqual(mirrorPatch.operations.map(operation => operation.type), ['mirror-stroke']);
+assert.equal(mirrorPatch.operations[0].transform.reflect, true);
+assert.equal(mirrorPatch.metrics.repairFallbackFraction, 0);
+assert.equal(semanticReplayReport(
+  captureBezierSemanticState(mirrored),
+  applyBezierSemanticPatch(captureBezierSemanticState(curved), mirrorPatch),
+  mirrorPatch
+).exact, true);
+
+// D4 regression: reason comes from each edit's structure, not the number of
+// fallback operations in the patch.
+const twoStrokes = compileBezierProgram({
+  id: 'two-atomic', name: 'Two atomic', pegRadius: 8.5,
+  strokes: [
+    { groupId: 'left', pegShape: 'circle', start: { x: 40, y: 180 }, h1: { x: 80, y: 180 }, h2: { x: 120, y: 180 }, end: { x: 160, y: 180 } },
+    { groupId: 'right', pegShape: 'circle', start: { x: 240, y: 300 }, h1: { x: 280, y: 300 }, h2: { x: 320, y: 300 }, end: { x: 360, y: 300 } }
+  ]
+});
+const twoAtomic = clone(twoStrokes);
+twoAtomic.pegs.find(peg => peg.bezierGroupId === 'left').y += 5;
+twoAtomic.pegs.find(peg => peg.bezierGroupId === 'right').y -= 5;
+const twoAtomicPatch = diffBezierSemanticStates(
+  captureBezierSemanticState(twoStrokes), captureBezierSemanticState(twoAtomic)
+);
+assert.deepEqual(
+  twoAtomicPatch.operations.filter(operation => operation.expressibility === 'fallback').map(operation => operation.reason),
+  ['atomic-object-edit', 'atomic-object-edit']
+);
+
+// D6 regression: two correspondences can always be fit exactly and therefore
+// do not constitute an integrity verdict.
+const twoPointLevel = clone(level);
+twoPointLevel.pegs = twoPointLevel.pegs.slice(0, 2);
+twoPointLevel.bezierCurves.curve.refPoints = twoPointLevel.bezierCurves.curve.refPoints.slice(0, 2);
+const twoPointAudit = auditNativeLevelBezierIntegrity(twoPointLevel, { repair: false, thresholdPx: 0.01 });
+assert.equal(twoPointAudit.reports.find(report => report.groupId === 'curve').status, 'insufficient-lineage');
+
+// D7 regression: object key insertion order has no semantic meaning.
+const reordered = clone(moved);
+const oldCurve = reordered.bezierCurves.curve;
+reordered.bezierCurves.curve = Object.fromEntries(Object.entries(oldCurve).reverse());
+assert.equal(diffBezierSemanticStates(after, captureBezierSemanticState(reordered)).operations.length, 0);
 
 const compiled = compileBezierProgram({
   id: 'no-op', name: 'No-op', pegRadius: 8.5,
@@ -116,5 +218,54 @@ recompiled.pegs.forEach((peg, index) => { peg.id = `import-regenerated-${index}`
 const noOp = diffBezierSemanticStates(captureBezierSemanticState(compiled), captureBezierSemanticState(recompiled));
 assert.equal(noOp.operations.length, 0);
 assert.equal(evaluateStaticCandidate(compiled).status, 'passed');
+
+const emptyState = captureBezierSemanticState({ pegs: [], bezierCurves: {}, metadata: {} });
+const addPatch = diffBezierSemanticStates(emptyState, captureBezierSemanticState(compiled));
+assert.deepEqual(addPatch.operations.map(operation => operation.type), ['add-stroke']);
+assert.equal(addPatch.operations.some(operation => 'after' in operation), false);
+assert.equal(semanticReplayReport(
+  captureBezierSemanticState(compiled), applyBezierSemanticPatch(emptyState, addPatch), addPatch
+).exact, true);
+const deletePatch = diffBezierSemanticStates(captureBezierSemanticState(compiled), emptyState);
+assert.deepEqual(deletePatch.operations.map(operation => operation.type), ['delete-stroke']);
+assert.equal(semanticReplayReport(
+  emptyState, applyBezierSemanticPatch(captureBezierSemanticState(compiled), deletePatch), deletePatch
+).exact, true);
+
+const resampledLevel = compileBezierProgram({
+  id: 'no-op', name: 'No-op', pegRadius: 8.5,
+  strokes: [{
+    groupId: 'circle-stroke', pegShape: 'brick', pegType: 'blue', spacingPx: 28,
+    start: { x: 80, y: 180 }, h1: { x: 140, y: 180 }, h2: { x: 200, y: 180 }, end: { x: 260, y: 180 }
+  }]
+});
+const nativeResamplePatch = diffBezierSemanticStates(
+  captureBezierSemanticState(compiled), captureBezierSemanticState(resampledLevel)
+);
+assert.deepEqual(nativeResamplePatch.operations.map(operation => operation.type), ['resample-stroke']);
+assert.equal(nativeResamplePatch.operations.some(operation => 'after' in operation), false);
+assert.equal(semanticReplayReport(
+  captureBezierSemanticState(resampledLevel),
+  applyBezierSemanticPatch(captureBezierSemanticState(compiled), nativeResamplePatch),
+  nativeResamplePatch
+).exact, true);
+
+const bentProgram = clone({
+  id: 'no-op', name: 'No-op', pegRadius: 8.5,
+  strokes: [{
+    groupId: 'circle-stroke', pegShape: 'circle', pegType: 'blue',
+    start: { x: 80, y: 180 }, h1: { x: 130, y: 140 }, h2: { x: 210, y: 220 }, end: { x: 260, y: 180 }
+  }]
+});
+const bentLevel = compileBezierProgram(bentProgram);
+const controlPatch = diffBezierSemanticStates(
+  captureBezierSemanticState(compiled), captureBezierSemanticState(bentLevel)
+);
+assert.deepEqual(controlPatch.operations.map(operation => operation.type), ['edit-control-points']);
+assert.equal(semanticReplayReport(
+  captureBezierSemanticState(bentLevel),
+  applyBezierSemanticPatch(captureBezierSemanticState(compiled), controlPatch),
+  controlPatch
+).exact, true);
 
 console.log('ok bezier repair foundation');

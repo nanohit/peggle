@@ -11,7 +11,8 @@ import {
 
 function materiallyChanges(transform) {
   return !!transform && (
-    Math.abs(Number(transform.tx || 0)) > 1e-7
+    transform.reflect === true
+    || Math.abs(Number(transform.tx || 0)) > 1e-7
     || Math.abs(Number(transform.ty || 0)) > 1e-7
     || Math.abs(Number(transform.angle || 0)) > 1e-9
     || Math.abs(Number(transform.scale || 1) - 1) > 1e-9
@@ -47,10 +48,14 @@ export function auditNativeLevelBezierIntegrity(level, options = {}) {
       }
       continue;
     }
-    const diagnostic = auditBezierGroup(curve, pegs, { thresholdPx, allowScale: true });
-    const canReconcile = diagnostic.transform && diagnostic.outlierCount === 0;
+    const diagnostic = auditBezierGroup(curve, pegs, {
+      thresholdPx,
+      allowScale: true,
+      allowReflection: true
+    });
+    const canReconcile = diagnostic.sufficientLineage && diagnostic.transform && diagnostic.outlierCount === 0;
     const changed = canReconcile && materiallyChanges(diagnostic.transform);
-    const status = diagnostic.pairCount < 2
+    const status = !diagnostic.sufficientLineage
       ? 'insufficient-lineage'
       : (diagnostic.outlierCount > 0 ? 'exceptions-or-malformed' : (changed ? 'similarity-reconcilable' : 'aligned'));
     reports.push({ groupId, status, ...diagnostic });

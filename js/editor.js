@@ -1247,12 +1247,14 @@ export class Editor {
       if (!selection.complete || !store[groupId]) continue;
       const diagnostic = auditBezierGroup(store[groupId], selection.all, {
         thresholdPx: DEFAULT_BEZIER_EXCEPTION_THRESHOLD_PX,
-        allowScale: true
+        allowScale: true,
+        allowReflection: true
       });
-      if (diagnostic.transform && diagnostic.outlierCount === 0) {
+      if (diagnostic.sufficientLineage && diagnostic.transform && diagnostic.outlierCount === 0) {
         const transform = diagnostic.transform;
         const materiallyChanged = Math.abs(transform.tx) > 1e-7 || Math.abs(transform.ty) > 1e-7
-          || Math.abs(transform.angle) > 1e-9 || Math.abs(transform.scale - 1) > 1e-9;
+          || Math.abs(transform.angle) > 1e-9 || Math.abs(transform.scale - 1) > 1e-9
+          || transform.reflect === true;
         if (materiallyChanged) store[groupId] = transformBezierCurve(store[groupId], transform);
       }
       ensureBezierNode(level, groupId);
@@ -1266,7 +1268,8 @@ export class Editor {
     const pegs = level.pegs.filter(peg => peg.bezierGroupId === groupId);
     const diagnostic = auditBezierGroup(curve, pegs, {
       thresholdPx: DEFAULT_BEZIER_EXCEPTION_THRESHOLD_PX,
-      allowScale: true
+      allowScale: true,
+      allowReflection: true
     });
     writeBezierIntegrityDiagnostic(level, groupId, diagnostic);
     return diagnostic;
@@ -1292,7 +1295,7 @@ export class Editor {
   }
 
   estimateSimilarityTransformFromPairs(pairs) {
-    return estimateSimilarityTransformFromPairs(pairs, { allowScale: true });
+    return estimateSimilarityTransformFromPairs(pairs, { allowScale: true, allowReflection: true });
   }
 
   getCircularMeanAngle(values) {
@@ -1327,9 +1330,10 @@ export class Editor {
       if (!rp) continue;
       exactPairs.push({ sx: rp.x, sy: rp.y, dx: peg.x, dy: peg.y });
     }
-    if (exactPairs.length >= 2) {
+    if (exactPairs.length >= 3) {
       return this.estimateSimilarityTransformFromPairs(exactPairs);
     }
+    if (exactPairs.length > 0 || groupPegs.length < 3) return null;
 
     // Fallback for legacy groups: estimate from centroid + mean tangent angle.
     const draft = {
@@ -1406,7 +1410,8 @@ export class Editor {
     this.activeBezierSpacingPx = Number.isFinite(data.spacingPx)
       ? data.spacingPx * (Number.isFinite(transform?.scale) ? transform.scale : 1)
       : null;
-    this.activeBezierRotationOffset = Number(data.rotationOffset || 0);
+    this.activeBezierRotationOffset = Number(data.rotationOffset || 0)
+      * (transform?.reflect === true ? -1 : 1);
     this._bezierDragStart = null;
     this.updateBezierDraftPath();
     this.setMode('draw');
@@ -1892,7 +1897,7 @@ export class Editor {
     this.activeBezierRotationOffset = 0;
     this._bezierDragStart = null;
     if (!level || toCommit.length === 0) return;
-    this.beginResearchCommand(previousBezierGroupId ? 'update-stroke' : 'add-stroke');
+    this.beginResearchCommand(previousBezierGroupId ? 'edit-control-points-or-resample' : 'add-stroke');
     this.saveUndoState();
 
     if (isBezierCommit && previousBezierGroupId) {
@@ -1984,7 +1989,7 @@ export class Editor {
     }
 
     if (bezierGroupId) this.auditBezierGroupAndRecord(bezierGroupId, level);
-    this.finishResearchCommand(previousBezierGroupId ? 'update-stroke' : 'add-stroke');
+    this.finishResearchCommand(previousBezierGroupId ? 'edit-control-points-or-resample' : 'add-stroke');
     this.levelManager.save();
     const updated = this.levelManager.getCurrentLevel();
     if (updated && this.onPegCountChange) {
@@ -2586,6 +2591,7 @@ export class Editor {
       const mirrorPoint = value => value ? { ...value, x: center.x - (value.x - center.x) } : value;
       for (const key of ['start', 'end', 'h1', 'h2']) curve[key] = mirrorPoint(curve[key]);
       if (Array.isArray(curve.refPoints)) curve.refPoints = curve.refPoints.map(mirrorPoint);
+      curve.rotationOffset = -Number(curve.rotationOffset || 0);
       ensureBezierNode(level, groupId);
     }
 
@@ -2624,6 +2630,7 @@ export class Editor {
       const mirrorPoint = value => value ? { ...value, y: center.y - (value.y - center.y) } : value;
       for (const key of ['start', 'end', 'h1', 'h2']) curve[key] = mirrorPoint(curve[key]);
       if (Array.isArray(curve.refPoints)) curve.refPoints = curve.refPoints.map(mirrorPoint);
+      curve.rotationOffset = -Number(curve.rotationOffset || 0);
       ensureBezierNode(level, groupId);
     }
 
