@@ -186,6 +186,74 @@ assert.deepEqual(
   ['atomic-object-edit', 'atomic-object-edit']
 );
 
+// N2/N3 regression: equal deltas are not "regional" unless indices are
+// contiguous. A non-contiguous selection transform requires command evidence.
+const sparseSelection = clone(fiftyFour);
+for (const index of [0, 5, 11]) {
+  sparseSelection.pegs[index].y += 6;
+  sparseSelection.metadata.generatorProgram.nodes.long.exceptions.overrides[String(index)] = {
+    kind: 'position', x: sparseSelection.pegs[index].x, y: sparseSelection.pegs[index].y
+  };
+}
+const sparseWithoutEvidence = diffBezierSemanticStates(
+  captureBezierSemanticState(fiftyFour), captureBezierSemanticState(sparseSelection)
+);
+assert.equal(sparseWithoutEvidence.operations.find(operation => operation.expressibility === 'fallback').reason,
+  'multiple-atomic-object-edits');
+const sparseWithEvidence = diffBezierSemanticStates(
+  captureBezierSemanticState(fiftyFour), captureBezierSemanticState(sparseSelection),
+  { commandHints: ['move-selection'], commandScope: 'single' }
+);
+assert.equal(sparseWithEvidence.operations.find(operation => operation.expressibility === 'fallback').reason,
+  'missing-language-operation:selection-transform');
+const sparseWithRecordedEvidence = diffBezierSemanticStates(
+  captureBezierSemanticState(fiftyFour), captureBezierSemanticState(sparseSelection),
+  { commandEvidence: [{
+    hints: ['move-selection'],
+    operations: [{ groupId: 'long', affectedMemberIndices: [0, 5, 11] }]
+  }] }
+);
+assert.equal(sparseWithRecordedEvidence.operations.find(operation => operation.expressibility === 'fallback').reason,
+  'missing-language-operation:selection-transform');
+const contiguousSelection = clone(fiftyFour);
+for (const index of [0, 1, 2]) {
+  contiguousSelection.pegs[index].y += 6;
+  contiguousSelection.metadata.generatorProgram.nodes.long.exceptions.overrides[String(index)] = {
+    kind: 'position', x: contiguousSelection.pegs[index].x, y: contiguousSelection.pegs[index].y
+  };
+}
+const contiguousPatch = diffBezierSemanticStates(
+  captureBezierSemanticState(fiftyFour), captureBezierSemanticState(contiguousSelection)
+);
+assert.equal(contiguousPatch.operations.find(operation => operation.expressibility === 'fallback').reason,
+  'missing-language-operation:regional-transform');
+
+// N1 regression: delete-selection is evidence only inside one command and is
+// combined with the existing spatial-closeness test.
+const nearStrokes = compileBezierProgram({
+  id: 'near-deletion', name: 'Near deletion', pegRadius: 8.5,
+  strokes: [
+    { groupId: 'near-a', pegShape: 'circle', start: { x: 80, y: 220 }, h1: { x: 100, y: 220 }, h2: { x: 120, y: 220 }, end: { x: 140, y: 220 } },
+    { groupId: 'near-b', pegShape: 'circle', start: { x: 160, y: 250 }, h1: { x: 180, y: 250 }, h2: { x: 200, y: 250 }, end: { x: 220, y: 250 } }
+  ]
+});
+const deleteAllState = captureBezierSemanticState({ pegs: [], bezierCurves: {}, metadata: {} });
+const unscopedDelete = diffBezierSemanticStates(captureBezierSemanticState(nearStrokes), deleteAllState, {
+  commandHints: ['delete-selection']
+});
+assert.equal(unscopedDelete.operations.some(operation => operation.compressionOpportunity), false);
+const scopedDelete = diffBezierSemanticStates(captureBezierSemanticState(nearStrokes), deleteAllState, {
+  commandHints: ['delete-selection'], commandScope: 'single'
+});
+assert.equal(scopedDelete.operations.every(operation => operation.compressionOpportunity?.commandEvidence === 'delete-selection'), true);
+const replayedDeleteEvidence = diffBezierSemanticStates(captureBezierSemanticState(nearStrokes), deleteAllState, {
+  commandEvidence: [{
+    hints: ['delete-selection'],
+    operations: [{ type: 'delete-stroke', groupId: 'near-a' }, { type: 'delete-stroke', groupId: 'near-b' }]
+  }]
+});
+assert.equal(replayedDeleteEvidence.operations.every(operation => operation.compressionOpportunity), true);
+
 // D6 regression: two correspondences can always be fit exactly and therefore
 // do not constitute an integrity verdict.
 const twoPointLevel = clone(level);

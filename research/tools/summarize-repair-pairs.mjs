@@ -50,14 +50,16 @@ async function main() {
     const beforeLevel = await readJson(path.resolve(root, candidate.levelPath));
     const commandLog = await readOptionalJson(path.join(options.repairedDirectory, `${candidate.source}.commands.json`));
     const embeddedCommands = repaired?.metadata?.generatorProgram?.commandLog || [];
-    const hints = (commandLog?.commands || commandLog || embeddedCommands)
-      .flatMap(command => command?.patch?.hints || command?.hints || command?.type || [])
-      .map(String);
+    const commands = commandLog?.commands || commandLog || embeddedCommands;
+    const commandEvidence = (Array.isArray(commands) ? commands : []).map(command => ({
+      hints: (command?.patch?.hints || command?.hints || (command?.type ? [command.type] : [])).map(String),
+      operations: command?.patch?.operations || []
+    }));
     const before = captureBezierSemanticState(beforeLevel);
     const after = captureBezierSemanticState(repaired);
     // Intent is inferred from final state. The command log is deliberately only
     // a disambiguation hint, never the source of patch operations.
-    const patch = diffBezierSemanticStates(before, after, { commandHints: hints });
+    const patch = diffBezierSemanticStates(before, after, { commandEvidence });
     const replayed = applyBezierSemanticPatch(before, patch);
     const replay = semanticReplayReport(after, replayed, patch);
     pairs.push({

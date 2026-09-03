@@ -215,7 +215,7 @@ function memberDifference(beforeMembers, afterMembers, thresholdPx) {
   return changes;
 }
 
-function classifyFallbackCause(changes, thresholdPx) {
+function classifyFallbackCause(changes, thresholdPx, context = {}) {
   if (changes.length === 1) {
     return { reason: 'atomic-object-edit', languageGap: false, evidence: { changedMemberCount: 1 } };
   }
@@ -229,10 +229,12 @@ function classifyFallbackCause(changes, thresholdPx) {
     referenceDelta ||= delta;
     if (Math.hypot(delta.x - referenceDelta.x, delta.y - referenceDelta.y) > thresholdPx) coherentDisplacement = false;
   }
-  if (coherentDisplacement) {
+  // "Regional" is a geometric claim: the changed members must form one run
+  // along the stroke. Check that before considering a shared displacement.
+  if (contiguous && coherentDisplacement) {
     return {
       reason: 'missing-language-operation:regional-transform', languageGap: true,
-      evidence: { changedMemberCount: changes.length, contiguousIndices: contiguous, coherentDisplacement: true }
+      evidence: { changedMemberCount: changes.length, contiguousIndices: true, coherentDisplacement: true }
     };
   }
   if (contiguous) {
@@ -241,14 +243,30 @@ function classifyFallbackCause(changes, thresholdPx) {
       evidence: { changedMemberCount: changes.length, contiguousIndices: true, coherentDisplacement: false }
     };
   }
+  if (coherentDisplacement && context.selectionTransformProven === true) {
+    return {
+      reason: 'missing-language-operation:selection-transform', languageGap: true,
+      evidence: {
+        changedMemberCount: changes.length,
+        contiguousIndices: false,
+        coherentDisplacement: true,
+        commandEvidence: 'move-selection'
+      }
+    };
+  }
   return {
     reason: 'multiple-atomic-object-edits', languageGap: false,
-    evidence: { changedMemberCount: changes.length, contiguousIndices: false, coherentDisplacement: false }
+    evidence: {
+      changedMemberCount: changes.length,
+      contiguousIndices: false,
+      coherentDisplacement,
+      commandEvidence: null
+    }
   };
 }
 
-function buildFallbackOperation(groupId, nodeId, changes, afterLineage, thresholdPx) {
-  const cause = classifyFallbackCause(changes, thresholdPx);
+function buildFallbackOperation(groupId, nodeId, changes, afterLineage, thresholdPx, context = {}) {
+  const cause = classifyFallbackCause(changes, thresholdPx, context);
   const expectedExceptions = semanticExceptions(afterLineage?.exceptions);
   const changedIndices = new Set(changes.map(change => change.index));
   return {
@@ -327,7 +345,21 @@ function applyOperation(result, operation) {
   }
 }
 
-function nativeOperationsForNode(before, after, thresholdPx) {
+function commandProvesSelectionTransform(groupId, changes, options) {
+  if (options.commandScope === 'single'
+      && options.hints.some(hint => hint === 'move-selection')) return true;
+  const changedIndices = new Set(changes.map(change => change.index));
+  return options.commandEvidence.some(command => {
+    if (!(command.hints || []).includes('move-selection')) return false;
+    return (command.operations || []).some(operation => {
+      if (operation.groupId !== groupId) return false;
+      const indices = operation.affectedMemberIndices || [];
+      return indices.length > 0 && [...changedIndices].every(index => indices.includes(index));
+    });
+  });
+}
+
+function nativeOperationsForNode(before, after, thresholdPx, options) {
   const operations = [];
   let working = clone(before);
   const fit = estimateSimilarityTransformFromPairs(curvePairs(before.curve, after.curve), {
@@ -382,7 +414,12 @@ function nativeOperationsForNode(before, after, thresholdPx) {
   const fallbackChanges = memberDifference(working.members, after.members, thresholdPx);
   if (fallbackChanges.length > 0) {
     const operation = buildFallbackOperation(
-      after.groupId, after.nodeId, fallbackChanges, after.lineage, thresholdPx
+      after.groupId,
+      after.nodeId,
+      fallbackChanges,
+      after.lineage,
+      thresholdPx,
+      { selectionTransformProven: commandProvesSelectionTransform(after.groupId, fallbackChanges, options) }
     );
     const candidate = { nodes: { [after.groupId]: working } };
     applyOperation(candidate, operation);
@@ -409,15 +446,47 @@ function nodeBounds(node) {
   };
 }
 
-function deletedRegionEvidence(deleted, hints) {
-  if (deleted.length < 2 || !hints.some(hint => /negative|space|region|mask/i.test(hint))) return null;
+function deletedRegionEvidence(deleted, evidenceKind) {
+  if (deleted.length < 2) return null;
   const boxes = deleted.map(operation => operation.deletedBounds).filter(Boolean);
   if (boxes.length !== deleted.length) return null;
   const centers = boxes.map(box => ({ x: (box.minX + box.maxX) / 2, y: (box.minY + box.maxY) / 2 }));
   const maximumDistance = Math.max(...centers.flatMap((left, index) => centers.slice(index + 1)
     .map(right => Math.hypot(left.x - right.x, left.y - right.y))), 0);
   if (maximumDistance > 180) return null;
-  return { reason: 'possible-negative-space-region-delete', confidence: 'hint+geometry', maximumCenterDistancePx: maximumDistance };
+  return {
+    reason: 'possible-negative-space-region-delete',
+    confidence: 'single-command+geometry',
+    commandEvidence: evidenceKind,
+    deletedStrokeCount: deleted.length,
+    maximumCenterDistancePx: maximumDistance
+  };
+}
+
+function annotateDeletedRegions(deleted, options) {
+  const batches = [];
+  if (options.commandScope === 'single'
+      && options.hints.some(hint => hint === 'delete-selection' || /negative|space|region|mask/i.test(hint))) {
+    batches.push({ operations: deleted, evidenceKind: options.hints.includes('delete-selection') ? 'delete-selection' : 'explicit-region-hint' });
+  }
+  for (const command of options.commandEvidence) {
+    const hints = command.hints || [];
+    if (!hints.some(hint => hint === 'delete-selection' || /negative|space|region|mask/i.test(hint))) continue;
+    const deletedIds = new Set((command.operations || [])
+      .filter(operation => operation.type === 'delete-stroke')
+      .map(operation => operation.groupId));
+    const operations = deleted.filter(operation => deletedIds.has(operation.groupId));
+    batches.push({ operations, evidenceKind: hints.includes('delete-selection') ? 'delete-selection' : 'explicit-region-hint' });
+  }
+  const annotated = new Set();
+  for (const batch of batches) {
+    const key = batch.operations.map(operation => operation.groupId).sort().join('|');
+    if (!key || annotated.has(key)) continue;
+    annotated.add(key);
+    const evidence = deletedRegionEvidence(batch.operations, batch.evidenceKind);
+    if (!evidence) continue;
+    for (const operation of batch.operations) operation.compressionOpportunity = evidence;
+  }
 }
 
 function changedMemberKeys(before, after, thresholdPx) {
@@ -438,6 +507,12 @@ function changedMemberKeys(before, after, thresholdPx) {
 export function diffBezierSemanticStates(before, after, options = {}) {
   const thresholdPx = Number.isFinite(options.thresholdPx) ? options.thresholdPx : DEFAULT_THRESHOLD_PX;
   const hints = Array.isArray(options.commandHints) ? options.commandHints.map(String) : [];
+  const commandEvidence = Array.isArray(options.commandEvidence) ? options.commandEvidence : [];
+  const classificationOptions = {
+    hints,
+    commandEvidence,
+    commandScope: options.commandScope === 'single' ? 'single' : 'aggregate'
+  };
   const operations = [];
   const ids = new Set([...Object.keys(before?.nodes || {}), ...Object.keys(after?.nodes || {})]);
   for (const groupId of [...ids].sort()) {
@@ -454,7 +529,8 @@ export function diffBezierSemanticStates(before, after, options = {}) {
       const fallbackChanges = memberDifference(simulated.nodes[groupId]?.members, right.members, thresholdPx);
       if (fallbackChanges.length) {
         operations.push(buildFallbackOperation(
-          groupId, right.nodeId, fallbackChanges, right.lineage, thresholdPx
+          groupId, right.nodeId, fallbackChanges, right.lineage, thresholdPx,
+          { selectionTransformProven: commandProvesSelectionTransform(groupId, fallbackChanges, classificationOptions) }
         ));
       }
       continue;
@@ -467,12 +543,11 @@ export function diffBezierSemanticStates(before, after, options = {}) {
       continue;
     }
     if (same(left, right)) continue;
-    operations.push(...nativeOperationsForNode(left, right, thresholdPx));
+    operations.push(...nativeOperationsForNode(left, right, thresholdPx, classificationOptions));
   }
 
   const deleted = operations.filter(operation => operation.type === 'delete-stroke');
-  const regionEvidence = deletedRegionEvidence(deleted, hints);
-  if (regionEvidence) for (const operation of deleted) operation.compressionOpportunity = regionEvidence;
+  annotateDeletedRegions(deleted, classificationOptions);
 
   return {
     format: 'bezier-semantic-patch', version: 2, hints, operations,

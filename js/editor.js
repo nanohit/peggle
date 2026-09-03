@@ -1192,7 +1192,8 @@ export class Editor {
     const after = captureBezierSemanticState(level);
     const patch = diffBezierSemanticStates(before, after, {
       thresholdPx: DEFAULT_BEZIER_EXCEPTION_THRESHOLD_PX,
-      commandHints: hints
+      commandHints: hints,
+      commandScope: 'single'
     });
     if (patch.operations.length > 0) {
       const command = {
@@ -1208,7 +1209,10 @@ export class Editor {
             groupId: operation.groupId,
             nodeId: operation.nodeId,
             reason: operation.reason || null,
-            languageGapCandidate: operation.languageGapCandidate || null
+            languageGapCandidate: operation.languageGapCandidate || null,
+            affectedMemberIndices: (operation.changes || []).map(change => change.index),
+            causeEvidence: operation.causeEvidence || null,
+            compressionOpportunity: operation.compressionOpportunity || null
           })),
           metrics: patch.metrics
         }

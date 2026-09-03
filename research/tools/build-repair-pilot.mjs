@@ -170,12 +170,21 @@ function allocateCounts(totalCount, lengths) {
 
 function compositionFootprint(level) {
   const xs = level.pegs.map(peg => peg.x), ys = level.pegs.map(peg => peg.y);
-  if (xs.length === 0) return { width: 0, height: 0, centroidX: null, centroidY: null };
+  if (xs.length === 0) return {
+    minX: null, maxX: null, minY: null, maxY: null,
+    width: 0, height: 0, centroidX: null, centroidY: null,
+    emptyOpeningTopPx: 600, emptyOpeningTopFraction: 1
+  };
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
   return {
-    width: Math.max(...xs) - Math.min(...xs),
-    height: Math.max(...ys) - Math.min(...ys),
+    minX, maxX, minY, maxY,
+    width: maxX - minX,
+    height: maxY - minY,
     centroidX: xs.reduce((sum, value) => sum + value, 0) / xs.length,
-    centroidY: ys.reduce((sum, value) => sum + value, 0) / ys.length
+    centroidY: ys.reduce((sum, value) => sum + value, 0) / ys.length,
+    emptyOpeningTopPx: minY,
+    emptyOpeningTopFraction: minY / 600
   };
 }
 
@@ -264,6 +273,21 @@ async function main() {
     const footprint = compositionFootprint(level);
     const retainedSourceFraction = level.pegs.length
       / Math.max(1, level.pegs.length + program.transfer.omittedFieldPegCount);
+    const knownProperties = [
+      ...(footprint.emptyOpeningTopPx > 190 ? [{
+        id: 'large-empty-opening',
+        measured: {
+          topOpeningPx: footprint.emptyOpeningTopPx,
+          playfieldFraction: footprint.emptyOpeningTopFraction
+        },
+        interpretationRisk: 'A repair that stretches or adds upward may be candidate-specific, not evidence for a missing language operation.'
+      }] : []),
+      ...(footprint.width / 400 < 0.55 ? [{
+        id: 'narrow-horizontal-footprint',
+        measured: { widthPx: footprint.width, playfieldFraction: footprint.width / 400 },
+        interpretationRisk: 'Horizontal expansion may be candidate-specific.'
+      }] : [])
+    ];
     const acceptanceFailures = [
       ...(staticCheck.status === 'passed' ? [] : staticCheck.failures.map(failure => `static:${failure}`)),
       ...(level.pegs.length >= 90 && level.pegs.length <= 140 ? [] : ['density-outside-90-140']),
@@ -289,6 +313,7 @@ async function main() {
       retainedSourceFraction,
       launchAxisErrorPx: program.transfer.launchAxisErrorPx,
       footprint,
+      knownProperties,
       strata: program.strata,
       staticCheck,
       acceptance: { status: acceptanceFailures.length ? 'rejected' : 'passed', failures: acceptanceFailures }
