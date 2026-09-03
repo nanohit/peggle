@@ -38,6 +38,16 @@ const DEFAULT_SKY_TOP = Object.freeze([0.052, 0.128, 0.205]);
 const DEFAULT_SKY_BOTTOM = Object.freeze([0.012, 0.028, 0.048]);
 const QUALITY_ORDER = Object.freeze(['low', 'medium', 'high']);
 const ZERO_CLEAR = new Float32Array(4);
+// How many per-frame movers the distance field can carry analytically. A real
+// board holds a ball or three, a bucket, two flippers and the launcher; past
+// this the overflow simply goes back into the jump flood, which is correct but
+// costs a rebuild.
+const MAX_DYNAMIC_SOLIDS = 24;
+// Analytic profiles the merge shader knows. They mirror shapeDistance() in
+// OBJECT_FS, which is what the jump flood would otherwise have rasterised.
+const DYN_DISC = 0;
+const DYN_ANNULUS = 1;
+const DYN_ROUNDBOX = 2;
 
 const SHAPE_DOME = 0;
 const SHAPE_BOX = 1;
@@ -160,11 +170,14 @@ export function createDefaultLighting() {
     giBlend: 0.55,
     bounce: 0.38,
     // Board surface. 0 = mottled polymer, 1 = recessed grid, 2 = plain.
-    boardStyle: 0,
+    // The grid is the cabinet's canonical playfield rather than an editor-only
+    // overlay: its channels live in the height field, so they pick up the same
+    // key light and cast the same tiny bevel shadows as the rest of the board.
+    boardStyle: 1,
     boardColor: [0.0068, 0.0155, 0.0248],
-    boardTexture: 1.0,
-    boardGrid: 34,
-    boardGridDepth: 0.55,
+    boardTexture: 0.34,
+    boardGrid: 32,
+    boardGridDepth: 0.48,
     // No fixtures by default. Static strips left bright pools on the board
     // whether or not their geometry was drawn, and that residue read as dirt.
     // The board is lit by the overhead rig and the ambient; every light that
@@ -835,6 +848,53 @@ void main() {
   } else {
     outColor = vec4(packSeed(best), 0.0, 1.0);
   }
+}`;
+
+// Folds the board's moving hardware into the flooded field.
+//
+// The jump flood is O(log n) full-screen passes over the whole board, and it was
+// being rerun every frame for the sake of a ball three pixels further down. The
+// solids the game moves are few and are exactly the primitives the object shader
+// already draws, so their distance is available in closed form. The flood then
+// only has to cover the level's own geometry, which changes when a peg is knocked
+// out and not otherwise.
+//
+// The field is an unsigned distance to the nearest boundary — valid inside a
+// solid as well as outside, which is what lets a ray stride through one — so each
+// profile contributes abs(signed distance). Taking a min can only shorten a ray's
+// stride, never lengthen it, so an entry here can never cause a march to step
+// over something: the merge is safe by construction even when it is redundant.
+const SDF_MERGE_FS = `#version 300 es
+precision highp float;
+${COMMON}
+#define MAX_DYNAMIC __MAX_DYNAMIC__
+in vec2 vUv;
+out vec4 outColor;
+uniform sampler2D uStatic;
+uniform vec2 uCanvas;
+uniform float uDistanceScale;
+uniform int uSolidCount;
+uniform vec4 uSolidA[MAX_DYNAMIC];   // x, y, halfW, halfH
+uniform vec4 uSolidB[MAX_DYNAMIC];   // cos, sin, profile, corner radius
+
+void main() {
+  float best = texture(uStatic, vUv).r * uDistanceScale;
+  vec2 p = vec2(vUv.x, 1.0 - vUv.y) * uCanvas;
+  for (int i = 0; i < MAX_DYNAMIC; i++) {
+    if (i >= uSolidCount) break;
+    vec4 a = uSolidA[i];
+    vec4 b = uSolidB[i];
+    // Back into the instance's local frame. The object vertex shader maps local
+    // to world with mat2(c, s, -s, c); this is its transpose.
+    vec2 q = p - a.xy;
+    q = vec2(q.x * b.x + q.y * b.y, q.y * b.x - q.x * b.y);
+    float d;
+    if (b.z < 0.5) d = length(q) - a.z;
+    else if (b.z < 1.5) d = abs(length(q) - (a.z - a.w)) - a.w;
+    else d = sdRoundBox(q, a.zw, b.w);
+    best = min(best, abs(d));
+  }
+  outColor = vec4(clamp(best / uDistanceScale, 0.0, 1.0), 0.0, 0.0, 1.0);
 }`;
 
 // ── 4. Radiance cascades ────────────────────────────────────────────────────
@@ -1521,30 +1581,61 @@ export class GpuPlayfieldRenderer {
     // identical shaders and driver state. Production uses the compact path.
     this.compactTargets = options.compactTargets !== false;
     this.reuseDistanceField = options.reuseDistanceField !== false;
+    // Declaring each render target's previous contents dead before overwriting
+    // it. Free on a tiler, which then skips loading the tile; measurable on some
+    // immediate-mode desktop drivers, which appear to treat it as a barrier.
+    this.discardTargets = options.discardTargets === true;
     this._ratio = 1;
     this._renderWidth = 0;
     this._renderHeight = 0;
 
-    this.instances = [];
-    this.curveVertices = [];
+    // Scene geometry is assembled straight into the arrays that get uploaded.
+    // Building it in plain JS arrays cost a per-element conversion on every
+    // frame, because TypedArray.set over an untyped source cannot memcpy.
+    this.instances = new Float32Array(INSTANCE_FLOATS * 256);
+    this.curveVertices = new Float32Array(CURVE_FLOATS * 1536);
+    this.instanceLength = 0;
+    this.curveLength = 0;
     this._instanceCount = 0;
     this._curveCount = 0;
     this._instanceCapacity = 0;
     this._curveCapacity = 0;
-    this._instanceUpload = new Float32Array(0);
-    this._curveUpload = new Float32Array(0);
     // The expensive jump-flood solve depends only on solid silhouettes and
     // height, not on light, colour, hit flashes, or portal flow. Keep an exact
     // (collision-free) snapshot of that geometry so emission-only frames can
     // reuse the existing distance field.
-    this._sdfGeometry = [];
-    this._sdfGeometryScratch = [];
+    this._sdfGeometry = new Float32Array(0);
+    this._sdfGeometryScratch = new Float32Array(0);
+    this._sdfGeometryLength = 0;
     this._sdfReady = false;
     this._sdfBuilds = 0;
     this._sdfReuses = 0;
+    // Solids the game moves every frame (ball, bucket, flippers, launcher).
+    // They are kept out of the jump flood and folded into the distance field
+    // analytically instead — see _renderDistanceField.
+    this._dynamicA = new Float32Array(MAX_DYNAMIC_SOLIDS * 4);
+    this._dynamicB = new Float32Array(MAX_DYNAMIC_SOLIDS * 4);
+    this._dynamicCount = 0;
+    this._dynamicOverflow = false;
+    this._staticInstanceLength = 0;
+    // The moving set already folded into the merged field, so an idle board
+    // does not redo even that one pass. Length -1 never matches a real frame.
+    this._dynamicSnapshot = new Float32Array(MAX_DYNAMIC_SOLIDS * 8);
+    this._dynamicSnapshotLength = -1;
+    this._sdfMerged = false;
+    // Radiance history is deliberately temporal, but a scene that becomes
+    // static still needs a few final frames to converge. Without this tail the
+    // frame-skipper freezes the first partially blended result and replaces it
+    // only on its half-second heartbeat — perceived as a shadow that lingers
+    // and then vanishes in one step.
+    this._temporalSettleFrames = 0;
 
     this._programs = {};
     this._targets = null;
+    // One framebuffer per render target, keyed by texture — see _bindTarget.
+    this._fbos = new Map();
+    this._attachOne = null;
+    this._attachAll = null;
     this._flashes = new Map();
     // Per-portal animation clocks, keyed by peg id, and the frame counter used
     // to retire the ones whose pegs are gone.
@@ -1606,6 +1697,12 @@ export class GpuPlayfieldRenderer {
    *  has to keep redrawing while any flash is still fading. */
   pendingFlashCount() {
     return this._flashes.size;
+  }
+
+  /** Frames the caller must continue drawing after the last moving/emissive
+   *  input disappears, so the radiance history reaches the static solution. */
+  needsTemporalSettling() {
+    return this._temporalSettleFrames > 0;
   }
 
   /** True when the scene holds something that animates on its own (portal
@@ -1671,6 +1768,13 @@ export class GpuPlayfieldRenderer {
       this._hdr = !this.forceLdr && !!floatColor;
       this._colorInternal = this._hdr ? gl.RGBA16F : gl.RGBA8;
       this._colorType = this._hdr ? gl.HALF_FLOAT : gl.UNSIGNED_BYTE;
+      // Allocated once: drawBuffers and invalidateFramebuffer both take lists,
+      // and rebuilding them per pass would allocate ~25 arrays a frame.
+      this._attachOne = [gl.COLOR_ATTACHMENT0];
+      this._attachAll = [
+        gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1,
+        gl.COLOR_ATTACHMENT2, gl.COLOR_ATTACHMENT3
+      ];
 
       // Tells the driver it may compile and link off the main thread. Batching
       // the submissions below is what actually lets it, but several drivers only
@@ -1689,6 +1793,8 @@ export class GpuPlayfieldRenderer {
         downsample: new Program(gl, FULLSCREEN_VS, DOWNSAMPLE_FS, shaderCache),
         seed: new Program(gl, FULLSCREEN_VS, seedFragment, shaderCache),
         jfa: new Program(gl, FULLSCREEN_VS, jfaFragment, shaderCache),
+        sdfMerge: new Program(gl, FULLSCREEN_VS,
+          SDF_MERGE_FS.replace('__MAX_DYNAMIC__', String(MAX_DYNAMIC_SOLIDS)), shaderCache),
         cascade: new Program(gl, FULLSCREEN_VS, CASCADE_FS, shaderCache),
         cascadeBlend: new Program(gl, FULLSCREEN_VS, CASCADE_BLEND_FS, shaderCache),
         shade: new Program(gl, FULLSCREEN_VS, SHADE_FS, shaderCache),
@@ -1891,6 +1997,9 @@ export class GpuPlayfieldRenderer {
       scene: color(sdfWidth, sdfHeight),
       seedA: coords(sdfWidth, sdfHeight),
       seedB: coords(sdfWidth, sdfHeight),
+      // The flooded field for geometry that only changes when the level does,
+      // and the merged field the rest of the pipeline reads.
+      sdfStatic: distance(sdfWidth, sdfHeight),
       sdfDistance: distance(sdfWidth, sdfHeight),
       lit: color(rw, rh),
       litPrev: color(rw, rh),
@@ -1899,7 +2008,6 @@ export class GpuPlayfieldRenderer {
       fieldPrimed: false,
       cascades: [],
       bloom: [],
-      fbo: gl.createFramebuffer(),
       gbufferFbo: gl.createFramebuffer()
     };
 
@@ -1917,26 +2025,29 @@ export class GpuPlayfieldRenderer {
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, targets.normal, 0);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT2, gl.TEXTURE_2D, targets.emission, 0);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT3, gl.TEXTURE_2D, targets.material, 0);
-    gl.drawBuffers([
-      gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1,
-      gl.COLOR_ATTACHMENT2, gl.COLOR_ATTACHMENT3
-    ]);
+    gl.drawBuffers(this._attachAll);
     if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       throw new Error('G-buffer framebuffer incomplete');
     }
-
-    // The downsample pass reads last frame's lighting on frame one. Texture
-    // storage is intentionally uninitialised by WebGL, so seed that history
-    // explicitly instead of letting driver memory become a one-frame flash (or
-    // nondeterministic benchmark noise).
-    gl.bindFramebuffer(gl.FRAMEBUFFER, targets.fbo);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, targets.litPrev, 0);
-    gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
-    gl.clearBufferfv(gl.COLOR, 0, ZERO_CLEAR);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-
     this._targets = targets;
+
+    // Texture storage is intentionally uninitialised by WebGL, and half-float
+    // garbage can decode to NaN. Two passes read a target before anything has
+    // written it this frame: the bounce reads last frame's lighting, and the
+    // composite reads bloom levels that are skipped when bloom is off — and
+    // NaN * 0 is NaN, not nothing. Seed them once here instead.
+    const seeded = [
+      { texture: targets.litPrev, width: rw, height: rh },
+      { texture: targets.lit, width: rw, height: rh },
+      targets.bloom[1], targets.bloom[2], targets.bloom[3]
+    ];
+    for (const level of seeded) {
+      this._bindTarget(level.texture, level.width, level.height);
+      gl.clearBufferfv(gl.COLOR, 0, ZERO_CLEAR);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     this._sdfReady = false;
   }
 
@@ -1945,24 +2056,47 @@ export class GpuPlayfieldRenderer {
     const t = this._targets;
     if (!gl || !t) return;
     const owned = ['albedo', 'normal', 'emission', 'material', 'scene',
-      'seedA', 'seedB', 'sdfDistance', 'lit', 'litPrev', 'fieldA', 'fieldB'];
+      'seedA', 'seedB', 'sdfStatic', 'sdfDistance', 'lit', 'litPrev', 'fieldA', 'fieldB'];
     for (const key of owned) {
       if (t[key]) gl.deleteTexture(t[key]);
     }
     for (const texture of t.cascades) gl.deleteTexture(texture);
     for (const level of t.bloom) gl.deleteTexture(level.texture);
-    if (t.fbo) gl.deleteFramebuffer(t.fbo);
+    for (const fbo of this._fbos.values()) gl.deleteFramebuffer(fbo);
+    this._fbos.clear();
     if (t.gbufferFbo) gl.deleteFramebuffer(t.gbufferFbo);
     this._targets = null;
     this._sdfReady = false;
+    this._sdfMerged = false;
   }
 
+  /** Binds a single-attachment target for a pass that overwrites all of it.
+   *
+   *  One framebuffer per texture rather than one shared framebuffer whose
+   *  attachment is swapped: re-attaching forces the driver to re-validate the
+   *  framebuffer on each of the ~25 passes in a frame, and some mobile drivers
+   *  make that expensive.
+   *
+   *  The invalidate is the part that matters on a tiler. Every pass that comes
+   *  through here writes every texel of its target, so loading the previous
+   *  contents into tile memory first is pure wasted bandwidth — several
+   *  megabytes a frame across the pass chain. Saying so up front lets the
+   *  driver skip the load. It cannot change what is rendered, because nothing
+   *  reads what was there. */
   _bindTarget(texture, width, height) {
     const gl = this.gl;
-    gl.bindFramebuffer(gl.FRAMEBUFFER, this._targets.fbo);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
-    gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+    let fbo = this._fbos.get(texture);
+    if (fbo === undefined) {
+      fbo = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+      gl.drawBuffers(this._attachOne);
+      this._fbos.set(texture, fbo);
+    } else {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    }
     gl.viewport(0, 0, width, height);
+    if (this.discardTargets) gl.invalidateFramebuffer(gl.FRAMEBUFFER, this._attachOne);
   }
 
   _blit() {
@@ -1981,13 +2115,39 @@ export class GpuPlayfieldRenderer {
    *    up through it (and its shadow grows with it).
    *  - energy drives self-animated shapes (a portal's flow rate). */
   _pushInstance(x, y, halfW, halfH, angle, shape, hit, mat, color, emissive, extra) {
-    this.instances.push(
-      x, y, halfW, halfH,
-      angle, shape, hit, mat,
-      color[0], color[1], color[2], emissive,
-      extra ? extra[0] : 1, extra ? extra[1] : 1,
-      extra ? extra[2] : 0, extra ? extra[3] : 0
-    );
+    let data = this.instances;
+    const at = this.instanceLength;
+    if (at + INSTANCE_FLOATS > data.length) {
+      data = new Float32Array(data.length * 2);
+      data.set(this.instances);
+      this.instances = data;
+    }
+    data[at] = x; data[at + 1] = y; data[at + 2] = halfW; data[at + 3] = halfH;
+    data[at + 4] = angle; data[at + 5] = shape; data[at + 6] = hit; data[at + 7] = mat;
+    data[at + 8] = color[0]; data[at + 9] = color[1]; data[at + 10] = color[2];
+    data[at + 11] = emissive;
+    data[at + 12] = extra ? extra[0] : 1;
+    data[at + 13] = extra ? extra[1] : 1;
+    data[at + 14] = extra ? extra[2] : 0;
+    data[at + 15] = extra ? extra[3] : 0;
+    this.instanceLength = at + INSTANCE_FLOATS;
+  }
+
+  /** Records one solid the game moves every frame, so the distance field can
+   *  account for it without re-flooding. Returns false once the budget is full,
+   *  which puts the caller's geometry back under the jump flood. */
+  _pushDynamicSolid(x, y, halfW, halfH, angle, kind, corner) {
+    if (this._dynamicCount >= MAX_DYNAMIC_SOLIDS) {
+      this._dynamicOverflow = true;
+      return false;
+    }
+    const at = this._dynamicCount * 4;
+    const a = this._dynamicA;
+    const b = this._dynamicB;
+    a[at] = x; a[at + 1] = y; a[at + 2] = halfW; a[at + 3] = halfH;
+    b[at] = Math.cos(angle); b[at + 1] = Math.sin(angle); b[at + 2] = kind; b[at + 3] = corner;
+    this._dynamicCount++;
+    return true;
   }
 
   _pushCurve(peg, hit, color, mat, cameraY, offsetX, offsetY) {
@@ -2001,15 +2161,22 @@ export class GpuPlayfieldRenderer {
     const add = (slice, side, fallbackNx, fallbackNy) => {
       const nx = Number.isFinite(slice.nx) ? slice.nx : fallbackNx;
       const ny = Number.isFinite(slice.ny) ? slice.ny : fallbackNy;
+      let data = this.curveVertices;
+      const at = this.curveLength;
+      if (at + CURVE_FLOATS > data.length) {
+        data = new Float32Array(data.length * 2);
+        data.set(this.curveVertices);
+        this.curveVertices = data;
+      }
       // Unit normal plus a signed offset: the vertex shader multiplies them.
-      this.curveVertices.push(
-        slice.x + offsetX,
-        slice.y + offsetY - cameraY,
-        nx, ny,
-        side, halfWidth,
-        color[0], color[1], color[2], 0,
-        hit, mat, emerge
-      );
+      data[at] = slice.x + offsetX;
+      data[at + 1] = slice.y + offsetY - cameraY;
+      data[at + 2] = nx; data[at + 3] = ny;
+      data[at + 4] = side; data[at + 5] = halfWidth;
+      data[at + 6] = color[0]; data[at + 7] = color[1]; data[at + 8] = color[2];
+      data[at + 9] = 0;
+      data[at + 10] = hit; data[at + 11] = mat; data[at + 12] = emerge;
+      this.curveLength = at + CURVE_FLOATS;
     };
     for (let i = 1; i < slices.length; i++) {
       const a = slices[i - 1];
@@ -2270,8 +2437,10 @@ export class GpuPlayfieldRenderer {
     const width = this.width;
     const height = this.height;
     const cameraY = Number(options.cameraY) || 0;
-    this.instances.length = 0;
-    this.curveVertices.length = 0;
+    this.instanceLength = 0;
+    this.curveLength = 0;
+    this._dynamicCount = 0;
+    this._dynamicOverflow = false;
     this._animated = false;
     this._buildTick++;
     // A Map of peg id -> 0..1, or null when nothing is rising.
@@ -2336,6 +2505,12 @@ export class GpuPlayfieldRenderer {
       }
     }
 
+    // Everything appended from here on is machine hardware the game moves every
+    // frame. It is recorded separately so the distance field can fold it in
+    // analytically instead of re-flooding the whole board because a ball fell
+    // three pixels.
+    this._staticInstanceLength = this.instanceLength;
+
     // Machine hardware — ball, launcher, catcher, flippers — enters as ordinary
     // geometry so it is lit by the same solve as everything else instead of
     // being painted on top of it.
@@ -2345,50 +2520,62 @@ export class GpuPlayfieldRenderer {
       const halfH = Number.isFinite(prop.halfH) ? prop.halfH : halfW;
       const emissive = Number.isFinite(prop.emissive) ? prop.emissive : 0;
       const mat = prop.metal ? MAT_METAL : (emissive > 0.01 ? MAT_EMISSIVE : MAT_PLASTIC);
+      const angle = Number(prop.angle) || 0;
+      const x = Number(prop.x) || 0;
+      const y = (Number(prop.y) || 0) - (prop.screenSpace ? 0 : cameraY);
       this._pushInstance(
-        Number(prop.x) || 0,
-        (Number(prop.y) || 0) - (prop.screenSpace ? 0 : cameraY),
+        x, y,
         halfW, halfH,
-        Number(prop.angle) || 0,
+        angle,
         shape,
         Number(prop.hit) || 0,
         mat,
         prop.color || [0.7, 0.95, 1.0],
         emissive
       );
+      this._registerDynamicSolid(x, y, halfW, halfH, angle, shape, mat);
+    }
+  }
+
+  /** Mirrors what the seed pass would have found for one moving prop: its
+   *  profile, and whether it writes enough height to count as solid at all. */
+  _registerDynamicSolid(x, y, halfW, halfH, angle, shape, mat) {
+    // A light strip writes a height of 0.05 and a hidden fixture writes zero;
+    // both sit under the seed shader's 0.06 threshold, so neither is a boundary.
+    if (shape === SHAPE_EMITTER || mat === MAT_HIDDEN_EMITTER) return;
+    if (shape === SHAPE_DOME || shape === SHAPE_BUMPER || shape === SHAPE_BALL) {
+      this._pushDynamicSolid(x, y, halfW, halfH, angle, DYN_DISC, 0);
+    } else if (shape === SHAPE_RING) {
+      this._pushDynamicSolid(x, y, halfW, halfH, angle, DYN_ANNULUS, 0);
+    } else if (shape === SHAPE_PORTAL || shape === SHAPE_CAPSULE) {
+      this._pushDynamicSolid(x, y, halfW, halfH, angle, DYN_ROUNDBOX, Math.min(halfW, halfH));
+    } else {
+      this._pushDynamicSolid(x, y, halfW, halfH, angle, DYN_ROUNDBOX, Math.min(3.4, halfH * 0.62));
     }
   }
 
   _uploadBuffers() {
     const gl = this.gl;
-    this._instanceCount = Math.floor(this.instances.length / INSTANCE_FLOATS);
-    this._curveCount = Math.floor(this.curveVertices.length / CURVE_FLOATS);
+    this._instanceCount = Math.floor(this.instanceLength / INSTANCE_FLOATS);
+    this._curveCount = Math.floor(this.curveLength / CURVE_FLOATS);
 
+    // The scene arrays are already the upload format, so these are straight
+    // memcpys out of them — no staging copy and no per-element conversion.
     if (this._instanceCount > 0) {
-      const length = this.instances.length;
-      if (this._instanceUpload.length < length) {
-        this._instanceUpload = new Float32Array(1 << Math.ceil(Math.log2(length)));
-      }
-      this._instanceUpload.set(this.instances, 0);
       gl.bindBuffer(gl.ARRAY_BUFFER, this._instanceBuffer);
-      if (this._instanceUpload.length > this._instanceCapacity) {
-        gl.bufferData(gl.ARRAY_BUFFER, this._instanceUpload.byteLength, gl.DYNAMIC_DRAW);
-        this._instanceCapacity = this._instanceUpload.length;
+      if (this.instances.length > this._instanceCapacity) {
+        gl.bufferData(gl.ARRAY_BUFFER, this.instances.byteLength, gl.DYNAMIC_DRAW);
+        this._instanceCapacity = this.instances.length;
       }
-      gl.bufferSubData(gl.ARRAY_BUFFER, 0, this._instanceUpload, 0, length);
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, this.instances, 0, this.instanceLength);
     }
     if (this._curveCount > 0) {
-      const length = this.curveVertices.length;
-      if (this._curveUpload.length < length) {
-        this._curveUpload = new Float32Array(1 << Math.ceil(Math.log2(length)));
-      }
-      this._curveUpload.set(this.curveVertices, 0);
       gl.bindBuffer(gl.ARRAY_BUFFER, this._curveBuffer);
-      if (this._curveUpload.length > this._curveCapacity) {
-        gl.bufferData(gl.ARRAY_BUFFER, this._curveUpload.byteLength, gl.DYNAMIC_DRAW);
-        this._curveCapacity = this._curveUpload.length;
+      if (this.curveVertices.length > this._curveCapacity) {
+        gl.bufferData(gl.ARRAY_BUFFER, this.curveVertices.byteLength, gl.DYNAMIC_DRAW);
+        this._curveCapacity = this.curveVertices.length;
       }
-      gl.bufferSubData(gl.ARRAY_BUFFER, 0, this._curveUpload, 0, length);
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, this.curveVertices, 0, this.curveLength);
     }
   }
 
@@ -2399,43 +2586,57 @@ export class GpuPlayfieldRenderer {
    * nothing once the arrays have reached their high-water mark.
    */
   _distanceGeometryChanged() {
+    // Props that the merge pass will carry analytically are excluded, so an
+    // otherwise still board no longer re-floods because the ball moved. If more
+    // movers arrived than the analytic budget holds, every one of them goes
+    // back under the flood, which is slower but stays correct.
+    const instanceEnd = this._dynamicOverflow ? this.instanceLength : this._staticInstanceLength;
+    const upperBound = 2 + (instanceEnd / INSTANCE_FLOATS) * 8 + (this.curveLength / CURVE_FLOATS) * 7;
+    if (this._sdfGeometryScratch.length < upperBound) {
+      this._sdfGeometryScratch = new Float32Array(Math.ceil(upperBound * 1.5));
+    }
     const next = this._sdfGeometryScratch;
-    next.length = 0;
+    let n = 0;
 
     const instances = this.instances;
     let solidInstances = 0;
-    next.push(0); // patched with the count after emitters have been skipped
-    for (let i = 0; i < instances.length; i += INSTANCE_FLOATS) {
+    const countSlot = n++; // patched with the count after emitters are skipped
+    for (let i = 0; i < instanceEnd; i += INSTANCE_FLOATS) {
       const shape = instances[i + 5];
       const material = instances[i + 7];
       // Light strips write a fixed height of 0.05 and hidden emitters write
       // zero. Both sit below the seed shader's 0.06 solid threshold.
       if (shape === SHAPE_EMITTER || material === MAT_HIDDEN_EMITTER) continue;
       solidInstances++;
-      next.push(
-        instances[i], instances[i + 1],       // centre
-        instances[i + 2], instances[i + 3],   // extent
-        instances[i + 4], shape,               // orientation / profile
-        instances[i + 12], instances[i + 13]   // height scale / emergence
-      );
+      next[n] = instances[i];          // centre
+      next[n + 1] = instances[i + 1];
+      next[n + 2] = instances[i + 2];  // extent
+      next[n + 3] = instances[i + 3];
+      next[n + 4] = instances[i + 4];  // orientation
+      next[n + 5] = shape;             // profile
+      next[n + 6] = instances[i + 12]; // height scale
+      next[n + 7] = instances[i + 13]; // emergence
+      n += 8;
     }
-    next[0] = solidInstances;
+    next[countSlot] = solidInstances;
 
     const curves = this.curveVertices;
-    next.push(curves.length / CURVE_FLOATS);
-    for (let i = 0; i < curves.length; i += CURVE_FLOATS) {
-      next.push(
-        curves[i], curves[i + 1],       // centreline position
-        curves[i + 2], curves[i + 3],   // normal
-        curves[i + 4], curves[i + 5],   // side / half width
-        curves[i + 12]                  // emergence
-      );
+    next[n++] = this.curveLength / CURVE_FLOATS;
+    for (let i = 0; i < this.curveLength; i += CURVE_FLOATS) {
+      next[n] = curves[i];             // centreline position
+      next[n + 1] = curves[i + 1];
+      next[n + 2] = curves[i + 2];     // normal
+      next[n + 3] = curves[i + 3];
+      next[n + 4] = curves[i + 4];     // side
+      next[n + 5] = curves[i + 5];     // half width
+      next[n + 6] = curves[i + 12];    // emergence
+      n += 7;
     }
 
     const previous = this._sdfGeometry;
-    let changed = next.length !== previous.length;
+    let changed = n !== this._sdfGeometryLength;
     if (!changed) {
-      for (let i = 0; i < next.length; i++) {
+      for (let i = 0; i < n; i++) {
         if (next[i] !== previous[i]) {
           changed = true;
           break;
@@ -2445,6 +2646,7 @@ export class GpuPlayfieldRenderer {
     if (changed) {
       this._sdfGeometry = next;
       this._sdfGeometryScratch = previous;
+      this._sdfGeometryLength = n;
     }
     return changed;
   }
@@ -2455,11 +2657,10 @@ export class GpuPlayfieldRenderer {
     const gl = this.gl;
     const t = this._targets;
     gl.bindFramebuffer(gl.FRAMEBUFFER, t.gbufferFbo);
-    gl.drawBuffers([
-      gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1,
-      gl.COLOR_ATTACHMENT2, gl.COLOR_ATTACHMENT3
-    ]);
     gl.viewport(0, 0, this._renderWidth, this._renderHeight);
+    // The board pass below writes all four attachments over every texel with
+    // blending off, so last frame's G-buffer never needs loading back in.
+    if (this.discardTargets) gl.invalidateFramebuffer(gl.FRAMEBUFFER, this._attachAll);
     gl.disable(gl.BLEND);
 
     const board = this.config;
@@ -2523,6 +2724,7 @@ export class GpuPlayfieldRenderer {
     // passes when the exact solid geometry snapshot is unchanged.
     if (!rebuild && this._sdfReady) {
       this._sdfReuses++;
+      this._mergeDynamicSolids(false);
       return;
     }
     this._sdfBuilds++;
@@ -2553,17 +2755,74 @@ export class GpuPlayfieldRenderer {
       const swap = source; source = destination; destination = swap;
     }
     // One final unit step cleans up the classic jump-flood corner artifacts.
-    this._bindTarget(t.sdfDistance, t.sdfWidth, t.sdfHeight);
+    this._bindTarget(t.sdfStatic, t.sdfWidth, t.sdfHeight);
     jfa.use()
       .tex('uSeed', 0, source)
       .f('uStep', 1)
       .f('uOutputDistance', 1);
     this._blit();
-    t.sdf = t.sdfDistance;
     this._sdfReady = true;
+    this._mergeDynamicSolids(true);
   }
 
-  _renderCascades() {
+  /** True when the moving set differs from the one already merged, updating the
+   *  snapshot as a side effect. Same exact-comparison approach as the static
+   *  geometry: a wrong "unchanged" would strand a stale field. */
+  _dynamicSolidsChanged() {
+    const floats = this._dynamicCount * 4;
+    const previous = this._dynamicSnapshot;
+    let changed = floats !== this._dynamicSnapshotLength;
+    if (!changed) {
+      for (let i = 0; i < floats; i++) {
+        if (previous[i] !== this._dynamicA[i] || previous[floats + i] !== this._dynamicB[i]) {
+          changed = true;
+          break;
+        }
+      }
+    }
+    if (changed) {
+      previous.set(this._dynamicA.subarray(0, floats), 0);
+      previous.set(this._dynamicB.subarray(0, floats), floats);
+      this._dynamicSnapshotLength = floats;
+    }
+    return changed;
+  }
+
+  /** Folds this frame's moving hardware into the flooded field. One pass over a
+   *  half-resolution target with a handful of closed-form profiles, in place of
+   *  the seed plus ten flood passes the movement would otherwise have cost. */
+  _mergeDynamicSolids(rebuilt) {
+    const t = this._targets;
+    const count = this._dynamicCount;
+    if (count === 0) {
+      t.sdf = t.sdfStatic;
+      this._sdfMerged = false;
+      this._dynamicSnapshotLength = -1;
+      return;
+    }
+    // An aiming player moves nothing at all. Neither half of the field has
+    // changed then, so the merged texture from last frame still stands.
+    const moved = this._dynamicSolidsChanged();
+    if (!rebuilt && !moved && this._sdfMerged) {
+      t.sdf = t.sdfDistance;
+      return;
+    }
+    const program = this._programs.sdfMerge;
+    this._bindTarget(t.sdfDistance, t.sdfWidth, t.sdfHeight);
+    program.use()
+      .tex('uStatic', 0, t.sdfStatic)
+      .v2('uCanvas', this.width, this.height)
+      .f('uDistanceScale', Math.max(this.width, this.height));
+    const gl = this.gl;
+    gl.uniform1i(program.loc('uSolidCount'), count);
+    gl.uniform4fv(program.loc('uSolidA[0]'), this._dynamicA, 0, count * 4);
+    gl.uniform4fv(program.loc('uSolidB[0]'), this._dynamicB, 0, count * 4);
+    this._blit();
+    t.sdf = t.sdfDistance;
+    this._sdfMerged = true;
+  }
+
+  _renderCascades(bypassHistory = false) {
     const gl = this.gl;
     const t = this._targets;
     const program = this._programs.cascade;
@@ -2616,7 +2875,7 @@ export class GpuPlayfieldRenderer {
       .tex('uHistory', 1, t.fieldPrimed ? t.fieldB : t.cascades[0])
       .v2('uCascadeSize', t.cascadeWidth, t.cascadeHeight)
       .f('uBlock', 2)
-      .f('uBlend', t.fieldPrimed ? this._giBlend : 1.0);
+      .f('uBlend', t.fieldPrimed && !bypassHistory ? this._giBlend : 1.0);
     this._blit();
     const previousField = t.fieldB;
     t.fieldB = t.fieldA;
@@ -2656,6 +2915,10 @@ export class GpuPlayfieldRenderer {
   _renderBloom() {
     const t = this._targets;
     const levels = t.bloom;
+    // The composite multiplies the whole chain by this. At zero the seven
+    // passes below produce something that is then scaled to nothing, and the
+    // targets were cleared at allocation so what it reads instead is black.
+    if (!(this._bloomStrength > 0)) return;
 
     this._bindTarget(levels[0].texture, levels[0].width, levels[0].height);
     this._programs.prefilter.use()
@@ -2680,13 +2943,13 @@ export class GpuPlayfieldRenderer {
     }
   }
 
-  _renderComposite() {
+  _renderComposite(sourceTexture = this._targets?.lit) {
     const gl = this.gl;
     const t = this._targets;
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, this._renderWidth, this._renderHeight);
     this._programs.composite.use()
-      .tex('uScene', 0, t.lit)
+      .tex('uScene', 0, sourceTexture)
       .tex('uBloom1', 1, t.bloom[1].texture)
       .tex('uBloom2', 2, t.bloom[2].texture)
       .tex('uBloom3', 3, t.bloom[3].texture)
@@ -2716,6 +2979,21 @@ export class GpuPlayfieldRenderer {
       gl.uniform3fv(program.loc('uWaveC[0]'), c);
     }
     this._blit();
+  }
+
+  /** Re-present the most recently completed frame and copy it into a 2D
+   *  context. The WebGL context does not preserve its drawing buffer, so a
+   *  plain drawImage at an arbitrary later time can capture an empty board.
+   *  Re-compositing the retained lit texture makes transition captures exact
+   *  while costing only one fullscreen blit at the rare level boundary. */
+  drawTo2D(targetCtx, x = 0, y = 0, width = this.width, height = this.height) {
+    if (!targetCtx || !this.ready || !this.gl || !this._targets) return false;
+    // render() swaps lit/litPrev after presentation; litPrev is therefore the
+    // latest completed lighting result between frames.
+    this._renderComposite(this._targets.litPrev);
+    this.gl.flush();
+    targetCtx.drawImage(this.canvas, x, y, width, height);
+    return true;
   }
 
   render(pegs, hitPegIds, options = {}) {
@@ -2768,8 +3046,15 @@ export class GpuPlayfieldRenderer {
     const sky = this._skyTop;
     this._skyRef = Math.max(1e-4, 0.2126 * sky[0] + 0.7152 * sky[1] + 0.0722 * sky[2]) * 0.75;
 
+    const flashWasActive = this._flashes.size > 0;
     this._buildScene(pegs, hitPegIds, options, dt);
     const sdfGeometryChanged = this._distanceGeometryChanged();
+    const lifecycleActive = options.bypassTemporalHistory === true;
+    if (sdfGeometryChanged || flashWasActive || this._flashes.size > 0 || lifecycleActive) {
+      // Seven .55 blends leave under 0.4% of the old field; eight gives the
+      // frame skipper a conservative final frame without a visible snap.
+      this._temporalSettleFrames = 8;
+    }
     this._uploadBuffers();
 
     const gl = this.gl;
@@ -2779,7 +3064,11 @@ export class GpuPlayfieldRenderer {
     this._beginGpuTimer();
     this._renderGBuffer();
     this._renderDistanceField(!this.reuseDistanceField || sdfGeometryChanged);
-    this._renderCascades();
+    // Pegs moving through the board must take their shadow with them in the
+    // same frame. Temporal probe smoothing is useful for free-moving lights,
+    // but it is visually wrong for a disappearing solid, so lifecycle frames
+    // use the current field directly.
+    this._renderCascades(lifecycleActive);
     this._renderShading();
     this._renderBloom();
     this._renderComposite();
@@ -2790,6 +3079,8 @@ export class GpuPlayfieldRenderer {
     const previous = t.litPrev;
     t.litPrev = t.lit;
     t.lit = previous;
+
+    if (this._temporalSettleFrames > 0) this._temporalSettleFrames--;
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     return true;
@@ -2804,5 +3095,6 @@ export class GpuPlayfieldRenderer {
     this.canvas = null;
     this.gl = null;
     this.ready = false;
+    this._temporalSettleFrames = 0;
   }
 }

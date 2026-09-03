@@ -57,33 +57,6 @@
   pointer-events: none;
 }
 
-.canvas-container--soft-horizontal {
-  overflow: hidden !important;
-}
-
-.canvas-container--soft-horizontal #gameCanvas,
-.canvas-container--soft-horizontal .game-foreground-layer,
-.level-transition-canvas--soft-edge {
-  -webkit-mask-image: linear-gradient(
-    90deg,
-    transparent 0,
-    rgba(0, 0, 0, 0.25) 10px,
-    #000 34px,
-    #000 calc(100% - 34px),
-    rgba(0, 0, 0, 0.25) calc(100% - 10px),
-    transparent 100%
-  );
-  mask-image: linear-gradient(
-    90deg,
-    transparent 0,
-    rgba(0, 0, 0, 0.25) 10px,
-    #000 34px,
-    #000 calc(100% - 34px),
-    rgba(0, 0, 0, 0.25) calc(100% - 10px),
-    transparent 100%
-  );
-}
-
 /* Slot clip layer — clips decorative assets to frame bounds */
 .visual-slot-clip {
   position: absolute;

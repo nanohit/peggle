@@ -168,8 +168,8 @@ try {
     }
   }
 
-  // Knocked-out pegs mid-exit. ?exit=0.4 freezes the sink at that progress so
-  // the body, its shadow and its afterglow can be judged together.
+  // Knocked-out pegs mid-exit. ?exit=0.4 freezes the shared body/light/shadow
+  // clock at that progress so all three can be judged together.
   let exits = null;
   if (params.has('exit')) {
     const e = Math.max(0, Math.min(1, Number(params.get('exit')) || 0));
@@ -177,7 +177,7 @@ try {
     exits = taken.map((peg, i) => {
       // Stagger them, so one frame shows several stages of the same motion.
       const u = Math.max(0, Math.min(1, e + i * 0.22));
-      const sink = 1 - Math.min(1, u / 0.43);   // body gone at 43% of the glow window
+      const sink = 1 - u;
       return { peg, sink, glow: (1 - u) * (1 - u) };
     });
   }
@@ -222,7 +222,12 @@ try {
       for (const x of exits) if (x.sink > 0) emergence.set(x.peg.id, x.sink);
     }
     renderer.render(pegs, hits, {
-      width: W, height: H, timeSeconds: frame * 0.016, emergence, exits
+      width: W,
+      height: H,
+      timeSeconds: frame * 0.016,
+      emergence,
+      exits,
+      bypassTemporalHistory: !!exits
     });
   }
 
@@ -233,10 +238,21 @@ try {
     position: 'absolute', left: '0', top: '0', width: W + 'px', height: H + 'px'
   });
 
+  const capture = document.createElement('canvas');
+  capture.width = W;
+  capture.height = H;
+  const captureCtx = capture.getContext('2d');
+  const captureOk = renderer.drawTo2D(captureCtx, 0, 0, W, H);
+  const sample = captureCtx.getImageData(0, 0, W, H).data;
+  let captureEnergy = 0;
+  for (let i = 0; i < sample.length; i += 64) {
+    captureEnergy += sample[i] + sample[i + 1] + sample[i + 2];
+  }
   const err = gl.getError();
   say(`instances=${renderer._instanceCount} curves=${renderer._curveCount}`);
+  say(`capture=${captureOk} energy=${captureEnergy}`);
   say(`gl.getError=0x${err.toString(16)}`);
-  say(err === 0 ? 'RESULT: OK' : 'RESULT: GL ERROR');
+  say(err === 0 && captureOk && captureEnergy > 0 ? 'RESULT: OK' : 'RESULT: GL ERROR');
 } catch (error) {
   say('RESULT: FAIL ' + (error && error.message ? error.message : String(error)));
 }

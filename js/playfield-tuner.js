@@ -11,7 +11,7 @@
 const STORAGE_KEY = 'peggle_playfield_lighting';
 // Bumped whenever the shipped defaults change. A preset saved under an older
 // version is discarded rather than silently shadowing the new defaults.
-const LIGHTING_VERSION = 3;
+const LIGHTING_VERSION = 4;
 
 const SLIDERS = [
   { group: 'Tone', key: 'exposure', min: 0.1, max: 3, step: 0.01 },

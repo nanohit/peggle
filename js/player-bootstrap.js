@@ -2079,7 +2079,7 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
   }
 
   // --- Transition animation (level complete -> next level) ---
-  const LEVEL_SCROLL_MS = 760;
+  const LEVEL_SCROLL_MS = 680;
   const LEVEL_MAP_SCROLL_MS = LEVEL_SCROLL_MS;
   const HUD_ENTER_MS = 320;
   const PEG_INTRO_BLANK_MS = 58;
@@ -2087,26 +2087,10 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
   const PEG_INTRO_MAX_SPREAD_MS = 520;
   const PEG_INTRO_DURATION_MS = 320;
   const PEG_INTRO_DIALOGUE_PAD_MS = 80;
-  const PORTRAIT_SCROLL_SLOTS = ['character', 'characterCircle', 'healthCircle', 'healthCharCircle'];
   let transitionOverlay = null;
   let transitionTimer = null;
   let hudEnterTimer = null;
   let levelStartDialogueTimer = null;
-
-  function clearPortraitScrollFx() {
-    if (!visualLayout) return;
-    for (const slotId of PORTRAIT_SCROLL_SLOTS) {
-      visualLayout.clearSlotRuntimeFx(slotId);
-    }
-  }
-
-  function setPortraitScrollFx(offsetY, offsetX = 0) {
-    if (!visualLayout) return;
-    for (const slotId of PORTRAIT_SCROLL_SLOTS) {
-      if (!visualLayout.slotElements?.[slotId]) continue;
-      visualLayout.setSlotRuntimeFx(slotId, { translateX: offsetX, translateY: offsetY });
-    }
-  }
 
   function clearLevelTransitionArtifacts() {
     if (transitionTimer) {
@@ -2123,8 +2107,6 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     transitionOverlay = null;
     canvas.style.transition = '';
     canvas.style.transform = '';
-    canvas.parentElement?.classList.remove('canvas-container--soft-horizontal');
-    clearPortraitScrollFx();
     const gambleRoot = gambleSystem?.ui?.root;
     if (gambleRoot) {
       gambleRoot.style.transition = '';
@@ -2196,12 +2178,6 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     const transitionLevel = options.levelData && Array.isArray(options.levelData.pegs)
       ? options.levelData
       : null;
-    const isPvpTransition = transitionLevel ? ensureLevelPvp(transitionLevel).enabled : false;
-    const resolvePegIntro = (fallbackFactory) => {
-      if (options.pegIntro === false) return false;
-      if (options.pegIntro) return options.pegIntro;
-      return typeof fallbackFactory === 'function' ? fallbackFactory() : null;
-    };
     const buildStartOptions = (extra = {}) => ({
       ...(transitionLevel ? { levelData: transitionLevel, cpuDuel: options.cpuDuel === true } : {}),
       suppressInputMs: Number.isFinite(options.suppressInputMs) ? options.suppressInputMs : 650,
@@ -2210,9 +2186,7 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     });
     const frame = visualLayout.frame;
     if (!frame) {
-      startLevel(nodeId, buildStartOptions({
-        pegIntro: resolvePegIntro(() => (isPvpTransition ? createPvpPegIntroOptions() : null))
-      }));
+      startLevel(nodeId, buildStartOptions({ pegIntro: false }));
       return;
     }
 
@@ -2233,13 +2207,12 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     }
 
     if (!outgoingCanvas || canvasRect.width <= 0 || canvasRect.height <= 0) {
-      startLevel(nodeId, buildStartOptions({
-        pegIntro: resolvePegIntro(() => (isPvpTransition ? createPvpPegIntroOptions() : null))
-      }));
+      startLevel(nodeId, buildStartOptions({ pegIntro: false }));
       return;
     }
 
     const overlay = document.createElement('div');
+    overlay.className = 'level-transition-overlay';
     overlay.style.position = 'absolute';
     overlay.style.left = (canvasRect.left - frameRect.left) + 'px';
     overlay.style.top = (canvasRect.top - frameRect.top) + 'px';
@@ -2247,61 +2220,75 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     overlay.style.height = canvasRect.height + 'px';
     overlay.style.overflow = 'hidden';
     overlay.style.pointerEvents = 'none';
-    overlay.style.zIndex = '1';
+    // Opaque, single-surface transition. The old and new boards are rendered
+    // directly next to one another on this strip, then the strip moves by
+    // exactly one viewport: no overlap, alpha blend, edge mask, or second
+    // independently moving canvas.
+    overlay.style.zIndex = '8';
+    overlay.style.background = '#020711';
 
-    outgoingCanvas.style.width = '100%';
-    outgoingCanvas.style.height = '100%';
-    outgoingCanvas.className = horizontal ? 'level-transition-canvas--soft-edge' : '';
-    outgoingCanvas.style.transform = horizontal ? 'translateX(0)' : 'translateY(0)';
-    outgoingCanvas.style.transition = `transform ${LEVEL_SCROLL_MS}ms cubic-bezier(0.22, 1, 0.36, 1)`;
-    overlay.appendChild(outgoingCanvas);
+    const strip = document.createElement('canvas');
+    strip.className = 'level-transition-strip';
+    strip.width = canvas.width * (horizontal ? 2 : 1);
+    strip.height = canvas.height * (horizontal ? 1 : 2);
+    strip.style.position = 'absolute';
+    strip.style.left = '0';
+    strip.style.top = '0';
+    strip.style.width = horizontal ? '200%' : '100%';
+    strip.style.height = horizontal ? '100%' : '200%';
+    strip.style.willChange = 'transform';
+
+    const reverse = horizontal ? direction === 'left' : direction === 'down';
+    const outgoingX = horizontal && reverse ? canvas.width : 0;
+    const outgoingY = !horizontal && reverse ? canvas.height : 0;
+    const incomingX = horizontal && !reverse ? canvas.width : 0;
+    const incomingY = !horizontal && !reverse ? canvas.height : 0;
+    const axis = horizontal ? 'X' : 'Y';
+    const startPercent = reverse ? -50 : 0;
+    const endPercent = reverse ? 0 : -50;
+    const stripCtx = strip.getContext('2d');
+    stripCtx.drawImage(outgoingCanvas, outgoingX, outgoingY);
+    strip.style.transform = `translate${axis}(${startPercent}%)`;
+    overlay.appendChild(strip);
 
     frame.appendChild(overlay);
     transitionOverlay = overlay;
 
-    const translate = horizontal ? 'translateX' : 'translateY';
-    const incomingStart = horizontal
-      ? (direction === 'right' ? '100%' : '-100%')
-      : (direction === 'down' ? '-100%' : '100%');
-    const outgoingEnd = horizontal
-      ? (direction === 'right' ? '-100%' : '100%')
-      : (direction === 'down' ? '100%' : '-100%');
-    const pegIntro = resolvePegIntro(() => (isPvpTransition
-      ? createPvpPegIntroOptions(LEVEL_SCROLL_MS + PEG_INTRO_BLANK_MS)
-      : createPegIntroOptions(LEVEL_SCROLL_MS + PEG_INTRO_BLANK_MS)));
-    const pegIntroMinMs = pegIntro ? pegIntro.delayMs + PEG_INTRO_DURATION_MS : 0;
-
-    canvas.style.transition = 'none';
-    canvas.style.transform = `${translate}(${incomingStart})`;
-    if (horizontal) {
-      canvas.parentElement?.classList.add('canvas-container--soft-horizontal');
-    }
-    if (!horizontal) {
-      setPortraitScrollFx(direction === 'down' ? -canvasRect.height : canvasRect.height);
-    }
-
     const started = startLevel(nodeId, buildStartOptions({
       clearTransition: false,
-      suppressInputMs: pegIntro ? pegIntroMinMs + 120 : (
-        Number.isFinite(options.suppressInputMs) ? options.suppressInputMs : 650
-      ),
-      pegIntro
+      suppressInputMs: Number.isFinite(options.suppressInputMs)
+        ? Math.max(options.suppressInputMs, LEVEL_SCROLL_MS + 120)
+        : LEVEL_SCROLL_MS + 120,
+      // The destination is already complete on the strip. Revealing its pegs
+      // again after arrival would be a second transition layered on the first.
+      pegIntro: false
     }));
     if (!started) {
       clearLevelTransitionArtifacts();
       return;
     }
 
+    // game.start() queued its first render before this callback. Capture that
+    // completed destination frame into the adjacent half of the strip, then
+    // move the one surface by exactly one board height (or width for PvP).
     requestAnimationFrame(() => {
-      canvas.style.transition = `transform ${LEVEL_SCROLL_MS}ms cubic-bezier(0.22, 1, 0.36, 1)`;
-      canvas.style.transform = `${translate}(0)`;
-      outgoingCanvas.style.transform = `${translate}(${outgoingEnd})`;
-      if (!horizontal) setPortraitScrollFx(0, 0);
-    });
+      const incomingCanvas = document.createElement('canvas');
+      incomingCanvas.width = canvas.width;
+      incomingCanvas.height = canvas.height;
+      const incomingCtx = incomingCanvas.getContext('2d');
+      const copied = game?.renderer?.drawCompositeTo?.(incomingCtx);
+      if (!copied) incomingCtx?.drawImage(canvas, 0, 0);
+      stripCtx.drawImage(incomingCanvas, incomingX, incomingY);
+      strip.style.transition = `transform ${LEVEL_SCROLL_MS}ms cubic-bezier(0.45, 0, 0.20, 1)`;
 
-    transitionTimer = setTimeout(() => {
-      clearLevelTransitionArtifacts();
-    }, LEVEL_SCROLL_MS + 90);
+      requestAnimationFrame(() => {
+        strip.style.transform = `translate${axis}(${endPercent}%)`;
+      });
+
+      transitionTimer = setTimeout(() => {
+        clearLevelTransitionArtifacts();
+      }, LEVEL_SCROLL_MS + 90);
+    });
   }
 
   // --- Level lifecycle ---

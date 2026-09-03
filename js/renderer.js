@@ -349,10 +349,10 @@ const END_MESSAGE_FADE_IN_MS = 260;
 const END_MESSAGE_FADE_OUT_MS = 190;
 const END_MESSAGE_LIFT_PX = 18;
 const PEG_EXIT_SHRINK_MS = 180;
-// How long a knocked-out peg keeps lighting the board after its body is gone.
-// A light that switches off in the same frame the peg stops existing reads as a
-// pop; a short tail reads as the peg being extinguished.
-const PEG_EXIT_GLOW_MS = 420;
+// Body, emitted light, height and cast shadow share one exit clock. Letting an
+// invisible emitter outlive the peg left a sourceless mark on the board and,
+// combined with temporal GI, looked exactly like a stale peg shadow.
+const PEG_EXIT_GLOW_MS = PEG_EXIT_SHRINK_MS;
 
 // When a render layer's inputs are unchanged its redraw is skipped; a forced
 // redraw every N frames bounds worst-case staleness if a dirty signal is
@@ -460,6 +460,7 @@ export class Renderer {
     this._survivalBgImageSrc = '';
     this._pegExitAnimations = new Map();
     this._pegEntryAnimations = new Map();
+    this._pegLifecycleWasActive = false;
     this.onVerticalProgress = null;
     this._endMessage = {
       key: '',
@@ -1291,9 +1292,15 @@ export class Renderer {
   drawCompositeTo(targetCtx) {
     if (!targetCtx) return false;
     targetCtx.clearRect(0, 0, this.width, this.height);
+
+    // The procedural playfield is a separate WebGL canvas below the 2D detail
+    // layers. Capture it first and at logical resolution; transition snapshots
+    // that copied only `this.canvas` lost the entire lit board and therefore
+    // looked like a flat layer sliding over the real scene.
+    if (this._gpuSceneActive && this._gpuPlayfield?.drawTo2D) {
+      this._gpuPlayfield.drawTo2D(targetCtx, 0, 0, this.width, this.height);
+    }
     targetCtx.drawImage(this.canvas, 0, 0);
-    // Keep this capture CPU-only; the WebGL shockwave layer is intentionally
-    // skipped so level transitions never force a GPU -> 2D readback.
     if (this._foregroundCanvas) {
       targetCtx.drawImage(this._foregroundCanvas, 0, 0);
     }
@@ -2332,7 +2339,17 @@ export class Renderer {
     map.clear();
     this._fillPegEmergence(map);
     const exits = this._collectPegExits(map);
-    return { emergence: map.size > 0 ? map : null, exits };
+    const active = map.size > 0 || !!(exits && exits.length > 0);
+    // Also bypass history on the first frame after the lifecycle ends. That is
+    // the frame on which the last footprint leaves the SDF, and blending it
+    // with the previous field is what used to strand a shadow until heartbeat.
+    const bypassTemporalHistory = active || this._pegLifecycleWasActive === true;
+    this._pegLifecycleWasActive = active;
+    return {
+      emergence: map.size > 0 ? map : null,
+      exits,
+      bypassTemporalHistory
+    };
   }
 
   _fillPegEmergence(map) {
@@ -2357,7 +2374,8 @@ export class Renderer {
   // a flat 2D sprite shrinks on top. Instead it stays in the scene and sinks
   // back through the board (the level intro's rise, run backwards), so the cap
   // narrows, the height drops and the cast shadow retreats together. Its light
-  // then outlives the body by a short tail.
+  // now reaches zero on the same frame as the body instead of surviving as a
+  // sourceless after-image.
   //
   // Returns the exiting pegs and writes their sink progress into `emergence`,
   // which is the same channel the intro uses.
@@ -4460,6 +4478,7 @@ export class Renderer {
       // A moving light leaves the solved field settling for a few frames, so
       // keep drawing until the temporal blend has caught up.
       || (this._gpuSceneActive && this._gpuPlayfield?.pendingFlashCount() > 0)
+      || (this._gpuSceneActive && this._gpuPlayfield?.needsTemporalSettling?.())
       || (this._gpuSceneActive && this._gpuPlayfield?.hasAnimatedContent())
       || (state.ghostBricks && state.ghostBricks.length > 0)
       || (state.yoyoThreads && state.yoyoThreads.length > 0)

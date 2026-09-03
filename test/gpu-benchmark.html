@@ -21,6 +21,7 @@ const forcedRatio = Math.max(0.5, Number(params.get('ratio')) || 1);
 const quality = params.get('quality') || 'high';
 const compactTargets = params.get('compact') !== '0';
 const reuseDistanceField = params.get('reuse') !== '0';
+const discardTargets = params.get('discard') === '1';
 const forceLdr = params.get('ldr') === '1';
 const warmupFrames = Math.max(4, Number(params.get('warmup')) || 24);
 const measuredFrames = Math.max(12, Number(params.get('frames')) || 90);
@@ -89,6 +90,7 @@ const renderer = new GpuPlayfieldRenderer({
   quality,
   compactTargets,
   reuseDistanceField,
+  discardTargets,
   forceLdr,
   // The harness owns timer queries and must keep the tested preset fixed.
   adaptiveQuality: false
@@ -212,10 +214,19 @@ function nextFrame() {
   return new Promise(resolve => requestAnimationFrame(resolve));
 }
 
+// Block-mean thumbnail of the final frame. fnv1a alone cannot tell a rewrite
+// that shifted one ray step by a hair from one that moved a shadow across the
+// board: any single changed bit flips it. Comparing thumbnails between runs
+// gives a real magnitude, which is what "no visual change" has to be argued on.
+const THUMB_W = 24;
+const THUMB_H = 36;
+
 function framebufferHash(frame) {
   renderer.render(pegs, new Set(), optionsFor(frame));
-  const pixels = new Uint8Array(renderer.canvas.width * renderer.canvas.height * 4);
-  gl.readPixels(0, 0, renderer.canvas.width, renderer.canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+  const w = renderer.canvas.width;
+  const h = renderer.canvas.height;
+  const pixels = new Uint8Array(w * h * 4);
+  gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
   let hash = 2166136261;
   let sum = 0;
   for (let i = 0; i < pixels.length; i++) {
@@ -223,9 +234,87 @@ function framebufferHash(frame) {
     hash = Math.imul(hash, 16777619);
     sum += pixels[i];
   }
+  const totals = new Float64Array(THUMB_W * THUMB_H * 3);
+  const counts = new Float64Array(THUMB_W * THUMB_H);
+  for (let y = 0; y < h; y++) {
+    const ty = Math.min(THUMB_H - 1, (y * THUMB_H / h) | 0);
+    for (let x = 0; x < w; x++) {
+      const tx = Math.min(THUMB_W - 1, (x * THUMB_W / w) | 0);
+      const cell = ty * THUMB_W + tx;
+      const src = (y * w + x) * 4;
+      totals[cell * 3] += pixels[src];
+      totals[cell * 3 + 1] += pixels[src + 1];
+      totals[cell * 3 + 2] += pixels[src + 2];
+      counts[cell]++;
+    }
+  }
+  const thumb = [];
+  for (let cell = 0; cell < counts.length; cell++) {
+    const n = counts[cell] || 1;
+    for (let c = 0; c < 3; c++) thumb.push(+(totals[cell * 3 + c] / n).toFixed(3));
+  }
   return {
     fnv1a: (hash >>> 0).toString(16).padStart(8, '0'),
-    byteMean: +(sum / pixels.length).toFixed(4)
+    byteMean: +(sum / pixels.length).toFixed(4),
+    thumbSize: [THUMB_W, THUMB_H],
+    thumb
+  };
+}
+
+// Interleaved A/B of one renderer flag.
+//
+// Comparing two separate page loads cannot settle a change worth a few percent:
+// the GPU's clock state at the moment the batch runs moves the number further
+// than the change does, and it is not the same twice. Flipping the flag between
+// adjacent saturated batches inside one run puts both arms at the same clocks,
+// and alternating over several rounds averages out whatever drift is left.
+//
+// ?ab=reuseDistanceField (or discardTargets, or none for a null A/B that
+// measures the method's own noise floor).
+async function abCompare(flag, rounds, framesPerBatch, startFrame) {
+  const samples = { on: [], off: [] };
+  let frame = startFrame;
+  for (let round = 0; round < rounds; round++) {
+    for (const state of [true, false]) {
+      if (flag !== 'none') renderer[flag] = state;
+      // Let the pipeline reach the new mode's steady state before timing it:
+      // the first frame after enabling reuse still rebuilds.
+      for (let i = 0; i < 10; i++) renderer.render(pegs, new Set(), optionsFor(frame++));
+      const query = gl.createQuery();
+      gl.beginQuery(timer.TIME_ELAPSED_EXT, query);
+      for (let i = 0; i < framesPerBatch; i++) {
+        renderer.render(pegs, new Set(), optionsFor(frame++));
+      }
+      gl.endQuery(timer.TIME_ELAPSED_EXT);
+      gl.flush();
+      const deadline = performance.now() + 10000;
+      while (!gl.getQueryParameter(query, gl.QUERY_RESULT_AVAILABLE) && performance.now() < deadline) {
+        await nextFrame();
+      }
+      if (gl.getQueryParameter(query, gl.QUERY_RESULT_AVAILABLE)) {
+        const ms = gl.getQueryParameter(query, gl.QUERY_RESULT) / 1e6 / framesPerBatch;
+        samples[state ? 'on' : 'off'].push(+ms.toFixed(4));
+      }
+      gl.deleteQuery(query);
+      await nextFrame();
+    }
+  }
+  const median = (values) => {
+    if (!values.length) return null;
+    const sorted = values.slice().sort((a, b) => a - b);
+    return +sorted[Math.floor(sorted.length / 2)].toFixed(4);
+  };
+  const on = median(samples.on);
+  const off = median(samples.off);
+  return {
+    flag,
+    rounds,
+    framesPerBatch,
+    onMs: on,
+    offMs: off,
+    deltaMs: on == null || off == null ? null : +(on - off).toFixed(4),
+    deltaPct: on == null || off == null || !off ? null : +((on - off) / off * 100).toFixed(2),
+    samples
   };
 }
 
@@ -285,7 +374,22 @@ async function run() {
     gl.deleteQuery(query);
   }
 
+  // Before the A/B sweep, not after: the sweep advances the renderer hundreds of
+  // frames, and every temporal channel in the pipeline — radiance history, the
+  // bounce buffer, portal clocks, flash decay — carries that forward. Hashing
+  // afterwards compares a frame against one with a different history and reports
+  // a difference the change under test had nothing to do with.
   const hash = framebufferHash(warmupFrames + measuredFrames + batchFrames);
+
+  const abFlag = params.get('ab');
+  const ab = abFlag && timer
+    ? await abCompare(abFlag, Math.max(2, Number(params.get('abRounds')) || 6), batchFrames,
+      warmupFrames + measuredFrames + batchFrames + 1)
+    : null;
+  if (abFlag === 'reuseDistanceField') renderer.reuseDistanceField = reuseDistanceField;
+  if (abFlag === 'discardTargets') renderer.discardTargets = discardTargets;
+  // Counted over the whole session, so an A/B sweep's own flag flipping shows up
+  // here. Only comparable between runs that used the same ?ab setting.
   const targets = renderer._targets;
   const cpu = Object.fromEntries(cpuNames.map(name => [name.replace(/^_render|^_/, ''), summarize(cpuSamples[name])]));
   const gpu = Object.fromEntries(passNames.map(name => [name.replace(/^_render/, ''), summarize(gpuSamples[name])]));
@@ -296,6 +400,7 @@ async function run() {
       quality,
       compactTargets,
       reuseDistanceField,
+      discardTargets,
       forceLdr,
       ratio: forcedRatio,
       mode: active ? 'active' : 'static',
@@ -341,17 +446,37 @@ async function run() {
     },
     cpuPasses: cpu,
     gpuPasses: gpu,
+    ab,
     pixels: hash
   };
   window.__GPU_BENCH_RESULT__ = result;
   document.documentElement.dataset.benchmark = 'done';
   out.className = 'ok';
   out.textContent = JSON.stringify(result, null, 2);
+  await report(result);
 }
 
-run().catch(error => {
+// ?report=8123 posts the result to a local collector. Headless Chrome offers no
+// usable stdout, so without this the only way to read a run is to screenshot the
+// JSON and transcribe it — which makes sweeping configs from a script painful.
+async function report(payload) {
+  const port = params.get('report');
+  if (!port) return;
+  try {
+    await fetch(`http://localhost:${Number(port)}/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+  } catch (error) {
+    out.textContent += `\n\nreport failed: ${error}`;
+  }
+}
+
+run().catch(async (error) => {
   window.__GPU_BENCH_ERROR__ = String(error?.stack || error);
   document.documentElement.dataset.benchmark = 'failed';
   out.textContent = window.__GPU_BENCH_ERROR__;
+  await report({ error: window.__GPU_BENCH_ERROR__, query: Object.fromEntries(params) });
 });
 </script>
