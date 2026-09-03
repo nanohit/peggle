@@ -17,6 +17,7 @@ import {
 import {
   clearBezierExceptions,
   ensureBezierNode,
+  ensureLevelSemanticIdentity,
   recordBezierDeletedException,
   recordBezierPositionException,
   removeBezierNode,
@@ -26,6 +27,10 @@ import {
   captureBezierSemanticState,
   diffBezierSemanticStates
 } from './bezier-semantic.js';
+import {
+  declareSemanticObject,
+  describeSemanticSelection
+} from './semantic-objects.js';
 import { FLIPPER_DEFAULTS, normalizeFlipperConfig } from './flipper-defaults.js';
 import { SurvivalRuntime } from './survival-runtime.js';
 import { ensureLevelSurvival, normalizeSurvivalGamblePegProperties } from './survival-mode.js';
@@ -85,6 +90,7 @@ export class Editor {
     this.selectedPegColor = null; // custom color override, null = use type default
     this.selectedShape = 'circle';
     this.selectedPegIds = new Set();
+    this.readOnly = false;
     this.mode = 'place'; // place, select, draw
     
     // Grid settings
@@ -192,6 +198,7 @@ export class Editor {
     const canvas = this.canvas;
     
     const handleStart = (e) => {
+      if (this.readOnly) return;
       const screenPos = this.getEventScreenPosition(e);
       const pos = this.toWorldPosition(screenPos);
 
@@ -735,6 +742,7 @@ export class Editor {
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      if (this.readOnly) return;
 
       if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault();
@@ -1189,6 +1197,11 @@ export class Editor {
     this._researchCommandBefore = null;
     this._researchCommandHints = [];
     if (!level) return null;
+    // Restore the curve/peg invariant before the state is read, so a stroke
+    // that ended up rigidly displaced is recorded as a transform regardless of
+    // which interaction path got it there.
+    this.reconcileRigidBezierGroups(level);
+    ensureLevelSemanticIdentity(level);
     const after = captureBezierSemanticState(level);
     const patch = diffBezierSemanticStates(before, after, {
       thresholdPx: DEFAULT_BEZIER_EXCEPTION_THRESHOLD_PX,
@@ -1206,6 +1219,8 @@ export class Editor {
           operations: patch.operations.map(operation => ({
             type: operation.type,
             expressibility: operation.expressibility,
+            objectId: operation.objectId || null,
+            family: operation.family || null,
             groupId: operation.groupId,
             nodeId: operation.nodeId,
             reason: operation.reason || null,
@@ -1263,6 +1278,62 @@ export class Editor {
       }
       ensureBezierNode(level, groupId);
       writeBezierIntegrityDiagnostic(level, groupId, diagnostic);
+    }
+  }
+
+  /**
+   * Selection-independent invariant pass, keyed on geometry rather than on what
+   * happens to be selected.
+   *
+   * `reconcileCompleteBezierGroups` can only fire when a drag *starts* with the
+   * whole stroke selected. A stroke displaced across two commands - most of it,
+   * then the peg that was missed - therefore keeps a stale curve, and the move
+   * is recorded as `regional-transform`: a language gap that does not exist,
+   * since `transform-stroke` expresses it exactly. That is the worst possible
+   * error for the repair study, because it argues for adding an operation the
+   * language already has.
+   *
+   * Deliberate per-peg edits are unaffected: a group that is not an exact rigid
+   * image of its curve has outliers and is left alone.
+   */
+  reconcileRigidBezierGroups(level = this.levelManager.getCurrentLevel()) {
+    if (!level) return;
+    const store = this.ensureBezierCurveStore(level);
+    const pegsByGroup = new Map();
+    for (const peg of level.pegs || []) {
+      if (!peg?.bezierGroupId) continue;
+      if (!pegsByGroup.has(peg.bezierGroupId)) pegsByGroup.set(peg.bezierGroupId, []);
+      pegsByGroup.get(peg.bezierGroupId).push(peg);
+    }
+    for (const [groupId, pegs] of pegsByGroup) {
+      const curve = store[groupId];
+      if (!curve) continue;
+      const diagnostic = auditBezierGroup(curve, pegs, {
+        thresholdPx: DEFAULT_BEZIER_EXCEPTION_THRESHOLD_PX,
+        allowScale: true,
+        allowReflection: true
+      });
+      // Two correspondences fit a similarity exactly, so they cannot tell a
+      // real rigid move from a coincidence.
+      if (diagnostic.pairCount < 3 || !diagnostic.transform || diagnostic.outlierCount > 0) continue;
+      const transform = diagnostic.transform;
+      const material = Math.abs(transform.tx) > 1e-7 || Math.abs(transform.ty) > 1e-7
+        || Math.abs(transform.angle) > 1e-9 || Math.abs(transform.scale - 1) > 1e-9
+        || transform.reflect === true;
+      if (!material) continue;
+      store[groupId] = transformBezierCurve(curve, transform);
+      // Every peg is now an exact image of the curve, so any positional
+      // override recorded while the move was still partial is stale. Deleted
+      // members are a different claim and are kept.
+      const node = ensureBezierNode(level, groupId);
+      node.exceptions.overrides = {};
+      writeBezierIntegrityDiagnostic(level, groupId, {
+        ...diagnostic,
+        rmsResidualPx: 0,
+        maxResidualPx: 0,
+        outlierCount: 0,
+        outlierIndices: []
+      });
     }
   }
 
@@ -2822,6 +2893,36 @@ export class Editor {
       groupName, 
       'custom'
     );
+  }
+
+  combineSelectionIntoObject(family) {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level || this.selectedPegIds.size === 0) {
+      return { ok: false, fit: { reason: 'empty-selection' } };
+    }
+    const normalizedFamily = family === 'Cluster' ? 'LiteralCluster' : family;
+    this.beginResearchCommand(`declare-object:${String(normalizedFamily).toLowerCase()}`);
+    this.saveUndoState();
+    const result = declareSemanticObject(level, this.selectedPegIds, normalizedFamily, {
+      thresholdPx: DEFAULT_BEZIER_EXCEPTION_THRESHOLD_PX * 4,
+      fallbackToLiteral: true
+    });
+    if (!result.ok) {
+      // No state changed, so remove the undo entry created for the attempted
+      // declaration and close the pending research command without a record.
+      this.undoStack.pop();
+      this._researchCommandBefore = null;
+      this._researchCommandHints = [];
+      return result;
+    }
+    this.finishResearchCommand(`declare-object:${String(result.fit.family).toLowerCase()}`);
+    this.levelManager.save();
+    this.notifySelectionChange();
+    return result;
+  }
+
+  describeSelectedSemanticObjects() {
+    return describeSemanticSelection(this.levelManager.getCurrentLevel(), this.selectedPegIds);
   }
 
   clearAllPegs() {

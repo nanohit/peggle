@@ -1,7 +1,12 @@
 // Peggle Levels - Level management and storage
 
 import { Utils } from './utils.js';
-import { removeBezierNode } from './bezier-program.js';
+import {
+  ensureBezierNode,
+  ensureLevelSemanticIdentity,
+  ensureSemanticObjectNode,
+  removeBezierNode
+} from './bezier-program.js';
 import { PHYSICS_CONFIG, DEFAULT_PEG_RADIUS } from './physics.js';
 import { normalizeFlipperConfig } from './flipper-defaults.js';
 import {
@@ -158,6 +163,10 @@ export function normalizeLevelData(level) {
     level.metadata.authorNotes = '';
   }
 
+  // Runtime peg/group IDs are intentionally disposable. Semantic IDs are not:
+  // repair diffs, declarations and replay all depend on them surviving import.
+  ensureLevelSemanticIdentity(level);
+
   level.visuals = normalizeVisuals(level.visuals);
   level.character = normalizeLevelCharacterAssignment(level.character);
   level.dialogue = normalizeDialogueConfig(level.dialogue);
@@ -295,6 +304,10 @@ export class LevelManager {
     
     const newPeg = {
       id: Utils.generateId(),
+      memberId: peg.bezierGroupId && Number.isFinite(peg.bezierIndex)
+        ? `${String(peg.bezierGroupId)}:member:${Number(peg.bezierIndex)}`
+        : `member:${Utils.generateId()}`,
+      objectId: peg.bezierGroupId ? String(peg.bezierGroupId) : `literal:${Utils.generateId()}`,
       type: normalizePegType(peg.type),
       x: peg.x,
       y: peg.y,
@@ -391,6 +404,12 @@ export class LevelManager {
     }
 
     level.pegs.push(newPeg);
+    const semanticNode = newPeg.bezierGroupId
+      ? ensureBezierNode(level, newPeg.bezierGroupId)
+      : ensureSemanticObjectNode(level, newPeg.objectId, 'LiteralCluster');
+    if (semanticNode && !semanticNode.memberIds.includes(newPeg.memberId)) {
+      semanticNode.memberIds.push(newPeg.memberId);
+    }
     level.metadata.modified = new Date().toISOString();
     this.save();
     
@@ -410,6 +429,7 @@ export class LevelManager {
         if (level.bezierCurves) delete level.bezierCurves[bezierGroupId];
         removeBezierNode(level, bezierGroupId);
       }
+      ensureLevelSemanticIdentity(level);
       level.metadata.modified = new Date().toISOString();
       this.save();
       return true;
@@ -432,6 +452,7 @@ export class LevelManager {
       if (level.bezierCurves) delete level.bezierCurves[bezierGroupId];
       removeBezierNode(level, bezierGroupId);
     }
+    ensureLevelSemanticIdentity(level);
     level.metadata.modified = new Date().toISOString();
     this.save();
   }
@@ -713,6 +734,9 @@ export class LevelManager {
   // Save to localStorage as a best-effort editor cache. Remote save is handled
   // by PeggleApp; quota failures here must never spam console or block editing.
   save() {
+    try { this.onDidSave?.(this.getCurrentLevel()); } catch (error) {
+      console.warn('[levels] onDidSave hook failed:', error);
+    }
     if (typeof localStorage === 'undefined' || typeof localStorage.setItem !== 'function') return false;
     const now = Date.now();
     if (this._localSaveQuotaBlockedUntil > now) return false;

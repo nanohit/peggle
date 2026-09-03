@@ -3,6 +3,13 @@
 import { Game } from './game.js';
 import { Editor } from './editor.js';
 import { LevelManager, cloneLevelSnapshot, normalizeLevelData } from './levels.js';
+import {
+  finishRepairSession,
+  loadSavedRepairSession,
+  recordRepairTransaction,
+  saveRepairSession,
+  startRepairSession
+} from './repair-session.js';
 import { PHYSICS_CONFIG, DEFAULT_PEG_RADIUS } from './physics.js';
 import { FLIPPER_DEFAULTS, createDefaultFlipperConfig, normalizeFlipperConfig } from './flipper-defaults.js';
 import {
@@ -319,6 +326,10 @@ class PeggleApp {
     };
     this.game = null;
     this.editor = null;
+    this.repairSession = null;
+    this._repairRuntimeLevelId = null;
+    this._repairReturnLevelId = null;
+    this._repairSwitching = false;
     this.gambleSystem = null;
     this.visualLayout = new VisualLayout();
     this._editingCampaignId = null;
@@ -374,6 +385,10 @@ class PeggleApp {
     this._mountEditorSideSheets();
     this.setupUI();
     this.initMode();
+    const savedRepairSession = loadSavedRepairSession();
+    if (savedRepairSession && !savedRepairSession.finishedAt) {
+      this._activateRepairSession(savedRepairSession, { resumed: true });
+    }
 
     // One-time diagnostics
     this._logDiagnostics();
@@ -425,6 +440,7 @@ class PeggleApp {
           <button id="importBtn" class="admin-btn">Import Level</button>
           <button id="importLinkBtn" class="admin-btn">Import Player Link</button>
           <button id="exportTrainingBtn" class="admin-btn">Export Training</button>
+          <button id="repairSessionBtn" class="admin-btn">Start / Resume Repair Study</button>
         </div>
       </div>
     `;
@@ -991,6 +1007,21 @@ class PeggleApp {
       document.getElementById('actionsOverlay').classList.remove('visible');
     });
 
+    document.getElementById('combineObjectBtn')?.addEventListener('click', () => {
+      if (!this.editor) return;
+      const family = document.getElementById('semanticFamilySelect')?.value || 'LiteralCluster';
+      const result = this.editor.combineSelectionIntoObject(family);
+      if (!result.ok) {
+        alert(`Could not combine selection: ${result.fit?.reason || 'unknown fit error'}`);
+        return;
+      }
+      const message = result.fit.literalFallback && family !== 'LiteralCluster'
+        ? `${family} fit was rejected (${result.fit.fallbackReason}); stored as a literal cluster.`
+        : `Declared ${result.fit.family} with ${result.fit.diagnostics?.memberCount || 0} pegs.`;
+      alert(message);
+      document.getElementById('actionsOverlay').classList.remove('visible');
+    });
+
     document.getElementById('rotateBtn').addEventListener('click', () => {
       if (this.editor) this.editor.rotateSelectedPegs(Math.PI / 12);
       document.getElementById('actionsOverlay').classList.remove('visible');
@@ -1089,6 +1120,14 @@ class PeggleApp {
 
     document.getElementById('exportTrainingBtn').addEventListener('click', () => {
       this.exportTrainingData();
+    });
+
+    document.getElementById('repairSessionBtn')?.addEventListener('click', () => {
+      if (this.repairSession && !this.repairSession.finishedAt) {
+        this._activateRepairSession(this.repairSession, { resumed: true });
+      } else {
+        this.importRepairSession();
+      }
     });
 
     // Physics settings button
@@ -3643,7 +3682,10 @@ class PeggleApp {
     };
 
     this.editor.onSelectionChange = (count) => {
-      document.getElementById('selectionCount').textContent = count > 0 ? `Selected: ${count}` : '';
+      const summary = this.editor.describeSelectedSemanticObjects?.();
+      document.getElementById('selectionCount').textContent = count > 0
+        ? (summary?.text || `Selected: ${count}`)
+        : '';
       this.syncSelectionPanels();
     };
 
@@ -6426,6 +6468,303 @@ class PeggleApp {
   closeDialogueEditor() {
     document.getElementById('dialogueOverlay').classList.remove('visible');
     this._hideDialoguePreview();
+  }
+
+  _ensureRepairSessionPanel() {
+    let panel = document.getElementById('repairSessionPanel');
+    if (panel) return panel;
+    panel = document.createElement('aside');
+    panel.id = 'repairSessionPanel';
+    panel.className = 'repair-session-panel';
+    panel.innerHTML = `
+      <div class="repair-session-header">
+        <div>
+          <div class="repair-session-kicker">Repair Study</div>
+          <div id="repairPosition" class="repair-session-position">1 / 6</div>
+        </div>
+        <button id="repairMinimizeBtn" class="header-btn" type="button" title="Minimize">−</button>
+      </div>
+      <div class="repair-session-body">
+        <div id="repairCandidateRole" class="repair-session-role"></div>
+        <h2 id="repairCandidateName" class="repair-session-name"></h2>
+        <div id="repairCandidateMeta" class="repair-session-meta"></div>
+        <div id="repairKnownDefect" class="repair-known-defect"></div>
+        <div class="repair-view-toggle" role="group" aria-label="Compare baseline and current level">
+          <button id="repairBeforeBtn" type="button">Before</button>
+          <button id="repairCurrentBtn" type="button">Current</button>
+        </div>
+        <label class="repair-field">
+          <span>Note</span>
+          <textarea id="repairNote" rows="3" placeholder="What you changed or noticed"></textarea>
+        </label>
+        <label class="repair-field">
+          <span>Wanted X, did Y</span>
+          <textarea id="repairFrictionNote" rows="3" placeholder="Where the editor or language fought your intent"></textarea>
+        </label>
+        <label class="repair-field repair-reason-field">
+          <span>Reason for Defer / Unfixable</span>
+          <textarea id="repairDispositionReason" rows="2" placeholder="Required for Defer or Unfixable"></textarea>
+        </label>
+        <div class="repair-dispositions">
+          <button data-repair-disposition="done" type="button">Done</button>
+          <button data-repair-disposition="deferred" type="button">Defer</button>
+          <button data-repair-disposition="unfixable" type="button">Unfixable</button>
+        </div>
+        <div id="repairAutosaveStatus" class="repair-autosave-status">Autosave ready</div>
+        <div id="repairSessionStatus" class="repair-session-status" aria-live="polite"></div>
+      </div>
+      <div class="repair-session-footer">
+        <button id="repairPrevBtn" type="button">← Previous</button>
+        <button id="repairNextBtn" type="button">Next →</button>
+        <button id="repairFinishBtn" type="button" class="repair-finish-btn">Finish & export</button>
+      </div>
+    `;
+    document.body.appendChild(panel);
+
+    panel.querySelector('#repairMinimizeBtn')?.addEventListener('click', () => panel.classList.toggle('minimized'));
+    panel.querySelector('#repairBeforeBtn')?.addEventListener('click', () => this._loadRepairCandidate(this.repairSession?.activeIndex || 0, 'before'));
+    panel.querySelector('#repairCurrentBtn')?.addEventListener('click', () => this._loadRepairCandidate(this.repairSession?.activeIndex || 0, 'current'));
+    panel.querySelector('#repairPrevBtn')?.addEventListener('click', () => this._loadRepairCandidate((this.repairSession?.activeIndex || 0) - 1, 'current'));
+    panel.querySelector('#repairNextBtn')?.addEventListener('click', () => this._loadRepairCandidate((this.repairSession?.activeIndex || 0) + 1, 'current'));
+    panel.querySelector('#repairFinishBtn')?.addEventListener('click', () => this._finishAndExportRepairSession());
+    panel.querySelectorAll('[data-repair-disposition]').forEach(button => {
+      button.addEventListener('click', () => this._setRepairDisposition(button.dataset.repairDisposition));
+    });
+    for (const id of ['repairNote', 'repairFrictionNote', 'repairDispositionReason']) {
+      panel.querySelector(`#${id}`)?.addEventListener('input', () => this._captureRepairPanelFields());
+    }
+    return panel;
+  }
+
+  importRepairSession() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json,application/json';
+    input.onchange = async event => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      try {
+        const definition = JSON.parse(await file.text());
+        const session = startRepairSession(definition);
+        this._activateRepairSession(session, { resumed: false });
+      } catch (error) {
+        console.error('[repair-session] import failed:', error);
+        alert(`Could not start repair study: ${error.message}`);
+      }
+    };
+    input.click();
+  }
+
+  _activateRepairSession(session, options = {}) {
+    if (!this.repairSession) this._repairReturnLevelId = this.levelManager.getCurrentLevel()?.id || null;
+    this.repairSession = session;
+    this._ensureRepairSessionPanel().classList.add('visible');
+    if (!this._preRepairOnDidSave) this._preRepairOnDidSave = this.levelManager.onDidSave || null;
+    this.levelManager.onDidSave = level => {
+      this._preRepairOnDidSave?.(level);
+      this._autosaveRepairLevel(level);
+    };
+    this._loadRepairCandidate(Number(session.activeIndex || 0), session.comparisonView || 'current', {
+      skipCapture: options.resumed === true
+    });
+  }
+
+  _cleanRepairRuntimeSnapshot(level, candidate) {
+    const snapshot = cloneLevelSnapshot(level);
+    snapshot.id = candidate.baselineLevel.id;
+    if (snapshot.metadata) delete snapshot.metadata.repairSessionRuntime;
+    return snapshot;
+  }
+
+  _captureRepairPanelFields() {
+    const session = this.repairSession;
+    if (!session) return;
+    const candidate = session.candidates[session.activeIndex];
+    const panel = document.getElementById('repairSessionPanel');
+    if (!candidate || !panel) return;
+    candidate.note = panel.querySelector('#repairNote')?.value || '';
+    candidate.frictionNote = panel.querySelector('#repairFrictionNote')?.value || '';
+    candidate.dispositionReason = panel.querySelector('#repairDispositionReason')?.value || '';
+    saveRepairSession(session);
+    this._showRepairAutosaved();
+  }
+
+  _captureCurrentRepairLevel() {
+    const session = this.repairSession;
+    if (!session || this._repairSwitching || session.comparisonView === 'before') return;
+    const candidate = session.candidates[session.activeIndex];
+    const level = this.levelManager.getCurrentLevel();
+    if (!candidate || !level || level.id !== this._repairRuntimeLevelId) return;
+    recordRepairTransaction(candidate, this._cleanRepairRuntimeSnapshot(level, candidate));
+    saveRepairSession(session);
+    this._showRepairAutosaved();
+  }
+
+  _autosaveRepairLevel(level) {
+    if (!this.repairSession || this._repairSwitching || this.repairSession.comparisonView === 'before') return;
+    if (!level || level.id !== this._repairRuntimeLevelId) return;
+    if (this._repairAutosaveQueued) return;
+    this._repairAutosaveQueued = true;
+    queueMicrotask(() => {
+      this._repairAutosaveQueued = false;
+      if (!this.repairSession || this._repairSwitching || this.repairSession.comparisonView === 'before') return;
+      const current = this.levelManager.getCurrentLevel();
+      if (!current || current.id !== this._repairRuntimeLevelId) return;
+      const candidate = this.repairSession.candidates[this.repairSession.activeIndex];
+      recordRepairTransaction(candidate, this._cleanRepairRuntimeSnapshot(current, candidate));
+      saveRepairSession(this.repairSession);
+      this._showRepairAutosaved();
+    });
+  }
+
+  _showRepairAutosaved() {
+    const target = document.getElementById('repairAutosaveStatus');
+    if (!target) return;
+    if (this.repairSession?.autosave?.status === 'failed') {
+      target.textContent = `Autosave failed: ${this.repairSession.autosave.error}`;
+      target.classList.add('failed');
+    } else {
+      target.textContent = `Autosaved ${new Date().toLocaleTimeString()}`;
+      target.classList.remove('failed');
+    }
+  }
+
+  _loadRepairCandidate(index, view = 'current', options = {}) {
+    const session = this.repairSession;
+    if (!session) return;
+    const nextIndex = Math.max(0, Math.min(session.candidates.length - 1, Number(index) || 0));
+    if (!options.skipCapture) {
+      this._captureRepairPanelFields();
+      this._captureCurrentRepairLevel();
+    }
+    this._repairSwitching = true;
+    try {
+      session.activeIndex = nextIndex;
+      session.comparisonView = view === 'before' ? 'before' : 'current';
+      const candidate = session.candidates[nextIndex];
+      const sourceLevel = session.comparisonView === 'before' ? candidate.baselineLevel : candidate.currentLevel;
+      const runtimeLevel = cloneLevelSnapshot(sourceLevel);
+      this._repairRuntimeLevelId = `repair-runtime:${session.sessionId}:${candidate.id}`;
+      runtimeLevel.id = this._repairRuntimeLevelId;
+      runtimeLevel.metadata ||= {};
+      runtimeLevel.metadata.repairSessionRuntime = {
+        sessionId: session.sessionId, candidateId: candidate.id, view: session.comparisonView
+      };
+      if (this._repairRuntimeLevelId) {
+        this.levelManager.levels = this.levelManager.levels.filter(level => !level?.metadata?.repairSessionRuntime);
+      }
+      this.levelManager.levels.push(runtimeLevel);
+      this.levelManager.currentLevelIndex = this.levelManager.levels.length - 1;
+      this.levelManager.save();
+      this.updateLevelTitle();
+      this.startEditor();
+      this.editor.readOnly = session.comparisonView === 'before';
+      document.body.classList.toggle('repair-before-view', this.editor.readOnly);
+      saveRepairSession(session);
+      this._renderRepairSessionPanel();
+    } finally {
+      this._repairSwitching = false;
+    }
+  }
+
+  _renderRepairSessionPanel() {
+    const session = this.repairSession;
+    const panel = this._ensureRepairSessionPanel();
+    if (!session) return;
+    const candidate = session.candidates[session.activeIndex];
+    panel.querySelector('#repairPosition').textContent = `${session.activeIndex + 1} / ${session.candidates.length}`;
+    panel.querySelector('#repairCandidateRole').textContent = candidate.role === 'control' ? 'Calibration control' : 'Exploratory repair';
+    panel.querySelector('#repairCandidateName').textContent = candidate.baselineLevel.name || candidate.id;
+    const source = candidate.source || {};
+    panel.querySelector('#repairCandidateMeta').textContent = [
+      source.compositionFamily,
+      `${candidate.currentLevel?.pegs?.length || 0} pegs`,
+      candidate.disposition !== 'pending' ? candidate.disposition : null
+    ].filter(Boolean).join(' · ');
+    const defect = panel.querySelector('#repairKnownDefect');
+    defect.textContent = candidate.knownDefect?.instruction || '';
+    defect.hidden = !candidate.knownDefect?.instruction;
+    panel.querySelector('#repairNote').value = candidate.note || '';
+    panel.querySelector('#repairFrictionNote').value = candidate.frictionNote || '';
+    panel.querySelector('#repairDispositionReason').value = candidate.dispositionReason || '';
+    panel.querySelector('#repairBeforeBtn').classList.toggle('active', session.comparisonView === 'before');
+    panel.querySelector('#repairCurrentBtn').classList.toggle('active', session.comparisonView !== 'before');
+    panel.querySelector('#repairPrevBtn').disabled = session.activeIndex === 0;
+    panel.querySelector('#repairNextBtn').disabled = session.activeIndex === session.candidates.length - 1;
+    panel.querySelectorAll('[data-repair-disposition]').forEach(button => {
+      button.classList.toggle('active', button.dataset.repairDisposition === candidate.disposition);
+    });
+  }
+
+  _setRepairDisposition(disposition) {
+    const session = this.repairSession;
+    if (!session) return;
+    if (session.comparisonView === 'before') {
+      this._loadRepairCandidate(session.activeIndex, 'current');
+      return;
+    }
+    this._captureRepairPanelFields();
+    this._captureCurrentRepairLevel();
+    const candidate = session.candidates[session.activeIndex];
+    if (['deferred', 'unfixable'].includes(disposition) && !candidate.dispositionReason.trim()) {
+      const status = document.getElementById('repairSessionStatus');
+      if (status) status.textContent = 'Add a reason before Defer or Unfixable.';
+      document.getElementById('repairDispositionReason')?.focus();
+      return;
+    }
+    candidate.disposition = disposition;
+    candidate.completedAt = new Date().toISOString();
+    saveRepairSession(session);
+    const nextPending = session.candidates.findIndex((value, index) => index > session.activeIndex && value.disposition === 'pending');
+    if (nextPending >= 0) this._loadRepairCandidate(nextPending, 'current', { skipCapture: true });
+    else this._renderRepairSessionPanel();
+  }
+
+  _finishAndExportRepairSession() {
+    const session = this.repairSession;
+    if (!session) return;
+    this._captureRepairPanelFields();
+    this._captureCurrentRepairLevel();
+    const result = finishRepairSession(session);
+    const status = document.getElementById('repairSessionStatus');
+    if (result.status !== 'complete') {
+      const summary = result.blockingFailures.slice(0, 3)
+        .map(failure => `${failure.candidateId}: ${failure.failures.join(', ')}`).join(' | ');
+      if (status) status.textContent = `Finish blocked — ${summary}`;
+      return;
+    }
+    saveRepairSession(session);
+    const blob = new Blob([JSON.stringify(result, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `${session.sessionId.replace(/[^a-z0-9_-]/gi, '_')}-result.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    if (status) status.textContent = 'All gates passed. One result file exported.';
+    this._endRepairSession();
+  }
+
+  _endRepairSession() {
+    const returnLevelId = this._repairReturnLevelId;
+    this._repairSwitching = true;
+    this.levelManager.levels = this.levelManager.levels.filter(level => !level?.metadata?.repairSessionRuntime);
+    let index = returnLevelId ? this.levelManager.levels.findIndex(level => level.id === returnLevelId) : -1;
+    if (index < 0 && this.levelManager.levels.length > 0) index = 0;
+    this.levelManager.currentLevelIndex = index;
+    this.levelManager.onDidSave = this._preRepairOnDidSave || null;
+    this._preRepairOnDidSave = null;
+    this.levelManager.save();
+    this._repairSwitching = false;
+    this.repairSession = null;
+    this._repairRuntimeLevelId = null;
+    this._repairReturnLevelId = null;
+    document.body.classList.remove('repair-before-view');
+    document.getElementById('repairSessionPanel')?.classList.remove('visible');
+    if (this.levelManager.getCurrentLevel()) {
+      this.updateLevelTitle();
+      this.startEditor();
+    }
   }
 
   async exportLevel() {

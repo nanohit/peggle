@@ -42,15 +42,29 @@ function normalizeBrickAngle(value) {
   return Math.abs(angle) < 1e-12 ? 0 : angle;
 }
 
-function memberSnapshot(peg) {
+const DERIVED_OR_VOLATILE_PEG_KEYS = new Set([
+  'id', 'memberId', 'objectId', 'groupId', 'bezierGroupId', 'bezierIndex',
+  'x', 'y', 'angle', 'shape', 'type', 'curveSlices'
+]);
+
+function memberSnapshot(peg, ordinal = 0) {
   const shape = peg.shape || 'circle';
+  const properties = {};
+  for (const [key, value] of Object.entries(peg || {})) {
+    if (DERIVED_OR_VOLATILE_PEG_KEYS.has(key)) continue;
+    properties[key] = clone(value);
+  }
   return {
-    index: Number(peg.bezierIndex),
+    memberId: String(peg.memberId || (peg.bezierGroupId && Number.isFinite(peg.bezierIndex)
+      ? `${peg.objectId || peg.bezierGroupId}:member:${Number(peg.bezierIndex)}`
+      : `legacy-member:${peg.id || ordinal}`)),
+    index: Number.isFinite(peg.bezierIndex) ? Number(peg.bezierIndex) : ordinal,
     x: Number(peg.x),
     y: Number(peg.y),
     angle: shape === 'brick' ? normalizeBrickAngle(peg.angle) : 0,
     shape,
-    type: peg.type || 'blue'
+    type: peg.type || 'blue',
+    properties
   };
 }
 
@@ -69,37 +83,62 @@ function semanticLineage(lineage) {
   if (!lineage || typeof lineage !== 'object') return null;
   const result = {};
   for (const [key, value] of Object.entries(lineage)) {
-    if (key === 'integrity' || key === 'nodeId') continue;
+    if (['integrity', 'nodeId', 'objectId', 'memberIds', 'binding', 'family'].includes(key)) continue;
     result[key] = key === 'exceptions' ? semanticExceptions(value) : clone(value);
   }
-  if (!result.family) result.family = 'BezierStroke';
-  if (!result.exceptions) result.exceptions = semanticExceptions(null);
   return result;
 }
 
 export function captureBezierSemanticState(level) {
   const curves = level?.bezierCurves && typeof level.bezierCurves === 'object' ? level.bezierCurves : {};
   const members = new Map();
-  for (const peg of level?.pegs || []) {
-    if (!peg?.bezierGroupId) continue;
-    if (!members.has(peg.bezierGroupId)) members.set(peg.bezierGroupId, []);
-    members.get(peg.bezierGroupId).push(memberSnapshot(peg));
+  for (const [ordinal, peg] of (level?.pegs || []).entries()) {
+    if (!peg) continue;
+    const objectId = String(peg.objectId || peg.bezierGroupId || `legacy-object:${peg.memberId || peg.id || ordinal}`);
+    if (!members.has(objectId)) members.set(objectId, []);
+    members.get(objectId).push(memberSnapshot(peg, ordinal));
   }
   const lineage = level?.metadata?.generatorProgram?.nodes || {};
-  const groupIds = new Set([...Object.keys(curves), ...members.keys(), ...Object.keys(lineage)]);
+  const curveBindings = new Map();
+  for (const [objectId, node] of Object.entries(lineage)) {
+    const groupId = node?.binding?.bezierGroupId
+      || (node?.family === 'BezierStroke' ? objectId : null);
+    if (groupId) curveBindings.set(String(groupId), String(node?.objectId || objectId));
+  }
+  for (const groupId of Object.keys(curves)) {
+    if (!curveBindings.has(groupId)) curveBindings.set(groupId, groupId);
+  }
+  const objectIds = new Set([...members.keys(), ...Object.keys(lineage), ...curveBindings.values()]);
   const nodes = {};
-  for (const groupId of [...groupIds].sort()) {
-    const groupMembers = (members.get(groupId) || []).sort((left, right) => left.index - right.index);
-    if (!curves[groupId] && groupMembers.length === 0 && !lineage[groupId]) continue;
-    nodes[groupId] = {
+  for (const objectId of [...objectIds].sort()) {
+    const rawNode = lineage[objectId] || Object.values(lineage).find(node => node?.objectId === objectId) || null;
+    const groupId = rawNode?.binding?.bezierGroupId
+      || ([...curveBindings].find(([_groupId, boundObjectId]) => boundObjectId === objectId)?.[0] || null);
+    const family = String(rawNode?.family || (groupId ? 'BezierStroke' : 'LiteralCluster'));
+    const groupMembers = (members.get(objectId) || []).sort((left, right) => (
+      (left.index - right.index) || left.memberId.localeCompare(right.memberId)
+    ));
+    if (!groupId && groupMembers.length === 0 && !rawNode) continue;
+    const nodeLineage = semanticLineage(rawNode) || {};
+    nodeLineage.family = family;
+    if (family === 'BezierStroke' && !nodeLineage.exceptions) nodeLineage.exceptions = semanticExceptions(rawNode?.exceptions);
+    nodes[objectId] = {
+      objectId,
+      family,
       groupId,
-      nodeId: String(lineage[groupId]?.nodeId || `bezier:${groupId}`),
-      curve: clone(curves[groupId] || null),
-      lineage: semanticLineage(lineage[groupId]),
+      nodeId: String(rawNode?.nodeId || objectId),
+      binding: groupId ? { type: 'bezier', bezierGroupId: groupId } : clone(rawNode?.binding || null),
+      definition: clone(rawNode?.definition || null),
+      curve: clone(groupId ? curves[groupId] || null : null),
+      lineage: nodeLineage,
       members: groupMembers
     };
   }
-  return { format: 'bezier-semantic-state', version: 2, nodes };
+  return { format: 'semantic-object-state', version: 3, nodes };
+}
+
+function memberKey(member) {
+  return String(member?.memberId || `index:${member?.index}`);
 }
 
 function bakeNodeMembers(node) {
@@ -125,18 +164,24 @@ function bakeNodeMembers(node) {
     if (deleted.has(index)) return [];
     const override = exceptions.overrides[String(index)];
     return [{
+      memberId: `${node.objectId || node.groupId}:member:${index}`,
       index,
       x: Number.isFinite(override?.x) ? override.x : value.x,
       y: Number.isFinite(override?.y) ? override.y : value.y,
       angle: shape === 'brick' ? normalizeBrickAngle(value.angle) : 0,
       shape,
-      type: curve.pegType || 'blue'
+      type: curve.pegType || 'blue',
+      properties: shape === 'brick'
+        ? { width: Number(curve.brickWidth || brickWidth), height: Number(curve.brickHeight || pegRadius * 1.2) }
+        : {}
     }];
   });
 }
 
 function cleanStrokePayload(node) {
   const payload = {
+    objectId: node.objectId || node.groupId,
+    family: node.family || 'BezierStroke',
     groupId: node.groupId,
     nodeId: node.nodeId,
     curve: clone(node.curve),
@@ -146,6 +191,20 @@ function cleanStrokePayload(node) {
   payload.lineage ||= { family: 'BezierStroke', exceptions: semanticExceptions(null) };
   payload.lineage.exceptions = semanticExceptions(null);
   return payload;
+}
+
+function cleanObjectPayload(node) {
+  return {
+    objectId: node.objectId,
+    family: node.family || 'LiteralCluster',
+    groupId: node.groupId || null,
+    nodeId: node.nodeId || node.objectId,
+    binding: clone(node.binding || null),
+    definition: clone(node.definition || null),
+    curve: clone(node.curve || null),
+    lineage: clone(node.lineage || { family: node.family || 'LiteralCluster' }),
+    members: clone(node.members || [])
+  };
 }
 
 function curvePairs(before, after) {
@@ -195,21 +254,23 @@ function controlPointDeltas(before, after) {
 }
 
 function memberDifference(beforeMembers, afterMembers, thresholdPx) {
-  const left = new Map((beforeMembers || []).map(member => [member.index, member]));
-  const right = new Map((afterMembers || []).map(member => [member.index, member]));
+  const left = new Map((beforeMembers || []).map(member => [memberKey(member), member]));
+  const right = new Map((afterMembers || []).map(member => [memberKey(member), member]));
   const changes = [];
-  for (const index of [...new Set([...left.keys(), ...right.keys()])].sort((a, b) => a - b)) {
-    const before = left.get(index) || null;
-    const after = right.get(index) || null;
+  for (const key of [...new Set([...left.keys(), ...right.keys()])].sort()) {
+    const before = left.get(key) || null;
+    const after = right.get(key) || null;
+    const index = Number.isFinite(after?.index) ? after.index : before?.index;
     if (!before || !after) {
-      changes.push({ index, kind: before ? 'delete-member' : 'add-member', before: clone(before), after: clone(after) });
+      changes.push({ memberId: key, index, kind: before ? 'delete-member' : 'add-member', before: clone(before), after: clone(after) });
       continue;
     }
     const positionChanged = !pointsClose(before, after, thresholdPx);
     const propertyChanged = before.shape !== after.shape || before.type !== after.type
-      || !close(normalizeBrickAngle(before.angle), normalizeBrickAngle(after.angle), 1e-6);
+      || !close(normalizeBrickAngle(before.angle), normalizeBrickAngle(after.angle), 1e-6)
+      || !same(before.properties || {}, after.properties || {});
     if (positionChanged || propertyChanged) {
-      changes.push({ index, kind: 'update-member', before: clone(before), after: clone(after) });
+      changes.push({ memberId: key, index, kind: 'update-member', before: clone(before), after: clone(after) });
     }
   }
   return changes;
@@ -272,6 +333,7 @@ function buildFallbackOperation(groupId, nodeId, changes, afterLineage, threshol
   return {
     type: 'object-exception',
     expressibility: 'fallback',
+    objectId: groupId,
     groupId,
     nodeId,
     changes,
@@ -289,22 +351,45 @@ function buildFallbackOperation(groupId, nodeId, changes, afterLineage, threshol
 
 function applyOperation(result, operation) {
   result.nodes ||= {};
-  if (operation.type === 'delete-stroke') {
-    delete result.nodes[operation.groupId];
+  const objectId = String(operation.objectId || operation.groupId || '');
+  if (operation.type === 'delete-stroke' || operation.type === 'delete-object') {
+    delete result.nodes[objectId];
     return;
   }
   if (operation.type === 'add-stroke') {
     const node = clone(operation.stroke);
     node.members = bakeNodeMembers(node);
-    result.nodes[operation.groupId] = node;
+    result.nodes[objectId] = node;
     return;
   }
-  const node = result.nodes[operation.groupId];
+  if (operation.type === 'add-object' || operation.type === 'declare-object') {
+    const movedMemberIds = new Set(operation.movedMemberIds || []);
+    for (const sourceObjectId of operation.sourceObjectIds || []) {
+      const source = result.nodes[sourceObjectId];
+      if (!source) continue;
+      source.members = (source.members || []).filter(member => !movedMemberIds.has(memberKey(member)));
+      if (source.members.length === 0) delete result.nodes[sourceObjectId];
+    }
+    const node = clone(operation.object || operation.declaredObject);
+    if (node) result.nodes[node.objectId || objectId] = node;
+    return;
+  }
+  const node = result.nodes[objectId];
   if (!node) return;
   if (operation.type === 'transform-stroke' || operation.type === 'mirror-stroke') {
     node.curve = transformBezierCurve(node.curve, operation.transform);
     node.members = node.members.map(member => transformMember(member, operation.transform));
     if (node.lineage?.exceptions) node.lineage.exceptions = transformExceptions(node.lineage.exceptions, operation.transform);
+    return;
+  }
+  if (operation.type === 'transform-object' || operation.type === 'mirror-object') {
+    node.members = (node.members || []).map(member => transformMember(member, operation.transform));
+    return;
+  }
+  if (operation.type === 'update-object-definition') {
+    node.family = operation.family || node.family;
+    node.definition = clone(operation.definition || null);
+    node.lineage = clone(operation.lineage || node.lineage || {});
     return;
   }
   if (operation.type === 'edit-control-points') {
@@ -325,24 +410,130 @@ function applyOperation(result, operation) {
     return;
   }
   if (operation.type === 'object-exception') {
-    const members = new Map((node.members || []).map(member => [member.index, member]));
-    node.lineage ||= { family: 'BezierStroke', exceptions: semanticExceptions(null) };
-    node.lineage.exceptions = semanticExceptions(node.lineage.exceptions);
+    const members = new Map((node.members || []).map(member => [memberKey(member), member]));
+    node.lineage ||= { family: node.family || 'LiteralCluster' };
+    if (node.family === 'BezierStroke') node.lineage.exceptions = semanticExceptions(node.lineage.exceptions);
     const expectedDeleted = new Set(operation.exceptionState?.deletedIndices || []);
     const expectedOverrides = operation.exceptionState?.overrides || {};
     for (const change of operation.changes || []) {
-      if (!change.after) members.delete(change.index);
-      else members.set(change.index, clone(change.after));
-      node.lineage.exceptions.deletedIndices = node.lineage.exceptions.deletedIndices.filter(index => index !== change.index);
-      delete node.lineage.exceptions.overrides[String(change.index)];
-      if (expectedDeleted.has(change.index)) node.lineage.exceptions.deletedIndices.push(change.index);
-      if (expectedOverrides[String(change.index)]) {
-        node.lineage.exceptions.overrides[String(change.index)] = clone(expectedOverrides[String(change.index)]);
+      const key = String(change.memberId || memberKey(change.after || change.before));
+      if (!change.after) members.delete(key);
+      else members.set(key, clone(change.after));
+      if (node.family === 'BezierStroke') {
+        node.lineage.exceptions.deletedIndices = node.lineage.exceptions.deletedIndices.filter(index => index !== change.index);
+        delete node.lineage.exceptions.overrides[String(change.index)];
+        if (expectedDeleted.has(change.index)) node.lineage.exceptions.deletedIndices.push(change.index);
+        if (expectedOverrides[String(change.index)]) {
+          node.lineage.exceptions.overrides[String(change.index)] = clone(expectedOverrides[String(change.index)]);
+        }
       }
     }
-    node.lineage.exceptions.deletedIndices.sort((a, b) => a - b);
-    node.members = [...members.values()].sort((left, right) => left.index - right.index);
+    if (node.family === 'BezierStroke') node.lineage.exceptions.deletedIndices.sort((a, b) => a - b);
+    node.members = [...members.values()].sort((left, right) => (
+      (left.index - right.index) || memberKey(left).localeCompare(memberKey(right))
+    ));
   }
+}
+
+function inferDeclarationOperations(before, after) {
+  const operations = [];
+  const beforeMemberOwner = new Map();
+  for (const [objectId, node] of Object.entries(before?.nodes || {})) {
+    for (const member of node.members || []) beforeMemberOwner.set(memberKey(member), objectId);
+  }
+  for (const [objectId, node] of Object.entries(after?.nodes || {})) {
+    if (before?.nodes?.[objectId] || node?.lineage?.declared !== true) continue;
+    const movedMemberIds = (node.members || []).map(memberKey);
+    if (!movedMemberIds.length || !movedMemberIds.every(memberId => beforeMemberOwner.has(memberId))) continue;
+    const sourceObjectIds = [...new Set(movedMemberIds.map(memberId => beforeMemberOwner.get(memberId)))];
+    const literal = node.family === 'LiteralCluster';
+    operations.push({
+      type: 'declare-object',
+      expressibility: literal ? 'fallback' : 'native',
+      objectId,
+      nodeId: node.nodeId,
+      family: node.family,
+      sourceObjectIds,
+      movedMemberIds,
+      declaredObject: cleanObjectPayload(node),
+      reason: literal ? 'explicit-literal-cluster' : null,
+      affectedMemberCount: movedMemberIds.length
+    });
+  }
+  return operations;
+}
+
+function matchingMemberPairs(beforeMembers, afterMembers) {
+  const right = new Map((afterMembers || []).map(member => [memberKey(member), member]));
+  return (beforeMembers || []).flatMap(member => {
+    const destination = right.get(memberKey(member));
+    if (!destination) return [];
+    return [{ sx: member.x, sy: member.y, dx: destination.x, dy: destination.y }];
+  }).filter(pair => Object.values(pair).every(Number.isFinite));
+}
+
+function genericOperationsForNode(before, after, thresholdPx) {
+  const operations = [];
+  let working = clone(before);
+  const sameProgram = before.family === after.family
+    && same(before.definition || null, after.definition || null)
+    && same(before.lineage || {}, after.lineage || {});
+  const pairs = matchingMemberPairs(before.members, after.members);
+  let fit = null;
+  if (sameProgram && pairs.length === 1) {
+    fit = {
+      angle: 0, scale: 1,
+      tx: pairs[0].dx - pairs[0].sx,
+      ty: pairs[0].dy - pairs[0].sy,
+      maxResidualPx: 0,
+      reflect: false
+    };
+  } else if (sameProgram && pairs.length >= 2) {
+    fit = estimateSimilarityTransformFromPairs(pairs, { allowScale: true, allowReflection: true });
+  }
+  if (fit && fit.maxResidualPx <= thresholdPx) {
+    const material = fit.reflect || Math.abs(fit.angle) > 1e-9 || Math.abs(fit.scale - 1) > 1e-9
+      || Math.abs(fit.tx) > 1e-7 || Math.abs(fit.ty) > 1e-7;
+    if (material) {
+      const operation = {
+        type: fit.reflect ? 'mirror-object' : 'transform-object',
+        expressibility: 'native', objectId: after.objectId, nodeId: after.nodeId,
+        transform: {
+          angle: fit.angle, scale: fit.scale, tx: fit.tx, ty: fit.ty,
+          ...(fit.reflect ? { reflect: true } : {})
+        },
+        residualPx: fit.maxResidualPx,
+        affectedMemberCount: before.members.length
+      };
+      const candidate = { nodes: { [after.objectId]: working } };
+      applyOperation(candidate, operation);
+      operations.push(operation);
+      working = candidate.nodes[after.objectId];
+    }
+  }
+
+  if (working.family !== after.family
+      || !same(working.definition || null, after.definition || null)
+      || !same(working.lineage || {}, after.lineage || {})) {
+    const operation = {
+      type: 'update-object-definition', expressibility: 'native',
+      objectId: after.objectId, nodeId: after.nodeId,
+      family: after.family, definition: clone(after.definition), lineage: clone(after.lineage),
+      affectedMemberCount: Math.max(working.members.length, after.members.length)
+    };
+    const candidate = { nodes: { [after.objectId]: working } };
+    applyOperation(candidate, operation);
+    operations.push(operation);
+    working = candidate.nodes[after.objectId];
+  }
+
+  const fallbackChanges = memberDifference(working.members, after.members, thresholdPx);
+  if (fallbackChanges.length > 0) {
+    operations.push(buildFallbackOperation(
+      after.objectId, after.nodeId, fallbackChanges, after.lineage, thresholdPx
+    ));
+  }
+  return operations;
 }
 
 function commandProvesSelectionTransform(groupId, changes, options) {
@@ -369,7 +560,7 @@ function nativeOperationsForNode(before, after, thresholdPx, options) {
   if (fit && fit.maxResidualPx <= thresholdPx) {
     const operation = {
       type: fit.reflect ? 'mirror-stroke' : 'transform-stroke', expressibility: 'native',
-      groupId: after.groupId, nodeId: after.nodeId,
+      objectId: after.objectId, groupId: after.groupId, nodeId: after.nodeId,
       transform: {
         angle: fit.angle, scale: fit.scale, tx: fit.tx, ty: fit.ty,
         ...(fit.reflect ? { reflect: true } : {})
@@ -380,56 +571,59 @@ function nativeOperationsForNode(before, after, thresholdPx, options) {
     const material = fit.reflect || Math.abs(fit.angle) > 1e-9 || Math.abs(fit.scale - 1) > 1e-9
       || Math.abs(fit.tx) > 1e-7 || Math.abs(fit.ty) > 1e-7;
     if (material) {
-      const candidate = { nodes: { [after.groupId]: working } };
+      const candidate = { nodes: { [after.objectId]: working } };
       applyOperation(candidate, operation);
       operations.push(operation);
-      working = candidate.nodes[after.groupId];
+      working = candidate.nodes[after.objectId];
     }
   }
 
   const deltas = controlPointDeltas(working.curve, after.curve);
   if (Object.keys(deltas).length > 0) {
     const operation = {
-      type: 'edit-control-points', expressibility: 'native', groupId: after.groupId, nodeId: after.nodeId,
+      type: 'edit-control-points', expressibility: 'native', objectId: after.objectId,
+      groupId: after.groupId, nodeId: after.nodeId,
       deltas, affectedMemberCount: Math.max(working.members.length, after.members.length)
     };
-    const candidate = { nodes: { [after.groupId]: working } };
+    const candidate = { nodes: { [after.objectId]: working } };
     applyOperation(candidate, operation);
     operations.push(operation);
-    working = candidate.nodes[after.groupId];
+    working = candidate.nodes[after.objectId];
   }
 
   const changes = changedCurveProperties(working.curve, after.curve);
   if (Object.keys(changes).length > 0) {
     const operation = {
-      type: 'resample-stroke', expressibility: 'native', groupId: after.groupId, nodeId: after.nodeId,
+      type: 'resample-stroke', expressibility: 'native', objectId: after.objectId,
+      groupId: after.groupId, nodeId: after.nodeId,
       changes, affectedMemberCount: Math.max(working.members.length, after.members.length)
     };
-    const candidate = { nodes: { [after.groupId]: working } };
+    const candidate = { nodes: { [after.objectId]: working } };
     applyOperation(candidate, operation);
     operations.push(operation);
-    working = candidate.nodes[after.groupId];
+    working = candidate.nodes[after.objectId];
   }
 
   const fallbackChanges = memberDifference(working.members, after.members, thresholdPx);
   if (fallbackChanges.length > 0) {
     const operation = buildFallbackOperation(
-      after.groupId,
+      after.objectId,
       after.nodeId,
       fallbackChanges,
       after.lineage,
       thresholdPx,
       { selectionTransformProven: commandProvesSelectionTransform(after.groupId, fallbackChanges, options) }
     );
-    const candidate = { nodes: { [after.groupId]: working } };
+    const candidate = { nodes: { [after.objectId]: working } };
     applyOperation(candidate, operation);
     operations.push(operation);
-    working = candidate.nodes[after.groupId];
+    working = candidate.nodes[after.objectId];
   }
 
   if (!same(working.lineage, after.lineage)) {
     operations.push({
-      type: 'metadata-only', expressibility: 'ignored', groupId: after.groupId, nodeId: after.nodeId,
+      type: 'metadata-only', expressibility: 'ignored', objectId: after.objectId,
+      groupId: after.groupId, nodeId: after.nodeId,
       changedKeys: [...new Set([...Object.keys(working.lineage || {}), ...Object.keys(after.lineage || {})])]
         .filter(key => !same(working.lineage?.[key], after.lineage?.[key]))
     });
@@ -492,14 +686,16 @@ function annotateDeletedRegions(deleted, options) {
 function changedMemberKeys(before, after, thresholdPx) {
   const keys = new Set();
   const ids = new Set([...Object.keys(before?.nodes || {}), ...Object.keys(after?.nodes || {})]);
-  for (const groupId of ids) {
-    const left = before?.nodes?.[groupId];
-    const right = after?.nodes?.[groupId];
+  for (const objectId of ids) {
+    const left = before?.nodes?.[objectId];
+    const right = after?.nodes?.[objectId];
     if (!left || !right) {
-      for (const member of left?.members || right?.members || []) keys.add(`${groupId}:${member.index}`);
+      for (const member of left?.members || right?.members || []) keys.add(`${objectId}:${memberKey(member)}`);
       continue;
     }
-    for (const change of memberDifference(left.members, right.members, thresholdPx)) keys.add(`${groupId}:${change.index}`);
+    for (const change of memberDifference(left.members, right.members, thresholdPx)) {
+      keys.add(`${objectId}:${change.memberId}`);
+    }
   }
   return keys;
 }
@@ -513,51 +709,72 @@ export function diffBezierSemanticStates(before, after, options = {}) {
     commandEvidence,
     commandScope: options.commandScope === 'single' ? 'single' : 'aggregate'
   };
-  const operations = [];
-  const ids = new Set([...Object.keys(before?.nodes || {}), ...Object.keys(after?.nodes || {})]);
-  for (const groupId of [...ids].sort()) {
-    const left = before?.nodes?.[groupId];
-    const right = after?.nodes?.[groupId];
+  const declarationOperations = inferDeclarationOperations(before, after);
+  const workingBefore = clone(before || { format: 'semantic-object-state', version: 3, nodes: {} });
+  for (const operation of declarationOperations) applyOperation(workingBefore, operation);
+  const operations = [...declarationOperations];
+  const ids = new Set([...Object.keys(workingBefore?.nodes || {}), ...Object.keys(after?.nodes || {})]);
+  for (const objectId of [...ids].sort()) {
+    const left = workingBefore?.nodes?.[objectId];
+    const right = after?.nodes?.[objectId];
     if (!left && right) {
-      const operation = {
-        type: 'add-stroke', expressibility: 'native', groupId, nodeId: right.nodeId,
-        stroke: cleanStrokePayload(right), affectedMemberCount: right.members.length
+      const isBezier = right.family === 'BezierStroke';
+      const isLiteral = right.family === 'LiteralCluster';
+      const operation = isBezier ? {
+        type: 'add-stroke', expressibility: 'native', objectId, groupId: right.groupId || objectId,
+        nodeId: right.nodeId, stroke: cleanStrokePayload(right), affectedMemberCount: right.members.length
+      } : {
+        type: 'add-object', expressibility: isLiteral ? 'fallback' : 'native',
+        objectId, nodeId: right.nodeId, object: cleanObjectPayload(right),
+        reason: isLiteral ? 'undeclared-literal-object' : null,
+        affectedMemberCount: right.members.length,
+        changes: isLiteral ? right.members.map(member => ({
+          memberId: memberKey(member), index: member.index, kind: 'add-member', before: null, after: clone(member)
+        })) : []
       };
       operations.push(operation);
-      const simulated = { format: 'bezier-semantic-state', version: 2, nodes: {} };
+      const simulated = { format: 'semantic-object-state', version: 3, nodes: {} };
       applyOperation(simulated, operation);
-      const fallbackChanges = memberDifference(simulated.nodes[groupId]?.members, right.members, thresholdPx);
-      if (fallbackChanges.length) {
+      const fallbackChanges = memberDifference(simulated.nodes[objectId]?.members, right.members, thresholdPx);
+      if (isBezier && fallbackChanges.length) {
         operations.push(buildFallbackOperation(
-          groupId, right.nodeId, fallbackChanges, right.lineage, thresholdPx,
-          { selectionTransformProven: commandProvesSelectionTransform(groupId, fallbackChanges, classificationOptions) }
+          objectId, right.nodeId, fallbackChanges, right.lineage, thresholdPx,
+          { selectionTransformProven: commandProvesSelectionTransform(objectId, fallbackChanges, classificationOptions) }
         ));
       }
       continue;
     }
     if (left && !right) {
-      operations.push({
-        type: 'delete-stroke', expressibility: 'native', groupId, nodeId: left.nodeId,
-        affectedMemberCount: left.members.length, deletedBounds: nodeBounds(left)
+      operations.push(left.family === 'BezierStroke' ? {
+        type: 'delete-stroke', expressibility: 'native', objectId, groupId: left.groupId || objectId,
+        nodeId: left.nodeId, affectedMemberCount: left.members.length, deletedBounds: nodeBounds(left)
+      } : {
+        type: 'delete-object', expressibility: 'native', objectId, nodeId: left.nodeId,
+        family: left.family, affectedMemberCount: left.members.length, deletedBounds: nodeBounds(left)
       });
       continue;
     }
     if (same(left, right)) continue;
-    operations.push(...nativeOperationsForNode(left, right, thresholdPx, classificationOptions));
+    if (left.family === 'BezierStroke' && right.family === 'BezierStroke') {
+      operations.push(...nativeOperationsForNode(left, right, thresholdPx, classificationOptions));
+    } else {
+      operations.push(...genericOperationsForNode(left, right, thresholdPx));
+    }
   }
 
   const deleted = operations.filter(operation => operation.type === 'delete-stroke');
   annotateDeletedRegions(deleted, classificationOptions);
 
   return {
-    format: 'bezier-semantic-patch', version: 2, hints, operations,
+    format: 'semantic-object-patch', version: 3, hints, operations,
     metrics: semanticPatchMetrics(operations, before, after, { thresholdPx })
   };
 }
 
 export function applyBezierSemanticPatch(state, patch) {
-  const result = clone(state || { format: 'bezier-semantic-state', version: 2, nodes: {} });
-  result.version = 2;
+  const result = clone(state || { format: 'semantic-object-state', version: 3, nodes: {} });
+  result.format = 'semantic-object-state';
+  result.version = 3;
   result.nodes ||= {};
   for (const operation of patch?.operations || []) applyOperation(result, operation);
   return result;
@@ -578,15 +795,21 @@ export function semanticPatchMetrics(operations, before = null, after = null, op
       languageGapReasonCounts[operation.languageGapCandidate] = (languageGapReasonCounts[operation.languageGapCandidate] || 0) + 1;
     }
     for (const change of operation.changes || []) {
-      fallbackChangedKeys.add(`${operation.groupId}:${change.index}`);
-      if (change.after) fallbackFinalKeys.add(`${operation.groupId}:${change.index}`);
+      const objectId = operation.objectId || operation.groupId;
+      const key = change.memberId || memberKey(change.after || change.before);
+      fallbackChangedKeys.add(`${objectId}:${key}`);
+      if (change.after) fallbackFinalKeys.add(`${objectId}:${key}`);
     }
   }
   const changedKeys = before && after ? changedMemberKeys(before, after, thresholdPx) : new Set();
   const finalMemberCount = Object.values(after?.nodes || {}).reduce((sum, node) => sum + (node.members?.length || 0), 0);
-  for (const [groupId, node] of Object.entries(after?.nodes || {})) {
+  for (const [objectId, node] of Object.entries(after?.nodes || {})) {
+    if (node.family === 'LiteralCluster') {
+      for (const member of node.members || []) fallbackFinalKeys.add(`${objectId}:${memberKey(member)}`);
+    }
     for (const index of Object.keys(node?.lineage?.exceptions?.overrides || {})) {
-      fallbackFinalKeys.add(`${groupId}:${index}`);
+      const member = (node.members || []).find(value => value.index === Number(index));
+      fallbackFinalKeys.add(`${objectId}:${member ? memberKey(member) : `index:${index}`}`);
     }
   }
   return {
@@ -613,11 +836,15 @@ function compareSemanticStates(expected, actual, tolerancePx = 1e-5) {
     const left = expected?.nodes?.[groupId];
     const right = actual?.nodes?.[groupId];
     if (left && right && left.nodeId === right.nodeId
-        && POINT_KEYS.every(key => pointsClose(left.curve?.[key], right.curve?.[key], tolerancePx))
-        && same(changedCurveProperties(left.curve, right.curve), {})
+        && left.objectId === right.objectId && left.family === right.family
+        && same(left.definition || null, right.definition || null)
+        && (left.family !== 'BezierStroke' || (
+          POINT_KEYS.every(key => pointsClose(left.curve?.[key], right.curve?.[key], tolerancePx))
+          && same(changedCurveProperties(left.curve, right.curve), {})
+        ))
         && same(left.lineage, right.lineage)) matchedStrokeUnits++;
-    const expectedMembers = new Map((left?.members || []).map(member => [member.index, member]));
-    const actualMembers = new Map((right?.members || []).map(member => [member.index, member]));
+    const expectedMembers = new Map((left?.members || []).map(member => [memberKey(member), member]));
+    const actualMembers = new Map((right?.members || []).map(member => [memberKey(member), member]));
     const indices = new Set([...expectedMembers.keys(), ...actualMembers.keys()]);
     for (const index of indices) {
       memberUnits++;
