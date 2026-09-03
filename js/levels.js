@@ -1,6 +1,7 @@
 // Peggle Levels - Level management and storage
 
 import { Utils } from './utils.js';
+import { removeBezierNode } from './bezier-program.js';
 import { PHYSICS_CONFIG, DEFAULT_PEG_RADIUS } from './physics.js';
 import { normalizeFlipperConfig } from './flipper-defaults.js';
 import {
@@ -403,7 +404,12 @@ export class LevelManager {
     
     const index = level.pegs.findIndex(p => p.id === pegId);
     if (index !== -1) {
+      const bezierGroupId = level.pegs[index]?.bezierGroupId || null;
       level.pegs.splice(index, 1);
+      if (bezierGroupId && !level.pegs.some(peg => peg.bezierGroupId === bezierGroupId)) {
+        if (level.bezierCurves) delete level.bezierCurves[bezierGroupId];
+        removeBezierNode(level, bezierGroupId);
+      }
       level.metadata.modified = new Date().toISOString();
       this.save();
       return true;
@@ -417,7 +423,15 @@ export class LevelManager {
     if (!level) return;
     
     const idSet = new Set(pegIds);
+    const affectedBezierGroups = new Set(level.pegs
+      .filter(peg => idSet.has(peg.id) && peg.bezierGroupId)
+      .map(peg => peg.bezierGroupId));
     level.pegs = level.pegs.filter(p => !idSet.has(p.id));
+    for (const bezierGroupId of affectedBezierGroups) {
+      if (level.pegs.some(peg => peg.bezierGroupId === bezierGroupId)) continue;
+      if (level.bezierCurves) delete level.bezierCurves[bezierGroupId];
+      removeBezierNode(level, bezierGroupId);
+    }
     level.metadata.modified = new Date().toISOString();
     this.save();
   }

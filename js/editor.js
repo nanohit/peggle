@@ -4,6 +4,28 @@ import { Renderer } from './renderer.js';
 import { LevelManager } from './levels.js';
 import { Utils } from './utils.js';
 import { PHYSICS_CONFIG, DEFAULT_PEG_RADIUS, getEffectiveBrickSize } from './physics.js';
+import {
+  BEZIER_BAKE_VERSION,
+  DEFAULT_BEZIER_EXCEPTION_THRESHOLD_PX,
+  applySimilarityTransform,
+  auditBezierGroup,
+  bakePegsFromSamples,
+  estimateSimilarityTransformFromPairs,
+  sampleCubicBezier,
+  transformBezierCurve
+} from './bezier-geometry.js';
+import {
+  clearBezierExceptions,
+  ensureBezierNode,
+  recordBezierDeletedException,
+  recordBezierPositionException,
+  removeBezierNode,
+  writeBezierIntegrityDiagnostic
+} from './bezier-program.js';
+import {
+  captureBezierSemanticState,
+  diffBezierSemanticStates
+} from './bezier-semantic.js';
 import { FLIPPER_DEFAULTS, normalizeFlipperConfig } from './flipper-defaults.js';
 import { SurvivalRuntime } from './survival-runtime.js';
 import { ensureLevelSurvival, normalizeSurvivalGamblePegProperties } from './survival-mode.js';
@@ -82,6 +104,7 @@ export class Editor {
     this.hasMoved = false;
     this.dragStartPositions = null;
     this.dragAnchorId = null;
+    this.dragStartBezierCurves = null;
     
     // Alt-drag copy
     this.isCopying = false;
@@ -94,6 +117,8 @@ export class Editor {
     this.drawShapeMode = 'free'; // 'free', 'circle', 'sine', 'bezier'
     this.bezierDraft = null;     // { start, end, h1, h2, bend }
     this.activeBezierGroupId = null;
+    this.activeBezierSpacingPx = null;
+    this.activeBezierRotationOffset = 0;
     
     // Rotation state
     this.rotationCenter = null;
@@ -128,6 +153,10 @@ export class Editor {
     this.undoStack = [];
     this.redoStack = [];
     this.maxUndoSteps = 50;
+    this.onResearchEditorCommand = null;
+    this._researchCommandBefore = null;
+    this._researchCommandHints = [];
+    this.researchEditorCommands = [];
     
     // Animation
     this.animationId = null;
@@ -150,6 +179,7 @@ export class Editor {
     // Survival vertical mode viewport runtime
     this.survivalRuntime = new SurvivalRuntime(canvas.height, { autoScroll: false });
     const level = this.levelManager.getCurrentLevel();
+    this.researchEditorCommands = Utils.deepClone(level?.metadata?.generatorProgram?.commandLog || []);
     if (level) {
       this.survivalRuntime.configure(ensureLevelSurvival(level, canvas.height));
     }
@@ -289,11 +319,13 @@ export class Editor {
             this.saveUndoState();
           } else {
             this.interactionType = 'rotate';
+            this.beginResearchCommand('rotate-selection');
             this.rotationCenter = this.getSelectionCenter();
+            this.saveUndoState();
+            this.reconcileCompleteBezierGroups();
             this.rotationStartAngle = Utils.angleBetween(
               this.rotationCenter.x, this.rotationCenter.y, pos.x, pos.y
             );
-            this.saveUndoState();
           }
           return;
         }
@@ -332,6 +364,7 @@ export class Editor {
         if (this.isCopying) {
           this.pendingCopyDrag = true;
         } else {
+          this.beginResearchCommand('move-selection');
           this.saveUndoState();
         }
         
@@ -484,6 +517,7 @@ export class Editor {
         case 'drag':
           if (this.hasMoved && this.selectedPegIds.size > 0) {
             if (this.pendingCopyDrag) {
+              this.beginResearchCommand('duplicate-selection');
               this.saveUndoState();
               this.duplicateSelectedPegsInPlace({ deferPvpMirror: true });
               this.pendingCopyDrag = false;
@@ -568,6 +602,8 @@ export class Editor {
           break;
 
         case 'rotate':
+          this.finalizeBezierSelectionExceptions();
+          this.finishResearchCommand('rotate-selection');
           this.levelManager.save();
           break;
 
@@ -595,6 +631,8 @@ export class Editor {
             this.createPvpMirroredCopies(movedCopies);
             this._pendingPvpMirrorAfterDragIds = null;
           }
+          this.finalizeBezierSelectionExceptions();
+          this.finishResearchCommand('move-selection');
           this.levelManager.save();
           break;
           
@@ -658,6 +696,7 @@ export class Editor {
       this.pendingCopyDrag = false;
       this.dragStartPositions = null;
       this.dragAnchorId = null;
+      this.dragStartBezierCurves = null;
       this._pendingPvpMirrorAfterDragIds = null;
       this._panStartCameraY = null;
       this._panStartScreenY = null;
@@ -760,7 +799,6 @@ export class Editor {
           this.setMode('place');
         } else {
           this.drawShapeMode = 'bezier';
-          this.selectedShape = 'brick';
           this.setMode('draw');
         }
       } else if (e.key === 'Enter' && this.mode === 'draw' && this.drawShapeMode === 'bezier') {
@@ -1090,6 +1128,8 @@ export class Editor {
   clearBezierDraft(resetPreview = true) {
     this.bezierDraft = null;
     this.activeBezierGroupId = null;
+    this.activeBezierSpacingPx = null;
+    this.activeBezierRotationOffset = 0;
     if (resetPreview) {
       this.drawPath = [];
       this.ghostBricks = [];
@@ -1115,6 +1155,8 @@ export class Editor {
       bend: { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 }
     };
     this.activeBezierGroupId = null;
+    this.activeBezierSpacingPx = null;
+    this.activeBezierRotationOffset = 0;
 
     this.updateBezierDraftPath();
     return this.bezierDraft;
@@ -1128,37 +1170,129 @@ export class Editor {
     return level.bezierCurves;
   }
 
+  beginResearchCommand(hint = null) {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level) return;
+    if (!this._researchCommandBefore) {
+      this._researchCommandBefore = captureBezierSemanticState(level);
+      this._researchCommandHints = [];
+    }
+    if (hint && !this._researchCommandHints.includes(hint)) this._researchCommandHints.push(hint);
+  }
+
+  finishResearchCommand(hint = null) {
+    if (!this._researchCommandBefore) return null;
+    if (hint && !this._researchCommandHints.includes(hint)) this._researchCommandHints.push(hint);
+    const level = this.levelManager.getCurrentLevel();
+    const before = this._researchCommandBefore;
+    const hints = [...this._researchCommandHints];
+    this._researchCommandBefore = null;
+    this._researchCommandHints = [];
+    if (!level) return null;
+    const after = captureBezierSemanticState(level);
+    const patch = diffBezierSemanticStates(before, after, {
+      thresholdPx: DEFAULT_BEZIER_EXCEPTION_THRESHOLD_PX,
+      commandHints: hints
+    });
+    if (patch.operations.length > 0) {
+      const command = {
+        sequence: this.researchEditorCommands.length,
+        at: new Date().toISOString(),
+        hints,
+        patch: {
+          format: patch.format,
+          version: patch.version,
+          operations: patch.operations.map(operation => ({
+            type: operation.type,
+            expressibility: operation.expressibility,
+            groupId: operation.groupId,
+            nodeId: operation.nodeId,
+            reason: operation.reason || null,
+            languageGapCandidate: operation.languageGapCandidate || null
+          })),
+          metrics: patch.metrics
+        }
+      };
+      this.researchEditorCommands.push(command);
+      if (this.researchEditorCommands.length > 500) this.researchEditorCommands.shift();
+      level.metadata ||= {};
+      level.metadata.generatorProgram ||= { schemaVersion: 1, nodes: {} };
+      level.metadata.generatorProgram.commandLog = Utils.deepClone(this.researchEditorCommands);
+      if (this.onResearchEditorCommand) this.onResearchEditorCommand({ before, after, patch, command });
+    }
+    return patch;
+  }
+
+  exportResearchEditorCommands() {
+    return { format: 'bezier-editor-command-log', version: 1, commands: Utils.deepClone(this.researchEditorCommands) };
+  }
+
+  getBezierSelectionGroups(level = this.levelManager.getCurrentLevel()) {
+    const groups = new Map();
+    for (const peg of level?.pegs || []) {
+      if (!peg?.bezierGroupId) continue;
+      if (!groups.has(peg.bezierGroupId)) groups.set(peg.bezierGroupId, { all: [], selected: [] });
+      const entry = groups.get(peg.bezierGroupId);
+      entry.all.push(peg);
+      if (this.selectedPegIds.has(peg.id)) entry.selected.push(peg);
+    }
+    for (const entry of groups.values()) entry.complete = entry.all.length > 0 && entry.selected.length === entry.all.length;
+    return groups;
+  }
+
+  reconcileCompleteBezierGroups(level = this.levelManager.getCurrentLevel()) {
+    if (!level) return;
+    const store = this.ensureBezierCurveStore(level);
+    for (const [groupId, selection] of this.getBezierSelectionGroups(level)) {
+      if (!selection.complete || !store[groupId]) continue;
+      const diagnostic = auditBezierGroup(store[groupId], selection.all, {
+        thresholdPx: DEFAULT_BEZIER_EXCEPTION_THRESHOLD_PX,
+        allowScale: true
+      });
+      if (diagnostic.transform && diagnostic.outlierCount === 0) {
+        const transform = diagnostic.transform;
+        const materiallyChanged = Math.abs(transform.tx) > 1e-7 || Math.abs(transform.ty) > 1e-7
+          || Math.abs(transform.angle) > 1e-9 || Math.abs(transform.scale - 1) > 1e-9;
+        if (materiallyChanged) store[groupId] = transformBezierCurve(store[groupId], transform);
+      }
+      ensureBezierNode(level, groupId);
+      writeBezierIntegrityDiagnostic(level, groupId, diagnostic);
+    }
+  }
+
+  auditBezierGroupAndRecord(groupId, level = this.levelManager.getCurrentLevel()) {
+    const curve = level?.bezierCurves?.[groupId];
+    if (!curve) return null;
+    const pegs = level.pegs.filter(peg => peg.bezierGroupId === groupId);
+    const diagnostic = auditBezierGroup(curve, pegs, {
+      thresholdPx: DEFAULT_BEZIER_EXCEPTION_THRESHOLD_PX,
+      allowScale: true
+    });
+    writeBezierIntegrityDiagnostic(level, groupId, diagnostic);
+    return diagnostic;
+  }
+
+  finalizeBezierSelectionExceptions() {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level) return;
+    for (const [groupId, selection] of this.getBezierSelectionGroups(level)) {
+      const diagnostic = this.auditBezierGroupAndRecord(groupId, level);
+      if (!diagnostic || selection.complete) continue;
+      const outliers = new Set(diagnostic.outlierIndices);
+      const residualByIndex = new Map(diagnostic.residuals.map(entry => [entry.index, entry.residualPx]));
+      for (const peg of selection.selected) {
+        if (!outliers.has(peg.bezierIndex)) continue;
+        recordBezierPositionException(level, groupId, peg.bezierIndex, peg, residualByIndex.get(peg.bezierIndex));
+      }
+    }
+  }
+
   estimateRigidTransformFromPairs(pairs) {
-    if (!Array.isArray(pairs) || pairs.length === 0) return null;
-    let srcCx = 0, srcCy = 0, dstCx = 0, dstCy = 0;
-    for (const p of pairs) {
-      srcCx += p.sx;
-      srcCy += p.sy;
-      dstCx += p.dx;
-      dstCy += p.dy;
-    }
-    srcCx /= pairs.length;
-    srcCy /= pairs.length;
-    dstCx /= pairs.length;
-    dstCy /= pairs.length;
+    return estimateSimilarityTransformFromPairs(pairs, { allowScale: false });
+  }
 
-    let sumDot = 0;
-    let sumCross = 0;
-    for (const p of pairs) {
-      const ax = p.sx - srcCx;
-      const ay = p.sy - srcCy;
-      const bx = p.dx - dstCx;
-      const by = p.dy - dstCy;
-      sumDot += ax * bx + ay * by;
-      sumCross += ax * by - ay * bx;
-    }
-
-    const angle = Math.atan2(sumCross, sumDot);
-    const cos = Math.cos(angle);
-    const sin = Math.sin(angle);
-    const tx = dstCx - (srcCx * cos - srcCy * sin);
-    const ty = dstCy - (srcCx * sin + srcCy * cos);
-    return { angle, tx, ty };
+  estimateSimilarityTransformFromPairs(pairs) {
+    return estimateSimilarityTransformFromPairs(pairs, { allowScale: true });
   }
 
   getCircularMeanAngle(values) {
@@ -1194,7 +1328,7 @@ export class Editor {
       exactPairs.push({ sx: rp.x, sy: rp.y, dx: peg.x, dy: peg.y });
     }
     if (exactPairs.length >= 2) {
-      return this.estimateRigidTransformFromPairs(exactPairs);
+      return this.estimateSimilarityTransformFromPairs(exactPairs);
     }
 
     // Fallback for legacy groups: estimate from centroid + mean tangent angle.
@@ -1236,12 +1370,7 @@ export class Editor {
 
   applyRigidTransform(point, transform) {
     if (!point || !transform) return point ? { x: point.x, y: point.y } : null;
-    const cos = Math.cos(transform.angle || 0);
-    const sin = Math.sin(transform.angle || 0);
-    return {
-      x: point.x * cos - point.y * sin + (transform.tx || 0),
-      y: point.x * sin + point.y * cos + (transform.ty || 0)
-    };
+    return applySimilarityTransform(point, transform);
   }
 
   beginEditBezierGroup(groupId) {
@@ -1273,7 +1402,11 @@ export class Editor {
     } else if (data.pegType) {
       this.selectedPegType = data.pegType;
     }
-    this.selectedShape = 'brick';
+    this.selectedShape = data.pegShape || groupPegs[0]?.shape || 'brick';
+    this.activeBezierSpacingPx = Number.isFinite(data.spacingPx)
+      ? data.spacingPx * (Number.isFinite(transform?.scale) ? transform.scale : 1)
+      : null;
+    this.activeBezierRotationOffset = Number(data.rotationOffset || 0);
     this._bezierDragStart = null;
     this.updateBezierDraftPath();
     this.setMode('draw');
@@ -1437,27 +1570,7 @@ export class Editor {
   }
 
   sampleBezierDraft(draft = this.bezierDraft, minPoints = 96) {
-    if (!draft) return [];
-    const p0 = draft.start;
-    const p1 = draft.h1;
-    const p2 = draft.h2;
-    const p3 = draft.end;
-
-    const approxLen = Utils.distance(p0.x, p0.y, p1.x, p1.y)
-      + Utils.distance(p1.x, p1.y, p2.x, p2.y)
-      + Utils.distance(p2.x, p2.y, p3.x, p3.y);
-    const points = Math.max(minPoints, Math.ceil(approxLen / 2));
-    const samples = [];
-
-    let prevAngle = 0;
-    for (let i = 0; i <= points; i++) {
-      const t = i / points;
-      const pt = this.getBezierPointAndTangent(t, p0, p1, p2, p3);
-      if (!Number.isFinite(pt.angle)) pt.angle = prevAngle;
-      prevAngle = pt.angle;
-      samples.push(pt);
-    }
-    return samples;
+    return draft ? sampleCubicBezier(draft, { minPoints }) : [];
   }
 
   updateBezierDraftPath() {
@@ -1469,7 +1582,7 @@ export class Editor {
 
     const samples = this.sampleBezierDraft(this.bezierDraft);
     this.drawPath = samples.map(s => ({ x: s.x, y: s.y }));
-    this.ghostBricks = this.computeGhostBricksFromSamples(samples, false, 'brick');
+    this.ghostBricks = this.computeGhostBricksFromSamples(samples, false, this.selectedShape, this.activeBezierSpacingPx);
 
     const mid = this.getBezierPointAndTangent(
       0.5,
@@ -1521,7 +1634,7 @@ export class Editor {
           angle
         });
       }
-      this.ghostBricks = this.computeGhostBricksFromSamples(samples, false, 'brick');
+      this.ghostBricks = this.computeGhostBricksFromSamples(samples, false, this.selectedShape, this.activeBezierSpacingPx);
       return;
     }
 
@@ -1741,51 +1854,16 @@ export class Editor {
   // Shared brick-placement logic: given pre-computed {x, y, angle} samples,
   // build arc-length table and place bricks edge-to-edge.
   // closedLoop: adjusts spacing for perfect integer tiling (circles).
-  computeGhostBricksFromSamples(samples, closedLoop = false, forceShape = null) {
-    if (samples.length < 2) return [];
-
-    const effectiveShape = forceShape || this.selectedShape;
-    const isBrick = effectiveShape === 'brick';
-    let spacing = isBrick ? this.getBrickWidth() : PHYSICS_CONFIG.pegRadius * 2.2;
-
-    // Build cumulative arc-length table
-    const cumLen = [0];
-    for (let i = 1; i < samples.length; i++) {
-      const d = Math.hypot(samples[i].x - samples[i - 1].x, samples[i].y - samples[i - 1].y);
-      cumLen.push(cumLen[i - 1] + d);
-    }
-    const totalLen = cumLen[cumLen.length - 1];
-    if (totalLen < spacing * 0.4) return [];
-
-    // For closed loops, adjust spacing so an integer number of bricks tiles perfectly
-    if (closedLoop) {
-      const numBricks = Math.max(1, Math.round(totalLen / spacing));
-      spacing = totalLen / numBricks;
-    }
-
-    const ghosts = [];
-    const NUM_SLICES = 5;
-    let edgePos = 0;
-
-    while (edgePos + spacing * 0.4 <= totalLen) {
-      const edgeEnd = Math.min(edgePos + spacing, totalLen);
-      const centerLen = (edgePos + edgeEnd) / 2;
-      const centerPt = this.sampleAtArcLen(samples, cumLen, centerLen);
-
-      if (isBrick) {
-        const slices = [];
-        for (let s = 0; s <= NUM_SLICES; s++) {
-          const arcLen = edgePos + (edgeEnd - edgePos) * s / NUM_SLICES;
-          const pt = this.sampleAtArcLen(samples, cumLen, Math.min(arcLen, totalLen));
-          slices.push({ x: pt.x, y: pt.y, nx: -Math.sin(pt.angle), ny: Math.cos(pt.angle) });
-        }
-        ghosts.push({ x: centerPt.x, y: centerPt.y, angle: centerPt.angle, slices });
-      } else {
-        ghosts.push({ x: centerPt.x, y: centerPt.y, angle: centerPt.angle });
-      }
-      edgePos += spacing;
-    }
-    return ghosts;
+  computeGhostBricksFromSamples(samples, closedLoop = false, forceShape = null, spacingPx = null) {
+    return bakePegsFromSamples(samples, {
+      shape: forceShape || this.selectedShape,
+      closedLoop,
+      spacingPx,
+      brickWidth: this.getBrickWidth(),
+      pegRadius: PHYSICS_CONFIG.pegRadius,
+      sliceCount: 5,
+      rotationOffset: this.activeBezierRotationOffset
+    });
   }
 
   // Commit ghost bricks to the level on draw release
@@ -1801,6 +1879,8 @@ export class Editor {
         }
       : null;
     const previousBezierGroupId = this.activeBezierGroupId;
+    const activeBezierSpacingPx = this.activeBezierSpacingPx;
+    const activeBezierRotationOffset = this.activeBezierRotationOffset;
     const isBezierCommit = this.drawShapeMode === 'bezier' && !!draftSnapshot;
     const bezierGroupId = isBezierCommit ? (previousBezierGroupId || Utils.generateId()) : null;
 
@@ -1808,8 +1888,11 @@ export class Editor {
     this.drawPath = [];
     this.bezierDraft = null;
     this.activeBezierGroupId = null;
+    this.activeBezierSpacingPx = null;
+    this.activeBezierRotationOffset = 0;
     this._bezierDragStart = null;
     if (!level || toCommit.length === 0) return;
+    this.beginResearchCommand(previousBezierGroupId ? 'update-stroke' : 'add-stroke');
     this.saveUndoState();
 
     if (isBezierCommit && previousBezierGroupId) {
@@ -1818,7 +1901,10 @@ export class Editor {
 
     if (isBezierCommit && draftSnapshot && bezierGroupId) {
       const store = this.ensureBezierCurveStore(level);
-      const bezierShape = 'brick';
+      const bezierShape = this.selectedShape === 'circle' ? 'circle' : 'brick';
+      const spacingPx = Number.isFinite(activeBezierSpacingPx)
+        ? activeBezierSpacingPx
+        : (bezierShape === 'brick' ? this.getBrickWidth() : PHYSICS_CONFIG.pegRadius * 2.2);
       store[bezierGroupId] = {
         start: draftSnapshot.start,
         end: draftSnapshot.end,
@@ -1826,15 +1912,22 @@ export class Editor {
         h2: draftSnapshot.h2,
         pegType: this.selectedPegType,
         pegShape: bezierShape,
+        spacingPx,
+        rotationOffset: Number(activeBezierRotationOffset || 0),
+        pegRadius: PHYSICS_CONFIG.pegRadius,
+        brickWidth: this.getBrickWidth(),
+        bakeVersion: BEZIER_BAKE_VERSION,
         refPoints: toCommit.map((gb, index) => ({
           index,
           x: gb.x,
           y: gb.y
         }))
       };
+      ensureBezierNode(level, bezierGroupId);
+      clearBezierExceptions(level, bezierGroupId);
     }
 
-    const commitShape = isBezierCommit ? 'brick' : this.selectedShape;
+    const commitShape = this.selectedShape;
     const isBrick = commitShape === 'brick';
     const w = this.getBrickWidth();
     const h = this.getBrickHeight();
@@ -1890,6 +1983,8 @@ export class Editor {
       }
     }
 
+    if (bezierGroupId) this.auditBezierGroupAndRecord(bezierGroupId, level);
+    this.finishResearchCommand(previousBezierGroupId ? 'update-stroke' : 'add-stroke');
     this.levelManager.save();
     const updated = this.levelManager.getCurrentLevel();
     if (updated && this.onPegCountChange) {
@@ -1996,7 +2091,9 @@ export class Editor {
       return;
     }
 
+    this.reconcileCompleteBezierGroups(level);
     this.dragStartPositions = new Map();
+    this.dragStartBezierCurves = new Map();
     for (const pegId of this.selectedPegIds) {
       const peg = level.pegs.find(p => p.id === pegId);
       if (peg) {
@@ -2004,6 +2101,11 @@ export class Editor {
         // Capture original curveSlices so they can be translated with the peg
         if (peg.curveSlices) snap.curveSlices = peg.curveSlices.map(s => ({ ...s }));
         this.dragStartPositions.set(pegId, snap);
+      }
+    }
+    for (const [groupId, selection] of this.getBezierSelectionGroups(level)) {
+      if (selection.complete && level.bezierCurves?.[groupId]) {
+        this.dragStartBezierCurves.set(groupId, Utils.deepClone(level.bezierCurves[groupId]));
       }
     }
     
@@ -2030,6 +2132,10 @@ export class Editor {
         deltaY = snappedY - anchorStart.y;
       }
 
+      // Clamp the selection as one rigid body. Per-peg clamping changes spacing
+      // near a boundary and silently turns a transform into a deformation.
+      let commonDeltaX = deltaX;
+      let commonDeltaY = deltaY;
       for (const pegId of this.selectedPegIds) {
         const peg = level.pegs.find(p => p.id === pegId);
         const start = this.dragStartPositions.get(pegId);
@@ -2039,20 +2145,35 @@ export class Editor {
             start.x + deltaX,
             start.y + deltaY,
             peg.angle || 0,
-            peg.curveSlices
+            start.curveSlices || peg.curveSlices
           );
-          peg.x = clamped.x;
-          peg.y = clamped.y;
+          const allowedX = clamped.x - start.x;
+          const allowedY = clamped.y - start.y;
+          commonDeltaX = deltaX >= 0 ? Math.min(commonDeltaX, allowedX) : Math.max(commonDeltaX, allowedX);
+          commonDeltaY = deltaY >= 0 ? Math.min(commonDeltaY, allowedY) : Math.max(commonDeltaY, allowedY);
+        }
+      }
+
+      for (const pegId of this.selectedPegIds) {
+        const peg = level.pegs.find(p => p.id === pegId);
+        const start = this.dragStartPositions.get(pegId);
+        if (peg && start) {
+          peg.x = start.x + commonDeltaX;
+          peg.y = start.y + commonDeltaY;
           // Translate curveSlices by the same delta so the visual follows the peg
           if (start.curveSlices && peg.curveSlices) {
-            const actualDx = peg.x - start.x;
-            const actualDy = peg.y - start.y;
             for (let i = 0; i < peg.curveSlices.length; i++) {
-              peg.curveSlices[i].x = start.curveSlices[i].x + actualDx;
-              peg.curveSlices[i].y = start.curveSlices[i].y + actualDy;
+              peg.curveSlices[i].x = start.curveSlices[i].x + commonDeltaX;
+              peg.curveSlices[i].y = start.curveSlices[i].y + commonDeltaY;
             }
           }
         }
+      }
+      for (const [groupId, curve] of this.dragStartBezierCurves || []) {
+        level.bezierCurves[groupId] = transformBezierCurve(curve, {
+          angle: 0, scale: 1, tx: commonDeltaX, ty: commonDeltaY
+        });
+        ensureBezierNode(level, groupId);
       }
     } else {
       for (const pegId of this.selectedPegIds) {
@@ -2079,13 +2200,32 @@ export class Editor {
 
   deleteSelectedPegs() {
     if (this.selectedPegIds.size === 0) return;
-    
+    const level = this.levelManager.getCurrentLevel();
+    if (!level) return;
+    this.beginResearchCommand('delete-selection');
     this.saveUndoState();
+    const touchedGroupIds = [];
+    for (const [groupId, selection] of this.getBezierSelectionGroups(level)) {
+      if (selection.selected.length === 0) continue;
+      touchedGroupIds.push(groupId);
+      if (selection.complete) {
+        if (level.bezierCurves) delete level.bezierCurves[groupId];
+        removeBezierNode(level, groupId);
+      } else {
+        for (const peg of selection.selected) {
+          recordBezierDeletedException(level, groupId, peg.bezierIndex);
+        }
+      }
+    }
     this.levelManager.removePegs(Array.from(this.selectedPegIds));
     this.selectedPegIds.clear();
     this.notifySelectionChange();
     
-    const level = this.levelManager.getCurrentLevel();
+    for (const groupId of touchedGroupIds) {
+      if (level.bezierCurves?.[groupId]) this.auditBezierGroupAndRecord(groupId, level);
+    }
+    this.finishResearchCommand('delete-selection');
+    this.levelManager.save();
     if (level && this.onPegCountChange) {
       this.onPegCountChange(level.pegs.length);
     }
@@ -2337,7 +2477,9 @@ export class Editor {
       return;
     }
 
+    this.beginResearchCommand('rotate-members-in-place');
     this.saveUndoState();
+    this.reconcileCompleteBezierGroups(level);
     const cos = Math.cos(angleDelta);
     const sin = Math.sin(angleDelta);
 
@@ -2360,6 +2502,15 @@ export class Editor {
       }
     }
 
+    for (const [groupId, selection] of this.getBezierSelectionGroups(level)) {
+      if (!selection.complete || !level.bezierCurves?.[groupId]) continue;
+      const curve = level.bezierCurves[groupId];
+      curve.rotationOffset = Number(curve.rotationOffset || 0) + angleDelta;
+      ensureBezierNode(level, groupId);
+    }
+
+    this.finalizeBezierSelectionExceptions();
+    this.finishResearchCommand('rotate-members-in-place');
     this.levelManager.save();
   }
 
@@ -2394,13 +2545,24 @@ export class Editor {
         }
       }
     }
+    const tx = cx - (cx * cos - cy * sin);
+    const ty = cy - (cx * sin + cy * cos);
+    for (const [groupId, selection] of this.getBezierSelectionGroups(level)) {
+      if (!selection.complete || !level.bezierCurves?.[groupId]) continue;
+      level.bezierCurves[groupId] = transformBezierCurve(level.bezierCurves[groupId], {
+        angle: angleDelta, scale: 1, tx, ty
+      });
+      ensureBezierNode(level, groupId);
+    }
   }
 
   mirrorHorizontal() {
     const level = this.levelManager.getCurrentLevel();
     if (!level || this.selectedPegIds.size === 0) return;
 
+    this.beginResearchCommand('mirror-horizontal');
     this.saveUndoState();
+    this.reconcileCompleteBezierGroups(level);
     const center = this.getSelectionCenter();
     if (!center) return;
 
@@ -2418,7 +2580,17 @@ export class Editor {
         }
       }
     }
+    for (const [groupId, selection] of this.getBezierSelectionGroups(level)) {
+      if (!selection.complete || !level.bezierCurves?.[groupId]) continue;
+      const curve = level.bezierCurves[groupId];
+      const mirrorPoint = value => value ? { ...value, x: center.x - (value.x - center.x) } : value;
+      for (const key of ['start', 'end', 'h1', 'h2']) curve[key] = mirrorPoint(curve[key]);
+      if (Array.isArray(curve.refPoints)) curve.refPoints = curve.refPoints.map(mirrorPoint);
+      ensureBezierNode(level, groupId);
+    }
 
+    this.finalizeBezierSelectionExceptions();
+    this.finishResearchCommand('mirror-horizontal');
     this.levelManager.save();
   }
 
@@ -2426,7 +2598,9 @@ export class Editor {
     const level = this.levelManager.getCurrentLevel();
     if (!level || this.selectedPegIds.size === 0) return;
 
+    this.beginResearchCommand('mirror-vertical');
     this.saveUndoState();
+    this.reconcileCompleteBezierGroups(level);
     const center = this.getSelectionCenter();
     if (!center) return;
 
@@ -2444,8 +2618,54 @@ export class Editor {
         }
       }
     }
+    for (const [groupId, selection] of this.getBezierSelectionGroups(level)) {
+      if (!selection.complete || !level.bezierCurves?.[groupId]) continue;
+      const curve = level.bezierCurves[groupId];
+      const mirrorPoint = value => value ? { ...value, y: center.y - (value.y - center.y) } : value;
+      for (const key of ['start', 'end', 'h1', 'h2']) curve[key] = mirrorPoint(curve[key]);
+      if (Array.isArray(curve.refPoints)) curve.refPoints = curve.refPoints.map(mirrorPoint);
+      ensureBezierNode(level, groupId);
+    }
 
+    this.finalizeBezierSelectionExceptions();
+    this.finishResearchCommand('mirror-vertical');
     this.levelManager.save();
+  }
+
+  scaleSelectedPegsAbsolute(scaleRatio, center = this.getSelectionCenter()) {
+    const level = this.levelManager.getCurrentLevel();
+    const scale = Number(scaleRatio);
+    if (!level || !center || !(scale > 0)) return false;
+    this.beginResearchCommand('scale-selection');
+    this.saveUndoState();
+    this.reconcileCompleteBezierGroups(level);
+    for (const pegId of this.selectedPegIds) {
+      const peg = level.pegs.find(value => value.id === pegId);
+      if (!peg) continue;
+      peg.x = center.x + (peg.x - center.x) * scale;
+      peg.y = center.y + (peg.y - center.y) * scale;
+      if (peg.curveSlices) {
+        for (const slice of peg.curveSlices) {
+          slice.x = center.x + (slice.x - center.x) * scale;
+          slice.y = center.y + (slice.y - center.y) * scale;
+        }
+      }
+    }
+    const transform = {
+      angle: 0,
+      scale,
+      tx: center.x * (1 - scale),
+      ty: center.y * (1 - scale)
+    };
+    for (const [groupId, selection] of this.getBezierSelectionGroups(level)) {
+      if (!selection.complete || !level.bezierCurves?.[groupId]) continue;
+      level.bezierCurves[groupId] = transformBezierCurve(level.bezierCurves[groupId], transform);
+      ensureBezierNode(level, groupId);
+    }
+    this.finalizeBezierSelectionExceptions();
+    this.finishResearchCommand('scale-selection');
+    this.levelManager.save();
+    return true;
   }
 
   cloneCurveSlicesForOffset(curveSlices, offsetX = 0, offsetY = 0) {
@@ -2597,26 +2817,53 @@ export class Editor {
     const level = this.levelManager.getCurrentLevel();
     if (!level) return;
     
+    this.beginResearchCommand('clear-all');
     this.saveUndoState();
     level.pegs = [];
+    level.bezierCurves = {};
+    if (level.metadata?.generatorProgram) level.metadata.generatorProgram.nodes = {};
     this.selectedPegIds.clear();
-    this.levelManager.save();
     this.notifySelectionChange();
     
     if (this.onPegCountChange) {
       this.onPegCountChange(0);
     }
+    this.finishResearchCommand('clear-all');
+    this.levelManager.save();
   }
 
   saveUndoState() {
     const level = this.levelManager.getCurrentLevel();
     if (!level) return;
-    
-    this.undoStack.push(Utils.deepClone(level.pegs));
+
+    this.undoStack.push(this.captureEditorUndoSnapshot(level));
     if (this.undoStack.length > this.maxUndoSteps) {
       this.undoStack.shift();
     }
     this.redoStack = [];
+  }
+
+  captureEditorUndoSnapshot(level = this.levelManager.getCurrentLevel()) {
+    return {
+      version: 2,
+      pegs: Utils.deepClone(level?.pegs || []),
+      bezierCurves: Utils.deepClone(level?.bezierCurves || {}),
+      generatorProgram: Utils.deepClone(level?.metadata?.generatorProgram || null)
+    };
+  }
+
+  applyEditorUndoSnapshot(level, snapshot) {
+    // Backward compatibility with snapshots created before curve state became
+    // part of the undo transaction.
+    if (Array.isArray(snapshot)) {
+      level.pegs = snapshot;
+      return;
+    }
+    level.pegs = Utils.deepClone(snapshot?.pegs || []);
+    level.bezierCurves = Utils.deepClone(snapshot?.bezierCurves || {});
+    level.metadata ||= {};
+    if (snapshot?.generatorProgram) level.metadata.generatorProgram = Utils.deepClone(snapshot.generatorProgram);
+    else delete level.metadata.generatorProgram;
   }
 
   undo() {
@@ -2625,8 +2872,10 @@ export class Editor {
     const level = this.levelManager.getCurrentLevel();
     if (!level) return;
     
-    this.redoStack.push(Utils.deepClone(level.pegs));
-    level.pegs = this.undoStack.pop();
+    this.beginResearchCommand('undo');
+    this.redoStack.push(this.captureEditorUndoSnapshot(level));
+    this.applyEditorUndoSnapshot(level, this.undoStack.pop());
+    this.finishResearchCommand('undo');
     this.levelManager.save();
     
     this.selectedPegIds.clear();
@@ -2643,8 +2892,10 @@ export class Editor {
     const level = this.levelManager.getCurrentLevel();
     if (!level) return;
     
-    this.undoStack.push(Utils.deepClone(level.pegs));
-    level.pegs = this.redoStack.pop();
+    this.beginResearchCommand('redo');
+    this.undoStack.push(this.captureEditorUndoSnapshot(level));
+    this.applyEditorUndoSnapshot(level, this.redoStack.pop());
+    this.finishResearchCommand('redo');
     this.levelManager.save();
     
     this.selectedPegIds.clear();
@@ -2734,7 +2985,7 @@ export class Editor {
       brickWidth: this.getBrickWidth(),
       brickHeight: this.getBrickHeight(),
       pegType: this.selectedPegType,
-      pegShape: (this.mode === 'draw' && this.drawShapeMode === 'bezier') ? 'brick' : this.selectedShape,
+      pegShape: this.selectedShape,
       // Animation mode state
       animationMode: this.animationMode && !this.animationPreview,
       animationGhosts: showStraightGhost ? this.getAnimationGhosts() : null,
@@ -2829,7 +3080,15 @@ export class Editor {
   }
 
   setSelectedShape(shape) {
-    this.selectedShape = shape;
+    const next = shape === 'brick' ? 'brick' : 'circle';
+    if (this.selectedShape === next) return;
+    this.selectedShape = next;
+    if (this.mode === 'draw' && this.drawShapeMode === 'bezier' && this.bezierDraft) {
+      // Shape changes are resampling operations: circle and brick grids have
+      // different spacing and therefore may have different member counts.
+      this.activeBezierSpacingPx = null;
+      this.updateBezierDraftPath();
+    }
   }
 
   setMode(mode) {
