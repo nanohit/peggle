@@ -204,7 +204,7 @@ async function main() {
   const session = {
     format: REPAIR_SESSION_FORMAT,
     version: REPAIR_SESSION_VERSION,
-    sessionId: `repair-v1:${options.seed}`,
+    sessionId: `repair-v1.1:${options.seed}`,
     seed: options.seed,
     source: {
       manifestFormat: manifest.format,
