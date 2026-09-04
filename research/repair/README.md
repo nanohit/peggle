@@ -52,18 +52,36 @@ of uploading the canonical result JSON:
 node research/tools/digest-repair-session.mjs "C:\path\to\repair-session-result.json"
 ```
 
-This writes `digest/digest.md`, `digest/digest.json`, and deterministic SVG
-before/after previews. The digest independently recomputes the semantic diff,
-replay, gates, fallback metrics and aggregates. It retains compact parameters
-for every final operation, source-candidate interpretation risks, retracted
-command markers, and a SHA-256 link to the exact archive. The primary aggregate
-contains only completed, gate-valid study candidates; control and incomplete
-candidates remain visible in separate diagnostic cohorts.
+This writes `digest/digest.md`, a minified `digest/digest.json`, deterministic
+SVG before/after views, and one model-ready PNG comparison sheet per candidate.
+Each sheet shows before, after, and a color-coded overlay. Edge or Chrome is
+used headlessly for rasterization; pass `--browser <path>` when it is not in a
+standard location, or explicitly opt out with `--no-png`.
+
+The digest independently recomputes the semantic diff, replay, gates, fallback
+metrics and aggregates. It retains compact parameters for every final
+operation, source-candidate interpretation risks, retracted command markers,
+and a SHA-256 link to the exact archive. It also derives global and per-changed-
+object relational descriptors: launcher-axis alignment, centroid and bounds,
+coverage, spacing, local density, nearest objects, mirror error, and coarse
+negative-space occupancy. The primary aggregate contains only completed,
+gate-valid study candidates; control and incomplete candidates remain visible
+in separate diagnostic cohorts. When many objects change, complete parameter
+clusters and delta distributions are retained while three salient objects are
+expanded; `--relations` retrieves the uncapped candidate detail.
+
+`digest.md` plus `digest.json` have a categorical combined limit of 102,400
+bytes. Preview images are separate visual inputs and are measured separately.
+If the text package exceeds the limit, generation fails rather than silently
+discarding evidence. Normally upload `digest.md` and the six comparison PNGs;
+keep `digest.json` for machine-readable follow-up.
 
 Exact evidence can be retrieved without loading the complete archive:
 
 ```powershell
 node research/tools/digest-repair-session.mjs <result.json> --candidate <id> --command <sequence>
 node research/tools/digest-repair-session.mjs <result.json> --candidate <id> --operation <index>
+node research/tools/digest-repair-session.mjs <result.json> --candidate <id> --relations
+node research/tools/digest-repair-session.mjs <result.json> --candidate <id> --relation <objectId>
 node research/tools/digest-repair-session.mjs <result.json> --candidate <id> --level before
 ```

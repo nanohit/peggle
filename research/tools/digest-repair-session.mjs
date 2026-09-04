@@ -5,28 +5,46 @@
 //   node research/tools/digest-repair-session.mjs <result.json> [outDir]
 //   node research/tools/digest-repair-session.mjs <result.json> --candidate <id> --command <sequence>
 //   node research/tools/digest-repair-session.mjs <result.json> --candidate <id> --operation <index>
+//   node research/tools/digest-repair-session.mjs <result.json> --candidate <id> --relation <objectId>
 //   node research/tools/digest-repair-session.mjs <result.json> --candidate <id> --level before|after
 
 import crypto from 'node:crypto';
+import { execFile as execFileCallback } from 'node:child_process';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
+import { promisify } from 'node:util';
 
 import {
   analyzeRepairCandidate,
   REPAIR_SESSION_RESULT_FORMAT,
   REPAIR_SESSION_VERSION
 } from '../../js/repair-session.js';
-import { renderNativeLevelSvg } from '../repair/lib/render-native-level.mjs';
+import { captureBezierSemanticState } from '../../js/bezier-semantic.js';
+import { describeRepairRelations, REPAIR_RELATION_METHOD } from '../repair/lib/relational-descriptors.mjs';
+import { renderNativeLevelSvg, renderRepairComparisonSvg } from '../repair/lib/render-native-level.mjs';
 
 const clone = value => (value == null ? value : JSON.parse(JSON.stringify(value)));
 const kb = value => `${(value / 1024).toFixed(1)} KB`;
+const execFile = promisify(execFileCallback);
+const MODEL_TEXT_BUDGET_BYTES = 100 * 1024;
 
 function round(value, digits = 3) {
   const number = Number(value);
   if (!Number.isFinite(number)) return null;
   const factor = 10 ** digits;
   return Math.round(number * factor) / factor;
+}
+
+function roundDeep(value, digits = 4) {
+  if (typeof value === 'number') return round(value, digits);
+  if (Array.isArray(value)) return value.map(entry => roundDeep(entry, digits));
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, roundDeep(entry, digits)]));
+  }
+  return value;
 }
 
 function tally(values) {
@@ -60,6 +78,57 @@ function agrees(left, right) {
 
 function safeName(value) {
   return String(value || 'candidate').replace(/[^a-z0-9_-]+/gi, '-').replace(/^-|-$/g, '').toLowerCase();
+}
+
+async function pathExists(value) {
+  try {
+    await fs.access(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function findRasterBrowser(explicitPath) {
+  if (explicitPath) {
+    if (!await pathExists(explicitPath)) throw new Error(`Raster browser does not exist: ${explicitPath}`);
+    return path.resolve(explicitPath);
+  }
+  const candidates = process.platform === 'win32' ? [
+    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+    'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe'
+  ] : process.platform === 'darwin' ? [
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'
+  ] : [
+    '/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/microsoft-edge'
+  ];
+  for (const candidate of candidates) if (await pathExists(candidate)) return candidate;
+  return null;
+}
+
+async function rasterizeSvg(svgPath, pngPath, browserPath, width, height) {
+  const profile = await fs.mkdtemp(path.join(os.tmpdir(), 'peggle-digest-browser-'));
+  try {
+    await fs.rm(pngPath, { force: true });
+    await execFile(browserPath, [
+      '--headless=new', '--disable-gpu', '--hide-scrollbars', '--no-first-run',
+      '--no-default-browser-check', '--disable-background-networking',
+      '--force-device-scale-factor=1', `--user-data-dir=${profile}`,
+      `--screenshot=${pngPath}`, `--window-size=${width},${height}`,
+      pathToFileURL(svgPath).href
+    ], { windowsHide: true, maxBuffer: 1024 * 1024 });
+    await fs.access(pngPath);
+  } finally {
+    const resolvedProfile = path.resolve(profile);
+    const resolvedTemp = `${path.resolve(os.tmpdir())}${path.sep}`;
+    if (resolvedProfile.startsWith(resolvedTemp)
+        && path.basename(resolvedProfile).startsWith('peggle-digest-browser-')) {
+      await fs.rm(resolvedProfile, { recursive: true, force: true });
+    }
+  }
 }
 
 function summarizeBounds(members) {
@@ -140,7 +209,7 @@ function summarizeOperation(operation, index) {
   }
   if (operation.type === 'object-exception') {
     entry.fallbackChanges = summarizeFallbackChanges(operation.changes);
-    if (operation.causeEvidence) entry.causeEvidence = clone(operation.causeEvidence);
+    if (operation.causeEvidence) entry.causeEvidence = roundDeep(operation.causeEvidence);
   } else if (operation.changes) entry.changes = compactChanges(operation.changes);
   if (operation.stroke) {
     entry.stroke = {
@@ -173,7 +242,7 @@ function summarizeOperation(operation, index) {
     memberCount: operation.group.memberIds?.length || 0,
     properties: clone(operation.group.properties || {})
   };
-  if (operation.deletedBounds) entry.deletedBounds = clone(operation.deletedBounds);
+  if (operation.deletedBounds) entry.deletedBounds = roundDeep(operation.deletedBounds);
   if (operation.family) entry.family = operation.family;
   if (operation.memberIds) entry.memberCount = operation.memberIds.length;
   return entry;
@@ -191,17 +260,72 @@ function groupOperations(operations) {
     entry.count++;
     entry.affectedMemberReferences += Number(operation.affectedMemberCount || 0);
     if (operation.reason) entry.reasons.push(operation.reason);
+    const parameterKey = operationParameterKey(operation);
+    if (!entry.parameterClusters) entry.parameterClusters = new Map();
+    if (!entry.parameterClusters.has(parameterKey)) entry.parameterClusters.set(parameterKey, {
+      parameters: operationParameterSummary(operation), count: 0, objectIds: []
+    });
+    const cluster = entry.parameterClusters.get(parameterKey);
+    cluster.count++;
+    const objectId = operation.objectId || operation.groupId;
+    if (objectId && cluster.objectIds.length < 6) cluster.objectIds.push(objectId);
   }
   return [...groups.values()]
     .sort((left, right) => right.count - left.count || left.type.localeCompare(right.type))
-    .map(entry => ({ ...entry, reasons: Object.fromEntries(tally(entry.reasons)) }));
+    .map(entry => ({
+      ...entry,
+      reasons: Object.fromEntries(tally(entry.reasons)),
+      parameterClusters: [...entry.parameterClusters.values()].map(cluster => ({
+        ...cluster,
+        omittedObjectIds: Math.max(0, cluster.count - cluster.objectIds.length)
+      }))
+    }));
+}
+
+function operationParameterSummary(operation) {
+  if (operation.transform) return {
+    angleDegrees: round(Number(operation.transform.angle || 0) * 180 / Math.PI, 1),
+    scale: round(operation.transform.scale ?? 1, 4),
+    tx: round(operation.transform.tx, 1), ty: round(operation.transform.ty, 1),
+    reflect: operation.transform.reflect === true
+  };
+  if (operation.type === 'object-exception') return {
+    reason: operation.reason || 'unclassified',
+    changedMembers: operation.changes?.length || 0
+  };
+  if (operation.changes) return { changedProperties: Object.keys(operation.changes).sort() };
+  if (operation.deltas) return { changedControlPoints: Object.keys(operation.deltas).sort() };
+  return { family: operation.family || operation.stroke?.family || operation.object?.family || null };
+}
+
+function operationParameterKey(operation) {
+  return JSON.stringify(operationParameterSummary(operation));
+}
+
+function selectOperationDetails(operations, limit = 3) {
+  const values = (operations || []).map((operation, index) => ({ operation, index }));
+  if (values.length <= limit) return { values, omitted: 0, policy: 'all' };
+  const ranked = [...values].sort((left, right) => {
+    const priority = value => value.operation.expressibility === 'fallback' ? 0
+      : ['add-stroke', 'delete-stroke', 'add-object', 'delete-object', 'declare-object'].includes(value.operation.type) ? 1
+        : value.operation.transform ? 3 : 2;
+    return priority(left) - priority(right)
+      || Number(right.operation.affectedMemberCount || 0) - Number(left.operation.affectedMemberCount || 0)
+      || left.index - right.index;
+  });
+  const selected = ranked.slice(0, limit).sort((left, right) => left.index - right.index);
+  return {
+    values: selected,
+    omitted: values.length - selected.length,
+    policy: 'fallback/add-delete/non-transform first, then largest transforms; parameter clusters retain the full distribution'
+  };
 }
 
 function transactionHints(transaction) {
   return (transaction?.patch?.hints || transaction?.hints || []).map(String);
 }
 
-function summarizeSequence(operationSequence, collapseAfter = 80) {
+function summarizeSequence(operationSequence, detailLimit = 24) {
   const entries = (operationSequence || []).map((transaction, index) => {
     const operations = (transaction.patch?.operations || []).filter(operation => operation.expressibility !== 'ignored');
     return {
@@ -216,7 +340,24 @@ function summarizeSequence(operationSequence, collapseAfter = 80) {
         .map(operation => operation.reason || 'unclassified')))
     };
   });
-  if (entries.length <= collapseAfter) return { entries, collapsed: false };
+  const aggregate = {
+    hints: Object.fromEntries(tally(entries.flatMap(entry => entry.hints))),
+    activeTypes: Object.fromEntries(tally(entries.filter(entry => !entry.retracted)
+      .flatMap(entry => Object.entries(entry.types).flatMap(([type, count]) => Array.from({ length: count }, () => type))))),
+    retractedTypes: Object.fromEntries(tally(entries.filter(entry => entry.retracted)
+      .flatMap(entry => Object.entries(entry.types).flatMap(([type, count]) => Array.from({ length: count }, () => type))))),
+    fallbackReasons: Object.fromEntries(tally(entries
+      .flatMap(entry => Object.entries(entry.fallbackReasons).flatMap(([reason, count]) => Array.from({ length: count }, () => reason)))))
+  };
+  const objectTouches = new Map();
+  for (const entry of entries) for (const objectId of entry.objects) {
+    objectTouches.set(objectId, (objectTouches.get(objectId) || 0) + 1);
+  }
+  const sortedTouches = [...objectTouches.entries()].sort((left, right) => right[1] - left[1]
+    || left[0].localeCompare(right[0]));
+  aggregate.mostTouchedObjects = sortedTouches.slice(0, 8).map(([objectId, count]) => ({ objectId, count }));
+  aggregate.omittedTouchedObjects = Math.max(0, sortedTouches.length - aggregate.mostTouchedObjects.length);
+
   const runs = [];
   for (const entry of entries) {
     const signature = JSON.stringify({
@@ -229,9 +370,28 @@ function summarizeSequence(operationSequence, collapseAfter = 80) {
       previous.endSeq = entry.seq;
     } else runs.push({ ...entry, endSeq: entry.seq, runLength: 1, signature });
   }
+  let selected = runs;
+  let selection = 'all collapsed runs';
+  if (runs.length > detailLimit) {
+    const chosen = new Set([
+      ...runs.slice(0, 5),
+      ...runs.slice(-5),
+      ...runs.filter(entry => entry.retracted || Object.keys(entry.fallbackReasons).length)
+    ]);
+    for (const entry of runs) {
+      if (chosen.size >= detailLimit) break;
+      chosen.add(entry);
+    }
+    selected = [...chosen].slice(0, detailLimit).sort((left, right) => left.seq - right.seq);
+    selection = 'first/last runs plus fallback and retracted evidence; aggregate counts cover every command';
+  }
   return {
-    entries: runs.map(({ signature: _signature, ...entry }) => entry),
-    collapsed: runs.length < entries.length
+    entries: selected.map(({ signature: _signature, ...entry }) => entry),
+    collapsed: runs.length < entries.length,
+    runCount: runs.length,
+    omittedRuns: Math.max(0, runs.length - selected.length),
+    selection,
+    aggregate
   };
 }
 
@@ -269,8 +429,8 @@ function sourceContext(source) {
     compositionFamily: source?.compositionFamily || null,
     sourceSkeleton: source?.sourceSkeleton || null,
     strata: clone(source?.strata || []),
-    knownProperties: clone(source?.knownProperties || []),
-    footprint: clone(source?.footprint || null)
+    knownProperties: roundDeep(source?.knownProperties || []),
+    footprint: roundDeep(source?.footprint || null)
   };
 }
 
@@ -282,10 +442,23 @@ function recomputeCandidate(candidate) {
   });
 }
 
-function candidateDigest(candidate, index, independent) {
+function candidateRelations(candidate, independent, changedObjectDetailLimit = 3) {
+  const width = Number(candidate.staticCheckOptions?.width || 400);
+  const height = Number(candidate.staticCheckOptions?.height
+    || candidate.finalLevel?.survival?.worldHeight || candidate.baselineLevel?.survival?.worldHeight || 600);
+  return describeRepairRelations(
+    captureBezierSemanticState(candidate.baselineLevel),
+    captureBezierSemanticState(candidate.finalLevel),
+    independent.patch.operations,
+    { width, height, axisX: width / 2, launcherY: 40, changedObjectDetailLimit }
+  );
+}
+
+function candidateDigest(candidate, index, independent, relations, rasterEnabled) {
   const { patch, replay, gates } = independent;
   const metrics = patch.metrics || {};
   const sequence = summarizeSequence(candidate.operationSequence);
+  const operationDetails = selectOperationDetails(patch.operations);
   const agreement = {
     finalSemanticDiff: agrees(candidate.finalSemanticDiff, patch),
     replay: agrees(candidate.replay, replay),
@@ -312,7 +485,9 @@ function candidateDigest(candidate, index, independent) {
     } : null,
     previews: {
       before: `previews/${previewBase}.before.svg`,
-      after: `previews/${previewBase}.after.svg`
+      after: `previews/${previewBase}.after.svg`,
+      comparisonSvg: `previews/${previewBase}.comparison.svg`,
+      comparisonPng: rasterEnabled ? `previews/${previewBase}.comparison.png` : null
     },
     integrity: { storedSummariesAgreeWithRecomputation: agreement },
     gates: Object.fromEntries(Object.entries(gates || {}).map(([name, gate]) => [name, compactGate(name, gate)])),
@@ -337,12 +512,25 @@ function candidateDigest(candidate, index, independent) {
     fallbackReasonCounts: clone(metrics.fallbackReasonCounts || {}),
     languageGapReasonCounts: clone(metrics.languageGapReasonCounts || {}),
     operationGroups: groupOperations(patch.operations),
-    operations: (patch.operations || []).map(summarizeOperation),
+    operationDetailPolicy: {
+      total: patch.operations?.length || 0,
+      reported: operationDetails.values.length,
+      omitted: operationDetails.omitted,
+      selection: operationDetails.policy
+    },
+    operations: operationDetails.values.map(({ operation, index: operationIndex }) => (
+      summarizeOperation(operation, operationIndex)
+    )),
+    relations,
     sequence: {
       recorded: (candidate.operationSequence || []).length,
       active: (candidate.operationSequence || []).filter(transaction => transaction?.retracted !== true).length,
       retracted: (candidate.operationSequence || []).filter(transaction => transaction?.retracted === true).length,
       collapsed: sequence.collapsed,
+      runCount: sequence.runCount,
+      omittedRuns: sequence.omittedRuns,
+      selection: sequence.selection,
+      aggregate: sequence.aggregate,
       entries: sequence.entries
     }
   };
@@ -403,17 +591,60 @@ function operationLine(operation) {
   return `- ${fields.join(' · ')}`;
 }
 
+function operationGroupLine(group) {
+  const clusters = group.parameterClusters.map(cluster => {
+    const examples = cluster.objectIds.length ? ` objects=${cluster.objectIds.join('|')}` : '';
+    const omitted = cluster.omittedObjectIds ? ` +${cluster.omittedObjectIds}` : '';
+    return `${cluster.count}×${JSON.stringify(cluster.parameters)}${examples}${omitted}`;
+  }).join('; ');
+  return `- ${group.count} × \`${group.type}\` (${group.expressibility}), affected-member references=${group.affectedMemberReferences}`
+    + `${Object.keys(group.reasons).length ? `, reasons=${formatCounts(group.reasons)}` : ''}`
+    + `${clusters ? ` — clusters: ${clusters}` : ''}`;
+}
+
+function globalRelationLines(relations) {
+  const before = relations.global.before, after = relations.global.after, delta = relations.global.delta;
+  return [
+    `Global geometry: members ${before.memberCount}→${after.memberCount}; objects ${before.objectCount}→${after.objectCount}; centroid (${before.centroid.x},${before.centroid.y})→(${after.centroid.x},${after.centroid.y}); axis offset ${before.centroid.signedAxisOffsetPx}→${after.centroid.signedAxisOffsetPx}px.`,
+    `Composition: coverage ${before.bounds.coverageX}×${before.bounds.coverageY}→${after.bounds.coverageX}×${after.bounds.coverageY}; mirror ${before.mirror.score}→${after.mirror.score}; nearest-neighbor mean ${before.nearestNeighbor.meanPx}→${after.nearestNeighbor.meanPx}px.`,
+    `Negative space: top opening ${before.negativeSpace.topOpeningPx}→${after.negativeSpace.topOpeningPx}px; occupancy ${before.negativeSpace.centerOccupancyFraction}→${after.negativeSpace.centerOccupancyFraction}; largest empty rectangle ${before.negativeSpace.largestEmptyRectangleFraction}→${after.negativeSpace.largestEmptyRectangleFraction}.`,
+    `Net relational delta: ${JSON.stringify(delta)}.`
+  ];
+}
+
+function changedObjectLine(entry) {
+  if (entry.status === 'added' || entry.status === 'deleted') {
+    const state = entry.after || entry.before;
+    return `- \`${entry.objectId}\` ${entry.status}: ${state.memberCount} members, centroid=(${state.centroid.x},${state.centroid.y}), bounds=${state.bounds.width}×${state.bounds.height}, mirror=${state.mirror.score}, nearest=${formatNearest(state.neighborhood.nearestObjects)}.`;
+  }
+  if (!entry.before || !entry.after) return `- \`${entry.objectId}\` ${entry.status}.`;
+  return `- \`${entry.objectId}\`: members ${entry.before.memberCount}→${entry.after.memberCount}; centroid (${entry.before.centroid.x},${entry.before.centroid.y})→(${entry.after.centroid.x},${entry.after.centroid.y}); bounds ${entry.before.bounds.width}×${entry.before.bounds.height}→${entry.after.bounds.width}×${entry.after.bounds.height}; orientation ${entry.before.orientation.angleDegrees}°→${entry.after.orientation.angleDegrees}°; net=${JSON.stringify(entry.delta)}; mirror ${entry.before.mirror.score}→${entry.after.mirror.score}; density ${entry.before.neighborhood.localDensity}→${entry.after.neighborhood.localDensity}; nearest before=${formatNearest(entry.before.neighborhood.nearestObjects)}, after=${formatNearest(entry.after.neighborhood.nearestObjects)}.`;
+}
+
+function formatNearest(entries) {
+  return entries?.length ? entries.map(entry => `${entry.objectId}:${entry.distancePx}px`).join('|') : 'none';
+}
+
 function renderMarkdown(digest) {
   const lines = [];
   lines.push(`# Repair session digest — ${digest.sessionId}`);
   lines.push('');
   lines.push(`Derived from \`${digest.sourceResult}\` (${kb(digest.archive.resultBytes)}, SHA-256 \`${digest.archive.sha256}\`).`);
   lines.push('Diffs, replay, gates and metrics below were independently recomputed from embedded before/after levels and active command evidence.');
+  lines.push(`Model-text budget: ${digest.modelInputBudget.combinedBytes}/${digest.modelInputBudget.maxCombinedBytes} bytes for digest.md + digest.json; previews are accounted separately as visual inputs.`);
+  lines.push(`Visual evidence: ${digest.visualEvidence.comparisonSheets} comparison sheets (${digest.visualEvidence.format}`
+    + `${digest.visualEvidence.totalComparisonPngBytes != null ? `, ${kb(digest.visualEvidence.totalComparisonPngBytes)} PNG total` : ''}).`);
   lines.push('');
   lines.push(`Result status: **${digest.resultStatus}**.`);
   if (digest.protocol?.warning) lines.push(`Protocol warning: ${digest.protocol.warning}`);
   lines.push('');
   lines.push('> Replay accuracy, repair fallback and final-state fallback must be interpreted together.');
+  lines.push('');
+  lines.push('## Analysis contract');
+  lines.push('');
+  for (const rule of digest.analysisContract) lines.push(`- ${rule}`);
+  lines.push('');
+  lines.push(`Relational descriptor method: ${JSON.stringify(digest.relationalMethod)}.`);
   lines.push('');
 
   const mismatches = digest.candidates.filter(candidate => !candidate.integrity.storedSummariesAgreeWithRecomputation.all);
@@ -462,7 +693,9 @@ function renderMarkdown(digest) {
     lines.push(`## ${candidate.order}. ${candidate.id}${family ? ` — ${family}` : ''}`);
     lines.push('');
     lines.push(`Disposition: **${candidate.disposition}**${candidate.dispositionReason ? ` — ${candidate.dispositionReason}` : ''}.`);
-    lines.push(`Previews: [before](${candidate.previews.before}), [after](${candidate.previews.after}).`);
+    lines.push(`Visual evidence: [comparison SVG](${candidate.previews.comparisonSvg})`
+      + `${candidate.previews.comparisonPng ? `, [model-ready PNG](${candidate.previews.comparisonPng})` : ''}`
+      + `; separate [before](${candidate.previews.before}) and [after](${candidate.previews.after}).`);
     if (candidate.source.strata.length) lines.push(`Strata: ${candidate.source.strata.join(', ')}.`);
     if (candidate.source.footprint) lines.push(`Source footprint: ${JSON.stringify(candidate.source.footprint)}.`);
     for (const property of candidate.source.knownProperties) {
@@ -482,13 +715,35 @@ function renderMarkdown(digest) {
       + ` changed members ${candidate.metrics.changedMemberCount}; final members ${candidate.metrics.finalMemberCount}`);
     lines.push('```');
     lines.push('');
-    lines.push(`Final semantic diff (${candidate.operations.length} operations):`);
+    for (const line of globalRelationLines(candidate.relations)) lines.push(line);
     lines.push('');
-    if (candidate.operations.length) for (const operation of candidate.operations) lines.push(operationLine(operation));
+    if (candidate.relations.changedObjectSummary.total) {
+      const summary = candidate.relations.changedObjectSummary;
+      lines.push(`Changed-object relational context: ${summary.total} total, ${summary.reported} detailed, ${summary.omitted} represented only in the complete distribution below.`);
+      lines.push('');
+      lines.push(`Distribution: statuses=${formatCounts(summary.statusCounts)}; families=${formatCounts(summary.familyCounts)}; deltas=${JSON.stringify(summary.deltaDistribution)}.`);
+      if (summary.omitted) lines.push(`Detail selection: ${summary.selection}.`);
+      lines.push('');
+      for (const entry of candidate.relations.changedObjects) lines.push(changedObjectLine(entry));
+      lines.push('');
+    }
+    lines.push(`Final semantic diff (${candidate.operationDetailPolicy.total} operations):`);
+    lines.push('');
+    if (candidate.operationGroups.length) for (const group of candidate.operationGroups) lines.push(operationGroupLine(group));
     else lines.push('- No semantic change.');
     lines.push('');
+    if (candidate.operations.length) {
+      lines.push(`Representative operation details: ${candidate.operationDetailPolicy.reported} shown, ${candidate.operationDetailPolicy.omitted} omitted.`);
+      if (candidate.operationDetailPolicy.omitted) lines.push(`Selection policy: ${candidate.operationDetailPolicy.selection}.`);
+      lines.push('');
+      for (const operation of candidate.operations) lines.push(operationLine(operation));
+      lines.push('');
+    }
     lines.push(`Command sequence: ${candidate.sequence.recorded} recorded, ${candidate.sequence.active} active, ${candidate.sequence.retracted} retracted.`
+      + ` ${candidate.sequence.runCount} semantic runs, ${candidate.sequence.entries.length} shown, ${candidate.sequence.omittedRuns} omitted.`
       + (candidate.sequence.collapsed ? ' Consecutive commands with identical hint, operation, target and reason were collapsed.' : ''));
+    lines.push(`Command aggregate: hints=${formatCounts(candidate.sequence.aggregate.hints)}; active types=${formatCounts(candidate.sequence.aggregate.activeTypes)}; retracted types=${formatCounts(candidate.sequence.aggregate.retractedTypes)}; fallback=${formatCounts(candidate.sequence.aggregate.fallbackReasons)}; most touched=${candidate.sequence.aggregate.mostTouchedObjects.map(entry => `${entry.objectId}:${entry.count}`).join('|') || 'none'}${candidate.sequence.aggregate.omittedTouchedObjects ? ` (+${candidate.sequence.aggregate.omittedTouchedObjects} objects)` : ''}.`);
+    if (candidate.sequence.omittedRuns) lines.push(`Run selection: ${candidate.sequence.selection}.`);
     lines.push('');
     lines.push('```text');
     for (const entry of candidate.sequence.entries) {
@@ -514,6 +769,8 @@ function renderMarkdown(digest) {
   lines.push('```powershell');
   lines.push('node research/tools/digest-repair-session.mjs <result.json> --candidate <id> --command <sequence>');
   lines.push('node research/tools/digest-repair-session.mjs <result.json> --candidate <id> --operation <index>');
+  lines.push('node research/tools/digest-repair-session.mjs <result.json> --candidate <id> --relations');
+  lines.push('node research/tools/digest-repair-session.mjs <result.json> --candidate <id> --relation <objectId>');
   lines.push('node research/tools/digest-repair-session.mjs <result.json> --candidate <id> --level before|after');
   lines.push('```');
   lines.push('');
@@ -528,6 +785,10 @@ function parseArgs(argv) {
     else if (value === '--command') options.command = Number(argv[++index]);
     else if (value === '--operation') options.operation = Number(argv[++index]);
     else if (value === '--level') options.level = argv[++index];
+    else if (value === '--relations') options.relations = true;
+    else if (value === '--relation') options.relation = argv[++index];
+    else if (value === '--browser') options.browser = argv[++index];
+    else if (value === '--no-png') options.noPng = true;
     else if (value === '--help' || value === '-h') options.help = true;
     else if (value.startsWith('--')) throw new Error(`Unknown option: ${value}`);
     else options.positionals.push(value);
@@ -573,38 +834,74 @@ function drillDown(result, options) {
     printJson(options.level === 'before' ? candidate.baselineLevel : candidate.finalLevel);
     return;
   }
-  throw new Error('Choose one of --command <sequence>, --operation <index>, or --level before|after.');
+  if (options.relations || options.relation) {
+    const independent = recomputeCandidate(candidate);
+    const relations = candidateRelations(candidate, independent, Number.MAX_SAFE_INTEGER);
+    if (options.relation) {
+      const entry = relations.changedObjects.find(value => value.objectId === options.relation);
+      if (!entry) throw new Error(`Candidate ${candidate.id} has no changed-object relation for ${options.relation}.`);
+      printJson(entry);
+    } else printJson(relations);
+    return;
+  }
+  throw new Error('Choose --command <sequence>, --operation <index>, --relations, --relation <objectId>, or --level before|after.');
 }
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const [input, outputArgument] = options.positionals;
   if (options.help || !input) {
-    console.error('usage: digest-repair-session.mjs <repair-session-result.json> [outDir] [--candidate <id> --command <n>|--operation <n>|--level before|after]');
+    console.error('usage: digest-repair-session.mjs <repair-session-result.json> [outDir] [--browser <path>|--no-png] [--candidate <id> --command <n>|--operation <n>|--relations|--relation <objectId>|--level before|after]');
     process.exit(options.help ? 0 : 2);
   }
   const resultPath = path.resolve(input);
   const raw = await fs.readFile(resultPath, 'utf8');
   const result = JSON.parse(raw);
   validateResult(result);
-  if (options.candidate || options.command != null || options.operation != null || options.level) {
+  if (options.candidate || options.command != null || options.operation != null
+      || options.level || options.relations || options.relation) {
     drillDown(result, options);
     return;
   }
 
   const output = path.resolve(outputArgument || path.join(path.dirname(resultPath), 'digest'));
   await fs.mkdir(path.join(output, 'previews'), { recursive: true });
+  const rasterBrowser = options.noPng ? null : await findRasterBrowser(options.browser);
+  if (!options.noPng && !rasterBrowser) {
+    throw new Error('No Edge/Chrome browser found for PNG comparison sheets. Pass --browser <path>, or --no-png to explicitly produce SVG only.');
+  }
   const candidates = [];
   for (const [index, candidate] of result.candidates.entries()) {
     const independent = recomputeCandidate(candidate);
-    const entry = candidateDigest(candidate, index, independent);
+    const width = Number(candidate.staticCheckOptions?.width || 400);
+    const height = Number(candidate.staticCheckOptions?.height
+      || candidate.finalLevel?.survival?.worldHeight || candidate.baselineLevel?.survival?.worldHeight || 600);
+    const relations = candidateRelations(candidate, independent);
+    const entry = candidateDigest(candidate, index, independent, relations, !!rasterBrowser);
     candidates.push(entry);
+    const comparisonSvg = renderRepairComparisonSvg(candidate.baselineLevel, candidate.finalLevel, {
+      title: `${candidate.id} — repair comparison`, width, height
+    });
     await Promise.all([
       fs.writeFile(path.join(output, entry.previews.before),
-        renderNativeLevelSvg(candidate.baselineLevel, { title: `${candidate.id} — before` })),
+        renderNativeLevelSvg(candidate.baselineLevel, { title: `${candidate.id} — before`, width, height })),
       fs.writeFile(path.join(output, entry.previews.after),
-        renderNativeLevelSvg(candidate.finalLevel, { title: `${candidate.id} — after` }))
+        renderNativeLevelSvg(candidate.finalLevel, { title: `${candidate.id} — after`, width, height })),
+      fs.writeFile(path.join(output, entry.previews.comparisonSvg), comparisonSvg)
     ]);
+    if (rasterBrowser) {
+      await rasterizeSvg(
+        path.join(output, entry.previews.comparisonSvg),
+        path.join(output, entry.previews.comparisonPng),
+        rasterBrowser,
+        width * 3,
+        height + 38
+      );
+    }
+    entry.previews.comparisonSvgBytes = (await fs.stat(path.join(output, entry.previews.comparisonSvg))).size;
+    entry.previews.comparisonPngBytes = rasterBrowser
+      ? (await fs.stat(path.join(output, entry.previews.comparisonPng))).size
+      : null;
   }
 
   const primaryStudy = candidates.filter(candidate => candidate.role === 'study'
@@ -619,7 +916,7 @@ async function main() {
     }));
   const digest = {
     format: 'repair-session-digest',
-    version: 2,
+    version: 3,
     sessionId: result.sessionId,
     seed: result.seed,
     resultStatus: result.status || 'unknown',
@@ -630,6 +927,30 @@ async function main() {
       resultBytes: Buffer.byteLength(raw, 'utf8'),
       sha256: crypto.createHash('sha256').update(raw).digest('hex')
     },
+    modelInputBudget: {
+      scope: 'digest.md + minified digest.json; preview images are separate visual inputs',
+      maxCombinedBytes: MODEL_TEXT_BUDGET_BYTES,
+      markdownBytes: 0,
+      jsonBytes: 0,
+      combinedBytes: 0
+    },
+    visualEvidence: {
+      comparisonSheets: candidates.length,
+      format: rasterBrowser ? 'png+svg' : 'svg-only',
+      rasterizer: rasterBrowser ? path.basename(rasterBrowser) : null,
+      totalComparisonSvgBytes: candidates.reduce((sum, candidate) => sum + candidate.previews.comparisonSvgBytes, 0),
+      totalComparisonPngBytes: rasterBrowser
+        ? candidates.reduce((sum, candidate) => sum + candidate.previews.comparisonPngBytes, 0)
+        : null
+    },
+    analysisContract: [
+      'Treat the control as pipeline calibration, never as evidence about the author or generator.',
+      'Interpret every operation together with its changed-object relations and before/after/overlay image.',
+      'Separate candidate-specific defects listed under knownProperties from patterns recurring across composition families.',
+      'Do not infer quality from operation or fallback counts alone; report competing explanations and request raw drill-down when the compact evidence is ambiguous.',
+      'State proposed language additions as falsifiable hypotheses tied to candidate ids and operation indices.'
+    ],
+    relationalMethod: clone(REPAIR_RELATION_METHOD),
     aggregates: {
       primaryStudy: aggregateCandidates(primaryStudy),
       excludedStudy: aggregateCandidates(candidates.filter(candidate => excludedStudy.some(value => value.id === candidate.id))),
@@ -644,14 +965,34 @@ async function main() {
       'full baselineLevel and finalLevel bodies (available through --level)',
       'raw per-operation payloads (compact parameters and fallback displacement statistics are retained; exact payloads are available through --operation)',
       'raw per-command patch bodies (hint, operation counts, target ids, fallback reasons and retraction are retained; exact payloads are available through --command)',
+      'full relational detail for low-salience changed objects when a candidate changes more than three objects (complete distributions are retained; exact relations are available through --relations/--relation)',
       'verbose gate evidence such as every offending member id (status, failure codes and key counts are retained)',
       'per-member coordinates except aggregate fallback displacement and added/deleted counts',
       'level configuration outside the composition semantic state'
     ]
   };
 
-  const markdown = renderMarkdown(digest);
-  const digestJson = `${JSON.stringify(digest, null, 2)}\n`;
+  let markdown = '', digestJson = '';
+  for (let iteration = 0; iteration < 5; iteration++) {
+    markdown = renderMarkdown(digest);
+    digestJson = `${JSON.stringify(digest)}\n`;
+    const measured = {
+      markdownBytes: Buffer.byteLength(markdown, 'utf8'),
+      jsonBytes: Buffer.byteLength(digestJson, 'utf8')
+    };
+    measured.combinedBytes = measured.markdownBytes + measured.jsonBytes;
+    const stable = measured.markdownBytes === digest.modelInputBudget.markdownBytes
+      && measured.jsonBytes === digest.modelInputBudget.jsonBytes
+      && measured.combinedBytes === digest.modelInputBudget.combinedBytes;
+    Object.assign(digest.modelInputBudget, measured);
+    if (stable) break;
+  }
+  markdown = renderMarkdown(digest);
+  digestJson = `${JSON.stringify(digest)}\n`;
+  const finalCombinedBytes = Buffer.byteLength(markdown, 'utf8') + Buffer.byteLength(digestJson, 'utf8');
+  if (finalCombinedBytes > MODEL_TEXT_BUDGET_BYTES) {
+    throw new Error(`Model text package is ${finalCombinedBytes} bytes; hard limit is ${MODEL_TEXT_BUDGET_BYTES}. Raw evidence was not truncated. Reduce the session or revise the explicit digest policy.`);
+  }
   await Promise.all([
     fs.writeFile(path.join(output, 'digest.json'), digestJson),
     fs.writeFile(path.join(output, 'digest.md'), markdown)
@@ -664,6 +1005,9 @@ async function main() {
     archiveBytes: digest.archive.resultBytes,
     digestJsonBytes: Buffer.byteLength(digestJson, 'utf8'),
     digestMarkdownBytes: markdownBytes,
+    combinedModelTextBytes: finalCombinedBytes,
+    maxCombinedModelTextBytes: MODEL_TEXT_BUDGET_BYTES,
+    comparisonPngs: rasterBrowser ? candidates.length : 0,
     markdownReduction: `${(digest.archive.resultBytes / Math.max(1, markdownBytes)).toFixed(0)}x`,
     storedSummaryMismatches: candidates.filter(candidate => !candidate.integrity.storedSummariesAgreeWithRecomputation.all)
       .map(candidate => candidate.id)
