@@ -42,4 +42,28 @@ node research/tools/analyze-repair-session.mjs "C:\path\to\repair-session-result
 
 The output directory contains `analysis.json`, `report.html`, and SVG before /
 after views rendered only from the embedded level JSON. The analyzer recomputes
-the final diff and replay instead of trusting metrics stored by the editor.
+the final diff, replay and gates instead of trusting metrics stored by the
+editor.
+
+For model-assisted interpretation, derive the smaller reading package instead
+of uploading the canonical result JSON:
+
+```powershell
+node research/tools/digest-repair-session.mjs "C:\path\to\repair-session-result.json"
+```
+
+This writes `digest/digest.md`, `digest/digest.json`, and deterministic SVG
+before/after previews. The digest independently recomputes the semantic diff,
+replay, gates, fallback metrics and aggregates. It retains compact parameters
+for every final operation, source-candidate interpretation risks, retracted
+command markers, and a SHA-256 link to the exact archive. The primary aggregate
+contains only completed, gate-valid study candidates; control and incomplete
+candidates remain visible in separate diagnostic cohorts.
+
+Exact evidence can be retrieved without loading the complete archive:
+
+```powershell
+node research/tools/digest-repair-session.mjs <result.json> --candidate <id> --command <sequence>
+node research/tools/digest-repair-session.mjs <result.json> --candidate <id> --operation <index>
+node research/tools/digest-repair-session.mjs <result.json> --candidate <id> --level before
+```

@@ -268,4 +268,43 @@ assert.match(await fs.readFile(path.join(analysisPath, 'report.html'), 'utf8'), 
 await fs.access(path.join(analysisPath, independent.candidates[0].beforePreview));
 await fs.access(path.join(analysisPath, independent.candidates[0].afterPreview));
 
+// The compact digest must also recompute rather than trust stored summaries,
+// retain operation parameters and known interpretation risks, and expose a
+// working raw drill-down path without duplicating full levels into the digest.
+const digestPath = path.join(temporary, 'digest');
+execFileSync(process.execPath, ['research/tools/digest-repair-session.mjs', resultPath, digestPath], {
+  cwd: path.resolve('.'), stdio: 'pipe'
+});
+const digest = JSON.parse(await fs.readFile(path.join(digestPath, 'digest.json'), 'utf8'));
+assert.equal(digest.version, 2);
+assert.equal(digest.candidates.every(candidate => candidate.integrity.storedSummariesAgreeWithRecomputation.all), true);
+assert.equal(digest.candidates[0].gates.control.status, 'passed');
+assert.equal(digest.candidates[0].operations[0].transform.tx, -10);
+assert.equal(digest.candidates[2].source.knownProperties[0].id, 'large-empty-opening');
+assert.equal(Object.hasOwn(digest.candidates[0], 'baselineLevel'), false);
+assert.match(await fs.readFile(path.join(digestPath, 'digest.md'), 'utf8'), /independently recomputed/);
+await fs.access(path.join(digestPath, digest.candidates[0].previews.before));
+await fs.access(path.join(digestPath, digest.candidates[0].previews.after));
+
+const rawOperation = JSON.parse(execFileSync(process.execPath, [
+  'research/tools/digest-repair-session.mjs', resultPath,
+  '--candidate', 'candidate-0', '--operation', '0'
+], { cwd: path.resolve('.'), encoding: 'utf8' }));
+assert.equal(rawOperation.type, 'transform-object');
+
+const tampered = JSON.parse(JSON.stringify(complete));
+tampered.candidates[0].replay.exact = false;
+tampered.candidates[0].finalSemanticDiff.metrics.operationCount = 999;
+const tamperedPath = path.join(temporary, 'tampered-result.json');
+const tamperedDigestPath = path.join(temporary, 'tampered-digest');
+await fs.writeFile(tamperedPath, JSON.stringify(tampered));
+execFileSync(process.execPath, ['research/tools/digest-repair-session.mjs', tamperedPath, tamperedDigestPath], {
+  cwd: path.resolve('.'), stdio: 'pipe'
+});
+const tamperedDigest = JSON.parse(await fs.readFile(path.join(tamperedDigestPath, 'digest.json'), 'utf8'));
+assert.equal(tamperedDigest.candidates[0].replay.exact, true);
+assert.equal(tamperedDigest.candidates[0].metrics.operationCount, 1);
+assert.equal(tamperedDigest.candidates[0].integrity.storedSummariesAgreeWithRecomputation.all, false);
+assert.match(await fs.readFile(path.join(tamperedDigestPath, 'digest.md'), 'utf8'), /Integrity warning/);
+
 console.log('ok repair session lifecycle, gates and result');

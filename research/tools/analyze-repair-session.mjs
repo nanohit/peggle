@@ -2,17 +2,31 @@
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 
 import {
-  applyBezierSemanticPatch,
-  captureBezierSemanticState,
-  diffBezierSemanticStates,
-  semanticReplayReport
-} from '../../js/bezier-semantic.js';
-import { REPAIR_SESSION_RESULT_FORMAT } from '../../js/repair-session.js';
+  analyzeRepairCandidate,
+  REPAIR_SESSION_RESULT_FORMAT
+} from '../../js/repair-session.js';
 import { renderNativeLevelSvg } from '../repair/lib/render-native-level.mjs';
 
 const clone = value => value == null ? value : JSON.parse(JSON.stringify(value));
+
+function comparable(value) {
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) return null;
+    return Math.round(value * 1e9) / 1e9;
+  }
+  if (Array.isArray(value)) return value.map(comparable);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => [key, comparable(entry)]));
+  }
+  return value;
+}
+
+const agrees = (left, right) => isDeepStrictEqual(comparable(left), comparable(right));
 
 function safeName(value) {
   return String(value || 'candidate').replace(/[^a-z0-9_-]+/gi, '-').replace(/^-|-$/g, '').toLowerCase();
@@ -22,14 +36,6 @@ function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, character => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
   })[character]);
-}
-
-function commandEvidence(sequence) {
-  return (sequence || []).filter(command => command?.retracted !== true).map(command => ({
-    sequence: command.sequence,
-    hints: (command?.patch?.hints || command?.hints || []).map(String),
-    operations: command?.patch?.operations || []
-  }));
 }
 
 function addCounts(target, source) {
@@ -81,12 +87,12 @@ async function main() {
   const fallbackReasonCounts = {};
   const languageGapReasonCounts = {};
   for (const [index, candidate] of (result.candidates || []).entries()) {
-    const before = captureBezierSemanticState(candidate.baselineLevel);
-    const after = captureBezierSemanticState(candidate.finalLevel);
-    const patch = diffBezierSemanticStates(before, after, {
-      commandEvidence: commandEvidence(candidate.operationSequence)
+    const independent = analyzeRepairCandidate({
+      ...candidate,
+      currentLevel: candidate.finalLevel,
+      transactionLog: candidate.operationSequence || []
     });
-    const replay = semanticReplayReport(after, applyBezierSemanticPatch(before, patch), patch);
+    const { patch, replay, gates } = independent;
     const base = `${String(index + 1).padStart(2, '0')}-${safeName(candidate.id)}`;
     const beforePreview = `previews/${base}-before.svg`;
     const afterPreview = `previews/${base}-after.svg`;
@@ -103,9 +109,10 @@ async function main() {
       note: candidate.note || '', frictionNote: candidate.frictionNote || '',
       operationSequence: clone(candidate.operationSequence || []),
       activeOperationCount: (candidate.operationSequence || []).filter(command => command?.retracted !== true).length,
-      finalSemanticDiff: patch, replay,
-      storedResultAgrees: JSON.stringify(candidate.finalSemanticDiff) === JSON.stringify(patch)
-        && JSON.stringify(candidate.replay) === JSON.stringify(replay),
+      finalSemanticDiff: patch, replay, gates,
+      storedResultAgrees: agrees(candidate.finalSemanticDiff, patch)
+        && agrees(candidate.replay, replay)
+        && agrees(candidate.gates, gates),
       beforePreview, afterPreview
     });
   }

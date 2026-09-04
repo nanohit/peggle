@@ -371,9 +371,18 @@ function operationSummary(operation) {
 
 function evaluateControlRepair(candidate, actualPatch) {
   if (candidate?.role !== 'control') return { status: 'not-applicable' };
-  if (!candidate.controlTargetLevel) return { status: 'failed', failures: ['missing-control-target'] };
   const baselineState = captureBezierSemanticState(candidate.baselineLevel);
-  const targetState = captureBezierSemanticState(candidate.controlTargetLevel);
+  const expectedDefinition = candidate?.knownDefect?.expectedOperation || null;
+  const targetState = candidate.controlTargetLevel
+    ? captureBezierSemanticState(candidate.controlTargetLevel)
+    : expectedDefinition
+      ? applyBezierSemanticPatch(baselineState, {
+        format: 'semantic-object-patch',
+        version: 4,
+        operations: [{ ...clone(expectedDefinition), expressibility: 'native' }]
+      })
+      : null;
+  if (!targetState) return { status: 'failed', failures: ['missing-control-target'] };
   const currentState = captureBezierSemanticState(candidate.currentLevel);
   const expectedPatch = diffBezierSemanticStates(baselineState, targetState);
   const expectedOperations = meaningfulPatchOperations(expectedPatch);
@@ -700,9 +709,17 @@ export function finishRepairSession(session, now = new Date().toISOString()) {
       candidateFailures.push('static-check-gate');
     }
     if (candidateFailures.length) blockingFailures.push({ candidateId: candidate.id, failures: candidateFailures });
+    const knownDefect = clone(candidate.knownDefect || null);
+    if (candidate.role === 'control' && knownDefect && !knownDefect.expectedOperation
+        && analysis.gates.control?.expectedOperation) {
+      // Keep the exported archive independently auditable without duplicating
+      // the complete control target level (roughly another full candidate).
+      knownDefect.expectedOperation = clone(analysis.gates.control.expectedOperation);
+    }
     candidateResults.push({
       id: candidate.id, order: candidate.order, role: candidate.role,
-      source: clone(candidate.source || {}), knownDefect: clone(candidate.knownDefect || null),
+      source: clone(candidate.source || {}), knownDefect,
+      staticCheckOptions: clone(candidate.staticCheckOptions || {}),
       disposition: candidate.disposition, dispositionReason: candidate.dispositionReason,
       note: candidate.note, frictionNote: candidate.frictionNote,
       baselineLevel: clone(candidate.baselineLevel), finalLevel: clone(candidate.currentLevel),
