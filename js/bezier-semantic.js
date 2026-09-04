@@ -323,7 +323,13 @@ function transformExceptions(exceptions, transform) {
 function changedCurveProperties(before, after) {
   const changes = {};
   for (const key of RESAMPLE_PROPERTIES) {
-    if (same(before?.[key] ?? null, after?.[key] ?? null)) continue;
+    const left = before?.[key] ?? null;
+    const right = after?.[key] ?? null;
+    // Similarity fitting is floating-point work. A pure rigid transform can
+    // infer scale as 0.9999999999999998; treating that as a spacing change
+    // creates a phantom resample-stroke after an otherwise exact rotation.
+    if ((Number.isFinite(left) && Number.isFinite(right) && close(left, right, 1e-7))
+        || same(left, right)) continue;
     changes[key] = { from: clone(before?.[key] ?? null), to: clone(after?.[key] ?? null) };
   }
   return changes;

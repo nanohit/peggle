@@ -30,7 +30,13 @@ function level(id) {
   });
 }
 
-const baselines = Array.from({ length: 6 }, (_value, index) => level(`level-${index}`));
+const controlTarget = level('level-0');
+const controlBaseline = JSON.parse(JSON.stringify(controlTarget));
+controlBaseline.pegs[0].x += 10;
+const baselines = [
+  controlBaseline,
+  ...Array.from({ length: 5 }, (_value, index) => level(`level-${index + 1}`))
+];
 const definition = {
   format: 'repair-session', version: 1, sessionId: 'test-session', seed: 'fixed',
   protocol: { metricsVisibleDuringRepair: false },
@@ -40,7 +46,7 @@ const definition = {
     source: index === 2 ? { knownProperties: [{ id: 'large-empty-opening', measured: { topOpeningPx: 230 } }] } : {},
     ...(index === 0 ? {
       knownDefect: { id: 'test-offset' },
-      controlTargetLevel: JSON.parse(JSON.stringify(baselines[0]))
+      controlTargetLevel: JSON.parse(JSON.stringify(controlTarget))
     } : {}),
     baselineLevel: baselines[index]
   }))
@@ -51,6 +57,13 @@ const session = startRepairSession(definition, '2026-01-01T00:00:00.000Z');
 assert.equal(session.candidates.length, 6);
 assert.notEqual(session.candidates[0].baselineLevel, session.candidates[0].currentLevel);
 assert.equal(analyzeRepairCandidate(session.candidates[0]).replay.exact, true);
+assert.equal(analyzeRepairCandidate(session.candidates[0]).gates.control.status, 'failed');
+const contaminatedControl = JSON.parse(JSON.stringify(session.candidates[0]));
+contaminatedControl.currentLevel = JSON.parse(JSON.stringify(controlTarget));
+contaminatedControl.currentLevel.pegs[1].x += 0.25;
+const contaminatedGate = analyzeRepairCandidate(contaminatedControl).gates.control;
+assert.equal(contaminatedGate.status, 'failed');
+assert.ok(contaminatedGate.failures.includes('unaffected-control-state-changed'));
 
 const memory = new Map();
 const storage = {
@@ -153,6 +166,16 @@ assert.equal(session.candidates[1].transactionLog[0].patch.operations.length, 1)
 const blocked = finishRepairSession(session, '2026-01-01T01:00:00.000Z');
 assert.equal(blocked.status, 'blocked');
 assert.equal(blocked.blockingFailures.length, 6);
+recordRepairTransaction(
+  session.candidates[0],
+  JSON.parse(JSON.stringify(controlTarget)),
+  '2026-01-01T01:30:00.000Z'
+);
+const correctedControl = analyzeRepairCandidate(session.candidates[0]).gates.control;
+assert.equal(correctedControl.status, 'passed');
+assert.equal(correctedControl.actualOperationCount, 1);
+assert.equal(correctedControl.actualOperation.type, 'transform-object');
+assert.equal(correctedControl.unaffectedStateExact, true);
 for (const candidate of session.candidates) candidate.disposition = 'done';
 const complete = finishRepairSession(session, '2026-01-01T02:00:00.000Z');
 assert.equal(complete.status, 'complete');

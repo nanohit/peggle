@@ -275,17 +275,44 @@ export function evaluateRepairStaticChecks(level, options = {}) {
   };
 }
 
-function evaluateControlRepair(candidate) {
+function meaningfulPatchOperations(patch) {
+  return (patch?.operations || []).filter(operation => operation.expressibility !== 'ignored');
+}
+
+function semanticStateWithoutNode(state, objectId) {
+  const result = clone(state);
+  if (result?.nodes) delete result.nodes[objectId];
+  return result;
+}
+
+function operationSummary(operation) {
+  if (!operation) return null;
+  return {
+    type: operation.type,
+    objectId: operation.objectId || operation.groupId || null,
+    expressibility: operation.expressibility,
+    transform: clone(operation.transform || null)
+  };
+}
+
+function evaluateControlRepair(candidate, actualPatch) {
   if (candidate?.role !== 'control') return { status: 'not-applicable' };
   if (!candidate.controlTargetLevel) return { status: 'failed', failures: ['missing-control-target'] };
-  const targetMembers = new Map();
-  for (const node of Object.values(captureBezierSemanticState(candidate.controlTargetLevel).nodes)) {
-    for (const member of node.members || []) targetMembers.set(member.memberId, member);
-  }
-  const currentMembers = new Map();
-  for (const node of Object.values(captureBezierSemanticState(candidate.currentLevel).nodes)) {
-    for (const member of node.members || []) currentMembers.set(member.memberId, member);
-  }
+  const baselineState = captureBezierSemanticState(candidate.baselineLevel);
+  const targetState = captureBezierSemanticState(candidate.controlTargetLevel);
+  const currentState = captureBezierSemanticState(candidate.currentLevel);
+  const expectedPatch = diffBezierSemanticStates(baselineState, targetState);
+  const expectedOperations = meaningfulPatchOperations(expectedPatch);
+  const actualOperations = meaningfulPatchOperations(actualPatch);
+  const expectedOperation = expectedOperations[0] || null;
+  const actualOperation = actualOperations[0] || null;
+  const expectedObjectId = expectedOperation?.objectId || expectedOperation?.groupId || null;
+  const validTransformTypes = new Set(['transform-stroke', 'mirror-stroke', 'transform-object', 'mirror-object']);
+
+  const targetMembers = new Map((targetState.nodes?.[expectedObjectId]?.members || [])
+    .map(member => [member.memberId, member]));
+  const currentMembers = new Map((currentState.nodes?.[expectedObjectId]?.members || [])
+    .map(member => [member.memberId, member]));
   const residuals = [];
   for (const [memberId, target] of targetMembers) {
     const current = currentMembers.get(memberId);
@@ -296,15 +323,46 @@ function evaluateControlRepair(candidate) {
   const rmsResidualPx = residuals.length
     ? Math.sqrt(residuals.reduce((sum, value) => sum + value * value, 0) / residuals.length)
     : Infinity;
+  const maxResidualPx = residuals.length ? Math.max(...residuals) : Infinity;
   const thresholdPx = Number(candidate.knownDefect?.acceptanceThresholdPx || 2);
-  const passed = complete && rmsResidualPx <= thresholdPx;
+  const targetReplay = semanticReplayReport(targetState, currentState, actualPatch);
+  const unaffectedReplay = expectedObjectId
+    ? semanticReplayReport(
+      semanticStateWithoutNode(baselineState, expectedObjectId),
+      semanticStateWithoutNode(currentState, expectedObjectId),
+      actualPatch
+    )
+    : { exact: false, replayAccuracy: 0 };
+  const definitionValid = expectedOperations.length === 1
+    && validTransformTypes.has(expectedOperation?.type)
+    && expectedObjectId != null;
+  const operationShapeValid = actualOperations.length === 1
+    && actualOperation?.type === expectedOperation?.type
+    && (actualOperation?.objectId || actualOperation?.groupId) === expectedObjectId
+    && actualOperation?.expressibility === 'native';
+  const failures = [];
+  if (!definitionValid) failures.push('invalid-control-definition');
+  if (actualOperations.length !== 1) failures.push('control-operation-count-mismatch');
+  else if (!operationShapeValid) failures.push('control-operation-shape-mismatch');
+  if (!complete) failures.push('control-membership-changed');
+  else if (maxResidualPx > thresholdPx) failures.push('known-defect-not-corrected');
+  if (!unaffectedReplay.exact) failures.push('unaffected-control-state-changed');
+  const passed = failures.length === 0;
   return {
     status: passed ? 'passed' : 'failed',
-    failures: passed ? [] : [complete ? 'known-defect-not-corrected' : 'control-membership-changed'],
+    failures,
+    expectedOperation: operationSummary(expectedOperation),
+    actualOperation: operationSummary(actualOperation),
+    expectedOperationCount: expectedOperations.length,
+    actualOperationCount: actualOperations.length,
     matchedMemberCount: residuals.length,
     expectedMemberCount: targetMembers.size,
     rmsResidualPx,
-    thresholdPx
+    maxResidualPx,
+    thresholdPx,
+    targetExact: targetReplay.exact,
+    targetReplayAccuracy: targetReplay.replayAccuracy,
+    unaffectedStateExact: unaffectedReplay.exact
   };
 }
 
@@ -320,7 +378,7 @@ export function analyzeRepairCandidate(candidate) {
   const commands = auditCommandLog(candidate.currentLevel);
   const transactions = auditTransactionLog(candidate.transactionLog || []);
   const staticChecks = evaluateRepairStaticChecks(candidate.currentLevel, candidate.staticCheckOptions);
-  const control = evaluateControlRepair(candidate);
+  const control = evaluateControlRepair(candidate, patch);
   return {
     patch,
     replay,
