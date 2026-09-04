@@ -20,17 +20,19 @@ Open the editor, click **Start / Resume Repair Study**, and choose the session
 JSON. The side panel owns navigation, Before/Current comparison, notes,
 friction notes, and Done/Defer/Unfixable dispositions.
 
-The active session is autosaved to browser storage after each completed editor
-transaction and resumes after a reload. **Before** is read-only. Defer and
-Unfixable require a reason.
+The active session is autosaved to IndexedDB after each completed editor
+transaction and resumes after a reload. This avoids the small `localStorage`
+quota: a session embeds six complete baselines and can be several megabytes.
+**Before** is read-only. Defer and Unfixable require a reason.
 
 Use **More → Combine into object** after selecting pegs to declare Ring,
 Polygon, Line, Arc, or a literal Cluster. A rejected geometric fit is retained
 explicitly as a literal cluster with its rejection reason.
 
-**Finish & export** recomputes semantic replay, lineage, command/transaction
-log integrity, and static checks. It exports one `repair-session-result.json`
-only after the required gates pass.
+**Finish & export** recomputes semantic replay, peg/group lineage,
+command/transaction log integrity, and static checks (bounds, launcher
+clearance, and cross-object overlap). It waits for the final durable autosave
+and exports one `repair-session-result.json` only after the required gates pass.
 
 ## 3. Read the result independently
 

@@ -511,6 +511,7 @@ export class LevelManager {
     const groupId = Utils.generateId();
     const group = {
       id: groupId,
+      objectId: `group:${Utils.generateId()}`,
       name: name,
       pattern: pattern
     };
@@ -643,9 +644,12 @@ export class LevelManager {
       // Generate new IDs
       level.id = Utils.generateId();
       const groupIdMap = new Map();
+      const pegIdMap = new Map();
       level.pegs = level.pegs.filter(peg => peg && typeof peg === 'object' && !Array.isArray(peg));
       level.pegs.forEach(peg => {
+        const previousPegId = peg.id;
         peg.id = Utils.generateId();
+        if (previousPegId != null) pegIdMap.set(previousPegId, peg.id);
       });
       if (Array.isArray(level.groups)) {
         level.groups.forEach(group => {
@@ -661,6 +665,11 @@ export class LevelManager {
       level.pegs.forEach(peg => {
         if (peg.groupId != null) {
           peg.groupId = groupIdMap.get(peg.groupId) || null;
+        }
+        for (const referenceKey of ['pvpMirrorOf', 'portalDestinationId', 'destinationId']) {
+          if (peg[referenceKey] != null && pegIdMap.has(peg[referenceKey])) {
+            peg[referenceKey] = pegIdMap.get(peg[referenceKey]);
+          }
         }
       });
       

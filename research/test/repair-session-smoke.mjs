@@ -7,10 +7,14 @@ import path from 'node:path';
 import { normalizeLevelData } from '../../js/levels.js';
 import {
   analyzeRepairCandidate,
+  auditSemanticLineage,
+  evaluateRepairStaticChecks,
   finishRepairSession,
   loadSavedRepairSession,
+  loadSavedRepairSessionDurable,
   recordRepairTransaction,
   saveRepairSession,
+  saveRepairSessionDurable,
   startRepairSession,
   validateRepairSessionDefinition
 } from '../../js/repair-session.js';
@@ -33,6 +37,7 @@ const definition = {
   candidates: Array.from({ length: 6 }, (_value, index) => ({
     id: `candidate-${index}`,
     role: index === 0 ? 'control' : 'study',
+    source: index === 2 ? { knownProperties: [{ id: 'large-empty-opening', measured: { topOpeningPx: 230 } }] } : {},
     ...(index === 0 ? {
       knownDefect: { id: 'test-offset' },
       controlTargetLevel: JSON.parse(JSON.stringify(baselines[0]))
@@ -54,6 +59,87 @@ const storage = {
 };
 saveRepairSession(session, storage);
 assert.equal(loadSavedRepairSession(storage).sessionId, session.sessionId);
+
+// The browser path must not put the multi-megabyte study payload in
+// localStorage. A small fake IndexedDB exercises the durable structured-clone
+// path under an intentionally tiny localStorage quota.
+function fakeIndexedDB() {
+  const data = new Map();
+  let initialized = false;
+  const database = {
+    objectStoreNames: { contains: () => initialized },
+    createObjectStore: () => { initialized = true; },
+    close: () => {},
+    transaction: () => {
+      const transaction = { error: null };
+      transaction.objectStore = () => ({
+        put: (value, key) => {
+          data.set(key, JSON.parse(JSON.stringify(value)));
+          queueMicrotask(() => transaction.oncomplete?.());
+        },
+        get: key => {
+          const request = {};
+          queueMicrotask(() => {
+            request.result = data.has(key) ? JSON.parse(JSON.stringify(data.get(key))) : undefined;
+            request.onsuccess?.();
+          });
+          return request;
+        },
+        delete: key => {
+          data.delete(key);
+          queueMicrotask(() => transaction.oncomplete?.());
+        }
+      });
+      return transaction;
+    }
+  };
+  return {
+    open: () => {
+      const request = {};
+      queueMicrotask(() => {
+        request.result = database;
+        if (!initialized) request.onupgradeneeded?.();
+        request.onsuccess?.();
+      });
+      return request;
+    }
+  };
+}
+
+const quotaStorage = {
+  setItem: (_key, value) => {
+    if (value.length > 1024) throw new Error('QuotaExceededError');
+  },
+  getItem: () => null,
+  removeItem: () => {}
+};
+const durableSession = JSON.parse(JSON.stringify(session));
+durableSession.candidates[0].note = 'x'.repeat(2_000_000);
+const indexedDB = fakeIndexedDB();
+await saveRepairSessionDurable(durableSession, { indexedDB, fallbackStorage: quotaStorage });
+assert.equal(durableSession.autosave.status, 'saved');
+const durableReload = await loadSavedRepairSessionDurable({ indexedDB, fallbackStorage: quotaStorage });
+assert.equal(durableReload.candidates[0].note.length, 2_000_000);
+
+const overlapLevel = level('overlap');
+overlapLevel.pegs[0].x = 120;
+overlapLevel.pegs[0].y = 180;
+overlapLevel.pegs[1].x = 125;
+overlapLevel.pegs[1].y = 180;
+const overlapCheck = evaluateRepairStaticChecks(overlapLevel);
+assert.equal(overlapCheck.status, 'failed');
+assert.equal(overlapCheck.crossObjectOverlapCount, 1);
+assert.ok(overlapCheck.failures.includes('cross-object-overlap'));
+const sharedObject = JSON.parse(JSON.stringify(overlapLevel));
+sharedObject.pegs[1].objectId = sharedObject.pegs[0].objectId;
+assert.equal(evaluateRepairStaticChecks(sharedObject).crossObjectOverlapCount, 0);
+
+const malformedLineage = level('malformed-group-lineage');
+malformedLineage.groups.push({ id: 'runtime-group-without-object-id', name: 'broken' });
+malformedLineage.pegs[0].groupId = 'missing-runtime-group';
+const malformedAudit = auditSemanticLineage(malformedLineage);
+assert.ok(malformedAudit.failures.includes('missing-group-object-id'));
+assert.ok(malformedAudit.failures.includes('orphan-group-reference'));
 
 // A save outside Editor.beginResearchCommand still becomes one ordered,
 // state-derived transaction instead of disappearing from the chronology.
@@ -87,7 +173,9 @@ const independent = JSON.parse(await fs.readFile(path.join(analysisPath, 'analys
 assert.equal(independent.candidates.length, 6);
 assert.equal(independent.candidates.every(candidate => candidate.replay.exact), true);
 assert.equal(independent.candidates.every(candidate => candidate.storedResultAgrees), true);
+assert.equal(independent.candidates[2].source.knownProperties[0].id, 'large-empty-opening');
 assert.match(await fs.readFile(path.join(analysisPath, 'report.html'), 'utf8'), /independently recomputed/);
+assert.match(await fs.readFile(path.join(analysisPath, 'report.html'), 'utf8'), /Known candidate properties/);
 await fs.access(path.join(analysisPath, independent.candidates[0].beforePreview));
 await fs.access(path.join(analysisPath, independent.candidates[0].afterPreview));
 

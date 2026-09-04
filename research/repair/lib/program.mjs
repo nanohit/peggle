@@ -91,7 +91,7 @@ export function compileBezierProgram(program) {
   for (const [strokeIndex, stroke] of (program.strokes || []).entries()) {
     const groupId = String(stroke.groupId || `program-stroke-${String(strokeIndex + 1).padStart(2, '0')}`);
     const node = ensureBezierNode(level, groupId);
-    node.nodeId = String(stroke.nodeId || `bezier:${groupId}`);
+    node.sourceRef = String(stroke.sourceRef || stroke.nodeId || `bezier:${groupId}`);
     node.objectId = groupId;
     node.memberIds = pegs.filter(peg => peg.objectId === groupId).map(peg => peg.memberId);
     node.source = stroke.source || null;

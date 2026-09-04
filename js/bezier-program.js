@@ -50,7 +50,10 @@ export const ensureBezierProgram = ensureGeneratorProgram;
 function normalizeNode(raw, objectId, fallbackFamily = 'LiteralCluster') {
   const node = isRecord(raw) ? raw : {};
   node.objectId = String(objectId);
-  node.nodeId = String(node.nodeId || objectId);
+  if (!node.sourceRef && node.nodeId && String(node.nodeId) !== String(objectId)) {
+    node.sourceRef = String(node.nodeId);
+  }
+  delete node.nodeId;
   node.family = String(node.family || fallbackFamily);
   if (!Array.isArray(node.memberIds)) node.memberIds = [];
   node.memberIds = [...new Set(node.memberIds.filter(value => typeof value === 'string' && value))];
@@ -177,6 +180,9 @@ export function ensureLevelSemanticIdentity(level) {
     const boundCurve = node.family === 'BezierStroke'
       && level.bezierCurves[node.binding?.bezierGroupId];
     if (node.memberIds.length === 0 && !boundCurve) delete migrated[objectId];
+  }
+  for (const group of level.groups || []) {
+    group.objectId = uniqueId(group.objectId, usedObjectIds, 'group');
   }
   program.nodes = migrated;
   return program;

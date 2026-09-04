@@ -12,6 +12,11 @@ const RESAMPLE_PROPERTIES = [
   'pegRadius', 'brickWidth', 'bakeVersion'
 ];
 const DEFAULT_THRESHOLD_PX = 1;
+const LEVEL_STRUCTURE_KEYS = new Set(['id', 'pegs', 'groups', 'bezierCurves', 'metadata']);
+const VOLATILE_METADATA_KEYS = new Set([
+  'created', 'modified', 'playCount', 'avgCompletionRate',
+  'generatorProgram', 'repairSessionRuntime'
+]);
 
 function clone(value) {
   return value == null ? value : JSON.parse(JSON.stringify(value));
@@ -25,6 +30,75 @@ function canonicalize(value) {
 
 function same(left, right) {
   return JSON.stringify(canonicalize(left)) === JSON.stringify(canonicalize(right));
+}
+
+function changedRecordProperties(before, after) {
+  const changes = {};
+  const keys = new Set([...Object.keys(before || {}), ...Object.keys(after || {})]);
+  for (const key of [...keys].sort()) {
+    if (same(before?.[key], after?.[key])) continue;
+    changes[key] = {
+      from: clone(before?.[key]),
+      to: clone(after?.[key]),
+      remove: !Object.prototype.hasOwnProperty.call(after || {}, key)
+    };
+  }
+  return changes;
+}
+
+function applyRecordChanges(target, changes) {
+  const result = target && typeof target === 'object' ? target : {};
+  for (const [key, change] of Object.entries(changes || {})) {
+    if (change.remove) delete result[key];
+    else result[key] = clone(change.to);
+  }
+  return result;
+}
+
+function semanticLevelSnapshot(level) {
+  const result = {};
+  for (const [key, value] of Object.entries(level || {})) {
+    if (LEVEL_STRUCTURE_KEYS.has(key)) continue;
+    result[key] = clone(value);
+  }
+  const metadata = {};
+  for (const [key, value] of Object.entries(level?.metadata || {})) {
+    if (VOLATILE_METADATA_KEYS.has(key)) continue;
+    metadata[key] = clone(value);
+  }
+  if (Object.keys(metadata).length) result.metadata = metadata;
+  return result;
+}
+
+function groupFamily(group) {
+  if (group?.animation) return 'AnimationGroup';
+  if (group?.destructionBody) return 'DestructionGroup';
+  return 'PegGroup';
+}
+
+function semanticGroups(level, memberIdByRuntimeId) {
+  const membersByRuntimeGroup = new Map();
+  for (const peg of level?.pegs || []) {
+    if (peg?.groupId == null) continue;
+    if (!membersByRuntimeGroup.has(peg.groupId)) membersByRuntimeGroup.set(peg.groupId, []);
+    membersByRuntimeGroup.get(peg.groupId).push(memberIdByRuntimeId.get(peg.id));
+  }
+  const result = {};
+  for (const [index, group] of (level?.groups || []).entries()) {
+    const objectId = String(group.objectId || `legacy-group:${group.id || index}`);
+    const properties = {};
+    for (const [key, value] of Object.entries(group || {})) {
+      if (key === 'id' || key === 'objectId') continue;
+      properties[key] = clone(value);
+    }
+    result[objectId] = {
+      objectId,
+      family: groupFamily(group),
+      memberIds: [...new Set((membersByRuntimeGroup.get(group.id) || []).filter(Boolean))].sort(),
+      properties
+    };
+  }
+  return result;
 }
 
 function close(left, right, tolerance = 1e-7) {
@@ -46,13 +120,16 @@ const DERIVED_OR_VOLATILE_PEG_KEYS = new Set([
   'id', 'memberId', 'objectId', 'groupId', 'bezierGroupId', 'bezierIndex',
   'x', 'y', 'angle', 'shape', 'type', 'curveSlices'
 ]);
+const RUNTIME_PEG_REFERENCE_KEYS = new Set(['pvpMirrorOf', 'portalDestinationId', 'destinationId']);
 
-function memberSnapshot(peg, ordinal = 0) {
+function memberSnapshot(peg, ordinal = 0, memberIdByRuntimeId = new Map()) {
   const shape = peg.shape || 'circle';
   const properties = {};
   for (const [key, value] of Object.entries(peg || {})) {
     if (DERIVED_OR_VOLATILE_PEG_KEYS.has(key)) continue;
-    properties[key] = clone(value);
+    properties[key] = RUNTIME_PEG_REFERENCE_KEYS.has(key) && memberIdByRuntimeId.has(value)
+      ? memberIdByRuntimeId.get(value)
+      : clone(value);
   }
   return {
     memberId: String(peg.memberId || (peg.bezierGroupId && Number.isFinite(peg.bezierIndex)
@@ -92,11 +169,18 @@ function semanticLineage(lineage) {
 export function captureBezierSemanticState(level) {
   const curves = level?.bezierCurves && typeof level.bezierCurves === 'object' ? level.bezierCurves : {};
   const members = new Map();
+  const memberIdByRuntimeId = new Map();
+  for (const [ordinal, peg] of (level?.pegs || []).entries()) {
+    if (!peg) continue;
+    memberIdByRuntimeId.set(peg.id, String(peg.memberId || (peg.bezierGroupId && Number.isFinite(peg.bezierIndex)
+      ? `${peg.objectId || peg.bezierGroupId}:member:${Number(peg.bezierIndex)}`
+      : `legacy-member:${peg.id || ordinal}`)));
+  }
   for (const [ordinal, peg] of (level?.pegs || []).entries()) {
     if (!peg) continue;
     const objectId = String(peg.objectId || peg.bezierGroupId || `legacy-object:${peg.memberId || peg.id || ordinal}`);
     if (!members.has(objectId)) members.set(objectId, []);
-    members.get(objectId).push(memberSnapshot(peg, ordinal));
+    members.get(objectId).push(memberSnapshot(peg, ordinal, memberIdByRuntimeId));
   }
   const lineage = level?.metadata?.generatorProgram?.nodes || {};
   const curveBindings = new Map();
@@ -126,7 +210,6 @@ export function captureBezierSemanticState(level) {
       objectId,
       family,
       groupId,
-      nodeId: String(rawNode?.nodeId || objectId),
       binding: groupId ? { type: 'bezier', bezierGroupId: groupId } : clone(rawNode?.binding || null),
       definition: clone(rawNode?.definition || null),
       curve: clone(groupId ? curves[groupId] || null : null),
@@ -134,7 +217,13 @@ export function captureBezierSemanticState(level) {
       members: groupMembers
     };
   }
-  return { format: 'semantic-object-state', version: 3, nodes };
+  return {
+    format: 'semantic-object-state',
+    version: 4,
+    level: semanticLevelSnapshot(level),
+    groups: semanticGroups(level, memberIdByRuntimeId),
+    nodes
+  };
 }
 
 function memberKey(member) {
@@ -183,7 +272,6 @@ function cleanStrokePayload(node) {
     objectId: node.objectId || node.groupId,
     family: node.family || 'BezierStroke',
     groupId: node.groupId,
-    nodeId: node.nodeId,
     curve: clone(node.curve),
     lineage: clone(node.lineage)
   };
@@ -198,7 +286,6 @@ function cleanObjectPayload(node) {
     objectId: node.objectId,
     family: node.family || 'LiteralCluster',
     groupId: node.groupId || null,
-    nodeId: node.nodeId || node.objectId,
     binding: clone(node.binding || null),
     definition: clone(node.definition || null),
     curve: clone(node.curve || null),
@@ -326,7 +413,7 @@ function classifyFallbackCause(changes, thresholdPx, context = {}) {
   };
 }
 
-function buildFallbackOperation(groupId, nodeId, changes, afterLineage, thresholdPx, context = {}) {
+function buildFallbackOperation(groupId, changes, afterLineage, thresholdPx, context = {}) {
   const cause = classifyFallbackCause(changes, thresholdPx, context);
   const expectedExceptions = semanticExceptions(afterLineage?.exceptions);
   const changedIndices = new Set(changes.map(change => change.index));
@@ -335,7 +422,6 @@ function buildFallbackOperation(groupId, nodeId, changes, afterLineage, threshol
     expressibility: 'fallback',
     objectId: groupId,
     groupId,
-    nodeId,
     changes,
     exceptionState: {
       deletedIndices: expectedExceptions.deletedIndices.filter(index => changedIndices.has(index)),
@@ -350,6 +436,32 @@ function buildFallbackOperation(groupId, nodeId, changes, afterLineage, threshol
 }
 
 function applyOperation(result, operation) {
+  if (operation.type === 'set-level-properties') {
+    result.level = applyRecordChanges(result.level || {}, operation.changes);
+    return;
+  }
+  result.groups ||= {};
+  if (operation.type === 'add-group') {
+    result.groups[operation.objectId] = clone(operation.group);
+    return;
+  }
+  if (operation.type === 'delete-group') {
+    delete result.groups[operation.objectId];
+    return;
+  }
+  if (operation.type === 'set-group-members') {
+    if (result.groups[operation.objectId]) {
+      result.groups[operation.objectId].memberIds = clone(operation.memberIds || []);
+    }
+    return;
+  }
+  if (operation.type === 'set-group-properties') {
+    const group = result.groups[operation.objectId];
+    if (!group) return;
+    group.family = operation.family || group.family;
+    group.properties = applyRecordChanges(group.properties || {}, operation.changes);
+    return;
+  }
   result.nodes ||= {};
   const objectId = String(operation.objectId || operation.groupId || '');
   if (operation.type === 'delete-stroke' || operation.type === 'delete-object') {
@@ -415,7 +527,7 @@ function applyOperation(result, operation) {
     if (node.family === 'BezierStroke') node.lineage.exceptions = semanticExceptions(node.lineage.exceptions);
     const expectedDeleted = new Set(operation.exceptionState?.deletedIndices || []);
     const expectedOverrides = operation.exceptionState?.overrides || {};
-    for (const change of operation.changes || []) {
+    for (const change of (Array.isArray(operation.changes) ? operation.changes : [])) {
       const key = String(change.memberId || memberKey(change.after || change.before));
       if (!change.after) members.delete(key);
       else members.set(key, clone(change.after));
@@ -435,6 +547,61 @@ function applyOperation(result, operation) {
   }
 }
 
+function contextOperations(before, after) {
+  const operations = [];
+  const levelChanges = changedRecordProperties(before?.level || {}, after?.level || {});
+  if (Object.keys(levelChanges).length) {
+    operations.push({
+      type: 'set-level-properties',
+      expressibility: 'fallback',
+      reason: 'missing-language-operation:level-properties',
+      languageGapCandidate: 'missing-language-operation:level-properties',
+      changes: levelChanges,
+      affectedMemberCount: 0
+    });
+  }
+  const groupIds = new Set([...Object.keys(before?.groups || {}), ...Object.keys(after?.groups || {})]);
+  for (const objectId of [...groupIds].sort()) {
+    const left = before?.groups?.[objectId];
+    const right = after?.groups?.[objectId];
+    if (!left && right) {
+      operations.push({
+        type: 'add-group', expressibility: 'native', objectId,
+        family: right.family, group: clone(right), affectedMemberCount: right.memberIds.length
+      });
+      continue;
+    }
+    if (left && !right) {
+      operations.push({
+        type: 'delete-group', expressibility: 'native', objectId,
+        family: left.family, affectedMemberCount: left.memberIds.length
+      });
+      continue;
+    }
+    if (!same(left.memberIds, right.memberIds)) {
+      operations.push({
+        type: 'set-group-members', expressibility: 'native', objectId,
+        family: right.family, memberIds: clone(right.memberIds),
+        addedMemberIds: right.memberIds.filter(memberId => !left.memberIds.includes(memberId)),
+        removedMemberIds: left.memberIds.filter(memberId => !right.memberIds.includes(memberId)),
+        affectedMemberCount: new Set([...left.memberIds, ...right.memberIds]).size
+      });
+    }
+    const propertyChanges = changedRecordProperties(left.properties || {}, right.properties || {});
+    if (left.family !== right.family || Object.keys(propertyChanges).length) {
+      operations.push({
+        type: 'set-group-properties', expressibility: 'fallback', objectId,
+        family: right.family,
+        reason: 'missing-language-operation:group-properties',
+        languageGapCandidate: 'missing-language-operation:group-properties',
+        changes: propertyChanges,
+        affectedMemberCount: right.memberIds.length
+      });
+    }
+  }
+  return operations;
+}
+
 function inferDeclarationOperations(before, after) {
   const operations = [];
   const beforeMemberOwner = new Map();
@@ -451,7 +618,6 @@ function inferDeclarationOperations(before, after) {
       type: 'declare-object',
       expressibility: literal ? 'fallback' : 'native',
       objectId,
-      nodeId: node.nodeId,
       family: node.family,
       sourceObjectIds,
       movedMemberIds,
@@ -497,7 +663,7 @@ function genericOperationsForNode(before, after, thresholdPx) {
     if (material) {
       const operation = {
         type: fit.reflect ? 'mirror-object' : 'transform-object',
-        expressibility: 'native', objectId: after.objectId, nodeId: after.nodeId,
+        expressibility: 'native', objectId: after.objectId,
         transform: {
           angle: fit.angle, scale: fit.scale, tx: fit.tx, ty: fit.ty,
           ...(fit.reflect ? { reflect: true } : {})
@@ -517,7 +683,7 @@ function genericOperationsForNode(before, after, thresholdPx) {
       || !same(working.lineage || {}, after.lineage || {})) {
     const operation = {
       type: 'update-object-definition', expressibility: 'native',
-      objectId: after.objectId, nodeId: after.nodeId,
+      objectId: after.objectId,
       family: after.family, definition: clone(after.definition), lineage: clone(after.lineage),
       affectedMemberCount: Math.max(working.members.length, after.members.length)
     };
@@ -530,7 +696,7 @@ function genericOperationsForNode(before, after, thresholdPx) {
   const fallbackChanges = memberDifference(working.members, after.members, thresholdPx);
   if (fallbackChanges.length > 0) {
     operations.push(buildFallbackOperation(
-      after.objectId, after.nodeId, fallbackChanges, after.lineage, thresholdPx
+      after.objectId, fallbackChanges, after.lineage, thresholdPx
     ));
   }
   return operations;
@@ -560,7 +726,7 @@ function nativeOperationsForNode(before, after, thresholdPx, options) {
   if (fit && fit.maxResidualPx <= thresholdPx) {
     const operation = {
       type: fit.reflect ? 'mirror-stroke' : 'transform-stroke', expressibility: 'native',
-      objectId: after.objectId, groupId: after.groupId, nodeId: after.nodeId,
+      objectId: after.objectId, groupId: after.groupId,
       transform: {
         angle: fit.angle, scale: fit.scale, tx: fit.tx, ty: fit.ty,
         ...(fit.reflect ? { reflect: true } : {})
@@ -582,7 +748,7 @@ function nativeOperationsForNode(before, after, thresholdPx, options) {
   if (Object.keys(deltas).length > 0) {
     const operation = {
       type: 'edit-control-points', expressibility: 'native', objectId: after.objectId,
-      groupId: after.groupId, nodeId: after.nodeId,
+      groupId: after.groupId,
       deltas, affectedMemberCount: Math.max(working.members.length, after.members.length)
     };
     const candidate = { nodes: { [after.objectId]: working } };
@@ -595,7 +761,7 @@ function nativeOperationsForNode(before, after, thresholdPx, options) {
   if (Object.keys(changes).length > 0) {
     const operation = {
       type: 'resample-stroke', expressibility: 'native', objectId: after.objectId,
-      groupId: after.groupId, nodeId: after.nodeId,
+      groupId: after.groupId,
       changes, affectedMemberCount: Math.max(working.members.length, after.members.length)
     };
     const candidate = { nodes: { [after.objectId]: working } };
@@ -608,7 +774,6 @@ function nativeOperationsForNode(before, after, thresholdPx, options) {
   if (fallbackChanges.length > 0) {
     const operation = buildFallbackOperation(
       after.objectId,
-      after.nodeId,
       fallbackChanges,
       after.lineage,
       thresholdPx,
@@ -623,7 +788,7 @@ function nativeOperationsForNode(before, after, thresholdPx, options) {
   if (!same(working.lineage, after.lineage)) {
     operations.push({
       type: 'metadata-only', expressibility: 'ignored', objectId: after.objectId,
-      groupId: after.groupId, nodeId: after.nodeId,
+      groupId: after.groupId,
       changedKeys: [...new Set([...Object.keys(working.lineage || {}), ...Object.keys(after.lineage || {})])]
         .filter(key => !same(working.lineage?.[key], after.lineage?.[key]))
     });
@@ -709,10 +874,13 @@ export function diffBezierSemanticStates(before, after, options = {}) {
     commandEvidence,
     commandScope: options.commandScope === 'single' ? 'single' : 'aggregate'
   };
+  const contextualOperations = contextOperations(before, after);
   const declarationOperations = inferDeclarationOperations(before, after);
-  const workingBefore = clone(before || { format: 'semantic-object-state', version: 3, nodes: {} });
-  for (const operation of declarationOperations) applyOperation(workingBefore, operation);
-  const operations = [...declarationOperations];
+  const workingBefore = clone(before || {
+    format: 'semantic-object-state', version: 4, level: {}, groups: {}, nodes: {}
+  });
+  for (const operation of [...contextualOperations, ...declarationOperations]) applyOperation(workingBefore, operation);
+  const operations = [...contextualOperations, ...declarationOperations];
   const ids = new Set([...Object.keys(workingBefore?.nodes || {}), ...Object.keys(after?.nodes || {})]);
   for (const objectId of [...ids].sort()) {
     const left = workingBefore?.nodes?.[objectId];
@@ -722,10 +890,10 @@ export function diffBezierSemanticStates(before, after, options = {}) {
       const isLiteral = right.family === 'LiteralCluster';
       const operation = isBezier ? {
         type: 'add-stroke', expressibility: 'native', objectId, groupId: right.groupId || objectId,
-        nodeId: right.nodeId, stroke: cleanStrokePayload(right), affectedMemberCount: right.members.length
+        stroke: cleanStrokePayload(right), affectedMemberCount: right.members.length
       } : {
         type: 'add-object', expressibility: isLiteral ? 'fallback' : 'native',
-        objectId, nodeId: right.nodeId, object: cleanObjectPayload(right),
+        objectId, object: cleanObjectPayload(right),
         reason: isLiteral ? 'undeclared-literal-object' : null,
         affectedMemberCount: right.members.length,
         changes: isLiteral ? right.members.map(member => ({
@@ -733,12 +901,12 @@ export function diffBezierSemanticStates(before, after, options = {}) {
         })) : []
       };
       operations.push(operation);
-      const simulated = { format: 'semantic-object-state', version: 3, nodes: {} };
+      const simulated = { format: 'semantic-object-state', version: 4, level: {}, groups: {}, nodes: {} };
       applyOperation(simulated, operation);
       const fallbackChanges = memberDifference(simulated.nodes[objectId]?.members, right.members, thresholdPx);
       if (isBezier && fallbackChanges.length) {
         operations.push(buildFallbackOperation(
-          objectId, right.nodeId, fallbackChanges, right.lineage, thresholdPx,
+          objectId, fallbackChanges, right.lineage, thresholdPx,
           { selectionTransformProven: commandProvesSelectionTransform(objectId, fallbackChanges, classificationOptions) }
         ));
       }
@@ -747,9 +915,9 @@ export function diffBezierSemanticStates(before, after, options = {}) {
     if (left && !right) {
       operations.push(left.family === 'BezierStroke' ? {
         type: 'delete-stroke', expressibility: 'native', objectId, groupId: left.groupId || objectId,
-        nodeId: left.nodeId, affectedMemberCount: left.members.length, deletedBounds: nodeBounds(left)
+        affectedMemberCount: left.members.length, deletedBounds: nodeBounds(left)
       } : {
-        type: 'delete-object', expressibility: 'native', objectId, nodeId: left.nodeId,
+        type: 'delete-object', expressibility: 'native', objectId,
         family: left.family, affectedMemberCount: left.members.length, deletedBounds: nodeBounds(left)
       });
       continue;
@@ -766,15 +934,17 @@ export function diffBezierSemanticStates(before, after, options = {}) {
   annotateDeletedRegions(deleted, classificationOptions);
 
   return {
-    format: 'semantic-object-patch', version: 3, hints, operations,
+    format: 'semantic-object-patch', version: 4, hints, operations,
     metrics: semanticPatchMetrics(operations, before, after, { thresholdPx })
   };
 }
 
 export function applyBezierSemanticPatch(state, patch) {
-  const result = clone(state || { format: 'semantic-object-state', version: 3, nodes: {} });
+  const result = clone(state || { format: 'semantic-object-state', version: 4, level: {}, groups: {}, nodes: {} });
   result.format = 'semantic-object-state';
-  result.version = 3;
+  result.version = 4;
+  result.level ||= {};
+  result.groups ||= {};
   result.nodes ||= {};
   for (const operation of patch?.operations || []) applyOperation(result, operation);
   return result;
@@ -794,7 +964,7 @@ export function semanticPatchMetrics(operations, before = null, after = null, op
     if (operation.languageGapCandidate) {
       languageGapReasonCounts[operation.languageGapCandidate] = (languageGapReasonCounts[operation.languageGapCandidate] || 0) + 1;
     }
-    for (const change of operation.changes || []) {
+    for (const change of (Array.isArray(operation.changes) ? operation.changes : [])) {
       const objectId = operation.objectId || operation.groupId;
       const key = change.memberId || memberKey(change.after || change.before);
       fallbackChangedKeys.add(`${objectId}:${key}`);
@@ -816,6 +986,12 @@ export function semanticPatchMetrics(operations, before = null, after = null, op
     operationCount: meaningful.length,
     nativeOperationCount: meaningful.length - fallback.length,
     fallbackOperationCount: fallback.length,
+    contextOperationCount: meaningful.filter(operation => [
+      'set-level-properties', 'add-group', 'delete-group', 'set-group-members', 'set-group-properties'
+    ].includes(operation.type)).length,
+    fallbackContextOperationCount: fallback.filter(operation => [
+      'set-level-properties', 'set-group-properties'
+    ].includes(operation.type)).length,
     changedMemberCount: changedKeys.size,
     fallbackChangedMemberCount: fallbackChangedKeys.size,
     repairFallbackFraction: changedKeys.size ? fallbackChangedKeys.size / changedKeys.size : 0,
@@ -831,12 +1007,17 @@ export function semanticPatchMetrics(operations, before = null, after = null, op
 function compareSemanticStates(expected, actual, tolerancePx = 1e-5) {
   const ids = new Set([...Object.keys(expected?.nodes || {}), ...Object.keys(actual?.nodes || {})]);
   let strokeUnits = 0, matchedStrokeUnits = 0, memberUnits = 0, matchedMemberUnits = 0;
+  let contextUnits = 1, matchedContextUnits = same(expected?.level || {}, actual?.level || {}) ? 1 : 0;
+  const groupIds = new Set([...Object.keys(expected?.groups || {}), ...Object.keys(actual?.groups || {})]);
+  for (const objectId of groupIds) {
+    contextUnits++;
+    if (same(expected?.groups?.[objectId], actual?.groups?.[objectId])) matchedContextUnits++;
+  }
   for (const groupId of ids) {
     strokeUnits++;
     const left = expected?.nodes?.[groupId];
     const right = actual?.nodes?.[groupId];
-    if (left && right && left.nodeId === right.nodeId
-        && left.objectId === right.objectId && left.family === right.family
+    if (left && right && left.objectId === right.objectId && left.family === right.family
         && same(left.definition || null, right.definition || null)
         && (left.family !== 'BezierStroke' || (
           POINT_KEYS.every(key => pointsClose(left.curve?.[key], right.curve?.[key], tolerancePx))
@@ -852,10 +1033,11 @@ function compareSemanticStates(expected, actual, tolerancePx = 1e-5) {
       if (before && after && memberDifference([before], [after], tolerancePx).length === 0) matchedMemberUnits++;
     }
   }
-  const totalUnits = strokeUnits + memberUnits;
+  const totalUnits = contextUnits + strokeUnits + memberUnits;
   return {
-    exact: matchedStrokeUnits === strokeUnits && matchedMemberUnits === memberUnits,
-    replayAccuracy: totalUnits ? (matchedStrokeUnits + matchedMemberUnits) / totalUnits : 1,
+    exact: matchedContextUnits === contextUnits
+      && matchedStrokeUnits === strokeUnits && matchedMemberUnits === memberUnits,
+    replayAccuracy: totalUnits ? (matchedContextUnits + matchedStrokeUnits + matchedMemberUnits) / totalUnits : 1,
     strokeAccuracy: strokeUnits ? matchedStrokeUnits / strokeUnits : 1,
     memberAccuracy: memberUnits ? matchedMemberUnits / memberUnits : 1
   };

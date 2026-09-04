@@ -5,9 +5,9 @@ import { Editor } from './editor.js';
 import { LevelManager, cloneLevelSnapshot, normalizeLevelData } from './levels.js';
 import {
   finishRepairSession,
-  loadSavedRepairSession,
+  loadSavedRepairSessionDurable,
   recordRepairTransaction,
-  saveRepairSession,
+  saveRepairSessionDurable,
   startRepairSession
 } from './repair-session.js';
 import { PHYSICS_CONFIG, DEFAULT_PEG_RADIUS } from './physics.js';
@@ -327,6 +327,8 @@ class PeggleApp {
     this.game = null;
     this.editor = null;
     this.repairSession = null;
+    this._repairPersistPromise = Promise.resolve();
+    this._repairFieldAutosaveTimer = null;
     this._repairRuntimeLevelId = null;
     this._repairReturnLevelId = null;
     this._repairSwitching = false;
@@ -385,10 +387,7 @@ class PeggleApp {
     this._mountEditorSideSheets();
     this.setupUI();
     this.initMode();
-    const savedRepairSession = loadSavedRepairSession();
-    if (savedRepairSession && !savedRepairSession.finishedAt) {
-      this._activateRepairSession(savedRepairSession, { resumed: true });
-    }
+    this._resumeSavedRepairSession();
 
     // One-time diagnostics
     this._logDiagnostics();
@@ -6531,7 +6530,7 @@ class PeggleApp {
       button.addEventListener('click', () => this._setRepairDisposition(button.dataset.repairDisposition));
     });
     for (const id of ['repairNote', 'repairFrictionNote', 'repairDispositionReason']) {
-      panel.querySelector(`#${id}`)?.addEventListener('input', () => this._captureRepairPanelFields());
+      panel.querySelector(`#${id}`)?.addEventListener('input', () => this._scheduleRepairPanelFieldAutosave());
     }
     return panel;
   }
@@ -6569,6 +6568,36 @@ class PeggleApp {
     });
   }
 
+  async _resumeSavedRepairSession() {
+    try {
+      const savedRepairSession = await loadSavedRepairSessionDurable();
+      if (savedRepairSession && !savedRepairSession.finishedAt && !this.repairSession) {
+        this._activateRepairSession(savedRepairSession, { resumed: true });
+      }
+    } catch (error) {
+      console.error('[repair-session] resume failed:', error);
+    }
+  }
+
+  _persistRepairSession(session = this.repairSession) {
+    if (!session) return Promise.resolve(null);
+    const pending = saveRepairSessionDurable(session);
+    this._repairPersistPromise = pending;
+    this._showRepairAutosaved();
+    pending.finally(() => {
+      if (this.repairSession === session) this._showRepairAutosaved();
+    });
+    return pending;
+  }
+
+  _scheduleRepairPanelFieldAutosave() {
+    clearTimeout(this._repairFieldAutosaveTimer);
+    this._repairFieldAutosaveTimer = setTimeout(() => {
+      this._repairFieldAutosaveTimer = null;
+      this._captureRepairPanelFields();
+    }, 250);
+  }
+
   _cleanRepairRuntimeSnapshot(level, candidate) {
     const snapshot = cloneLevelSnapshot(level);
     snapshot.id = candidate.baselineLevel.id;
@@ -6579,14 +6608,15 @@ class PeggleApp {
   _captureRepairPanelFields() {
     const session = this.repairSession;
     if (!session) return;
+    clearTimeout(this._repairFieldAutosaveTimer);
+    this._repairFieldAutosaveTimer = null;
     const candidate = session.candidates[session.activeIndex];
     const panel = document.getElementById('repairSessionPanel');
     if (!candidate || !panel) return;
     candidate.note = panel.querySelector('#repairNote')?.value || '';
     candidate.frictionNote = panel.querySelector('#repairFrictionNote')?.value || '';
     candidate.dispositionReason = panel.querySelector('#repairDispositionReason')?.value || '';
-    saveRepairSession(session);
-    this._showRepairAutosaved();
+    this._persistRepairSession(session);
   }
 
   _captureCurrentRepairLevel() {
@@ -6596,8 +6626,7 @@ class PeggleApp {
     const level = this.levelManager.getCurrentLevel();
     if (!candidate || !level || level.id !== this._repairRuntimeLevelId) return;
     recordRepairTransaction(candidate, this._cleanRepairRuntimeSnapshot(level, candidate));
-    saveRepairSession(session);
-    this._showRepairAutosaved();
+    this._persistRepairSession(session);
   }
 
   _autosaveRepairLevel(level) {
@@ -6612,8 +6641,7 @@ class PeggleApp {
       if (!current || current.id !== this._repairRuntimeLevelId) return;
       const candidate = this.repairSession.candidates[this.repairSession.activeIndex];
       recordRepairTransaction(candidate, this._cleanRepairRuntimeSnapshot(current, candidate));
-      saveRepairSession(this.repairSession);
-      this._showRepairAutosaved();
+      this._persistRepairSession(this.repairSession);
     });
   }
 
@@ -6623,8 +6651,12 @@ class PeggleApp {
     if (this.repairSession?.autosave?.status === 'failed') {
       target.textContent = `Autosave failed: ${this.repairSession.autosave.error}`;
       target.classList.add('failed');
+    } else if (this.repairSession?.autosave?.status === 'saving') {
+      target.textContent = 'Autosaving…';
+      target.classList.remove('failed');
     } else {
-      target.textContent = `Autosaved ${new Date().toLocaleTimeString()}`;
+      const savedAt = this.repairSession?.autosave?.at;
+      target.textContent = `Autosaved ${savedAt ? new Date(savedAt).toLocaleTimeString() : ''}`.trim();
       target.classList.remove('failed');
     }
   }
@@ -6660,7 +6692,7 @@ class PeggleApp {
       this.startEditor();
       this.editor.readOnly = session.comparisonView === 'before';
       document.body.classList.toggle('repair-before-view', this.editor.readOnly);
-      saveRepairSession(session);
+      this._persistRepairSession(session);
       this._renderRepairSessionPanel();
     } finally {
       this._repairSwitching = false;
@@ -6714,13 +6746,13 @@ class PeggleApp {
     }
     candidate.disposition = disposition;
     candidate.completedAt = new Date().toISOString();
-    saveRepairSession(session);
+    this._persistRepairSession(session);
     const nextPending = session.candidates.findIndex((value, index) => index > session.activeIndex && value.disposition === 'pending');
     if (nextPending >= 0) this._loadRepairCandidate(nextPending, 'current', { skipCapture: true });
     else this._renderRepairSessionPanel();
   }
 
-  _finishAndExportRepairSession() {
+  async _finishAndExportRepairSession() {
     const session = this.repairSession;
     if (!session) return;
     this._captureRepairPanelFields();
@@ -6733,7 +6765,11 @@ class PeggleApp {
       if (status) status.textContent = `Finish blocked — ${summary}`;
       return;
     }
-    saveRepairSession(session);
+    await this._persistRepairSession(session);
+    if (session.autosave?.status === 'failed') {
+      if (status) status.textContent = `Finish blocked — durable autosave failed: ${session.autosave.error}`;
+      return;
+    }
     const blob = new Blob([JSON.stringify(result, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
@@ -6747,6 +6783,8 @@ class PeggleApp {
 
   _endRepairSession() {
     const returnLevelId = this._repairReturnLevelId;
+    clearTimeout(this._repairFieldAutosaveTimer);
+    this._repairFieldAutosaveTimer = null;
     this._repairSwitching = true;
     this.levelManager.levels = this.levelManager.levels.filter(level => !level?.metadata?.repairSessionRuntime);
     let index = returnLevelId ? this.levelManager.levels.findIndex(level => level.id === returnLevelId) : -1;

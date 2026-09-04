@@ -20,6 +20,7 @@ function lineSamples(length) {
 }
 
 const clone = value => JSON.parse(JSON.stringify(value));
+const withoutSemanticNodes = state => ({ ...clone(state), nodes: {} });
 
 const baked = bakePegsFromSamples(lineSamples(35), { shape: 'brick', spacingPx: 10, brickWidth: 10 });
 assert.deepEqual(baked.map(point => point.x), [5, 15, 25, 32.5]);
@@ -237,22 +238,25 @@ const nearStrokes = compileBezierProgram({
     { groupId: 'near-b', pegShape: 'circle', start: { x: 160, y: 250 }, h1: { x: 180, y: 250 }, h2: { x: 200, y: 250 }, end: { x: 220, y: 250 } }
   ]
 });
-const deleteAllState = captureBezierSemanticState({ pegs: [], bezierCurves: {}, metadata: {} });
-const unscopedDelete = diffBezierSemanticStates(captureBezierSemanticState(nearStrokes), deleteAllState, {
+const nearState = captureBezierSemanticState(nearStrokes);
+const deleteAllState = withoutSemanticNodes(nearState);
+const unscopedDelete = diffBezierSemanticStates(nearState, deleteAllState, {
   commandHints: ['delete-selection']
 });
 assert.equal(unscopedDelete.operations.some(operation => operation.compressionOpportunity), false);
-const scopedDelete = diffBezierSemanticStates(captureBezierSemanticState(nearStrokes), deleteAllState, {
+const scopedDelete = diffBezierSemanticStates(nearState, deleteAllState, {
   commandHints: ['delete-selection'], commandScope: 'single'
 });
-assert.equal(scopedDelete.operations.every(operation => operation.compressionOpportunity?.commandEvidence === 'delete-selection'), true);
-const replayedDeleteEvidence = diffBezierSemanticStates(captureBezierSemanticState(nearStrokes), deleteAllState, {
+assert.equal(scopedDelete.operations.filter(operation => operation.type === 'delete-stroke')
+  .every(operation => operation.compressionOpportunity?.commandEvidence === 'delete-selection'), true);
+const replayedDeleteEvidence = diffBezierSemanticStates(nearState, deleteAllState, {
   commandEvidence: [{
     hints: ['delete-selection'],
     operations: [{ type: 'delete-stroke', groupId: 'near-a' }, { type: 'delete-stroke', groupId: 'near-b' }]
   }]
 });
-assert.equal(replayedDeleteEvidence.operations.every(operation => operation.compressionOpportunity), true);
+assert.equal(replayedDeleteEvidence.operations.filter(operation => operation.type === 'delete-stroke')
+  .every(operation => operation.compressionOpportunity), true);
 
 // D6 regression: two correspondences can always be fit exactly and therefore
 // do not constitute an integrity verdict.
@@ -287,17 +291,18 @@ const noOp = diffBezierSemanticStates(captureBezierSemanticState(compiled), capt
 assert.equal(noOp.operations.length, 0);
 assert.equal(evaluateStaticCandidate(compiled).status, 'passed');
 
-const emptyState = captureBezierSemanticState({ pegs: [], bezierCurves: {}, metadata: {} });
-const addPatch = diffBezierSemanticStates(emptyState, captureBezierSemanticState(compiled));
+const compiledState = captureBezierSemanticState(compiled);
+const emptyState = withoutSemanticNodes(compiledState);
+const addPatch = diffBezierSemanticStates(emptyState, compiledState);
 assert.deepEqual(addPatch.operations.map(operation => operation.type), ['add-stroke']);
 assert.equal(addPatch.operations.some(operation => 'after' in operation), false);
 assert.equal(semanticReplayReport(
-  captureBezierSemanticState(compiled), applyBezierSemanticPatch(emptyState, addPatch), addPatch
+  compiledState, applyBezierSemanticPatch(emptyState, addPatch), addPatch
 ).exact, true);
-const deletePatch = diffBezierSemanticStates(captureBezierSemanticState(compiled), emptyState);
+const deletePatch = diffBezierSemanticStates(compiledState, emptyState);
 assert.deepEqual(deletePatch.operations.map(operation => operation.type), ['delete-stroke']);
 assert.equal(semanticReplayReport(
-  emptyState, applyBezierSemanticPatch(captureBezierSemanticState(compiled), deletePatch), deletePatch
+  emptyState, applyBezierSemanticPatch(compiledState, deletePatch), deletePatch
 ).exact, true);
 
 const resampledLevel = compileBezierProgram({

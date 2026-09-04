@@ -9,6 +9,9 @@ export const REPAIR_SESSION_FORMAT = 'repair-session';
 export const REPAIR_SESSION_RESULT_FORMAT = 'repair-session-result';
 export const REPAIR_SESSION_VERSION = 1;
 export const REPAIR_SESSION_STORAGE_KEY = 'peggle_active_repair_session_v1';
+export const REPAIR_SESSION_DATABASE_NAME = 'peggle_repair_study';
+export const REPAIR_SESSION_DATABASE_STORE = 'sessions';
+export const REPAIR_SESSION_DATABASE_KEY = 'active';
 
 const clone = value => value == null ? value : JSON.parse(JSON.stringify(value));
 
@@ -77,6 +80,7 @@ export function recordRepairTransaction(candidate, nextLevel, now = new Date().t
 
 export function auditSemanticLineage(level) {
   const pegs = Array.isArray(level?.pegs) ? level.pegs : [];
+  const groups = Array.isArray(level?.groups) ? level.groups : [];
   const nodes = level?.metadata?.generatorProgram?.nodes || {};
   const missingObjectIds = [], missingMemberIds = [], missingNodes = [], wrongMembership = [];
   const duplicateMemberIds = [];
@@ -100,6 +104,31 @@ export function auditSemanticLineage(level) {
       if (!seenMembers.has(memberId)) phantomMemberIds.push({ objectId, memberId });
     }
   }
+  const missingGroupObjectIds = [], duplicateGroupObjectIds = [], orphanGroupReferences = [];
+  const groupMembershipMismatches = [];
+  const seenGroupObjectIds = new Set();
+  const groupsByRuntimeId = new Map(groups.map(group => [group?.id, group]));
+  for (const [index, group] of groups.entries()) {
+    const label = group?.id || `group-index:${index}`;
+    if (!group?.objectId) missingGroupObjectIds.push(label);
+    if (group?.objectId && seenGroupObjectIds.has(group.objectId)) duplicateGroupObjectIds.push(group.objectId);
+    if (group?.objectId) seenGroupObjectIds.add(group.objectId);
+  }
+  for (const peg of pegs) {
+    if (peg?.groupId == null) continue;
+    if (!groupsByRuntimeId.has(peg.groupId)) {
+      orphanGroupReferences.push({ memberId: peg.memberId || null, groupId: peg.groupId });
+    }
+  }
+  const semanticGroupState = captureBezierSemanticState(level).groups || {};
+  for (const group of groups) {
+    if (!group?.objectId) continue;
+    const expected = pegs.filter(peg => peg.groupId === group.id).map(peg => peg.memberId).filter(Boolean).sort();
+    const actual = [...(semanticGroupState[group.objectId]?.memberIds || [])].sort();
+    if (JSON.stringify(expected) !== JSON.stringify(actual)) {
+      groupMembershipMismatches.push({ objectId: group.objectId, expected, actual });
+    }
+  }
   const failures = [];
   if (missingObjectIds.length) failures.push('missing-object-id');
   if (missingMemberIds.length) failures.push('missing-member-id');
@@ -107,11 +136,16 @@ export function auditSemanticLineage(level) {
   if (missingNodes.length) failures.push('missing-object-node');
   if (wrongMembership.length) failures.push('object-membership-mismatch');
   if (phantomMemberIds.length) failures.push('phantom-node-member');
+  if (missingGroupObjectIds.length) failures.push('missing-group-object-id');
+  if (duplicateGroupObjectIds.length) failures.push('duplicate-group-object-id');
+  if (orphanGroupReferences.length) failures.push('orphan-group-reference');
+  if (groupMembershipMismatches.length) failures.push('group-membership-mismatch');
   return {
     status: failures.length ? 'failed' : 'passed', failures,
-    pegCount: pegs.length, nodeCount: Object.keys(nodes).length,
+    pegCount: pegs.length, nodeCount: Object.keys(nodes).length, groupCount: groups.length,
     missingObjectIds, missingMemberIds, duplicateMemberIds,
-    missingNodes: [...new Set(missingNodes)], wrongMembership, phantomMemberIds
+    missingNodes: [...new Set(missingNodes)], wrongMembership, phantomMemberIds,
+    missingGroupObjectIds, duplicateGroupObjectIds, orphanGroupReferences, groupMembershipMismatches
   };
 }
 
@@ -146,6 +180,55 @@ function pegExtent(peg, pegRadius) {
   };
 }
 
+function collisionFootprint(peg, pegRadius, padding = 0.25) {
+  if (peg.shape !== 'brick') {
+    return { kind: 'circle', x: Number(peg.x), y: Number(peg.y), radius: pegRadius + padding };
+  }
+  return {
+    kind: 'rectangle', x: Number(peg.x), y: Number(peg.y), rotation: Number(peg.angle || 0),
+    halfWidth: Number(peg.width || pegRadius * 4) / 2 + padding,
+    halfHeight: Number(peg.height || pegRadius * 1.2) / 2 + padding
+  };
+}
+
+function rectangleCorners(shape) {
+  const cos = Math.cos(shape.rotation), sin = Math.sin(shape.rotation);
+  return [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([sx, sy]) => {
+    const x = sx * shape.halfWidth, y = sy * shape.halfHeight;
+    return { x: shape.x + x * cos - y * sin, y: shape.y + x * sin + y * cos };
+  });
+}
+
+function circleRectangleOverlap(circle, rectangle) {
+  const cos = Math.cos(-rectangle.rotation), sin = Math.sin(-rectangle.rotation);
+  const dx = circle.x - rectangle.x, dy = circle.y - rectangle.y;
+  const localX = dx * cos - dy * sin, localY = dx * sin + dy * cos;
+  const closestX = Math.max(-rectangle.halfWidth, Math.min(rectangle.halfWidth, localX));
+  const closestY = Math.max(-rectangle.halfHeight, Math.min(rectangle.halfHeight, localY));
+  return Math.hypot(localX - closestX, localY - closestY) < circle.radius;
+}
+
+function rectangleRectangleOverlap(left, right) {
+  const leftCorners = rectangleCorners(left), rightCorners = rectangleCorners(right);
+  const axes = [left.rotation, left.rotation + Math.PI / 2, right.rotation, right.rotation + Math.PI / 2]
+    .map(angle => ({ x: Math.cos(angle), y: Math.sin(angle) }));
+  for (const axis of axes) {
+    const project = corners => corners.map(point => point.x * axis.x + point.y * axis.y);
+    const a = project(leftCorners), b = project(rightCorners);
+    if (Math.max(...a) <= Math.min(...b) || Math.max(...b) <= Math.min(...a)) return false;
+  }
+  return true;
+}
+
+function footprintsOverlap(left, right) {
+  if (left.kind === 'circle' && right.kind === 'circle') {
+    return Math.hypot(left.x - right.x, left.y - right.y) < left.radius + right.radius;
+  }
+  if (left.kind === 'circle') return circleRectangleOverlap(left, right);
+  if (right.kind === 'circle') return circleRectangleOverlap(right, left);
+  return rectangleRectangleOverlap(left, right);
+}
+
 export function evaluateRepairStaticChecks(level, options = {}) {
   const width = Number(options.width || 400);
   const height = Number(options.height || level?.survival?.worldHeight || 600);
@@ -153,6 +236,7 @@ export function evaluateRepairStaticChecks(level, options = {}) {
   const launcher = options.launcher || { x: width / 2, y: 40 };
   const minimumLauncherClearance = Number(options.minimumLauncherClearance || 42);
   const outOfBounds = [];
+  const footprints = [];
   let launcherClearance = Infinity;
   for (const peg of level?.pegs || []) {
     const extent = pegExtent(peg, pegRadius);
@@ -160,14 +244,33 @@ export function evaluateRepairStaticChecks(level, options = {}) {
         || peg.y - extent.y < 0 || peg.y + extent.y > height) outOfBounds.push(peg.memberId || peg.id);
     launcherClearance = Math.min(launcherClearance,
       Math.hypot(peg.x - launcher.x, peg.y - launcher.y) - Math.hypot(extent.x, extent.y));
+    footprints.push({ peg, shape: collisionFootprint(peg, pegRadius, Number(options.collisionPadding ?? 0.25)) });
+  }
+  const sourceRefByObject = new Map(Object.entries(level?.metadata?.generatorProgram?.nodes || {})
+    .map(([objectId, node]) => [objectId, node?.source?.strokeId || node?.sourceRef || null]));
+  const crossObjectOverlaps = [];
+  for (let left = 0; left < footprints.length; left++) {
+    for (let right = left + 1; right < footprints.length; right++) {
+      const a = footprints[left], b = footprints[right];
+      if (a.peg.objectId && a.peg.objectId === b.peg.objectId) continue;
+      const leftSource = sourceRefByObject.get(a.peg.objectId);
+      const rightSource = sourceRefByObject.get(b.peg.objectId);
+      if (leftSource && leftSource === rightSource) continue;
+      if (footprintsOverlap(a.shape, b.shape)) {
+        crossObjectOverlaps.push([a.peg.memberId || a.peg.id, b.peg.memberId || b.peg.id]);
+      }
+    }
   }
   const failures = [];
   if (outOfBounds.length) failures.push('out-of-bounds');
+  if (crossObjectOverlaps.length) failures.push('cross-object-overlap');
   if (launcherClearance < minimumLauncherClearance) failures.push('launcher-clearance');
   if (!(level?.pegs?.length > 0)) failures.push('empty-level');
   return {
     status: failures.length ? 'failed' : 'passed', failures,
     pegCount: level?.pegs?.length || 0, outOfBounds,
+    crossObjectOverlapCount: crossObjectOverlaps.length,
+    crossObjectOverlapExamples: crossObjectOverlaps.slice(0, 20),
     launcherClearance, minimumLauncherClearance, width, height
   };
 }
@@ -310,10 +413,140 @@ export function saveRepairSession(session, storage = globalThis.localStorage) {
 }
 
 export function loadSavedRepairSession(storage = globalThis.localStorage) {
-  const raw = storage?.getItem?.(REPAIR_SESSION_STORAGE_KEY);
-  if (!raw) return null;
-  const parsed = JSON.parse(raw);
-  return parsed?.format === REPAIR_SESSION_FORMAT && parsed?.version === REPAIR_SESSION_VERSION ? parsed : null;
+  try {
+    const raw = storage?.getItem?.(REPAIR_SESSION_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed?.format === REPAIR_SESSION_FORMAT && parsed?.version === REPAIR_SESSION_VERSION ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+let durableSaveQueue = Promise.resolve();
+
+function indexedDbFrom(options) {
+  return Object.prototype.hasOwnProperty.call(options || {}, 'indexedDB')
+    ? options.indexedDB
+    : globalThis.indexedDB;
+}
+
+function fallbackStorageFrom(options) {
+  return Object.prototype.hasOwnProperty.call(options || {}, 'fallbackStorage')
+    ? options.fallbackStorage
+    : globalThis.localStorage;
+}
+
+function openRepairSessionDatabase(indexedDB) {
+  return new Promise((resolve, reject) => {
+    let request;
+    try {
+      request = indexedDB.open(REPAIR_SESSION_DATABASE_NAME, 1);
+    } catch (error) {
+      reject(error);
+      return;
+    }
+    request.onupgradeneeded = () => {
+      const database = request.result;
+      if (!database.objectStoreNames.contains(REPAIR_SESSION_DATABASE_STORE)) {
+        database.createObjectStore(REPAIR_SESSION_DATABASE_STORE);
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error('Could not open repair-session database'));
+    request.onblocked = () => reject(new Error('Repair-session database upgrade was blocked'));
+  });
+}
+
+async function writeDurableSession(indexedDB, snapshot) {
+  const database = await openRepairSessionDatabase(indexedDB);
+  try {
+    await new Promise((resolve, reject) => {
+      const transaction = database.transaction(REPAIR_SESSION_DATABASE_STORE, 'readwrite');
+      transaction.objectStore(REPAIR_SESSION_DATABASE_STORE).put(snapshot, REPAIR_SESSION_DATABASE_KEY);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error || new Error('Repair-session write failed'));
+      transaction.onabort = () => reject(transaction.error || new Error('Repair-session write aborted'));
+    });
+  } finally {
+    database.close();
+  }
+}
+
+async function readDurableSession(indexedDB) {
+  const database = await openRepairSessionDatabase(indexedDB);
+  try {
+    return await new Promise((resolve, reject) => {
+      const transaction = database.transaction(REPAIR_SESSION_DATABASE_STORE, 'readonly');
+      const request = transaction.objectStore(REPAIR_SESSION_DATABASE_STORE).get(REPAIR_SESSION_DATABASE_KEY);
+      request.onsuccess = () => resolve(request.result || null);
+      request.onerror = () => reject(request.error || new Error('Repair-session read failed'));
+    });
+  } finally {
+    database.close();
+  }
+}
+
+export function saveRepairSessionDurable(session, options = {}) {
+  const indexedDB = indexedDbFrom(options);
+  const fallbackStorage = fallbackStorageFrom(options);
+  if (!indexedDB?.open) return Promise.resolve(saveRepairSession(session, fallbackStorage));
+
+  const at = new Date().toISOString();
+  const revision = Number(session.autosaveRevision || 0) + 1;
+  session.updatedAt = at;
+  session.autosaveRevision = revision;
+  session.autosave = { status: 'saving', at, error: null };
+  const snapshot = clone(session);
+  snapshot.autosave = { status: 'saved', at, error: null };
+  durableSaveQueue = durableSaveQueue.catch(() => null).then(async () => {
+    try {
+      await writeDurableSession(indexedDB, snapshot);
+      // Remove a legacy multi-megabyte localStorage copy after the durable write.
+      try { fallbackStorage?.removeItem?.(REPAIR_SESSION_STORAGE_KEY); } catch { /* best effort migration */ }
+      if (session.autosaveRevision === revision) session.autosave = { status: 'saved', at, error: null };
+    } catch (error) {
+      if (session.autosaveRevision === revision) {
+        session.autosave = { status: 'failed', at, error: error?.message || String(error) };
+      }
+    }
+    return session;
+  });
+  return durableSaveQueue;
+}
+
+export async function loadSavedRepairSessionDurable(options = {}) {
+  const indexedDB = indexedDbFrom(options);
+  const fallbackStorage = fallbackStorageFrom(options);
+  if (!indexedDB?.open) return loadSavedRepairSession(fallbackStorage);
+  try {
+    const saved = await readDurableSession(indexedDB);
+    if (saved?.format === REPAIR_SESSION_FORMAT && saved?.version === REPAIR_SESSION_VERSION) return saved;
+  } catch {
+    // A legacy localStorage session remains a valid recovery path when IDB is unavailable.
+  }
+  const legacy = loadSavedRepairSession(fallbackStorage);
+  if (legacy) await saveRepairSessionDurable(legacy, { indexedDB, fallbackStorage });
+  return legacy;
+}
+
+export async function clearSavedRepairSessionDurable(options = {}) {
+  const indexedDB = indexedDbFrom(options);
+  const fallbackStorage = fallbackStorageFrom(options);
+  try { fallbackStorage?.removeItem?.(REPAIR_SESSION_STORAGE_KEY); } catch { /* best effort */ }
+  if (!indexedDB?.open) return;
+  const database = await openRepairSessionDatabase(indexedDB);
+  try {
+    await new Promise((resolve, reject) => {
+      const transaction = database.transaction(REPAIR_SESSION_DATABASE_STORE, 'readwrite');
+      transaction.objectStore(REPAIR_SESSION_DATABASE_STORE).delete(REPAIR_SESSION_DATABASE_KEY);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error || new Error('Repair-session delete failed'));
+      transaction.onabort = () => reject(transaction.error || new Error('Repair-session delete aborted'));
+    });
+  } finally {
+    database.close();
+  }
 }
 
 export function finishRepairSession(session, now = new Date().toISOString()) {

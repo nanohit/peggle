@@ -1222,10 +1222,10 @@ export class Editor {
             objectId: operation.objectId || null,
             family: operation.family || null,
             groupId: operation.groupId,
-            nodeId: operation.nodeId,
             reason: operation.reason || null,
             languageGapCandidate: operation.languageGapCandidate || null,
-            affectedMemberIndices: (operation.changes || []).map(change => change.index),
+            affectedMemberIndices: (Array.isArray(operation.changes) ? operation.changes : [])
+              .map(change => change.index),
             causeEvidence: operation.causeEvidence || null,
             compressionOpportunity: operation.compressionOpportunity || null
           })),
