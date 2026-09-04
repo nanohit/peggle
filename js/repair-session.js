@@ -15,8 +15,31 @@ export const REPAIR_SESSION_DATABASE_KEY = 'active';
 
 const clone = value => value == null ? value : JSON.parse(JSON.stringify(value));
 
+function activeResearchCommands(commands) {
+  return (Array.isArray(commands) ? commands : []).filter(command => command?.retracted !== true);
+}
+
+function setTransactionActivity(transaction, retracted, evidence, now) {
+  if (!transaction) return;
+  transaction.retracted = retracted;
+  if (Array.isArray(evidence?.activity)) transaction.activity = clone(evidence.activity);
+  else {
+    transaction.activity ||= [];
+    transaction.activity.push({
+      action: evidence?.action || (retracted ? 'undo' : 'redo'),
+      at: evidence?.at || now,
+      retracted
+    });
+  }
+  if (retracted) transaction.retractedAt = evidence?.retractedAt || evidence?.at || now;
+  else transaction.reactivatedAt = evidence?.reactivatedAt || evidence?.at || now;
+  if (['undo', 'redo'].includes(evidence?.action) && Number.isInteger(evidence?.sequence)) {
+    transaction.historySequence = evidence.sequence;
+  }
+}
+
 function commandEvidence(level) {
-  return (level?.metadata?.generatorProgram?.commandLog || []).map(command => ({
+  return activeResearchCommands(level?.metadata?.generatorProgram?.commandLog).map(command => ({
     sequence: command.sequence,
     hints: (command?.patch?.hints || command?.hints || []).map(String),
     operations: command?.patch?.operations || []
@@ -27,7 +50,7 @@ function transactionEvidence(candidate) {
   if (!Array.isArray(candidate?.transactionLog) || candidate.transactionLog.length === 0) {
     return commandEvidence(candidate?.currentLevel);
   }
-  return candidate.transactionLog.map(transaction => ({
+  return activeResearchCommands(candidate.transactionLog).map(transaction => ({
     sequence: transaction.sequence,
     hints: (transaction?.patch?.hints || transaction?.hints || []).map(String),
     operations: transaction?.patch?.operations || []
@@ -40,6 +63,13 @@ export function recordRepairTransaction(candidate, nextLevel, now = new Date().t
   const previousLevel = candidate.currentLevel || candidate.baselineLevel;
   const previousCommands = previousLevel?.metadata?.generatorProgram?.commandLog || [];
   const nextCommands = nextLevel?.metadata?.generatorProgram?.commandLog || [];
+  const previousHistoryEvent = previousLevel?.metadata?.generatorProgram?.historyEvent || null;
+  const nextHistoryEvent = nextLevel?.metadata?.generatorProgram?.historyEvent || null;
+  const historyTransition = nextHistoryEvent
+    && ['undo', 'redo'].includes(nextHistoryEvent.action)
+    && nextHistoryEvent.id !== previousHistoryEvent?.id
+    ? nextHistoryEvent
+    : null;
   const previousEditorSequences = new Set(previousCommands.map(command => command.sequence));
   const alreadyRecorded = new Set(candidate.transactionLog
     .map(transaction => transaction.editorSequence)
@@ -47,6 +77,27 @@ export function recordRepairTransaction(candidate, nextLevel, now = new Date().t
   const newEditorCommands = nextCommands.filter(command => (
     !previousEditorSequences.has(command.sequence) && !alreadyRecorded.has(command.sequence)
   ));
+  const newEditorSequences = new Set(newEditorCommands.map(command => command.sequence));
+  const previousBySequence = new Map(previousCommands.map(command => [command.sequence, command]));
+  const nextBySequence = new Map(nextCommands.map(command => [command.sequence, command]));
+  const recordedByEditorSequence = new Map(candidate.transactionLog
+    .filter(transaction => Number.isInteger(transaction?.editorSequence))
+    .map(transaction => [transaction.editorSequence, transaction]));
+  const activityTransitions = [];
+  const knownSequences = new Set([
+    ...previousBySequence.keys(),
+    ...nextBySequence.keys(),
+    ...recordedByEditorSequence.keys()
+  ]);
+  for (const sequence of knownSequences) {
+    if (newEditorSequences.has(sequence)) continue;
+    const previous = previousBySequence.get(sequence);
+    const next = nextBySequence.get(sequence);
+    const wasActive = !!previous && previous.retracted !== true;
+    const isActive = !!next && next.retracted !== true;
+    if (wasActive === isActive) continue;
+    activityTransitions.push({ sequence, retracted: !isActive, command: next || previous || null });
+  }
   const appended = [];
   for (const command of newEditorCommands) {
     const transaction = {
@@ -58,7 +109,30 @@ export function recordRepairTransaction(candidate, nextLevel, now = new Date().t
     candidate.transactionLog.push(transaction);
     appended.push(transaction);
   }
-  if (newEditorCommands.length === 0) {
+  for (const transition of activityTransitions) {
+    const transaction = recordedByEditorSequence.get(transition.sequence);
+    if (!transaction) continue;
+    setTransactionActivity(transaction, transition.retracted, transition.command, now);
+  }
+  // Some editor actions are captured from state rather than an explicit
+  // command. Their undo snapshots cannot name an editor sequence, so use the
+  // history event to retract/reactivate the matching raw transaction instead
+  // of appending the inverse state diff as a new intention.
+  if (historyTransition && activityTransitions.length === 0) {
+    let transaction = null;
+    if (historyTransition.action === 'undo') {
+      transaction = [...candidate.transactionLog].reverse().find(value => value.retracted !== true) || null;
+    } else {
+      transaction = candidate.transactionLog
+        .filter(value => value.retracted === true)
+        .sort((left, right) => (
+          Number(right.historySequence || 0) - Number(left.historySequence || 0)
+          || (Date.parse(right.retractedAt || '') || 0) - (Date.parse(left.retractedAt || '') || 0)
+        ))[0] || null;
+    }
+    setTransactionActivity(transaction, historyTransition.action === 'undo', historyTransition, now);
+  }
+  if (newEditorCommands.length === 0 && activityTransitions.length === 0 && !historyTransition) {
     const before = captureBezierSemanticState(previousLevel);
     const after = captureBezierSemanticState(nextLevel);
     const patch = diffBezierSemanticStates(before, after);

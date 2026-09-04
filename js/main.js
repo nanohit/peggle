@@ -6770,7 +6770,9 @@ class PeggleApp {
       if (status) status.textContent = `Finish blocked — durable autosave failed: ${session.autosave.error}`;
       return;
     }
-    const blob = new Blob([JSON.stringify(result, null, 2)], { type: 'application/json' });
+    // Results contain both baseline and final native levels so the analysis can
+    // be recomputed independently. Whitespace is pure transfer overhead.
+    const blob = new Blob([JSON.stringify(result)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;

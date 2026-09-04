@@ -78,11 +78,13 @@ assert.equal(propertyPatch.operations.length, 1);
 assert.equal(propertyPatch.operations[0].type, 'object-exception');
 assert.equal(propertyPatch.operations[0].reason, 'atomic-object-edit');
 
-// A1 broad-capture regression: group animation and level-wide authored state
-// are content too. They must survive import and produce replayable operations.
+// Group structure remains semantic, while level-wide semantic state is an
+// explicit composition whitelist. Gameplay and presentation settings survive
+// native import but must not become composition-language gaps.
 const grouped = normalizeLevelData({
   ...freePegLevel(3),
   id: 'grouped-regression',
+  pegRadius: 9,
   aimLength: 220,
   flippers: { enabled: true, y: 540, xOffset: 80, length: 72 },
   groups: [{
@@ -99,8 +101,9 @@ const groupedState = captureBezierSemanticState(grouped);
 assert.equal(Object.keys(groupedState.groups).length, 1);
 assert.equal(Object.values(groupedState.groups)[0].family, 'AnimationGroup');
 assert.equal(Object.values(groupedState.groups)[0].memberIds.length, 3);
-assert.equal(groupedState.level.aimLength, 220);
-assert.equal(groupedState.level.flippers.enabled, true);
+assert.equal(groupedState.level.pegRadius, 9);
+assert.equal(groupedState.level.aimLength, undefined);
+assert.equal(groupedState.level.flippers, undefined);
 assert.equal(Object.values(grouped.metadata.generatorProgram.nodes).some(node => 'nodeId' in node), false);
 
 const importedGrouped = manager.importLevel(JSON.stringify(grouped));
@@ -108,7 +111,12 @@ assert.equal(diffBezierSemanticStates(groupedState, captureBezierSemanticState(i
 assert.equal(importedGrouped.groups[0].objectId, grouped.groups[0].objectId);
 
 const changedContext = clone(grouped);
+changedContext.pegRadius = 10;
 changedContext.aimLength = 180;
+changedContext.visuals.background.color = '#123456';
+changedContext.character = { id: 'out-of-scope-character' };
+changedContext.dialogue = { enabled: true, entries: [] };
+changedContext.survival.initialBalls = 999;
 changedContext.flippers.xOffset = 96;
 changedContext.groups[0].animation.dx = 33;
 const changedContextState = captureBezierSemanticState(changedContext);
@@ -119,5 +127,6 @@ assert.deepEqual(contextPatch.operations.map(operation => operation.type), [
 assert.equal(semanticReplayReport(
   changedContextState, applyBezierSemanticPatch(groupedState, contextPatch), contextPatch
 ).exact, true);
+assert.deepEqual(Object.keys(contextPatch.operations[0].changes), ['pegRadius']);
 
 console.log('ok semantic object identity and free-peg coverage');

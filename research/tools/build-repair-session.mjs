@@ -204,7 +204,7 @@ async function main() {
   const session = {
     format: REPAIR_SESSION_FORMAT,
     version: REPAIR_SESSION_VERSION,
-    sessionId: `repair-v1.1:${options.seed}`,
+    sessionId: `repair-v1.2:${options.seed}`,
     seed: options.seed,
     source: {
       manifestFormat: manifest.format,
@@ -218,6 +218,9 @@ async function main() {
       controlFirst: true,
       deterministicOrder: true,
       metricsVisibleDuringRepair: false,
+      semanticScope: 'composition-v1',
+      levelPropertyWhitelist: ['pegRadius'],
+      undoPolicy: 'retain-retracted-exclude-from-analysis',
       autosave: 'every-level-save',
       finishGates: ['semantic-replay', 'lineage', 'command-log-integrity', 'static-checks-for-done'],
       dispositions: ['done', 'deferred', 'unfixable'],
@@ -226,7 +229,9 @@ async function main() {
     candidates: [control, ...studyCandidates]
   };
   await fs.mkdir(path.dirname(options.output), { recursive: true });
-  await fs.writeFile(options.output, `${JSON.stringify(session, null, 2)}\n`);
+  // These files embed complete native levels for independent replay. Compact
+  // JSON removes roughly half the bytes without discarding audit data.
+  await fs.writeFile(options.output, `${JSON.stringify(session)}\n`);
   console.log(JSON.stringify({
     output: options.output,
     sessionId: session.sessionId,

@@ -6,7 +6,7 @@ import {
   estimateSimilarityTransformFromPairs
 } from '../../js/bezier-geometry.js';
 import { auditNativeLevelBezierIntegrity } from '../../js/bezier-integrity.js';
-import { ensureBezierNode } from '../../js/bezier-program.js';
+import { ensureBezierNode, reconcileResearchCommandActivity } from '../../js/bezier-program.js';
 import {
   applyBezierSemanticPatch,
   captureBezierSemanticState,
@@ -340,5 +340,29 @@ assert.equal(semanticReplayReport(
   applyBezierSemanticPatch(captureBezierSemanticState(compiled), controlPatch),
   controlPatch
 ).exact, true);
+
+const rawCommands = [
+  { sequence: 0, hints: ['move-selection'] },
+  { sequence: 1, hints: ['rotate-selection'] }
+];
+const afterUndo = reconcileResearchCommandActivity(
+  rawCommands,
+  [rawCommands[0]],
+  'undo',
+  '2026-01-01T00:00:00.000Z'
+);
+assert.equal(afterUndo[0].retracted, undefined);
+assert.equal(afterUndo[1].retracted, true);
+assert.deepEqual(afterUndo[1].activity, [{
+  action: 'undo', at: '2026-01-01T00:00:00.000Z', retracted: true
+}]);
+const afterRedo = reconcileResearchCommandActivity(
+  afterUndo,
+  rawCommands,
+  'redo',
+  '2026-01-01T00:01:00.000Z'
+);
+assert.equal(afterRedo[1].retracted, false);
+assert.equal(afterRedo[1].activity.length, 2);
 
 console.log('ok bezier repair foundation');

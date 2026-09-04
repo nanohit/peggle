@@ -44,6 +44,36 @@ export function ensureGeneratorProgram(level) {
   return program;
 }
 
+/**
+ * Preserve an append-only research journal while making undo/redo change the
+ * activity of existing commands instead of inventing inverse intentions.
+ *
+ * Undo snapshots contain the journal as it existed before the edited state.
+ * Commands absent from that snapshot are retracted; redo snapshots restore
+ * their previous activity. The transition history remains diagnostic evidence
+ * but `retracted` is the only field consumed by analysis.
+ */
+export function reconcileResearchCommandActivity(commands, snapshotCommands, action, at = new Date().toISOString()) {
+  const restored = new Map((Array.isArray(snapshotCommands) ? snapshotCommands : [])
+    .filter(command => Number.isInteger(command?.sequence))
+    .map(command => [command.sequence, command]));
+  return (Array.isArray(commands) ? commands : []).map(command => {
+    const snapshotCommand = restored.get(command?.sequence);
+    const retracted = !snapshotCommand || snapshotCommand.retracted === true;
+    if ((command.retracted === true) === retracted) return command;
+    const activity = [
+      ...(Array.isArray(command.activity) ? command.activity : []),
+      { action: String(action || 'history'), at, retracted }
+    ];
+    return {
+      ...command,
+      retracted,
+      activity,
+      ...(retracted ? { retractedAt: at } : { reactivatedAt: at })
+    };
+  });
+}
+
 // Backward-compatible export used by the existing editor and compiler.
 export const ensureBezierProgram = ensureGeneratorProgram;
 

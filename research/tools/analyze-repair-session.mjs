@@ -25,7 +25,7 @@ function escapeHtml(value) {
 }
 
 function commandEvidence(sequence) {
-  return (sequence || []).map(command => ({
+  return (sequence || []).filter(command => command?.retracted !== true).map(command => ({
     sequence: command.sequence,
     hints: (command?.patch?.hints || command?.hints || []).map(String),
     operations: command?.patch?.operations || []
@@ -54,7 +54,7 @@ function renderReport(analysis) {
         <div><dt>Repair fallback</dt><dd>${(candidate.replay.repairFallbackFraction * 100).toFixed(1)}%</dd></div>
         <div><dt>Final-state fallback</dt><dd>${(candidate.replay.stateFallbackFraction * 100).toFixed(1)}%</dd></div>
         <div><dt>Program coverage</dt><dd>${(candidate.replay.stateProgramCoverage * 100).toFixed(1)}%</dd></div>
-        <div><dt>Commands</dt><dd>${candidate.operationSequence.length}</dd></div>
+        <div><dt>Commands</dt><dd>${candidate.activeOperationCount} active / ${candidate.operationSequence.length} raw</dd></div>
         <div><dt>Final operations</dt><dd>${candidate.finalSemanticDiff.operations.length}</dd></div>
       </dl>
       ${candidate.note ? `<p><strong>Note:</strong> ${escapeHtml(candidate.note)}</p>` : ''}
@@ -102,6 +102,7 @@ async function main() {
       disposition: candidate.disposition, dispositionReason: candidate.dispositionReason || '',
       note: candidate.note || '', frictionNote: candidate.frictionNote || '',
       operationSequence: clone(candidate.operationSequence || []),
+      activeOperationCount: (candidate.operationSequence || []).filter(command => command?.retracted !== true).length,
       finalSemanticDiff: patch, replay,
       storedResultAgrees: JSON.stringify(candidate.finalSemanticDiff) === JSON.stringify(patch)
         && JSON.stringify(candidate.replay) === JSON.stringify(replay),

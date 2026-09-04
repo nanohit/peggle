@@ -163,6 +163,72 @@ assert.equal(session.candidates[1].transactionLog.length, 1);
 assert.equal(session.candidates[1].transactionLog[0].source, 'state-derived-transaction');
 assert.equal(session.candidates[1].transactionLog[0].patch.operations.length, 1);
 
+// Undo/redo changes command activity in place. It must not append an inverse
+// state-derived transaction that analysis could mistake for author intent.
+const journalBaseline = level('journal-activity');
+const journalCandidate = {
+  role: 'study', baselineLevel: journalBaseline,
+  currentLevel: JSON.parse(JSON.stringify(journalBaseline)), transactionLog: []
+};
+const journalEdited = JSON.parse(JSON.stringify(journalBaseline));
+journalEdited.pegs[0].x += 12;
+const editorCommand = {
+  sequence: 0, at: '2026-01-01T00:20:00.000Z', hints: ['move-selection'],
+  patch: { format: 'semantic-object-patch', version: 4, operations: [], metrics: {} }
+};
+journalEdited.metadata.generatorProgram.commandLog = [editorCommand];
+recordRepairTransaction(journalCandidate, journalEdited, '2026-01-01T00:20:00.000Z');
+assert.equal(journalCandidate.transactionLog.length, 1);
+const journalUndone = JSON.parse(JSON.stringify(journalBaseline));
+journalUndone.metadata.generatorProgram.commandLog = [{
+  ...editorCommand, retracted: true, retractedAt: '2026-01-01T00:21:00.000Z',
+  activity: [{ action: 'undo', at: '2026-01-01T00:21:00.000Z', retracted: true }]
+}];
+recordRepairTransaction(journalCandidate, journalUndone, '2026-01-01T00:21:00.000Z');
+assert.equal(journalCandidate.transactionLog.length, 1);
+assert.equal(journalCandidate.transactionLog[0].retracted, true);
+assert.equal(analyzeRepairCandidate(journalCandidate).patch.operations.length, 0);
+const journalRedone = JSON.parse(JSON.stringify(journalEdited));
+journalRedone.metadata.generatorProgram.commandLog = [{
+  ...editorCommand, retracted: false, reactivatedAt: '2026-01-01T00:22:00.000Z',
+  activity: [
+    { action: 'undo', at: '2026-01-01T00:21:00.000Z', retracted: true },
+    { action: 'redo', at: '2026-01-01T00:22:00.000Z', retracted: false }
+  ]
+}];
+recordRepairTransaction(journalCandidate, journalRedone, '2026-01-01T00:22:00.000Z');
+assert.equal(journalCandidate.transactionLog.length, 1);
+assert.equal(journalCandidate.transactionLog[0].retracted, false);
+
+const derivedBaseline = level('derived-history-activity');
+const derivedCandidate = {
+  role: 'study', baselineLevel: derivedBaseline,
+  currentLevel: JSON.parse(JSON.stringify(derivedBaseline)), transactionLog: []
+};
+const derivedEdited = JSON.parse(JSON.stringify(derivedBaseline));
+derivedEdited.pegs.push({
+  id: 'derived-added', objectId: 'derived-added-object', memberId: 'derived-added-member',
+  x: 160, y: 210, type: 'blue', shape: 'circle', angle: 0, groupId: null
+});
+recordRepairTransaction(derivedCandidate, derivedEdited, '2026-01-01T00:30:00.000Z');
+assert.equal(derivedCandidate.transactionLog[0].source, 'state-derived-transaction');
+const derivedUndone = JSON.parse(JSON.stringify(derivedBaseline));
+derivedUndone.metadata.generatorProgram.historyEvent = {
+  id: 'undo:1:test', sequence: 1, action: 'undo', at: '2026-01-01T00:31:00.000Z'
+};
+recordRepairTransaction(derivedCandidate, derivedUndone, '2026-01-01T00:31:00.000Z');
+assert.equal(derivedCandidate.transactionLog.length, 1);
+assert.equal(derivedCandidate.transactionLog[0].retracted, true);
+assert.equal(analyzeRepairCandidate(derivedCandidate).patch.operations.length, 0);
+const derivedRedone = JSON.parse(JSON.stringify(derivedEdited));
+derivedRedone.metadata.generatorProgram.historyEvent = {
+  id: 'redo:2:test', sequence: 2, action: 'redo', at: '2026-01-01T00:32:00.000Z'
+};
+recordRepairTransaction(derivedCandidate, derivedRedone, '2026-01-01T00:32:00.000Z');
+assert.equal(derivedCandidate.transactionLog.length, 1);
+assert.equal(derivedCandidate.transactionLog[0].retracted, false);
+assert.equal(derivedCandidate.transactionLog[0].historySequence, 2);
+
 const blocked = finishRepairSession(session, '2026-01-01T01:00:00.000Z');
 assert.equal(blocked.status, 'blocked');
 assert.equal(blocked.blockingFailures.length, 6);

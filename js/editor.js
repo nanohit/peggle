@@ -18,6 +18,7 @@ import {
   clearBezierExceptions,
   ensureBezierNode,
   ensureLevelSemanticIdentity,
+  reconcileResearchCommandActivity,
   recordBezierDeletedException,
   recordBezierPositionException,
   removeBezierNode,
@@ -163,6 +164,7 @@ export class Editor {
     this._researchCommandBefore = null;
     this._researchCommandHints = [];
     this.researchEditorCommands = [];
+    this._researchHistorySequence = 0;
     
     // Animation
     this.animationId = null;
@@ -186,6 +188,7 @@ export class Editor {
     this.survivalRuntime = new SurvivalRuntime(canvas.height, { autoScroll: false });
     const level = this.levelManager.getCurrentLevel();
     this.researchEditorCommands = Utils.deepClone(level?.metadata?.generatorProgram?.commandLog || []);
+    this._researchHistorySequence = Number(level?.metadata?.generatorProgram?.historyEvent?.sequence || 0);
     if (level) {
       this.survivalRuntime.configure(ensureLevelSurvival(level, canvas.height));
     }
@@ -2978,16 +2981,39 @@ export class Editor {
     else delete level.metadata.generatorProgram;
   }
 
+  reconcileResearchHistory(level, snapshot, action) {
+    const snapshotCommands = snapshot?.generatorProgram?.commandLog || [];
+    const at = new Date().toISOString();
+    this.researchEditorCommands = reconcileResearchCommandActivity(
+      this.researchEditorCommands,
+      snapshotCommands,
+      action,
+      at
+    );
+    level.metadata ||= {};
+    level.metadata.generatorProgram ||= { schemaVersion: 2, nodes: {} };
+    level.metadata.generatorProgram.commandLog = Utils.deepClone(this.researchEditorCommands);
+    this._researchHistorySequence++;
+    level.metadata.generatorProgram.historyEvent = {
+      id: `${action}:${this._researchHistorySequence}:${at}`,
+      sequence: this._researchHistorySequence,
+      action,
+      at
+    };
+  }
+
   undo() {
     if (this.undoStack.length === 0) return;
     
     const level = this.levelManager.getCurrentLevel();
     if (!level) return;
     
-    this.beginResearchCommand('undo');
     this.redoStack.push(this.captureEditorUndoSnapshot(level));
-    this.applyEditorUndoSnapshot(level, this.undoStack.pop());
-    this.finishResearchCommand('undo');
+    const snapshot = this.undoStack.pop();
+    this.applyEditorUndoSnapshot(level, snapshot);
+    this.reconcileRigidBezierGroups(level);
+    ensureLevelSemanticIdentity(level);
+    this.reconcileResearchHistory(level, snapshot, 'undo');
     this.levelManager.save();
     
     this.selectedPegIds.clear();
@@ -3004,10 +3030,12 @@ export class Editor {
     const level = this.levelManager.getCurrentLevel();
     if (!level) return;
     
-    this.beginResearchCommand('redo');
     this.undoStack.push(this.captureEditorUndoSnapshot(level));
-    this.applyEditorUndoSnapshot(level, this.redoStack.pop());
-    this.finishResearchCommand('redo');
+    const snapshot = this.redoStack.pop();
+    this.applyEditorUndoSnapshot(level, snapshot);
+    this.reconcileRigidBezierGroups(level);
+    ensureLevelSemanticIdentity(level);
+    this.reconcileResearchHistory(level, snapshot, 'redo');
     this.levelManager.save();
     
     this.selectedPegIds.clear();

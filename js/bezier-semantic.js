@@ -12,11 +12,11 @@ const RESAMPLE_PROPERTIES = [
   'pegRadius', 'brickWidth', 'bakeVersion'
 ];
 const DEFAULT_THRESHOLD_PX = 1;
-const LEVEL_STRUCTURE_KEYS = new Set(['id', 'pegs', 'groups', 'bezierCurves', 'metadata']);
-const VOLATILE_METADATA_KEYS = new Set([
-  'created', 'modified', 'playCount', 'avgCompletionRate',
-  'generatorProgram', 'repairSessionRuntime'
-]);
+// This state describes the composition program, not the entire game level.
+// Keep a positive list so newly added gameplay/visual settings cannot silently
+// become `missing-language-operation:level-properties` evidence. pegRadius is
+// the one level-wide property that changes authored geometry and bake spacing.
+export const COMPOSITION_LEVEL_PROPERTY_KEYS = Object.freeze(['pegRadius']);
 
 function clone(value) {
   return value == null ? value : JSON.parse(JSON.stringify(value));
@@ -57,16 +57,9 @@ function applyRecordChanges(target, changes) {
 
 function semanticLevelSnapshot(level) {
   const result = {};
-  for (const [key, value] of Object.entries(level || {})) {
-    if (LEVEL_STRUCTURE_KEYS.has(key)) continue;
-    result[key] = clone(value);
+  for (const key of COMPOSITION_LEVEL_PROPERTY_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(level || {}, key)) result[key] = clone(level[key]);
   }
-  const metadata = {};
-  for (const [key, value] of Object.entries(level?.metadata || {})) {
-    if (VOLATILE_METADATA_KEYS.has(key)) continue;
-    metadata[key] = clone(value);
-  }
-  if (Object.keys(metadata).length) result.metadata = metadata;
   return result;
 }
 
