@@ -1,0 +1,231 @@
+{
+  "authored": {
+    "coordinateSystem": {
+      "bounds": {
+        "maxX": 400,
+        "maxY": 600,
+        "minX": 0,
+        "minY": 0
+      },
+      "orientation": "portrait",
+      "origin": "top-left",
+      "units": "game-pixel",
+      "viewport": {
+        "height": 600,
+        "width": 400
+      },
+      "xAxis": "right",
+      "yAxis": "down"
+    },
+    "groups": [],
+    "mechanics": {
+      "aimLength": 300,
+      "billiard": null,
+      "bucket": {
+        "enabled": true,
+        "height": 16,
+        "width": 70
+      },
+      "destruction": null,
+      "flippers": null,
+      "hitPegClear": {
+        "delayMs": null,
+        "enabled": false
+      },
+      "launcher": {
+        "coordinateSpace": "world",
+        "x": 200,
+        "y": 40
+      },
+      "mode": "standard",
+      "pegRadius": 8.5,
+      "pvp": null,
+      "survival": null,
+      "yoyo": null
+    },
+    "metadata": {
+      "created": "2026-08-09",
+      "purpose": "Deterministic research smoke fixture"
+    },
+    "name": "Research Native Mini",
+    "objects": [
+      {
+        "geometry": {
+          "radius": 8.5,
+          "shape": "circle"
+        },
+        "groupIds": [],
+        "id": "target-center",
+        "kind": "circle",
+        "properties": {},
+        "role": "target",
+        "source": {
+          "index": 0,
+          "raw": {
+            "angle": 0,
+            "id": "target-center",
+            "shape": "circle",
+            "type": "orange",
+            "x": 200,
+            "y": 180
+          },
+          "system": "nanohit-peggle-level-json"
+        },
+        "targetType": "orange",
+        "transform": {
+          "rotation": 0,
+          "scaleX": 1,
+          "scaleY": 1,
+          "x": 200,
+          "y": 180
+        }
+      },
+      {
+        "geometry": {
+          "radius": 8.5,
+          "shape": "circle"
+        },
+        "groupIds": [],
+        "id": "target-side",
+        "kind": "circle",
+        "properties": {},
+        "role": "target",
+        "source": {
+          "index": 1,
+          "raw": {
+            "angle": 0,
+            "id": "target-side",
+            "shape": "circle",
+            "type": "blue",
+            "x": 244,
+            "y": 236
+          },
+          "system": "nanohit-peggle-level-json"
+        },
+        "targetType": "blue",
+        "transform": {
+          "rotation": 0,
+          "scaleX": 1,
+          "scaleY": 1,
+          "x": 244,
+          "y": 236
+        }
+      },
+      {
+        "geometry": {
+          "curveSlices": [],
+          "height": 10.2,
+          "shape": "rotated-rectangle",
+          "width": 180
+        },
+        "groupIds": [],
+        "id": "floor-brick",
+        "kind": "brick",
+        "properties": {},
+        "role": "obstacle",
+        "source": {
+          "index": 2,
+          "raw": {
+            "angle": 0.18,
+            "height": 10.2,
+            "id": "floor-brick",
+            "shape": "brick",
+            "type": "obstacle",
+            "width": 180,
+            "x": 200,
+            "y": 330
+          },
+          "system": "nanohit-peggle-level-json"
+        },
+        "targetType": "obstacle",
+        "transform": {
+          "rotation": 0.18,
+          "scaleX": 1,
+          "scaleY": 1,
+          "x": 200,
+          "y": 330
+        }
+      }
+    ],
+    "tags": [
+      "synthetic",
+      "research-fixture"
+    ]
+  },
+  "extensions": {
+    "nativeLevel": {
+      "aimLength": 300,
+      "difficulty": "test",
+      "groups": [],
+      "id": "research-native-mini",
+      "metadata": {
+        "created": "2026-08-09",
+        "purpose": "Deterministic research smoke fixture"
+      },
+      "name": "Research Native Mini",
+      "pegRadius": 8.5,
+      "pegs": [
+        {
+          "angle": 0,
+          "id": "target-center",
+          "shape": "circle",
+          "type": "orange",
+          "x": 200,
+          "y": 180
+        },
+        {
+          "angle": 0,
+          "id": "target-side",
+          "shape": "circle",
+          "type": "blue",
+          "x": 244,
+          "y": 236
+        },
+        {
+          "angle": 0.18,
+          "height": 10.2,
+          "id": "floor-brick",
+          "shape": "brick",
+          "type": "obstacle",
+          "width": 180,
+          "x": 200,
+          "y": 330
+        }
+      ],
+      "tags": [
+        "synthetic",
+        "research-fixture"
+      ],
+      "version": 1,
+      "visuals": {
+        "background": null
+      }
+    }
+  },
+  "format": "peggle-research",
+  "formatVersion": 1,
+  "id": "level:nanohit-peggle:research-native-mini",
+  "losses": [],
+  "provenance": {
+    "ingestion": {
+      "at": "2026-08-09T00:00:00.000Z",
+      "tool": "import-game-level.mjs",
+      "toolRevision": "synthetic-fixture-v1",
+      "toolVersion": "0.1.0"
+    },
+    "source": {
+      "path": "research/fixtures/native-mini.json",
+      "revision": "synthetic-fixture-v1",
+      "sha256": "8eebf72932543456ce3589df95b24261c18c8c187c782e053ce7c7e6ddaf867d",
+      "system": "nanohit-peggle",
+      "version": 1
+    }
+  },
+  "recordType": "level",
+  "visual": {
+    "presentation": {
+      "background": null
+    }
+  },
+  "warnings": []
+}

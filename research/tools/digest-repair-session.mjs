@@ -109,6 +109,36 @@ async function findRasterBrowser(explicitPath) {
   return null;
 }
 
+/**
+ * Wait for a screenshot to land and finish being written.
+ *
+ * Edge and Chrome on Windows hand the work to a detached process and the
+ * launcher exits immediately, so the command resolving says nothing about the
+ * file existing. Poll until the size stops changing, which also covers a large
+ * sheet still being flushed.
+ */
+async function waitForStableFile(filePath, timeoutMs = 20000, quietMs = 250) {
+  const deadline = Date.now() + timeoutMs;
+  let lastSize = -1;
+  let stableSince = 0;
+  while (Date.now() < deadline) {
+    let size = -1;
+    try {
+      size = (await fs.stat(filePath)).size;
+    } catch { size = -1; }
+    if (size > 0 && size === lastSize) {
+      if (stableSince && Date.now() - stableSince >= quietMs) return size;
+      if (!stableSince) stableSince = Date.now();
+    } else {
+      stableSince = 0;
+    }
+    lastSize = size;
+    await new Promise(resolve => { setTimeout(resolve, 50); });
+  }
+  throw new Error(`Timed out after ${timeoutMs}ms waiting for ${path.basename(filePath)}.`
+    + ' The browser may have failed to render the sheet; pass --no-png to build an SVG-only package.');
+}
+
 async function rasterizeSvg(svgPath, pngPath, browserPath, width, height) {
   const profile = await fs.mkdtemp(path.join(os.tmpdir(), 'peggle-digest-browser-'));
   try {
@@ -120,7 +150,7 @@ async function rasterizeSvg(svgPath, pngPath, browserPath, width, height) {
       `--screenshot=${pngPath}`, `--window-size=${width},${height}`,
       pathToFileURL(svgPath).href
     ], { windowsHide: true, maxBuffer: 1024 * 1024 });
-    await fs.access(pngPath);
+    await waitForStableFile(pngPath);
   } finally {
     const resolvedProfile = path.resolve(profile);
     const resolvedTemp = `${path.resolve(os.tmpdir())}${path.sep}`;

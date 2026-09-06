@@ -394,6 +394,14 @@ function getQueryParam(key) {
   return new URLSearchParams(window.location.search).get(key);
 }
 
+let researchRecorderModulePromise = null;
+function loadResearchRecorderModule() {
+  const value = getQueryParam('research');
+  if (value == null || value === '0' || value === 'false' || value === 'off') return Promise.resolve(null);
+  if (!researchRecorderModulePromise) researchRecorderModulePromise = import('./research-recorder.js');
+  return researchRecorderModulePromise;
+}
+
 function getRequestedNames() {
   const raw = getQueryParam('level') || getQueryParam('levels');
   if (!raw) return [];
@@ -722,6 +730,7 @@ async function resolve() {
 }
 
 async function bootPvpDuelRoom(roomCode) {
+  const researchRecorderModule = await loadResearchRecorderModule();
   const canvas = document.getElementById('gameCanvas');
   canvas.getContext('2d', { alpha: false });
 
@@ -981,7 +990,11 @@ async function bootPvpDuelRoom(roomCode) {
     game.renderer.setBackground(visuals.background);
     game.renderer.setBallTrail(visuals.ballTrail);
     game.renderer.setShockwave(visuals.shockwave);
+    const researchRecorder = researchRecorderModule?.attachResearchRecorder(game, level, {
+      sourcePath: `${window.location.pathname}${window.location.search}`
+    });
     game.loadLevel(level);
+    researchRecorder?.markLevelLoaded();
     game.setAimLength?.(pvp.aimLength ?? PVP_DEFAULT_AIM_LENGTH);
     game.confirmShoot = !!localStorage.getItem('peggle_confirmShoot');
 
@@ -1019,6 +1032,8 @@ async function bootPvpDuelRoom(roomCode) {
 }
 
 async function bootWithLevels(levels, campaignName, campaignData, options = {}) {
+
+  const researchRecorderModule = await loadResearchRecorderModule();
 
   const canvas = document.getElementById('gameCanvas');
   canvas.getContext('2d', { alpha: false });
@@ -2481,7 +2496,11 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     };
     game.setEndSequenceConfig?.(visuals.endSequence);
 
+    const researchRecorder = researchRecorderModule?.attachResearchRecorder(game, levelData, {
+      sourcePath: `${window.location.pathname}${window.location.search}`
+    });
     game.loadLevel(levelData);
+    researchRecorder?.markLevelLoaded();
     let pegIntroMs = 0;
     const pegIntroOptions = options.pegIntro === false
       ? null

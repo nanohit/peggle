@@ -1,0 +1,691 @@
+{
+  "artifacts": [],
+  "checkpoints": [
+    {
+      "sha256": "4c1e579883b95f43d33e1f5265ad507f9e113e0a499001057aa11efddcb96727",
+      "state": {
+        "balls": [
+          {
+            "active": true,
+            "id": "ball:shot:0",
+            "portalCooldown": 0,
+            "radius": 8.5,
+            "stuck": false,
+            "vx": 4.592425496802575e-16,
+            "vy": 7.5,
+            "x": 200,
+            "y": 40
+          }
+        ],
+        "bucket": {
+          "enabled": true,
+          "height": 16,
+          "phase": 1.5707963267948966,
+          "speed": 1.5,
+          "width": 70,
+          "x": 200,
+          "y": 575
+        },
+        "hitObjectIds": [],
+        "objects": [
+          {
+            "angle": 0.18,
+            "hit": false,
+            "id": "floor-brick",
+            "type": "obstacle",
+            "x": 200,
+            "y": 330
+          },
+          {
+            "angle": 0,
+            "hit": false,
+            "id": "target-center",
+            "type": "orange",
+            "x": 200,
+            "y": 180
+          },
+          {
+            "angle": 0,
+            "hit": false,
+            "id": "target-side",
+            "type": "blue",
+            "x": 244,
+            "y": 236
+          }
+        ]
+      },
+      "step": 0,
+      "timeSeconds": 0
+    },
+    {
+      "sha256": "b2b8a478e66381ee943cf2b64eb9acd3c2f03905a7829c9a0155d39d8388151f",
+      "state": {
+        "balls": [
+          {
+            "active": true,
+            "id": "ball:shot:0",
+            "portalCooldown": 0,
+            "radius": 8.5,
+            "stuck": false,
+            "vx": -0.02622912078759698,
+            "vy": -3.9207149310728138,
+            "x": 199.60099581656908,
+            "y": 90.14698872930066
+          }
+        ],
+        "bucket": {
+          "enabled": true,
+          "height": 16,
+          "phase": 1.7849958259032928,
+          "speed": 1.5,
+          "width": 70,
+          "x": 361.2292328852413,
+          "y": 575
+        },
+        "hitObjectIds": [
+          "target-center"
+        ],
+        "objects": [
+          {
+            "angle": 0.18,
+            "hit": false,
+            "id": "floor-brick",
+            "type": "obstacle",
+            "x": 200,
+            "y": 330
+          },
+          {
+            "angle": 0,
+            "hit": true,
+            "id": "target-center",
+            "type": "orange",
+            "x": 200,
+            "y": 180
+          },
+          {
+            "angle": 0,
+            "hit": false,
+            "id": "target-side",
+            "type": "blue",
+            "x": 244,
+            "y": 236
+          }
+        ]
+      },
+      "step": 30,
+      "timeSeconds": 0.25
+    },
+    {
+      "sha256": "9b4932f0f6e17ed09e3de84ef8bfc8786be3aa064c6e9ff8c0b635fa8a1608bb",
+      "state": {
+        "balls": [
+          {
+            "active": true,
+            "id": "ball:shot:0",
+            "portalCooldown": 0,
+            "radius": 8.5,
+            "stuck": false,
+            "vx": -0.0247001716709934,
+            "vy": -0.20164071876952142,
+            "x": 198.83805020738393,
+            "y": 30.72895678995839
+          }
+        ],
+        "bucket": {
+          "enabled": true,
+          "height": 16,
+          "phase": 1.999195325011689,
+          "speed": 1.5,
+          "width": 70,
+          "x": 350.0892792334954,
+          "y": 575
+        },
+        "hitObjectIds": [
+          "target-center"
+        ],
+        "objects": [
+          {
+            "angle": 0.18,
+            "hit": false,
+            "id": "floor-brick",
+            "type": "obstacle",
+            "x": 200,
+            "y": 330
+          },
+          {
+            "angle": 0,
+            "hit": true,
+            "id": "target-center",
+            "type": "orange",
+            "x": 200,
+            "y": 180
+          },
+          {
+            "angle": 0,
+            "hit": false,
+            "id": "target-side",
+            "type": "blue",
+            "x": 244,
+            "y": 236
+          }
+        ]
+      },
+      "step": 60,
+      "timeSeconds": 0.5
+    },
+    {
+      "sha256": "08274c84371dc51796e397e75567397183e001d489dabc47e1ddabd55d67b4c2",
+      "state": {
+        "balls": [
+          {
+            "active": true,
+            "id": "ball:shot:0",
+            "portalCooldown": 0,
+            "radius": 8.5,
+            "stuck": false,
+            "vx": -0.023260348126691442,
+            "vy": 3.3006410483149007,
+            "x": 198.1195782587772,
+            "y": 79.49035501483225
+          }
+        ],
+        "bucket": {
+          "enabled": true,
+          "height": 16,
+          "phase": 2.213394824120085,
+          "speed": 1.5,
+          "width": 70,
+          "x": 332.0893047525191,
+          "y": 575
+        },
+        "hitObjectIds": [
+          "target-center"
+        ],
+        "objects": [
+          {
+            "angle": 0.18,
+            "hit": false,
+            "id": "floor-brick",
+            "type": "obstacle",
+            "x": 200,
+            "y": 330
+          },
+          {
+            "angle": 0,
+            "hit": true,
+            "id": "target-center",
+            "type": "orange",
+            "x": 200,
+            "y": 180
+          },
+          {
+            "angle": 0,
+            "hit": false,
+            "id": "target-side",
+            "type": "blue",
+            "x": 244,
+            "y": 236
+          }
+        ]
+      },
+      "step": 90,
+      "timeSeconds": 0.75
+    },
+    {
+      "sha256": "1f2cb061c1e8c64589b6b443e445d4bed5a6dc4797ae7e042ada660f42a86411",
+      "state": {
+        "balls": [
+          {
+            "active": true,
+            "id": "ball:shot:0",
+            "portalCooldown": 0,
+            "radius": 8.5,
+            "stuck": false,
+            "vx": -1.3255683409515735,
+            "vy": -2.0462657599296126,
+            "x": 182.8493305141394,
+            "y": 133.29280909738924
+          }
+        ],
+        "bucket": {
+          "enabled": true,
+          "height": 16,
+          "phase": 2.4275943232284813,
+          "speed": 1.5,
+          "width": 70,
+          "x": 308.05202110097144,
+          "y": 575
+        },
+        "hitObjectIds": [
+          "target-center"
+        ],
+        "objects": [
+          {
+            "angle": 0.18,
+            "hit": false,
+            "id": "floor-brick",
+            "type": "obstacle",
+            "x": 200,
+            "y": 330
+          },
+          {
+            "angle": 0,
+            "hit": true,
+            "id": "target-center",
+            "type": "orange",
+            "x": 200,
+            "y": 180
+          },
+          {
+            "angle": 0,
+            "hit": false,
+            "id": "target-side",
+            "type": "blue",
+            "x": 244,
+            "y": 236
+          }
+        ]
+      },
+      "step": 120,
+      "timeSeconds": 1
+    },
+    {
+      "sha256": "ded134e29235918802e699d741a93cd9b22fbb87ef75439901ee26ddb685e016",
+      "state": {
+        "balls": [
+          {
+            "active": true,
+            "id": "ball:shot:0",
+            "portalCooldown": 0,
+            "radius": 8.5,
+            "stuck": false,
+            "vx": -1.2482982501884108,
+            "vy": 1.563542974985168,
+            "x": 144.29155522332135,
+            "y": 128.3982503749138
+          }
+        ],
+        "bucket": {
+          "enabled": true,
+          "height": 16,
+          "phase": 2.6417938223368775,
+          "speed": 1.5,
+          "width": 70,
+          "x": 279.0760828088085,
+          "y": 575
+        },
+        "hitObjectIds": [
+          "target-center"
+        ],
+        "objects": [
+          {
+            "angle": 0.18,
+            "hit": false,
+            "id": "floor-brick",
+            "type": "obstacle",
+            "x": 200,
+            "y": 330
+          },
+          {
+            "angle": 0,
+            "hit": true,
+            "id": "target-center",
+            "type": "orange",
+            "x": 200,
+            "y": 180
+          },
+          {
+            "angle": 0,
+            "hit": false,
+            "id": "target-side",
+            "type": "blue",
+            "x": 244,
+            "y": 236
+          }
+        ]
+      },
+      "step": 150,
+      "timeSeconds": 1.25
+    },
+    {
+      "sha256": "c8c8c2c1927e41064897a2777e7eda612ecfde0e1066d09a6bfe9365da88d707",
+      "state": {
+        "balls": [
+          {
+            "active": true,
+            "id": "ball:shot:0",
+            "portalCooldown": 0,
+            "radius": 8.5,
+            "stuck": false,
+            "vx": -1.1755323911137185,
+            "vy": 4.962928572919861,
+            "x": 107.98139154505007,
+            "y": 228.5048370055026
+          }
+        ],
+        "bucket": {
+          "enabled": true,
+          "height": 16,
+          "phase": 2.8559933214452737,
+          "speed": 1.5,
+          "width": 70,
+          "x": 246.48587187883476,
+          "y": 575
+        },
+        "hitObjectIds": [
+          "target-center"
+        ],
+        "objects": [
+          {
+            "angle": 0.18,
+            "hit": false,
+            "id": "floor-brick",
+            "type": "obstacle",
+            "x": 200,
+            "y": 330
+          },
+          {
+            "angle": 0,
+            "hit": true,
+            "id": "target-center",
+            "type": "orange",
+            "x": 200,
+            "y": 180
+          },
+          {
+            "angle": 0,
+            "hit": false,
+            "id": "target-side",
+            "type": "blue",
+            "x": 244,
+            "y": 236
+          }
+        ]
+      },
+      "step": 180,
+      "timeSeconds": 1.5
+    },
+    {
+      "sha256": "864a269cde7966f807557014e155b8d9f373049ef0be2fec251895c58ae6dc89",
+      "state": {
+        "balls": [
+          {
+            "active": true,
+            "id": "ball:shot:0",
+            "portalCooldown": 0,
+            "radius": 8.5,
+            "stuck": false,
+            "vx": -1.1070082028465262,
+            "vy": 8.164157029063706,
+            "x": 73.78782159972144,
+            "y": 427.491837389725
+          }
+        ],
+        "bucket": {
+          "enabled": true,
+          "height": 16,
+          "phase": 3.07019282055367,
+          "speed": 1.5,
+          "width": 70,
+          "x": 211.77096522787198,
+          "y": 575
+        },
+        "hitObjectIds": [
+          "target-center"
+        ],
+        "objects": [
+          {
+            "angle": 0.18,
+            "hit": false,
+            "id": "floor-brick",
+            "type": "obstacle",
+            "x": 200,
+            "y": 330
+          },
+          {
+            "angle": 0,
+            "hit": true,
+            "id": "target-center",
+            "type": "orange",
+            "x": 200,
+            "y": 180
+          },
+          {
+            "angle": 0,
+            "hit": false,
+            "id": "target-side",
+            "type": "blue",
+            "x": 244,
+            "y": 236
+          }
+        ]
+      },
+      "step": 210,
+      "timeSeconds": 1.75
+    },
+    {
+      "sha256": "89b95484a91e723db1fdb3de154c9b3fbf71f4b942588321af35a5ad28ec710c",
+      "state": {
+        "balls": [
+          {
+            "active": true,
+            "id": "ball:shot:0",
+            "portalCooldown": 0,
+            "radius": 8.5,
+            "stuck": false,
+            "vx": -1.0550762082019356,
+            "vy": 10.590251861334304,
+            "x": 47.873756272070814,
+            "y": 653.9905160866875
+          }
+        ],
+        "bucket": {
+          "enabled": true,
+          "height": 16,
+          "phase": 3.241552419840387,
+          "speed": 1.5,
+          "width": 70,
+          "x": 183.53409167006433,
+          "y": 575
+        },
+        "hitObjectIds": [
+          "target-center"
+        ],
+        "objects": [
+          {
+            "angle": 0.18,
+            "hit": false,
+            "id": "floor-brick",
+            "type": "obstacle",
+            "x": 200,
+            "y": 330
+          },
+          {
+            "angle": 0,
+            "hit": true,
+            "id": "target-center",
+            "type": "orange",
+            "x": 200,
+            "y": 180
+          },
+          {
+            "angle": 0,
+            "hit": false,
+            "id": "target-side",
+            "type": "blue",
+            "x": 244,
+            "y": 236
+          }
+        ]
+      },
+      "step": 234,
+      "timeSeconds": 1.95
+    }
+  ],
+  "events": [
+    {
+      "data": {
+        "angleRadians": 1.5707963267948966,
+        "launcher": {
+          "x": 200,
+          "y": 40
+        },
+        "power": 7.5
+      },
+      "mechanical": {
+        "ball": {
+          "id": "ball:shot:0",
+          "vx": 4.592425496802575e-16,
+          "vy": 7.5,
+          "x": 200,
+          "y": 40
+        }
+      },
+      "sequence": 0,
+      "step": 0,
+      "timeSeconds": 0,
+      "type": "shot_launched"
+    },
+    {
+      "data": {
+        "exitId": null,
+        "impact": {
+          "normalX": 0,
+          "normalY": 1,
+          "speed": 9.049589924237566,
+          "vx": 4.456564934037072e-16,
+          "vy": 9.049589924237566
+        },
+        "objectId": "target-center",
+        "objectType": "orange"
+      },
+      "mechanical": {
+        "ball": {
+          "id": "ball:shot:0",
+          "vx": -0.027028728369622976,
+          "vy": -5.865710945643356,
+          "x": 200,
+          "y": 162.5
+        }
+      },
+      "sequence": 1,
+      "step": 15,
+      "timeSeconds": 0.125,
+      "type": "peg_hit"
+    },
+    {
+      "data": {
+        "active": true,
+        "bucketCatches": 0,
+        "hitCount": 1
+      },
+      "sequence": 2,
+      "step": 234,
+      "timeSeconds": 1.95,
+      "type": "shot_finished"
+    }
+  ],
+  "extensions": {
+    "labOptions": {
+      "checkpointEvery": 30,
+      "maxSteps": 1600
+    },
+    "supportedSubset": [
+      "circle",
+      "brick",
+      "segment",
+      "rod",
+      "bumper",
+      "portal",
+      "bucket"
+    ],
+    "unsupportedObjects": []
+  },
+  "format": "peggle-research",
+  "formatVersion": 1,
+  "id": "run:headless-lab:1778897caf0843f7d6874d2b",
+  "levelRef": {
+    "id": "level:nanohit-peggle:research-native-mini",
+    "sha256": "ff37032163dae09f8f242ba7500be600ed27fa07ca6a2c71119d44ad457376fc"
+  },
+  "losses": [],
+  "measurements": {
+    "bucketCatches": 0,
+    "hitCount": 1,
+    "hitObjectIds": [
+      "target-center"
+    ],
+    "simulatedSeconds": 1.95,
+    "simulatedSteps": 234
+  },
+  "provenance": {
+    "ingestion": {
+      "at": "2026-08-09T00:00:00.000Z",
+      "tool": "run-lab.mjs",
+      "toolRevision": "6201ec1120f7dbadecf76a6e40710bb9bacab915",
+      "toolVersion": "0.1.0"
+    },
+    "source": {
+      "revision": "6201ec1120f7dbadecf76a6e40710bb9bacab915",
+      "system": "nanohit-peggle-headless-lab"
+    }
+  },
+  "recordType": "run",
+  "reproduction": {
+    "capability": "subset-deterministic",
+    "fixedStepSeconds": 0.008333333333333333,
+    "floatPolicy": {
+      "checkpointComparison": "exact-canonical-json",
+      "storage": "IEEE-754 JSON numbers"
+    },
+    "game": {
+      "id": "nanohit-peggle-physics-engine",
+      "revision": "6201ec1120f7dbadecf76a6e40710bb9bacab915"
+    },
+    "inputs": [
+      {
+        "data": {
+          "angleRadians": 1.5707963267948966,
+          "launcher": {
+            "coordinateSpace": "world",
+            "x": 200,
+            "y": 40
+          },
+          "power": 7.5
+        },
+        "sequence": 0,
+        "step": 0,
+        "type": "launch"
+      }
+    ],
+    "physicsConfig": {
+      "bounce": 0.65,
+      "brickHeight": 10.2,
+      "brickWidth": 34,
+      "friction": 0.998,
+      "gravity": 0.12,
+      "launchPower": 7.5,
+      "maxVelocity": 16,
+      "pegRadius": 8.5,
+      "timeScale": 1
+    },
+    "platform": {
+      "adapter": "PhysicsEngine-only",
+      "runtime": "node"
+    },
+    "seed": {
+      "algorithm": "mulberry32-from-sha256-prefix",
+      "master": "synthetic-fixture",
+      "streams": {
+        "mechanics": "synthetic-fixture"
+      },
+      "unseededStreams": []
+    },
+    "tool": {
+      "id": "headless-research-lab",
+      "revision": "6201ec1120f7dbadecf76a6e40710bb9bacab915",
+      "version": "0.1.0"
+    }
+  },
+  "warnings": []
+}

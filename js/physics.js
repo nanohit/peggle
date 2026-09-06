@@ -374,7 +374,7 @@ function circleRectOverlap(ball, brick) {
 }
 
 export class PhysicsEngine {
-  constructor(width, height) {
+  constructor(width, height, options = {}) {
     this.width = width;
     this.height = height;
     this.ballTopY = 0;
@@ -401,6 +401,13 @@ export class PhysicsEngine {
     this._pegGridCandidates = [];
     this._maxPegCollisionRadius = PHYSICS_CONFIG.pegRadius;
     this.destructionContactSettings = null;
+    // Gameplay uses Math.random by default for backwards compatibility. Research
+    // and replay adapters inject a named seeded stream here.
+    this.random = typeof options.random === 'function' ? options.random : Math.random;
+  }
+
+  setRandomSource(random) {
+    this.random = typeof random === 'function' ? random : Math.random;
   }
 
   setBall(ball) {
@@ -933,7 +940,7 @@ export class PhysicsEngine {
         // Small tangent perturbation to break perfect ping-pong symmetry.
         // Grows slowly with repeats; never large enough to feel like a kick.
         const jitterMag = 0.3 + osc * 0.18;
-        outVt += (Math.random() - 0.5) * 2 * jitterMag;
+        outVt += (this.random() - 0.5) * 2 * jitterMag;
         // Only enforce a normal floor for genuinely slow exits, and only after
         // we've actually been bouncing repeatedly. Don't accelerate fast balls.
         if (osc >= 2) {
@@ -1216,8 +1223,8 @@ export class PhysicsEngine {
 
     // Add slight randomness to prevent perfect loops
     const jitter = gentleSurfaceSlide ? 0.035 : 0.3;
-    ball.vx += (Math.random() - 0.5) * jitter;
-    ball.vy += (Math.random() - 0.5) * jitter;
+    ball.vx += (this.random() - 0.5) * jitter;
+    ball.vy += (this.random() - 0.5) * jitter;
     if (surfaceSlide) {
       this.applyDestructionSurfaceSlide(ball, surfaceSlide);
     }
@@ -1322,10 +1329,10 @@ export class PhysicsEngine {
         // Small jitter to avoid sticking. PVP can opt out so replay keyframes
         // are sourced from a cleaner simulator state.
         if (!a.disableCollisionJitter && !b.disableCollisionJitter) {
-          a.vx += (Math.random() - 0.5) * 0.1;
-          a.vy += (Math.random() - 0.5) * 0.1;
-          b.vx += (Math.random() - 0.5) * 0.1;
-          b.vy += (Math.random() - 0.5) * 0.1;
+          a.vx += (this.random() - 0.5) * 0.1;
+          a.vy += (this.random() - 0.5) * 0.1;
+          b.vx += (this.random() - 0.5) * 0.1;
+          b.vy += (this.random() - 0.5) * 0.1;
         }
         this.clampBallSpeed(a);
         this.clampBallSpeed(b);

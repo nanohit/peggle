@@ -1,0 +1,180 @@
+{
+  "artifacts": [
+    {
+      "kind": "telemetry-log",
+      "mediaType": "application/x-ndjson",
+      "path": "research/fixtures/haggle-mini.jsonl",
+      "sha256": "d43d51158ec90fc684c655a7ad1a1192090ab072942b68491a5813275064aec9"
+    }
+  ],
+  "checkpoints": [],
+  "events": [
+    {
+      "data": {
+        "levelName": "fixture.dat"
+      },
+      "sequence": 0,
+      "speedMultiplier": 1,
+      "step": 0,
+      "timeSeconds": 0,
+      "type": "level_load",
+      "wallTimeSeconds": 0
+    },
+    {
+      "data": {
+        "gunAngleDegrees": 0,
+        "gunAngleRadians": 1.5707963267948966,
+        "replayPoint": false
+      },
+      "sequence": 1,
+      "speedMultiplier": 1,
+      "step": 1,
+      "timeSeconds": 0.25,
+      "type": "shot_begin",
+      "wallTimeSeconds": 0.25
+    },
+    {
+      "data": {
+        "current": 2,
+        "hotkey": "F6",
+        "previous": 1
+      },
+      "sequence": 2,
+      "speedMultiplier": 2,
+      "step": 2,
+      "timeSeconds": 0.3,
+      "type": "speed_change",
+      "wallTimeSeconds": 0.3
+    },
+    {
+      "data": {
+        "flag": false,
+        "x": 200,
+        "y": 180
+      },
+      "mechanical": {
+        "sourcePosition": {
+          "x": 200,
+          "y": 180
+        }
+      },
+      "sequence": 3,
+      "speedMultiplier": 2,
+      "step": 3,
+      "timeSeconds": 0.5,
+      "type": "peg_hit",
+      "wallTimeSeconds": 0.4
+    },
+    {
+      "data": {},
+      "sequence": 4,
+      "speedMultiplier": 2,
+      "step": 4,
+      "timeSeconds": 1,
+      "type": "level_done",
+      "wallTimeSeconds": 0.65
+    }
+  ],
+  "extensions": {
+    "captureClock": {
+      "accelerationInvariant": true,
+      "canonicalEventTime": "gameTimeMs",
+      "wallTime": "monotonicMs"
+    },
+    "rawTopLevelFields": [
+      "data",
+      "format",
+      "gameTimeMs",
+      "gameVariant",
+      "monotonicMs",
+      "sequence",
+      "speedMultiplier",
+      "type",
+      "version"
+    ],
+    "rawTransportFormat": "peggle-haggle-telemetry/v2",
+    "sourceEventCount": 5
+  },
+  "format": "peggle-research",
+  "formatVersion": 1,
+  "id": "run:haggle:haggle-mini",
+  "levelRef": {
+    "id": "level:nanohit-peggle:research-native-mini",
+    "sha256": "ff37032163dae09f8f242ba7500be600ed27fa07ca6a2c71119d44ad457376fc"
+  },
+  "losses": [
+    "Raw Haggle callbacks do not yet expose exact simulation steps or stable source object IDs; retain the linked raw telemetry artifact."
+  ],
+  "measurements": {
+    "eventCount": 5,
+    "maxSpeedMultiplier": 2,
+    "pegHitCount": 1,
+    "shotCount": 1,
+    "speedChangeCount": 1
+  },
+  "provenance": {
+    "ingestion": {
+      "at": "2026-08-09T00:00:00.000Z",
+      "tool": "import-haggle-telemetry.mjs",
+      "toolRevision": "6201ec1120f7dbadecf76a6e40710bb9bacab915",
+      "toolVersion": "0.2.0"
+    },
+    "source": {
+      "executableSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "gameVariant": "peggle-deluxe-1.0.1",
+      "path": "research/fixtures/haggle-mini.jsonl",
+      "revision": "synthetic-fixture-v1",
+      "sha256": "d43d51158ec90fc684c655a7ad1a1192090ab072942b68491a5813275064aec9",
+      "system": "haggle-runtime-telemetry"
+    }
+  },
+  "recordType": "run",
+  "reproduction": {
+    "capability": "observational",
+    "fixedStepSeconds": null,
+    "floatPolicy": {
+      "checkpointComparison": "not-available",
+      "storage": "source callback values"
+    },
+    "game": {
+      "id": "peggle-deluxe-1.0.1",
+      "revision": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "inputs": [
+      {
+        "data": {
+          "angleDegrees": 0,
+          "angleRadians": 1.5707963267948966
+        },
+        "sequence": 0,
+        "step": 1,
+        "type": "launch"
+      }
+    ],
+    "physicsConfig": {
+      "known": false
+    },
+    "platform": {
+      "capture": "haggle",
+      "runtime": "native-windows-x86"
+    },
+    "seed": {
+      "algorithm": "unknown-source-rng",
+      "master": "unobserved",
+      "streams": {},
+      "unseededStreams": [
+        "mechanics",
+        "visual"
+      ]
+    },
+    "tool": {
+      "id": "haggle-telemetry-mod",
+      "revision": "synthetic-fixture-v1",
+      "version": "0.2.0"
+    }
+  },
+  "warnings": [
+    "Haggle capture is observational: source fixed step, physics config, RNG state, exact game tick, and complete object identity are not exposed yet.",
+    "Runtime acceleration was active. Canonical event time uses the virtual game clock; wallTimeSeconds preserves elapsed real time."
+  ]
+}

@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Peggle benchmark blind review</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, system-ui, sans-serif; background: #020617; color: #e2e8f0; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; }
+    header { display: flex; align-items: center; gap: 16px; padding: 14px 20px; border-bottom: 1px solid #1e293b; }
+    header strong { margin-right: auto; }
+    main { max-width: 1500px; margin: 0 auto; padding: 20px; }
+    .prompt { text-align: center; font-size: 18px; margin: 0 0 18px; }
+    .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+    .choice { display: grid; gap: 10px; padding: 14px; border: 1px solid #334155; border-radius: 14px; background: #0f172a; }
+    .choice img { width: 100%; max-height: 68vh; object-fit: contain; border-radius: 8px; background: #e2e8f0; }
+    button { border: 1px solid #475569; border-radius: 9px; padding: 11px 16px; color: #f8fafc; background: #1e293b; font: inherit; cursor: pointer; }
+    button:hover, button:focus-visible { background: #334155; outline: 2px solid #38bdf8; }
+    .actions { display: flex; justify-content: center; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+    .primary { background: #0369a1; border-color: #0ea5e9; }
+    .status { color: #94a3b8; }
+    .done { text-align: center; padding: 18vh 20px; }
+    [hidden] { display: none !important; }
+    @media (max-width: 780px) { .pair { grid-template-columns: 1fr; } .choice img { max-height: 42vh; } }
+  </style>
+</head>
+<body>
+  <header>
+    <strong>Blind composition review</strong>
+    <span class="status" id="progress">Loading…</span>
+    <button id="export" type="button">Export decisions</button>
+    <button id="reset" type="button">Reset</button>
+  </header>
+  <main>
+    <section id="review" hidden>
+      <p class="prompt" id="prompt"></p>
+      <div class="pair">
+        <article class="choice">
+          <img id="left-image" alt="Layout A">
+          <button class="primary" id="left" type="button">A is stronger (1)</button>
+        </article>
+        <article class="choice">
+          <img id="right-image" alt="Layout B">
+          <button class="primary" id="right" type="button">B is stronger (2)</button>
+        </article>
+      </div>
+      <div class="actions">
+        <button id="tie" type="button">Tie / cannot tell (0)</button>
+        <button id="back" type="button">Undo previous</button>
+      </div>
+    </section>
+    <section class="done" id="done" hidden>
+      <h1>Review complete</h1>
+      <p>Export the decisions and keep the JSON with the benchmark.</p>
+      <button class="primary" id="export-done" type="button">Export decisions</button>
+    </section>
+    <section class="done" id="error" hidden>
+      <h1>Could not load benchmark</h1>
+      <p id="error-message"></p>
+    </section>
+  </main>
+  <script type="module">
+    const elements = Object.fromEntries([
+      'progress', 'review', 'prompt', 'left-image', 'right-image', 'left', 'right',
+      'tie', 'back', 'done', 'error', 'error-message', 'export', 'export-done', 'reset'
+    ].map(id => [id, document.getElementById(id)]));
+    let benchmark;
+    let decisions = [];
+    let seedDecisions = [];
+    let lockedDecisionCount = 0;
+    let storageKey = '';
+
+    function currentPair() { return benchmark.reviewPairs[decisions.length]; }
+    function save() { localStorage.setItem(storageKey, JSON.stringify(decisions)); }
+    function show(element, visible) { element.hidden = !visible; }
+
+    function render() {
+      const pair = currentPair();
+      elements.progress.textContent = `${decisions.length} / ${benchmark.reviewPairs.length}` +
+        (lockedDecisionCount ? ` (${lockedDecisionCount} imported)` : '');
+      show(elements.review, !!pair);
+      show(elements.done, !pair);
+      show(elements.error, false);
+      if (!pair) return;
+      elements.prompt.textContent = pair.prompt;
+      elements['left-image'].src = pair.left.previewPath;
+      elements['right-image'].src = pair.right.previewPath;
+      elements.back.disabled = decisions.length <= lockedDecisionCount;
+    }
+
+    function decide(choice) {
+      const pair = currentPair();
+      if (!pair) return;
+      decisions.push({
+        pairId: pair.id,
+        choice,
+        decidedAt: new Date().toISOString()
+      });
+      save();
+      render();
+    }
+
+    function exportDecisions() {
+      const value = {
+        format: 'peggle-benchmark-review',
+        formatVersion: benchmark.formatVersion >= 3 ? 3 : 2,
+        benchmarkId: benchmark.id,
+        benchmarkCreatedAt: benchmark.createdAt,
+        benchmarkFormatVersion: benchmark.formatVersion,
+        representationRevision: benchmark.representation?.revision || null,
+        exportedAt: new Date().toISOString(),
+        completed: decisions.length === benchmark.reviewPairs.length,
+        decisions
+      };
+      const blob = new Blob([`${JSON.stringify(value, null, 2)}\n`], { type: 'application/json' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `benchmark-review-${benchmark.id.replace(/[^a-z0-9]+/gi, '-')}.json`;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    }
+
+    elements.left.addEventListener('click', () => decide('left'));
+    elements.right.addEventListener('click', () => decide('right'));
+    elements.tie.addEventListener('click', () => decide('tie'));
+    elements.back.addEventListener('click', () => {
+      if (decisions.length <= lockedDecisionCount) return;
+      decisions.pop();
+      save();
+      render();
+    });
+    elements.export.addEventListener('click', exportDecisions);
+    elements['export-done'].addEventListener('click', exportDecisions);
+    elements.reset.addEventListener('click', () => {
+      const message = lockedDecisionCount
+        ? 'Delete locally saved continuation decisions and return to the imported review checkpoint?'
+        : 'Delete all locally saved decisions for this benchmark?';
+      if (!confirm(message)) return;
+      decisions = [...seedDecisions];
+      save();
+      render();
+    });
+    window.addEventListener('keydown', event => {
+      if (event.key === '1') decide('left');
+      else if (event.key === '2') decide('right');
+      else if (event.key === '0') decide('tie');
+      else return;
+      event.preventDefault();
+    });
+
+    try {
+      const response = await fetch('./benchmark.json', { cache: 'no-store' });
+      if (!response.ok) throw new Error(`benchmark.json returned HTTP ${response.status}`);
+      benchmark = await response.json();
+      storageKey = `peggle-review:${benchmark.id}:${benchmark.createdAt}`;
+      if (benchmark.formatVersion >= 3) {
+        try {
+          const seedResponse = await fetch('./review-seed.json', { cache: 'no-store' });
+          if (!seedResponse.ok) throw new Error(`review-seed.json returned HTTP ${seedResponse.status}`);
+          const seed = await seedResponse.json();
+          if (seed.benchmarkId !== benchmark.id || seed.benchmarkCreatedAt !== benchmark.createdAt) {
+            throw new Error('review-seed.json belongs to a different benchmark build');
+          }
+          seedDecisions = Array.isArray(seed.decisions) ? seed.decisions : [];
+          lockedDecisionCount = Number(seed.lockedDecisionCount) || seedDecisions.length;
+          if (lockedDecisionCount !== seedDecisions.length) throw new Error('review seed lock count is inconsistent');
+          seedDecisions.forEach((decision, index) => {
+            if (decision.pairId !== benchmark.reviewPairs[index]?.id) {
+              throw new Error(`review seed decision ${index + 1} does not match the pair prefix`);
+            }
+          });
+        } catch (error) {
+          throw new Error(`Could not load imported review checkpoint: ${error.message}`);
+        }
+      }
+      const stored = localStorage.getItem(storageKey);
+      try { decisions = stored == null ? [...seedDecisions] : JSON.parse(stored); } catch { decisions = [...seedDecisions]; }
+      decisions = decisions.slice(0, benchmark.reviewPairs.length);
+      if (decisions.length < lockedDecisionCount) decisions = [...seedDecisions];
+      render();
+    } catch (error) {
+      elements.progress.textContent = 'Load failed';
+      show(elements.review, false);
+      show(elements.done, false);
+      show(elements.error, true);
+      elements['error-message'].textContent = `${error.message}. Serve this directory over HTTP instead of opening review.html directly.`;
+    }
+  </script>
+</body>
+</html>

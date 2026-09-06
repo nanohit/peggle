@@ -1,0 +1,304 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nanohit.github.io/peggle/research/schema/research-record.schema.json",
+  "title": "Peggle research record",
+  "description": "Canonical envelope for authored levels and runtime experiment records.",
+  "type": "object",
+  "required": ["format", "formatVersion", "recordType", "id", "provenance"],
+  "properties": {
+    "format": { "const": "peggle-research" },
+    "formatVersion": { "const": 1 },
+    "recordType": { "enum": ["level", "run"] },
+    "id": { "type": "string", "minLength": 1 },
+    "provenance": { "$ref": "#/$defs/provenance" },
+    "authored": { "$ref": "#/$defs/authoredLevel" },
+    "visual": { "$ref": "#/$defs/visualTruth" },
+    "levelRef": { "$ref": "#/$defs/levelRef" },
+    "reproduction": { "$ref": "#/$defs/reproduction" },
+    "events": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/event" }
+    },
+    "checkpoints": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/checkpoint" }
+    },
+    "measurements": { "type": "object", "additionalProperties": true },
+    "artifacts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/artifact" }
+    },
+    "extensions": { "type": "object", "additionalProperties": true },
+    "warnings": { "type": "array", "items": { "type": "string" } },
+    "losses": { "type": "array", "items": { "type": "string" } }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "recordType": { "const": "level" } }, "required": ["recordType"] },
+      "then": { "required": ["authored"] }
+    },
+    {
+      "if": { "properties": { "recordType": { "const": "run" } }, "required": ["recordType"] },
+      "then": { "required": ["levelRef", "reproduction", "events", "checkpoints"] }
+    }
+  ],
+  "additionalProperties": true,
+  "$defs": {
+    "provenance": {
+      "type": "object",
+      "required": ["source", "ingestion"],
+      "properties": {
+        "source": {
+          "type": "object",
+          "required": ["system"],
+          "properties": {
+            "system": { "type": "string", "minLength": 1 },
+            "path": { "type": "string" },
+            "uri": { "type": "string" },
+            "revision": { "type": "string" },
+            "sha256": { "$ref": "#/$defs/sha256" },
+            "version": { "type": ["string", "number"] }
+          },
+          "additionalProperties": true
+        },
+        "ingestion": {
+          "type": "object",
+          "required": ["tool", "toolVersion", "at"],
+          "properties": {
+            "tool": { "type": "string", "minLength": 1 },
+            "toolVersion": { "type": "string", "minLength": 1 },
+            "toolRevision": { "type": "string" },
+            "at": { "type": "string", "format": "date-time" }
+          },
+          "additionalProperties": true
+        },
+        "parents": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/levelRef" }
+        }
+      },
+      "additionalProperties": true
+    },
+    "authoredLevel": {
+      "type": "object",
+      "required": ["name", "coordinateSystem", "objects", "groups", "mechanics"],
+      "properties": {
+        "name": { "type": "string" },
+        "coordinateSystem": { "$ref": "#/$defs/coordinateSystem" },
+        "objects": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/authoredObject" }
+        },
+        "groups": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/group" }
+        },
+        "mechanics": { "type": "object", "additionalProperties": true },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "metadata": { "type": "object", "additionalProperties": true }
+      },
+      "additionalProperties": true
+    },
+    "coordinateSystem": {
+      "type": "object",
+      "required": ["units", "origin", "xAxis", "yAxis", "orientation", "bounds"],
+      "properties": {
+        "units": { "type": "string" },
+        "origin": { "enum": ["top-left", "bottom-left", "center", "source-defined"] },
+        "xAxis": { "enum": ["right", "left", "source-defined"] },
+        "yAxis": { "enum": ["down", "up", "source-defined"] },
+        "orientation": { "enum": ["portrait", "landscape", "square", "unbounded", "source-defined"] },
+        "bounds": {
+          "type": "object",
+          "required": ["minX", "minY", "maxX", "maxY"],
+          "properties": {
+            "minX": { "type": "number" },
+            "minY": { "type": "number" },
+            "maxX": { "type": "number" },
+            "maxY": { "type": "number" }
+          },
+          "additionalProperties": false
+        },
+        "viewport": {
+          "type": "object",
+          "properties": {
+            "width": { "type": "number", "exclusiveMinimum": 0 },
+            "height": { "type": "number", "exclusiveMinimum": 0 }
+          },
+          "required": ["width", "height"],
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "authoredObject": {
+      "type": "object",
+      "required": ["id", "kind", "role", "transform"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "kind": {
+          "enum": ["circle", "brick", "segment", "polygon", "rod", "bumper", "portal", "emitter", "hole", "unknown"]
+        },
+        "role": { "enum": ["target", "obstacle", "permanent", "trigger", "decoration", "unknown"] },
+        "targetType": { "type": ["string", "null"] },
+        "transform": { "$ref": "#/$defs/transform" },
+        "geometry": { "type": "object", "additionalProperties": true },
+        "groupIds": { "type": "array", "items": { "type": "string" } },
+        "portal": { "type": "object", "additionalProperties": true },
+        "animation": { "type": "object", "additionalProperties": true },
+        "movement": { "type": "object", "additionalProperties": true },
+        "destruction": { "type": "object", "additionalProperties": true },
+        "properties": { "type": "object", "additionalProperties": true },
+        "source": { "type": "object", "additionalProperties": true }
+      },
+      "additionalProperties": true
+    },
+    "transform": {
+      "type": "object",
+      "required": ["x", "y", "rotation"],
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "rotation": { "type": "number" },
+        "scaleX": { "type": "number" },
+        "scaleY": { "type": "number" }
+      },
+      "additionalProperties": true
+    },
+    "group": {
+      "type": "object",
+      "required": ["id", "objectIds"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string" },
+        "objectIds": { "type": "array", "items": { "type": "string" } },
+        "animation": { "type": "object", "additionalProperties": true },
+        "movement": { "type": "object", "additionalProperties": true },
+        "destruction": { "type": "object", "additionalProperties": true },
+        "source": { "type": "object", "additionalProperties": true }
+      },
+      "additionalProperties": true
+    },
+    "visualTruth": {
+      "type": "object",
+      "properties": {
+        "background": { "$ref": "#/$defs/artifact" },
+        "semanticRenders": { "type": "array", "items": { "$ref": "#/$defs/artifact" } },
+        "screenshots": { "type": "array", "items": { "$ref": "#/$defs/artifact" } },
+        "presentation": { "type": "object", "additionalProperties": true }
+      },
+      "additionalProperties": true
+    },
+    "levelRef": {
+      "type": "object",
+      "required": ["id", "sha256"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "path": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "reproduction": {
+      "type": "object",
+      "required": ["capability", "game", "tool", "fixedStepSeconds", "physicsConfig", "seed", "inputs"],
+      "properties": {
+        "capability": { "enum": ["observational", "subset-deterministic", "exact"] },
+        "game": {
+          "type": "object",
+          "required": ["id", "revision"],
+          "properties": {
+            "id": { "type": "string" },
+            "revision": { "type": "string" },
+            "contentSha256": { "$ref": "#/$defs/sha256" }
+          },
+          "additionalProperties": true
+        },
+        "tool": {
+          "type": "object",
+          "required": ["id", "version"],
+          "properties": {
+            "id": { "type": "string" },
+            "version": { "type": "string" },
+            "revision": { "type": "string" }
+          },
+          "additionalProperties": true
+        },
+        "fixedStepSeconds": { "type": ["number", "null"], "exclusiveMinimum": 0 },
+        "physicsConfig": { "type": "object", "additionalProperties": { "type": ["number", "boolean", "string", "null"] } },
+        "seed": {
+          "type": "object",
+          "required": ["algorithm", "master", "streams"],
+          "properties": {
+            "algorithm": { "type": "string" },
+            "master": { "type": ["string", "integer"] },
+            "streams": { "type": "object", "additionalProperties": { "type": ["string", "integer"] } },
+            "unseededStreams": { "type": "array", "items": { "type": "string" } }
+          },
+          "additionalProperties": true
+        },
+        "inputs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/input" }
+        },
+        "platform": { "type": "object", "additionalProperties": true },
+        "floatPolicy": { "type": "object", "additionalProperties": true }
+      },
+      "additionalProperties": true
+    },
+    "input": {
+      "type": "object",
+      "required": ["sequence", "step", "type", "data"],
+      "properties": {
+        "sequence": { "type": "integer", "minimum": 0 },
+        "step": { "type": "integer", "minimum": 0 },
+        "type": { "type": "string", "minLength": 1 },
+        "data": { "type": "object", "additionalProperties": true }
+      },
+      "additionalProperties": true
+    },
+    "event": {
+      "type": "object",
+      "required": ["sequence", "step", "timeSeconds", "type", "data"],
+      "properties": {
+        "sequence": { "type": "integer", "minimum": 0 },
+        "step": { "type": "integer", "minimum": 0 },
+        "timeSeconds": { "type": "number", "minimum": 0 },
+        "type": { "type": "string", "minLength": 1 },
+        "data": { "type": "object", "additionalProperties": true },
+        "mechanical": { "type": "object", "additionalProperties": true }
+      },
+      "additionalProperties": true
+    },
+    "checkpoint": {
+      "type": "object",
+      "required": ["step", "timeSeconds", "sha256", "state"],
+      "properties": {
+        "step": { "type": "integer", "minimum": 0 },
+        "timeSeconds": { "type": "number", "minimum": 0 },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "state": { "type": "object", "additionalProperties": true }
+      },
+      "additionalProperties": true
+    },
+    "artifact": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": { "enum": ["exact-json", "semantic-render", "screenshot", "background", "trajectory", "telemetry-log", "frame-index", "capture-session", "other"] },
+        "path": { "type": "string" },
+        "uri": { "type": "string" },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "mediaType": { "type": "string" },
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "metadata": { "type": "object", "additionalProperties": true }
+      },
+      "additionalProperties": true
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}

@@ -2,18 +2,50 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "node --check api/*.js && node --check scripts/*.mjs && node --check js/main.js && node --check js/editor.js && node --check js/physics.js && node --check js/destruction-mode.js && node --check js/player-bootstrap.js && node --check js/image-compression.js && node --check js/visual-layout.js && node --check js/character-config.js",
+    "build:player": "esbuild js/player-bootstrap.js --bundle --format=esm --splitting --outdir=dist",
+    "check": "node scripts/check-syntax.mjs",
     "migrate:assets": "node scripts/migrate-assets.mjs",
     "mirror:assets": "node scripts/mirror-assets-to-github.mjs",
     "test:assets": "node scripts/asset-store-smoke.mjs",
     "test:destruction": "node scripts/destruction-smoke.mjs",
-    "test:player-regression": "node scripts/player-regression-smoke.mjs"
+    "test:player-regression": "node scripts/player-regression-smoke.mjs",
+    "test:research": "node research/test/research-smoke.mjs && node research/test/benchmark-smoke.mjs && node research/test/generator-smoke.mjs",
+    "research:examples": "node research/tools/generate-examples.mjs",
+    "research:finalize-capture": "node research/tools/finalize-capture-session.mjs",
+    "research:import-production": "node research/tools/import-production-corpus.mjs",
+    "research:export-pak": "node research/tools/export-peggle-pak-corpus.mjs",
+    "research:audit-pak-corpus": "node research/tools/audit-peggleedit-corpus.mjs",
+    "research:benchmark": "node research/tools/build-benchmark.mjs",
+    "research:benchmark:v1": "node research/tools/build-benchmark.mjs research/generated/peggle-deluxe/corpus.json --holdout research/generated/peggle-nights/corpus.json --adaptation research/generated/production/corpus.json --output research/generated/benchmark-v1 --pilot-size 8 --mutation-count 5 --review-pairs 20 --simulate originals --angle-count 17 --max-steps 3600 --seed deluxe-pilot-v1",
+    "research:benchmark:v2": "node research/tools/build-preference-benchmark.mjs --prior-review \"J:/Dark Souls 2/benchmark-review-benchmark-quality-v1-deluxe-pilot-v1.json\"",
+    "research:verify-benchmark": "node research/tools/verify-benchmark.mjs",
+    "research:verify-benchmark:v1": "node research/tools/verify-benchmark.mjs research/generated/benchmark-v1/benchmark.json",
+    "research:verify-benchmark:v2": "node research/tools/verify-benchmark.mjs research/generated/benchmark-v2/benchmark.json",
+    "research:summarize-review": "node research/tools/summarize-benchmark-review.mjs",
+    "research:generator:foundation": "node research/tools/build-generator-foundation.mjs",
+    "research:generator:build": "node research/tools/build-generator-pipeline.mjs",
+    "research:generator:generate": "node research/tools/generate-constructive-levels.mjs",
+    "research:generator:review": "node research/tools/build-generator-review.mjs",
+    "research:generator:verify": "node research/tools/verify-generator-pipeline.mjs",
+    "research:generator:summarize": "node research/tools/summarize-generator-review.mjs",
+    "research:dsl:roundtrip": "node research/dsl/run-roundtrip.mjs",
+    "research:dsl:deluxe": "node research/dsl/run-roundtrip.mjs research/generated/peggle-deluxe/corpus.json --limit 55 --out research/generated/dsl-roundtrip-deluxe-all",
+    "research:dsl:alea": "node research/dsl/run-roundtrip.mjs research/generated/production/corpus.json --limit 64 --out research/generated/dsl-roundtrip-alea-all",
+    "research:autoplay": "node research/autoplay/run-autoplay.mjs",
+    "research:autoplay:alea": "node research/autoplay/run-autoplay.mjs research/generated/production/corpus.json --limit 8 --out research/generated/autoplay-alea",
+    "research:coordinate-transfer-audit": "node research/tools/build-coordinate-transfer-audit.mjs",
+    "research:coordinate-transfer-verify": "node research/tools/verify-coordinate-transfer-audit.mjs",
+    "research:coordinate-transfer-summarize": "node research/tools/summarize-coordinate-transfer-audit.mjs",
+    "research:review": "python -m http.server 8765",
+    "test:benchmark": "node research/test/benchmark-smoke.mjs"
   },
   "dependencies": {
     "ioredis": "^5.10.0",
     "ios-haptics": "^0.1.4"
   },
   "devDependencies": {
+    "ajv": "8.18.0",
+    "ajv-formats": "3.0.1",
     "esbuild": "^0.24.0"
   }
 }

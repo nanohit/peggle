@@ -1,0 +1,5 @@
+{"format":"peggle-haggle-telemetry","version":2,"sequence":0,"monotonicMs":1000,"gameTimeMs":5000,"speedMultiplier":1,"gameVariant":"peggle-deluxe-1.0.1","type":"level_load","data":{"levelName":"fixture.dat"}}
+{"format":"peggle-haggle-telemetry","version":2,"sequence":1,"monotonicMs":1250,"gameTimeMs":5250,"speedMultiplier":1,"gameVariant":"peggle-deluxe-1.0.1","type":"shot_begin","data":{"gunAngleRadians":1.5707963267948966,"gunAngleDegrees":0,"replayPoint":false}}
+{"format":"peggle-haggle-telemetry","version":2,"sequence":2,"monotonicMs":1300,"gameTimeMs":5300,"speedMultiplier":2,"gameVariant":"peggle-deluxe-1.0.1","type":"speed_change","data":{"previous":1,"current":2,"hotkey":"F6"}}
+{"format":"peggle-haggle-telemetry","version":2,"sequence":3,"monotonicMs":1400,"gameTimeMs":5500,"speedMultiplier":2,"gameVariant":"peggle-deluxe-1.0.1","type":"peg_hit","data":{"x":200,"y":180,"flag":false}}
+{"format":"peggle-haggle-telemetry","version":2,"sequence":4,"monotonicMs":1650,"gameTimeMs":6000,"speedMultiplier":2,"gameVariant":"peggle-deluxe-1.0.1","type":"level_done","data":{}}

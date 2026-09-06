@@ -7,3 +7,10 @@ dist/
 public/
 backups/
 mirror/
+research/generated/
+research/vendor/
+research/.tools/
+research/tools/peggleedit-exporter/bin/
+research/tools/peggleedit-exporter/obj/
+research/tools/haggle-telemetry/build/
+research/**/__pycache__/

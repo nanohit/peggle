@@ -1,0 +1,212 @@
+{
+  "authored": {
+    "coordinateSystem": {
+      "bounds": {
+        "maxX": 800,
+        "maxY": 600,
+        "minX": 0,
+        "minY": 0
+      },
+      "orientation": "landscape",
+      "origin": "top-left",
+      "units": "source-pixel",
+      "viewport": {
+        "height": 600,
+        "width": 800
+      },
+      "xAxis": "right",
+      "yAxis": "down"
+    },
+    "groups": [],
+    "mechanics": {
+      "bucket": {
+        "enabled": true,
+        "sourceDefined": true
+      },
+      "launcher": {
+        "coordinateSpace": "source-defined"
+      },
+      "mode": "classic",
+      "sourceLevelVersion": 66
+    },
+    "metadata": {},
+    "name": "fixtures/flash-mini.dat.xml",
+    "objects": [
+      {
+        "geometry": {
+          "thickness": 10.0,
+          "x1": 120.0,
+          "x2": 280.0,
+          "y1": 300.0,
+          "y2": 340.0
+        },
+        "groupIds": [],
+        "id": "ent-0000",
+        "kind": "segment",
+        "properties": {
+          "collidable": true,
+          "movingFlag": true,
+          "sourceId": null,
+          "visible": true
+        },
+        "role": "obstacle",
+        "source": {
+          "class": 2,
+          "index": 0,
+          "raw": {
+            "class": 2,
+            "line": {
+              "mx1": 120.0,
+              "mx2": 280.0,
+              "my1": 300.0,
+              "my2": 340.0
+            },
+            "mCollidable": true,
+            "mMoving": true
+          },
+          "system": "peggle-flash-xml"
+        },
+        "targetType": null,
+        "transform": {
+          "rotation": 0.24497866312686414,
+          "scaleX": 1,
+          "scaleY": 1,
+          "x": 200.0,
+          "y": 320.0
+        }
+      },
+      {
+        "geometry": {
+          "radius": 10.0,
+          "shape": "circle"
+        },
+        "groupIds": [],
+        "id": "ent-0001",
+        "kind": "circle",
+        "properties": {
+          "collidable": true,
+          "movingFlag": true,
+          "sourceId": null,
+          "visible": true
+        },
+        "role": "target",
+        "source": {
+          "class": 5,
+          "index": 1,
+          "raw": {
+            "ball": {
+              "mCollidesWithOtherBalls": true,
+              "mIsPeg": true,
+              "mRadius": 10.0,
+              "mx": 200.0,
+              "my": 180.0
+            },
+            "class": 5,
+            "mCollidable": true,
+            "mMoving": true,
+            "pegInfo": {
+              "mVariable": true
+            }
+          },
+          "system": "peggle-flash-xml"
+        },
+        "targetType": "classic-variable",
+        "transform": {
+          "rotation": 0.0,
+          "scaleX": 1,
+          "scaleY": 1,
+          "x": 200.0,
+          "y": 180.0
+        }
+      },
+      {
+        "geometry": {
+          "brickAngleDegrees": 45.0,
+          "brickRadius": 25.0,
+          "height": 20.0,
+          "shape": "rotated-rectangle",
+          "width": 50.0
+        },
+        "groupIds": [],
+        "id": "ent-0002",
+        "kind": "brick",
+        "properties": {
+          "collidable": true,
+          "movingFlag": true,
+          "sourceId": null,
+          "visible": true
+        },
+        "role": "target",
+        "source": {
+          "class": 6,
+          "index": 2,
+          "raw": {
+            "brick": {
+              "mBrickAngle": 45.0,
+              "mBrickRadius": 25.0,
+              "mBrickRotation": 30.0,
+              "mBrickThickness": 20.0
+            },
+            "class": 6,
+            "mCollidable": true,
+            "mMoving": true,
+            "pegInfo": {
+              "mVariable": true
+            },
+            "poly": {
+              "mx": 260.0,
+              "my": 240.0
+            }
+          },
+          "system": "peggle-flash-xml"
+        },
+        "targetType": "classic-variable",
+        "transform": {
+          "rotation": 0.5235987755982988,
+          "scaleX": 1,
+          "scaleY": 1,
+          "x": 260.0,
+          "y": 240.0
+        }
+      }
+    ],
+    "tags": [
+      "classic-peggle",
+      "professional-corpus",
+      "landscape-source"
+    ]
+  },
+  "extensions": {
+    "sourceRootAttributes": {
+      "name": "fixtures/flash-mini.dat.xml"
+    },
+    "sourceXmlSha256": "d245096b11eb967c3daccad1e82fb3c4f2a18c757f11605d0768675ec5731af7"
+  },
+  "format": "peggle-research",
+  "formatVersion": 1,
+  "id": "level:peggle-flash:flash-mini-dat",
+  "losses": [],
+  "provenance": {
+    "ingestion": {
+      "at": "2026-08-09T00:00:00.000Z",
+      "tool": "extract_peggle_flash.py",
+      "toolRevision": "synthetic-fixture-v1",
+      "toolVersion": "0.1.0"
+    },
+    "source": {
+      "archiveEntry": "flash-mini.dat.xml",
+      "path": "C:\\Users\\Pavel\\Desktop\\ultimatepeggle\\peggle\\research\\fixtures\\flash-mini.dat.xml",
+      "revision": "synthetic-fixture-v1",
+      "sha256": "d245096b11eb967c3daccad1e82fb3c4f2a18c757f11605d0768675ec5731af7",
+      "system": "peggle-flash",
+      "version": 66
+    }
+  },
+  "recordType": "level",
+  "visual": {
+    "presentation": {
+      "source": "peggle-flash"
+    }
+  },
+  "warnings": []
+}

@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "id": "research-native-mini",
+  "name": "Research Native Mini",
+  "difficulty": "test",
+  "tags": ["synthetic", "research-fixture"],
+  "aimLength": 300,
+  "pegRadius": 8.5,
+  "pegs": [
+    {
+      "id": "target-center",
+      "type": "orange",
+      "shape": "circle",
+      "x": 200,
+      "y": 180,
+      "angle": 0
+    },
+    {
+      "id": "target-side",
+      "type": "blue",
+      "shape": "circle",
+      "x": 244,
+      "y": 236,
+      "angle": 0
+    },
+    {
+      "id": "floor-brick",
+      "type": "obstacle",
+      "shape": "brick",
+      "x": 200,
+      "y": 330,
+      "angle": 0.18,
+      "width": 180,
+      "height": 10.2
+    }
+  ],
+  "groups": [],
+  "visuals": {
+    "background": null
+  },
+  "metadata": {
+    "created": "2026-08-09",
+    "purpose": "Deterministic research smoke fixture"
+  }
+}
