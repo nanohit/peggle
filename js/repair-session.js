@@ -397,7 +397,9 @@ export function validateRepairSessionDefinition(definition) {
   if (definition?.format !== REPAIR_SESSION_FORMAT) failures.push('invalid-format');
   if (definition?.version !== REPAIR_SESSION_VERSION) failures.push('unsupported-version');
   if (!definition?.sessionId) failures.push('missing-session-id');
-  if (!Array.isArray(definition?.candidates) || definition.candidates.length !== 6) failures.push('expected-six-candidates');
+  const expectedCount = definition?.protocol?.candidateCount ?? 6;
+  if (!Number.isInteger(expectedCount) || expectedCount < 2 || expectedCount > 30
+    || !Array.isArray(definition?.candidates) || definition.candidates.length !== expectedCount) failures.push('candidate-count-mismatch');
   const ids = new Set();
   for (const [index, candidate] of (definition?.candidates || []).entries()) {
     if (!candidate?.id || ids.has(candidate.id)) failures.push(`invalid-candidate-id:${index}`);
@@ -405,7 +407,7 @@ export function validateRepairSessionDefinition(definition) {
     if (!candidate?.baselineLevel?.pegs) failures.push(`missing-baseline:${index}`);
     if (index === 0 && candidate?.role !== 'control') failures.push('first-candidate-must-be-control');
     if (index === 0 && !candidate?.knownDefect) failures.push('control-missing-known-defect');
-    if (index === 0 && !candidate?.controlTargetLevel) failures.push('control-missing-target');
+    if (index === 0 && !candidate?.controlTargetLevel && !candidate?.knownDefect?.expectedOperation) failures.push('control-missing-target');
   }
   return { status: failures.length ? 'failed' : 'passed', failures };
 }
@@ -645,4 +647,29 @@ export function finishRepairSession(session, now = new Date().toISOString()) {
   };
   if (!blockingFailures.length) session.finishedAt = now;
   return result;
+}
+
+// A diagnostic gate must never hold the author's work hostage. Ordinary
+// drafts are readable by the digest; even a broken analyzer has a raw escape.
+export function exportRepairSessionDraft(session, now = new Date().toISOString()) {
+  try {
+    const result = finishRepairSession(clone(session), now);
+    return { ...result, status: 'draft', finishedAt: null, exportedAt: now };
+  } catch (error) {
+    return { ...clone(session), status: 'draft', exportedAt: now, exportError: String(error?.message || error) };
+  }
+}
+
+export function resumeRepairArchive(archive) {
+  if (archive?.format !== REPAIR_SESSION_RESULT_FORMAT || archive.version !== REPAIR_SESSION_VERSION
+    || !archive.candidates?.every(c => c.baselineLevel?.pegs && c.finalLevel?.pegs)) throw new Error('Invalid repair archive');
+  const candidates = archive.candidates.map(c => ({ id: c.id, role: c.role, order: c.order, source: clone(c.source),
+    knownDefect: clone(c.knownDefect), staticCheckOptions: clone(c.staticCheckOptions), baselineLevel: clone(c.baselineLevel) }));
+  const session = startRepairSession({ ...archive, format: REPAIR_SESSION_FORMAT, candidates }, archive.startedAt);
+  for (const [i, candidate] of session.candidates.entries()) {
+    const c = archive.candidates[i];
+    Object.assign(candidate, { currentLevel: clone(c.finalLevel), transactionLog: clone(c.operationSequence || []),
+      disposition: c.disposition || 'pending', note: c.note || '', frictionNote: c.frictionNote || '', dispositionReason: c.dispositionReason || '' });
+  }
+  return session;
 }

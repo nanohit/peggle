@@ -29,7 +29,7 @@ import { renderNativeLevelSvg, renderRepairComparisonSvg } from '../repair/lib/r
 const clone = value => (value == null ? value : JSON.parse(JSON.stringify(value)));
 const kb = value => `${(value / 1024).toFixed(1)} KB`;
 const execFile = promisify(execFileCallback);
-const MODEL_TEXT_BUDGET_BYTES = 100 * 1024;
+const MODEL_TEXT_BUDGET_BYTES = 100_000; // Decimal KB; also safely below 100 KiB.
 
 function round(value, digits = 3) {
   const number = Number(value);
@@ -323,8 +323,9 @@ function operationParameterSummary(operation) {
     reason: operation.reason || 'unclassified',
     changedMembers: operation.changes?.length || 0
   };
-  if (operation.changes) return { changedProperties: Object.keys(operation.changes).sort() };
-  if (operation.deltas) return { changedControlPoints: Object.keys(operation.deltas).sort() };
+  if (operation.type === 'precision-correction') return { precisionMembers: operation.changes?.length || 0 };
+  if (operation.changes) return { changes: compactChanges(operation.changes) };
+  if (operation.deltas) return { controlPointDeltas: roundDeep(operation.deltas) };
   return { family: operation.family || operation.stroke?.family || operation.object?.family || null };
 }
 
@@ -457,6 +458,9 @@ function sourceContext(source) {
     source: source?.source || null,
     sourceLevelId: source?.sourceLevelId || null,
     compositionFamily: source?.compositionFamily || null,
+    generatorRevision: source?.generatorRevision || null,
+    generatorRulesHash: source?.generatorRulesHash || null,
+    parameters: roundDeep(source?.parameters || null),
     sourceSkeleton: source?.sourceSkeleton || null,
     strata: clone(source?.strata || []),
     knownProperties: roundDeep(source?.knownProperties || []),
@@ -537,7 +541,9 @@ function candidateDigest(candidate, index, independent, relations, rasterEnabled
       changedMemberCount: metrics.changedMemberCount ?? null,
       fallbackChangedMemberCount: metrics.fallbackChangedMemberCount ?? null,
       finalMemberCount: metrics.finalMemberCount ?? null,
-      fallbackFinalMemberCount: metrics.fallbackFinalMemberCount ?? null
+      fallbackFinalMemberCount: metrics.fallbackFinalMemberCount ?? null,
+      precisionCorrectionMemberCount: metrics.precisionCorrectionMemberCount ?? 0,
+      reconstructionOnlyFallbackMemberCount: metrics.reconstructionOnlyFallbackMemberCount ?? 0
     },
     fallbackReasonCounts: clone(metrics.fallbackReasonCounts || {}),
     languageGapReasonCounts: clone(metrics.languageGapReasonCounts || {}),
@@ -666,6 +672,7 @@ function renderMarkdown(digest) {
     + `${digest.visualEvidence.totalComparisonPngBytes != null ? `, ${kb(digest.visualEvidence.totalComparisonPngBytes)} PNG total` : ''}).`);
   lines.push('');
   lines.push(`Result status: **${digest.resultStatus}**.`);
+  if (digest.protocol?.synthetic) lines.push('SYNTHETIC VERIFICATION ONLY — no author preference or generator-quality evidence.');
   if (digest.protocol?.warning) lines.push(`Protocol warning: ${digest.protocol.warning}`);
   lines.push('');
   lines.push('> Replay accuracy, repair fallback and final-state fallback must be interpreted together.');
@@ -727,8 +734,10 @@ function renderMarkdown(digest) {
       + `${candidate.previews.comparisonPng ? `, [model-ready PNG](${candidate.previews.comparisonPng})` : ''}`
       + `; separate [before](${candidate.previews.before}) and [after](${candidate.previews.after}).`);
     if (candidate.source.strata.length) lines.push(`Strata: ${candidate.source.strata.join(', ')}.`);
+    if (candidate.source.parameters) lines.push(`Generator ${candidate.source.generatorRevision} (${candidate.source.generatorRulesHash}): ${JSON.stringify(candidate.source.parameters)}.`);
     if (candidate.source.footprint) lines.push(`Source footprint: ${JSON.stringify(candidate.source.footprint)}.`);
     for (const property of candidate.source.knownProperties) {
+      if (typeof property === 'string') { lines.push(`Known property: ${property}`); continue; }
       lines.push(`Known property \`${property.id}\`: ${JSON.stringify(property.measured || {})}`
         + (property.interpretationRisk ? ` — ${property.interpretationRisk}` : ''));
     }
@@ -743,6 +752,7 @@ function renderMarkdown(digest) {
     lines.push(`         operations ${candidate.metrics.operationCount}`
       + ` (native ${candidate.metrics.nativeOperationCount}, fallback ${candidate.metrics.fallbackOperationCount})`
       + ` changed members ${candidate.metrics.changedMemberCount}; final members ${candidate.metrics.finalMemberCount}`);
+    lines.push(`         precision-only members ${candidate.metrics.precisionCorrectionMemberCount}; reconstruction-only fallback members ${candidate.metrics.reconstructionOnlyFallbackMemberCount}`);
     lines.push('```');
     lines.push('');
     for (const line of globalRelationLines(candidate.relations)) lines.push(line);

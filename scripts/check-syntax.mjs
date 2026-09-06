@@ -6,6 +6,9 @@ const files = [
   ...readdirSync('scripts').filter(name => name.endsWith('.mjs')).map(name => `scripts/${name}`),
   ...readdirSync('research/tools').filter(name => name.endsWith('.mjs')).map(name => `research/tools/${name}`),
   ...readdirSync('research/generator/lib').filter(name => name.endsWith('.mjs')).map(name => `research/generator/lib/${name}`),
+  ...readdirSync('research/repair/lib').filter(name => name.endsWith('.mjs')).map(name => `research/repair/lib/${name}`),
+  ...readdirSync('research/test').filter(name => name.endsWith('.mjs')).map(name => `research/test/${name}`),
+  ...readdirSync('js').filter(name => name.endsWith('.js')).map(name => `js/${name}`),
   'research/tools/lib/node-io.mjs',
   'research/test/research-smoke.mjs',
   'research/test/benchmark-smoke.mjs',
@@ -24,7 +27,7 @@ const files = [
 ];
 
 let failed = false;
-for (const file of files) {
+for (const file of new Set(files)) {
   const result = spawnSync(process.execPath, ['--input-type=module', '--check'], {
     input: readFileSync(file),
     encoding: 'utf8'
@@ -36,4 +39,4 @@ for (const file of files) {
   }
 }
 if (failed) process.exitCode = 1;
-else console.log(`ok syntax (${files.length} files)`);
+else console.log(`ok syntax (${new Set(files).size} files)`);

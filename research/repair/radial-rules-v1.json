@@ -1,0 +1,18 @@
+{
+  "format": "radial-generator-rules",
+  "version": 1,
+  "revision": "radial-v1",
+  "hypothesis": "Four related, interrupted elliptical rings share a center and openings. Test whether author repairs identify transferable changes to these relations.",
+  "ringCount": 4,
+  "brickRings": [3],
+  "ranges": {
+    "centerY": [280, 320],
+    "innerRadius": [34, 38],
+    "ringStep": [34, 39],
+    "verticalScale": [1.08, 1.42],
+    "topOpeningDegrees": [20, 70],
+    "bottomOpeningDegrees": [18, 34],
+    "circleSpacing": [19.3, 20.4],
+    "brickSpacing": [23, 25]
+  }
+}

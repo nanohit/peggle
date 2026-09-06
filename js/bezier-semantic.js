@@ -104,6 +104,19 @@ function pointsClose(left, right, tolerance = DEFAULT_THRESHOLD_PX) {
   return !!left && !!right && close(left.x, right.x, tolerance) && close(left.y, right.y, tolerance);
 }
 
+function memberPropertiesClose(left = {}, right = {}) {
+  const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
+  return [...keys].every(key => {
+    if (!Object.prototype.hasOwnProperty.call(left, key) || !Object.prototype.hasOwnProperty.call(right, key)) return false;
+    // Arc lengths can differ by a few ULPs between Node/V8 versions. This
+    // numerical epsilon is NOT the 1px author-edit threshold. Real dimension
+    // changes still count and a corrupt replay still fails.
+    if (['width', 'height', 'brickBaseRadius'].includes(key)
+      && Number.isFinite(left[key]) && Number.isFinite(right[key])) return close(left[key], right[key], GEOMETRY_EPSILON_PX);
+    return same(left[key], right[key]);
+  });
+}
+
 function normalizeBrickAngle(value) {
   let angle = Number(value || 0);
   while (angle >= Math.PI / 2) angle -= Math.PI;
@@ -381,7 +394,7 @@ function memberDifference(beforeMembers, afterMembers, thresholdPx) {
     const positionChanged = !pointsClose(before, after, thresholdPx);
     const propertyChanged = before.shape !== after.shape || before.type !== after.type
       || !close(normalizeBrickAngle(before.angle), normalizeBrickAngle(after.angle), 1e-6)
-      || !same(before.properties || {}, after.properties || {});
+      || !memberPropertiesClose(before.properties, after.properties);
     if (positionChanged || propertyChanged || !slicesClose(before.curveSlices, after.curveSlices, thresholdPx)) {
       changes.push({ memberId: key, index, kind: 'update-member', before: clone(before), after: clone(after) });
     }

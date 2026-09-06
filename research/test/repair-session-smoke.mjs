@@ -341,6 +341,6 @@ try {
 } catch (error) {
   budgetFailure = String(error.stderr || error.message);
 }
-assert.match(budgetFailure, /hard limit is 102400/);
+assert.match(budgetFailure, /hard limit is 100000/);
 
 console.log('ok repair session lifecycle, gates and result');

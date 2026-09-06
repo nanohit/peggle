@@ -5,11 +5,14 @@ import { Editor } from './editor.js';
 import { LevelManager, cloneLevelSnapshot, normalizeLevelData } from './levels.js';
 import {
   finishRepairSession,
+  exportRepairSessionDraft,
+  resumeRepairArchive,
   loadSavedRepairSessionDurable,
   recordRepairTransaction,
   saveRepairSessionDurable,
   startRepairSession
 } from './repair-session.js';
+import { makeStandardPlayPreview } from './repair-play-preview.js';
 import { PHYSICS_CONFIG, DEFAULT_PEG_RADIUS } from './physics.js';
 import { FLIPPER_DEFAULTS, createDefaultFlipperConfig, normalizeFlipperConfig } from './flipper-defaults.js';
 import {
@@ -587,7 +590,7 @@ class PeggleApp {
     this._syncTimer = setTimeout(async () => {
       this._syncTimer = null;
       const level = this.levelManager.getCurrentLevel();
-      if (!level) return;
+      if (!level || level.metadata?.repairSessionRuntime) return;
       const safeName = (level.name || 'untitled').replace(/[^a-zA-Z0-9_-]/g, '_');
       const snapshot = await this._cloneLevelSnapshotForStorage(level);
       if (!snapshot) return;
@@ -3628,6 +3631,10 @@ class PeggleApp {
   }
 
   startEditor() {
+    if (this.repairSession?.comparisonView === 'play' && !this._repairSwitching) {
+      this._loadRepairCandidate(this.repairSession.activeIndex, 'current');
+      return;
+    }
     this.teardownGambleSystem();
     this.portraitReactionController.dispose();
 
@@ -4114,6 +4121,11 @@ class PeggleApp {
   }
 
   togglePlayMode() {
+    if (this.repairSession) {
+      if (this.mode === 'editor') this._startRepairPlayPreview();
+      else this._loadRepairCandidate(this.repairSession.activeIndex, 'current');
+      return;
+    }
     if (this.mode === 'editor') {
       this.startGame();
     } else {
@@ -6491,10 +6503,11 @@ class PeggleApp {
         <div class="repair-view-toggle" role="group" aria-label="Compare baseline and current level">
           <button id="repairBeforeBtn" type="button">Before</button>
           <button id="repairCurrentBtn" type="button">Current</button>
+          <button id="repairPlayBtn" type="button">Play preview</button>
         </div>
         <label class="repair-field">
-          <span>Note</span>
-          <textarea id="repairNote" rows="3" placeholder="What you changed or noticed"></textarea>
+          <span>Что хотели улучшить?</span>
+          <textarea id="repairNote" rows="3" placeholder="Одной фразой: зачем эта правка? Можно дополнить после игры."></textarea>
         </label>
         <label class="repair-field">
           <span>Wanted X, did Y</span>
@@ -6516,6 +6529,8 @@ class PeggleApp {
         <button id="repairPrevBtn" type="button">← Previous</button>
         <button id="repairNextBtn" type="button">Next →</button>
         <button id="repairFinishBtn" type="button" class="repair-finish-btn">Finish & export</button>
+        <button id="repairDraftBtn" type="button">Export draft / backup</button>
+        <button id="repairImportBtn" type="button">Import session / backup</button>
       </div>
     `;
     document.body.appendChild(panel);
@@ -6526,6 +6541,9 @@ class PeggleApp {
     panel.querySelector('#repairPrevBtn')?.addEventListener('click', () => this._loadRepairCandidate((this.repairSession?.activeIndex || 0) - 1, 'current'));
     panel.querySelector('#repairNextBtn')?.addEventListener('click', () => this._loadRepairCandidate((this.repairSession?.activeIndex || 0) + 1, 'current'));
     panel.querySelector('#repairFinishBtn')?.addEventListener('click', () => this._finishAndExportRepairSession());
+    panel.querySelector('#repairDraftBtn')?.addEventListener('click', () => this._exportRepairDraft());
+    panel.querySelector('#repairImportBtn')?.addEventListener('click', () => this.importRepairSession());
+    panel.querySelector('#repairPlayBtn')?.addEventListener('click', () => this._startRepairPlayPreview());
     panel.querySelectorAll('[data-repair-disposition]').forEach(button => {
       button.addEventListener('click', () => this._setRepairDisposition(button.dataset.repairDisposition));
     });
@@ -6544,8 +6562,15 @@ class PeggleApp {
       if (!file) return;
       try {
         const definition = JSON.parse(await file.text());
-        const session = startRepairSession(definition);
-        this._activateRepairSession(session, { resumed: false });
+        const rawResume = definition?.format === 'repair-session' && definition?.startedAt && definition.candidates?.every(c => c.currentLevel);
+        const resultResume = definition?.format === 'repair-session-result';
+        const resumed = rawResume || resultResume;
+        const session = resultResume ? resumeRepairArchive(definition) : rawResume ? definition : startRepairSession(definition);
+        if (this.repairSession && !this.repairSession.finishedAt) {
+          if (!confirm('Текущая сессия ещё открыта. Сначала скачать её резервную копию, затем открыть выбранный файл?')) return;
+          this._exportRepairDraft();
+        }
+        this._activateRepairSession(session, { resumed });
       } catch (error) {
         console.error('[repair-session] import failed:', error);
         alert(`Could not start repair study: ${error.message}`);
@@ -6555,16 +6580,20 @@ class PeggleApp {
   }
 
   _activateRepairSession(session, options = {}) {
-    if (!this.repairSession) this._repairReturnLevelId = this.levelManager.getCurrentLevel()?.id || null;
+    if (!this.repairSession) {
+      this._repairReturnLevelId = this.levelManager.getCurrentLevel()?.id || null;
+      this._preRepairOnDidSave = this.levelManager.onDidSave || null;
+      this.levelManager.onDidSave = level => {
+        this._preRepairOnDidSave?.(level);
+        this._autosaveRepairLevel(level);
+      };
+    }
     this.repairSession = session;
     this._ensureRepairSessionPanel().classList.add('visible');
-    if (!this._preRepairOnDidSave) this._preRepairOnDidSave = this.levelManager.onDidSave || null;
-    this.levelManager.onDidSave = level => {
-      this._preRepairOnDidSave?.(level);
-      this._autosaveRepairLevel(level);
-    };
     this._loadRepairCandidate(Number(session.activeIndex || 0), session.comparisonView || 'current', {
-      skipCapture: options.resumed === true
+      // The previous editor belongs to a different session (or is already
+      // captured). Never record it into the newly activated baseline.
+      skipCapture: true
     });
   }
 
@@ -6574,8 +6603,24 @@ class PeggleApp {
       if (savedRepairSession && !savedRepairSession.finishedAt && !this.repairSession) {
         this._activateRepairSession(savedRepairSession, { resumed: true });
       }
+      // Explicit link from the local study landing page, never auto-open a tab.
+      const requested = new URLSearchParams(location.search).get('repair');
+      if (requested) {
+        const url = new URL(requested, location.href);
+        if (url.origin !== location.origin || !url.pathname.startsWith('/research/generated/')) throw new Error('Repair link must be a local generated session');
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`Repair session HTTP ${response.status}`);
+        const definition = await response.json();
+        if (!this.repairSession) this._activateRepairSession(startRepairSession(definition));
+        else if (this.repairSession.sessionId !== definition.sessionId) {
+          document.getElementById('repairSessionStatus').textContent = `Возобновлена незавершённая сессия ${this.repairSession.sessionId}. Ссылка ведёт к другой версии. Сохраните backup; новую сессию можно скачать на стартовой странице и открыть через Import session / backup.`;
+        }
+      }
     } catch (error) {
       console.error('[repair-session] resume failed:', error);
+      const status = document.getElementById('repairSessionStatus');
+      if (status) status.textContent = `Не удалось загрузить ссылку: ${error.message}. Сохранённая работа не заменена.`;
+      else alert(`Не удалось открыть repair session: ${error.message}`);
     }
   }
 
@@ -6621,25 +6666,27 @@ class PeggleApp {
 
   _captureCurrentRepairLevel() {
     const session = this.repairSession;
-    if (!session || this._repairSwitching || session.comparisonView === 'before') return;
+    if (!session || this._repairSwitching || session.comparisonView !== 'current') return;
     const candidate = session.candidates[session.activeIndex];
     const level = this.levelManager.getCurrentLevel();
     if (!candidate || !level || level.id !== this._repairRuntimeLevelId) return;
+    this._captureRepairEditorHistory(candidate);
     recordRepairTransaction(candidate, this._cleanRepairRuntimeSnapshot(level, candidate));
     this._persistRepairSession(session);
   }
 
   _autosaveRepairLevel(level) {
-    if (!this.repairSession || this._repairSwitching || this.repairSession.comparisonView === 'before') return;
+    if (!this.repairSession || this._repairSwitching || this.repairSession.comparisonView !== 'current') return;
     if (!level || level.id !== this._repairRuntimeLevelId) return;
     if (this._repairAutosaveQueued) return;
     this._repairAutosaveQueued = true;
     queueMicrotask(() => {
       this._repairAutosaveQueued = false;
-      if (!this.repairSession || this._repairSwitching || this.repairSession.comparisonView === 'before') return;
+      if (!this.repairSession || this._repairSwitching || this.repairSession.comparisonView !== 'current') return;
       const current = this.levelManager.getCurrentLevel();
       if (!current || current.id !== this._repairRuntimeLevelId) return;
       const candidate = this.repairSession.candidates[this.repairSession.activeIndex];
+      this._captureRepairEditorHistory(candidate);
       recordRepairTransaction(candidate, this._cleanRepairRuntimeSnapshot(current, candidate));
       this._persistRepairSession(this.repairSession);
     });
@@ -6659,6 +6706,33 @@ class PeggleApp {
       target.textContent = `Autosaved ${savedAt ? new Date(savedAt).toLocaleTimeString() : ''}`.trim();
       target.classList.remove('failed');
     }
+  }
+
+  _captureRepairEditorHistory(candidate) {
+    if (!this.editor || this.repairSession?.comparisonView !== 'current') return;
+    // Local undo history stays in IndexedDB, not in the model-facing archive.
+    candidate.editorHistory = JSON.parse(JSON.stringify({
+      undoStack: this.editor.undoStack, redoStack: this.editor.redoStack,
+      historySequence: this.editor._researchHistorySequence
+    }));
+  }
+
+  _startRepairPlayPreview() {
+    const session = this.repairSession;
+    if (!session || session.comparisonView === 'play') return;
+    this._captureRepairPanelFields(); this._captureCurrentRepairLevel();
+    const candidate = session.candidates[session.activeIndex];
+    this._repairSwitching = true;
+    try {
+      session.comparisonView = 'play';
+      const preview = makeStandardPlayPreview(candidate.currentLevel, candidate.id);
+      preview.id = this._repairRuntimeLevelId;
+      preview.metadata.repairSessionRuntime = { sessionId: session.sessionId, candidateId: candidate.id, view: 'play' };
+      this.levelManager.levels[this.levelManager.currentLevelIndex] = preview;
+      this.startGame();
+      document.body.classList.remove('repair-before-view');
+      document.getElementById('repairSessionStatus').textContent = 'Проба физики: фиксированные 25 оранжевых, не оптимизация сложности. Current вернёт ремонт без изменений.';
+    } finally { this._repairSwitching = false; }
   }
 
   _loadRepairCandidate(index, view = 'current', options = {}) {
@@ -6691,6 +6765,12 @@ class PeggleApp {
       this.updateLevelTitle();
       this.startEditor();
       this.editor.readOnly = session.comparisonView === 'before';
+      if (!this.editor.readOnly && candidate.editorHistory) {
+        const history = JSON.parse(JSON.stringify(candidate.editorHistory));
+        this.editor.undoStack = history.undoStack || [];
+        this.editor.redoStack = history.redoStack || [];
+        this.editor._researchHistorySequence = history.historySequence || 0;
+      }
       document.body.classList.toggle('repair-before-view', this.editor.readOnly);
       this._persistRepairSession(session);
       this._renderRepairSessionPanel();
@@ -6731,7 +6811,7 @@ class PeggleApp {
   _setRepairDisposition(disposition) {
     const session = this.repairSession;
     if (!session) return;
-    if (session.comparisonView === 'before') {
+    if (session.comparisonView !== 'current') {
       this._loadRepairCandidate(session.activeIndex, 'current');
       return;
     }
@@ -6757,16 +6837,22 @@ class PeggleApp {
     if (!session) return;
     this._captureRepairPanelFields();
     this._captureCurrentRepairLevel();
-    const result = finishRepairSession(session);
     const status = document.getElementById('repairSessionStatus');
+    let result;
+    try { result = finishRepairSession(session); }
+    catch (error) {
+      if (status) status.textContent = `Analysis failed: ${error.message}. Use Export draft / backup; your levels are retained.`;
+      return;
+    }
     if (result.status !== 'complete') {
       const summary = result.blockingFailures.slice(0, 3)
         .map(failure => `${failure.candidateId}: ${failure.failures.join(', ')}`).join(' | ');
-      if (status) status.textContent = `Finish blocked — ${summary}`;
+      if (status) status.textContent = `Finish blocked — ${summary}. Export draft / backup сохранит всю работу независимо от проверок.`;
       return;
     }
     await this._persistRepairSession(session);
     if (session.autosave?.status === 'failed') {
+      session.finishedAt = null;
       if (status) status.textContent = `Finish blocked — durable autosave failed: ${session.autosave.error}`;
       return;
     }
@@ -6781,6 +6867,17 @@ class PeggleApp {
     URL.revokeObjectURL(url);
     if (status) status.textContent = 'All gates passed. One result file exported.';
     this._endRepairSession();
+  }
+
+  _exportRepairDraft() {
+    if (!this.repairSession) return;
+    this._captureRepairPanelFields(); this._captureCurrentRepairLevel();
+    const draft = exportRepairSessionDraft(this.repairSession);
+    const url = URL.createObjectURL(new Blob([JSON.stringify(draft)], { type: 'application/json' }));
+    const anchor = document.createElement('a'); anchor.href = url;
+    anchor.download = `${this.repairSession.sessionId.replace(/[^a-z0-9_-]/gi, '_')}-draft.json`;
+    anchor.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+    document.getElementById('repairSessionStatus').textContent = 'Draft exported. Session remains open; diagnostic failures are preserved.';
   }
 
   _endRepairSession() {

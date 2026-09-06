@@ -63,6 +63,17 @@ function intersects(a, b, tolerance) {
   });
 }
 
+function ribbonSeam(a, b) {
+  if (a.kind !== 'rectangle' || b.kind !== 'rectangle') return false;
+  // Consecutive native ribbon rectangles share an endpoint. Their mitred
+  // corners overlap slightly as the tangent turns; this is a seam, not two
+  // overlapping pegs. Exempt ONLY that rectangle pair, not either object.
+  if (Math.abs(Math.cos(a.rotation - b.rotation)) < Math.cos(Math.PI / 9)) return false;
+  const ends = s => [-1, 1].map(sign => ({ x: s.x + sign * s.halfWidth * Math.cos(s.rotation), y: s.y + sign * s.halfWidth * Math.sin(s.rotation) }));
+  return ends(a).some(x => ends(b).some(y => Math.hypot(x.x - y.x, x.y - y.y) < 1e-5
+    && (a.x - x.x) * (b.x - x.x) + (a.y - x.y) * (b.y - x.y) < 0));
+}
+
 export function evaluateCompositionGeometry(level, options = {}) {
   const width = Number(options.width || 400), height = Number(options.height || 600);
   const radius = Number(level.pegRadius || 8.5), tolerance = Number(options.overlapTolerancePx ?? 0.05);
@@ -81,14 +92,23 @@ export function evaluateCompositionGeometry(level, options = {}) {
     footprints.push({ peg, id, shapes, bounds });
   }
   const overlaps = [], sameObjectOverlaps = [], crossObjectOverlaps = [];
+  let ribbonSeamContactCount = 0;
   for (let i = 0; i < footprints.length; i++) for (let j = i + 1; j < footprints.length; j++) {
     const a = footprints[i], b = footprints[j];
     if (a.bounds.maxX <= b.bounds.minX || b.bounds.maxX <= a.bounds.minX || a.bounds.maxY <= b.bounds.minY || b.bounds.maxY <= a.bounds.minY) continue;
-    if (!a.shapes.some(x => b.shapes.some(y => intersects(x, y, tolerance)))) continue;
+    let materialOverlap = false;
+    for (const x of a.shapes) for (const y of b.shapes) {
+      if (!intersects(x, y, tolerance)) continue;
+      if (a.peg.curveSlices?.length >= 2 && b.peg.curveSlices?.length >= 2 && ribbonSeam(x, y)) ribbonSeamContactCount++;
+      else materialOverlap = true;
+    }
+    if (!materialOverlap) continue;
     const pair = [a.id, b.id]; overlaps.push(pair);
     (a.peg.objectId && a.peg.objectId === b.peg.objectId ? sameObjectOverlaps : crossObjectOverlaps).push(pair);
   }
   const failures = [];
+  if (![width, height, radius].every(v => Number.isFinite(v) && v > 0)
+    || !Number.isFinite(tolerance) || tolerance < 0 || !Number.isFinite(minimumLauncherClearance)) failures.push('invalid-geometry-options');
   if (invalidGeometry.length) failures.push('invalid-geometry');
   if (outOfBounds.length) failures.push('out-of-bounds');
   if (sameObjectOverlaps.length) failures.push('same-object-overlap');
@@ -98,7 +118,7 @@ export function evaluateCompositionGeometry(level, options = {}) {
   const allBounds = footprintBounds(footprints.flatMap(x => x.shapes));
   return { status: failures.length ? 'failed' : 'passed', failures, width, height,
     pegCount: footprints.length, invalidGeometry, outOfBounds,
-    overlapCount: overlaps.length, overlapExamples: overlaps.slice(0, 20),
+    overlapCount: overlaps.length, overlapExamples: overlaps.slice(0, 20), ribbonSeamContactCount,
     sameObjectOverlapCount: sameObjectOverlaps.length, crossObjectOverlapCount: crossObjectOverlaps.length,
     crossObjectOverlapExamples: crossObjectOverlaps.slice(0, 20), launcherClearance, minimumLauncherClearance,
     coverage: footprints.length ? { bounds: allBounds, emptyOpeningPx: allBounds.minY,

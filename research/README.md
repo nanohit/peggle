@@ -1,5 +1,20 @@
 # Peggle research laboratory
 
+## Active workflow
+
+Start with [Standard generator → author repair → rule revision](docs/STANDARD_GENERATOR_LOOP.md).
+It uses one controllable radial family, one calibration and two author repairs,
+then compares a justified rule revision on six fresh matched seeds. Run
+`npm run research:repair` and manually open `http://127.0.0.1:8765/`.
+No production writes, automatic browser opening, scrolling or destruction.
+
+The older benchmark, constructive-v0, DSL and autoplay tools below are retained
+as historical research/reference infrastructure. They are not prerequisites or
+quality oracles for the active loop. Replay and language coverage diagnose the
+instrument; only improvement on fresh levels can support a generator rule.
+
+## Historical laboratory
+
 This directory is the reproducible, developer-only boundary around the shipped
 browser game. It is deliberately separate from gameplay and rendering code.
 
@@ -33,7 +48,7 @@ it is not part of the generator or its acceptance path.
 - `examples/` — small checked-in outputs produced from synthetic/native inputs.
 - `generated/` — ignored local output for extracted commercial data and runs.
 
-## Quick start
+## Historical quick start
 
 Run all research checks:
 
