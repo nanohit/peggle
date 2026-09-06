@@ -1,14 +1,10 @@
+import { evaluateCompositionGeometry } from '../../../js/composition-geometry.js';
 import {
   BEZIER_BAKE_VERSION,
   bakePegsFromSamples,
   sampleCubicBezier
 } from '../../../js/bezier-geometry.js';
 import { ensureBezierNode } from '../../../js/bezier-program.js';
-import {
-  collisionBounds,
-  collisionFootprint,
-  collisionFootprintsOverlap
-} from '../../generator/lib/collision.mjs';
 
 const DEFAULT_PEG_RADIUS = 8.5;
 
@@ -29,7 +25,7 @@ export function compileBezierProgram(program) {
     const curve = {
       start: { ...stroke.start }, end: { ...stroke.end }, h1: { ...stroke.h1 }, h2: { ...stroke.h2 },
       pegType: stroke.pegType || 'blue', pegShape: shape, spacingPx,
-      rotationOffset: finite(stroke.rotationOffset), pegRadius, brickWidth,
+      rotationOffset: finite(stroke.rotationOffset), pegRadius, brickWidth, brickHeight,
       bakeVersion: BEZIER_BAKE_VERSION
     };
     const baked = bakePegsFromSamples(sampleCubicBezier(curve), {
@@ -48,11 +44,12 @@ export function compileBezierProgram(program) {
         id: `${groupId}:${index}`,
         objectId: groupId,
         memberId: `${groupId}:member:${index}`,
-        type: stroke.pegType || (index === 0 ? 'orange' : 'blue'),
+        type: stroke.pegType || 'blue',
         shape,
         x, y,
         angle: shape === 'brick' ? point.angle : 0,
-        ...(shape === 'brick' ? { width: brickWidth, height: brickHeight, curveSlices: point.slices } : {}),
+        ...(shape === 'brick' ? { width: brickWidth, height: brickHeight, brickBaseRadius: pegRadius,
+          curveSlices: point.slices.map(slice => ({ ...slice, x: slice.x + x - point.x, y: slice.y + y - point.y })) } : {}),
         groupId: null,
         bezierGroupId: groupId,
         bezierIndex: index
@@ -100,60 +97,9 @@ export function compileBezierProgram(program) {
   return level;
 }
 
-function pegObject(peg, pegRadius) {
-  return {
-    id: peg.id,
-    kind: peg.shape === 'brick' ? 'brick' : 'circle',
-    transform: { x: peg.x, y: peg.y, rotation: peg.angle || 0 },
-    geometry: peg.shape === 'brick'
-      ? { width: peg.width, height: peg.height }
-      : { radius: pegRadius }
-  };
-}
-
 export function evaluateStaticCandidate(level, options = {}) {
-  const width = finite(options.width, 400);
-  const height = finite(options.height, 600);
-  const launcher = options.launcher || { x: width / 2, y: 40 };
-  const minimumLauncherClearance = finite(options.minimumLauncherClearance, 48);
-  const pegRadius = finite(level.pegRadius, DEFAULT_PEG_RADIUS);
-  const padded = level.pegs.map(peg => ({ peg, shape: collisionFootprint(pegObject(peg, pegRadius), 0.25) }));
-  const outOfBounds = padded.filter(({ shape }) => {
-    const bounds = collisionBounds(shape);
-    return bounds.minX < 0 || bounds.maxX > width || bounds.minY < 0 || bounds.maxY > height;
-  }).map(({ peg }) => peg.id);
-  const overlaps = [];
-  const sourceStrokeByGroup = new Map(Object.entries(level?.metadata?.generatorProgram?.nodes || {})
-    .map(([groupId, node]) => [groupId, node?.source?.strokeId || null]));
-  for (let left = 0; left < padded.length; left++) {
-    for (let right = left + 1; right < padded.length; right++) {
-      if (padded[left].peg.bezierGroupId === padded[right].peg.bezierGroupId) continue;
-      const leftSourceStroke = sourceStrokeByGroup.get(padded[left].peg.bezierGroupId);
-      const rightSourceStroke = sourceStrokeByGroup.get(padded[right].peg.bezierGroupId);
-      // Cubic segmentation is an implementation detail. Adjacent segments of
-      // one source arc are allowed to meet exactly as they did in the source.
-      if (leftSourceStroke && leftSourceStroke === rightSourceStroke) continue;
-      if (collisionFootprintsOverlap(padded[left].shape, padded[right].shape)) {
-        overlaps.push([padded[left].peg.id, padded[right].peg.id]);
-      }
-    }
-  }
-  const launcherClearance = padded.length ? Math.min(...padded.map(({ shape }) => (
-    Math.hypot(shape.x - launcher.x, shape.y - launcher.y)
-      - (shape.kind === 'circle' ? shape.radius : Math.hypot(shape.halfWidth, shape.halfHeight))
-  ))) : Infinity;
-  const failures = [];
-  if (outOfBounds.length) failures.push('out-of-bounds');
-  if (overlaps.length) failures.push('cross-stroke-overlap');
-  if (launcherClearance < minimumLauncherClearance) failures.push('launcher-clearance');
-  return {
-    status: failures.length ? 'rejected' : 'passed',
-    failures,
-    pegCount: level.pegs.length,
+  const result = evaluateCompositionGeometry(level, options);
+  return { ...result, status: result.status === 'passed' ? 'passed' : 'rejected',
     strokeCount: Object.keys(level.bezierCurves || {}).length,
-    outOfBounds,
-    crossStrokeOverlapCount: overlaps.length,
-    crossStrokeOverlapExamples: overlaps.slice(0, 20),
-    launcherClearance
-  };
+    crossStrokeOverlapCount: result.overlapCount, crossStrokeOverlapExamples: result.overlapExamples };
 }

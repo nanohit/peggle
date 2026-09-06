@@ -7,6 +7,7 @@ import { PHYSICS_CONFIG, DEFAULT_PEG_RADIUS, getEffectiveBrickSize } from './phy
 import {
   BEZIER_BAKE_VERSION,
   DEFAULT_BEZIER_EXCEPTION_THRESHOLD_PX,
+  GEOMETRY_EPSILON_PX,
   applySimilarityTransform,
   auditBezierGroup,
   bakePegsFromSamples,
@@ -1213,7 +1214,7 @@ export class Editor {
     });
     if (patch.operations.length > 0) {
       const command = {
-        sequence: this.researchEditorCommands.length,
+        sequence: (this.researchEditorCommands.at(-1)?.sequence ?? -1) + 1,
         at: new Date().toISOString(),
         hints,
         patch: {
@@ -1236,7 +1237,6 @@ export class Editor {
         }
       };
       this.researchEditorCommands.push(command);
-      if (this.researchEditorCommands.length > 500) this.researchEditorCommands.shift();
       level.metadata ||= {};
       level.metadata.generatorProgram ||= { schemaVersion: 1, nodes: {} };
       level.metadata.generatorProgram.commandLog = Utils.deepClone(this.researchEditorCommands);
@@ -1272,7 +1272,7 @@ export class Editor {
         allowScale: true,
         allowReflection: true
       });
-      if (diagnostic.sufficientLineage && diagnostic.transform && diagnostic.outlierCount === 0) {
+      if (diagnostic.sufficientLineage && diagnostic.transform && diagnostic.maxResidualPx <= GEOMETRY_EPSILON_PX) {
         const transform = diagnostic.transform;
         const materiallyChanged = Math.abs(transform.tx) > 1e-7 || Math.abs(transform.ty) > 1e-7
           || Math.abs(transform.angle) > 1e-9 || Math.abs(transform.scale - 1) > 1e-9
@@ -1318,7 +1318,7 @@ export class Editor {
       });
       // Two correspondences fit a similarity exactly, so they cannot tell a
       // real rigid move from a coincidence.
-      if (diagnostic.pairCount < 3 || !diagnostic.transform || diagnostic.outlierCount > 0) continue;
+      if (diagnostic.pairCount < 3 || !diagnostic.transform || diagnostic.maxResidualPx > GEOMETRY_EPSILON_PX) continue;
       const transform = diagnostic.transform;
       const material = Math.abs(transform.tx) > 1e-7 || Math.abs(transform.ty) > 1e-7
         || Math.abs(transform.angle) > 1e-9 || Math.abs(transform.scale - 1) > 1e-9
@@ -1332,8 +1332,8 @@ export class Editor {
       node.exceptions.overrides = {};
       writeBezierIntegrityDiagnostic(level, groupId, {
         ...diagnostic,
-        rmsResidualPx: 0,
-        maxResidualPx: 0,
+        rmsResidualPx: diagnostic.rmsResidualPx,
+        maxResidualPx: diagnostic.maxResidualPx,
         outlierCount: 0,
         outlierIndices: []
       });
@@ -1472,6 +1472,10 @@ export class Editor {
 
     this.drawShapeMode = 'bezier';
     this.activeBezierGroupId = groupId;
+    this.activeBezierDimensions = {
+      width: data.brickWidth ?? groupPegs[0]?.width ?? this.getBrickWidth(),
+      height: data.brickHeight ?? groupPegs[0]?.height ?? this.getBrickHeight()
+    };
     this.bezierDraft = {
       start,
       end,
@@ -1485,6 +1489,7 @@ export class Editor {
       this.selectedPegType = data.pegType;
     }
     this.selectedShape = data.pegShape || groupPegs[0]?.shape || 'brick';
+    this.activeBezierOriginalType = this.selectedPegType;
     this.activeBezierSpacingPx = Number.isFinite(data.spacingPx)
       ? data.spacingPx * (Number.isFinite(transform?.scale) ? transform.scale : 1)
       : null;
@@ -1942,7 +1947,7 @@ export class Editor {
       shape: forceShape || this.selectedShape,
       closedLoop,
       spacingPx,
-      brickWidth: this.getBrickWidth(),
+      brickWidth: this.activeBezierGroupId ? (this.activeBezierDimensions?.width ?? this.getBrickWidth()) : this.getBrickWidth(),
       pegRadius: PHYSICS_CONFIG.pegRadius,
       sliceCount: 5,
       rotationOffset: this.activeBezierRotationOffset
@@ -1962,6 +1967,12 @@ export class Editor {
         }
       : null;
     const previousBezierGroupId = this.activeBezierGroupId;
+    const previousMembers = new Map((level?.pegs || [])
+      .filter(peg => previousBezierGroupId && peg.bezierGroupId === previousBezierGroupId)
+      .map(peg => [peg.bezierIndex, peg]));
+    const dimensions = previousBezierGroupId ? this.activeBezierDimensions : null;
+    const commitWidth = dimensions?.width ?? this.getBrickWidth();
+    const commitHeight = dimensions?.height ?? this.getBrickHeight();
     const activeBezierSpacingPx = this.activeBezierSpacingPx;
     const activeBezierRotationOffset = this.activeBezierRotationOffset;
     const isBezierCommit = this.drawShapeMode === 'bezier' && !!draftSnapshot;
@@ -1971,6 +1982,7 @@ export class Editor {
     this.drawPath = [];
     this.bezierDraft = null;
     this.activeBezierGroupId = null;
+    this.activeBezierDimensions = null;
     this.activeBezierSpacingPx = null;
     this.activeBezierRotationOffset = 0;
     this._bezierDragStart = null;
@@ -1998,7 +2010,8 @@ export class Editor {
         spacingPx,
         rotationOffset: Number(activeBezierRotationOffset || 0),
         pegRadius: PHYSICS_CONFIG.pegRadius,
-        brickWidth: this.getBrickWidth(),
+        brickWidth: commitWidth,
+        brickHeight: commitHeight,
         bakeVersion: BEZIER_BAKE_VERSION,
         refPoints: toCommit.map((gb, index) => ({
           index,
@@ -2012,15 +2025,17 @@ export class Editor {
 
     const commitShape = this.selectedShape;
     const isBrick = commitShape === 'brick';
-    const w = this.getBrickWidth();
-    const h = this.getBrickHeight();
+    const w = commitWidth;
+    const h = commitHeight;
     const createdPegs = [];
     for (let i = 0; i < toCommit.length; i++) {
       const gb = toCommit[i];
       const pegData = {
+        ...(previousMembers.get(i) || {}),
         x: gb.x,
         y: gb.y,
-        type: this.selectedPegType,
+        type: previousMembers.has(i) && this.selectedPegType === this.activeBezierOriginalType
+          ? previousMembers.get(i).type : this.selectedPegType,
         shape: commitShape,
         angle: isBrick ? gb.angle : 0
       };
@@ -2033,7 +2048,7 @@ export class Editor {
         pegData.height = h;
         if (gb.slices) pegData.curveSlices = gb.slices;
       }
-      this.applyCreationDestructionDefaults(pegData);
+      if (!previousMembers.has(i)) this.applyCreationDestructionDefaults(pegData);
       if (this.selectedPegColor) pegData.color = this.selectedPegColor;
       if (!this.isPegPositionAllowed(pegData, pegData.x, pegData.y, pegData.angle, pegData.curveSlices)) continue;
       const newPeg = this.levelManager.addPeg(pegData);
@@ -2044,27 +2059,7 @@ export class Editor {
       sourceBezierGroupId: isBezierCommit ? bezierGroupId : null
     });
 
-    // Cleanup legacy artifacts from early bezier versions that committed circles
-    // along the same path without bezierGroupId metadata.
-    if (isBezierCommit && toCommit.length > 0) {
-      const near = PHYSICS_CONFIG.pegRadius * 0.9;
-      const legacyIds = [];
-      for (const peg of level.pegs) {
-        if (peg.bezierGroupId || peg.groupId) continue;
-        if (peg.shape !== 'circle') continue;
-        if (peg.type !== this.selectedPegType) continue;
-        for (const gb of toCommit) {
-          if (Utils.distance(peg.x, peg.y, gb.x, gb.y) <= near) {
-            legacyIds.push(peg.id);
-            break;
-          }
-        }
-      }
-      if (legacyIds.length >= 3) {
-        const idSet = new Set(legacyIds);
-        level.pegs = level.pegs.filter(p => !idSet.has(p.id));
-      }
-    }
+    // Proximity is not ownership. Never silently delete nearby unbound pegs.
 
     if (bezierGroupId) this.auditBezierGroupAndRecord(bezierGroupId, level);
     this.finishResearchCommand(previousBezierGroupId ? 'edit-control-points-or-resample' : 'add-stroke');
@@ -2962,6 +2957,7 @@ export class Editor {
     return {
       version: 2,
       pegs: Utils.deepClone(level?.pegs || []),
+      groups: Utils.deepClone(level?.groups || []),
       bezierCurves: Utils.deepClone(level?.bezierCurves || {}),
       generatorProgram: Utils.deepClone(level?.metadata?.generatorProgram || null)
     };
@@ -2975,6 +2971,7 @@ export class Editor {
       return;
     }
     level.pegs = Utils.deepClone(snapshot?.pegs || []);
+    if (snapshot?.groups) level.groups = Utils.deepClone(snapshot.groups);
     level.bezierCurves = Utils.deepClone(snapshot?.bezierCurves || {});
     level.metadata ||= {};
     if (snapshot?.generatorProgram) level.metadata.generatorProgram = Utils.deepClone(snapshot.generatorProgram);

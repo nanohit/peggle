@@ -47,14 +47,15 @@ const level = {
   bezierCurves: {
     curve: {
       start: { x: 0, y: 0 }, end: { x: 30, y: 0 }, h1: { x: 10, y: 0 }, h2: { x: 20, y: 0 },
-      pegShape: 'brick', pegType: 'blue', spacingPx: 10,
+      pegShape: 'brick', pegType: 'blue', spacingPx: 10, brickWidth: 10, brickHeight: 10.2,
       refPoints: baked.slice(0, 3).map((point, index) => ({ index, x: point.x, y: point.y }))
     },
     orphan: { start: { x: 0, y: 0 }, end: { x: 1, y: 0 }, h1: { x: 0, y: 0 }, h2: { x: 1, y: 0 } }
   },
   pegs: baked.slice(0, 3).map((point, index) => ({
     id: `volatile-${index}`, bezierGroupId: 'curve', bezierIndex: index,
-    x: point.x + 12, y: point.y + 7, angle: point.angle, shape: 'brick', type: 'blue'
+    x: point.x + 12, y: point.y + 7, angle: point.angle, shape: 'brick', type: 'blue', width: 10, height: 10.2,
+    curveSlices: point.slices.map(s => ({ ...s, x: s.x + 12, y: s.y + 7 }))
   }))
 };
 ensureBezierNode(level, 'curve');
@@ -69,7 +70,7 @@ const before = captureBezierSemanticState(level);
 const moved = clone(level);
 for (const key of ['start', 'end', 'h1', 'h2']) moved.bezierCurves.curve[key].x += 5;
 for (const point of moved.bezierCurves.curve.refPoints) point.x += 5;
-for (const peg of moved.pegs) peg.x += 5;
+for (const peg of moved.pegs) { peg.x += 5; for (const s of peg.curveSlices) s.x += 5; }
 // Volatile peg IDs do not participate in semantic identity.
 moved.pegs.forEach((peg, index) => { peg.id = `regenerated-${index}`; });
 const after = captureBezierSemanticState(moved);
@@ -107,6 +108,7 @@ assert.equal(resample.operations[0].type, 'resample-stroke');
 
 const atomic = clone(moved);
 atomic.pegs[1].x += 4;
+for (const s of atomic.pegs[1].curveSlices) s.x += 4;
 atomic.metadata.generatorProgram.nodes.curve.exceptions.overrides['1'] = {
   kind: 'position', x: atomic.pegs[1].x, y: atomic.pegs[1].y, residualPx: 4
 };
@@ -154,7 +156,10 @@ const mirrored = clone(curved);
 for (const key of ['start', 'end', 'h1', 'h2']) mirrored.bezierCurves['s-curve'][key].x = 400 - mirrored.bezierCurves['s-curve'][key].x;
 for (const point of mirrored.bezierCurves['s-curve'].refPoints) point.x = 400 - point.x;
 mirrored.bezierCurves['s-curve'].rotationOffset *= -1;
-for (const peg of mirrored.pegs) { peg.x = 400 - peg.x; peg.angle = -(peg.angle || 0); }
+for (const peg of mirrored.pegs) {
+  peg.x = 400 - peg.x; peg.angle = -(peg.angle || 0);
+  for (const s of peg.curveSlices) { s.x = 400 - s.x; s.nx = -s.nx; }
+}
 const mirrorPatch = diffBezierSemanticStates(
   captureBezierSemanticState(curved), captureBezierSemanticState(mirrored), { thresholdPx: 0.01 }
 );
@@ -289,7 +294,10 @@ const recompiled = compileBezierProgram({
 recompiled.pegs.forEach((peg, index) => { peg.id = `import-regenerated-${index}`; });
 const noOp = diffBezierSemanticStates(captureBezierSemanticState(compiled), captureBezierSemanticState(recompiled));
 assert.equal(noOp.operations.length, 0);
-assert.equal(evaluateStaticCandidate(compiled).status, 'passed');
+// The native midpoint/tail bake shortens the last spacing: this fixture has
+// a real intra-stroke circle overlap, which the old same-object skip hid.
+assert.equal(evaluateStaticCandidate(compiled).status, 'rejected');
+assert.equal(evaluateStaticCandidate(compiled).sameObjectOverlapCount, 1);
 
 const compiledState = captureBezierSemanticState(compiled);
 const emptyState = withoutSemanticNodes(compiledState);

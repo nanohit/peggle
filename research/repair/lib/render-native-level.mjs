@@ -1,3 +1,5 @@
+import { curvedBrickOutline, effectiveCompositionSize } from '../../../js/composition-geometry.js';
+
 function escapeXml(value) {
   return String(value ?? '')
     .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
@@ -19,8 +21,9 @@ function pegSvg(peg, pegRadius, style = {}) {
   const strokeWidth = Number(style.strokeWidth ?? 1.2);
   const dash = style.dash ? ` stroke-dasharray="${escapeXml(style.dash)}"` : '';
   if (peg.shape === 'brick') {
-    const width = Number(peg.width || pegRadius * 4);
-    const height = Number(peg.height || pegRadius * 1.2);
+    const outline = curvedBrickOutline(peg, pegRadius);
+    if (outline) return `<polygon points="${outline.map(p => `${p.x},${p.y}`).join(' ')}" fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}" opacity="${opacity}"${dash}/>`;
+    const { width, height } = effectiveCompositionSize(peg, pegRadius);
     const degrees = Number(peg.angle || 0) * 180 / Math.PI;
     return `<rect x="${peg.x - width / 2}" y="${peg.y - height / 2}" width="${width}" height="${height}" rx="3" fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}" opacity="${opacity}"${dash} transform="rotate(${degrees} ${peg.x} ${peg.y})"/>`;
   }
@@ -58,7 +61,8 @@ function pegChanged(before, after) {
     || before.type !== after.type
     || Math.abs(Number(before.angle || 0) - Number(after.angle || 0)) > 1e-4
     || Math.abs(Number(before.width || 0) - Number(after.width || 0)) > 0.25
-    || Math.abs(Number(before.height || 0) - Number(after.height || 0)) > 0.25;
+    || Math.abs(Number(before.height || 0) - Number(after.height || 0)) > 0.25
+    || JSON.stringify(before.curveSlices) !== JSON.stringify(after.curveSlices);
 }
 
 function overlayPegs(beforeLevel, afterLevel, pegRadius) {
@@ -86,7 +90,7 @@ function overlayPegs(beforeLevel, afterLevel, pegRadius) {
 
 export function renderNativeLevelSvg(level, options = {}) {
   const width = Number(options.width || 400);
-  const height = Number(options.height || level?.survival?.worldHeight || 600);
+  const height = Number(options.height || (level?.survival?.enabled ? level.survival.worldHeight : 600));
   const pegRadius = Number(level?.pegRadius || 8.5);
   const title = escapeXml(options.title || level?.name || 'Level');
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${title}">

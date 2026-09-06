@@ -1,3 +1,4 @@
+import { evaluateCompositionGeometry } from './composition-geometry.js';
 import {
   applyBezierSemanticPatch,
   captureBezierSemanticState,
@@ -243,110 +244,8 @@ export function auditCommandLog(level) {
   };
 }
 
-function pegExtent(peg, pegRadius) {
-  if (peg.shape !== 'brick') return { x: pegRadius, y: pegRadius };
-  const width = Number(peg.width || pegRadius * 4);
-  const height = Number(peg.height || pegRadius * 1.2);
-  const angle = Number(peg.angle || 0);
-  return {
-    x: Math.abs(Math.cos(angle)) * width / 2 + Math.abs(Math.sin(angle)) * height / 2,
-    y: Math.abs(Math.sin(angle)) * width / 2 + Math.abs(Math.cos(angle)) * height / 2
-  };
-}
-
-function collisionFootprint(peg, pegRadius, padding = 0.25) {
-  if (peg.shape !== 'brick') {
-    return { kind: 'circle', x: Number(peg.x), y: Number(peg.y), radius: pegRadius + padding };
-  }
-  return {
-    kind: 'rectangle', x: Number(peg.x), y: Number(peg.y), rotation: Number(peg.angle || 0),
-    halfWidth: Number(peg.width || pegRadius * 4) / 2 + padding,
-    halfHeight: Number(peg.height || pegRadius * 1.2) / 2 + padding
-  };
-}
-
-function rectangleCorners(shape) {
-  const cos = Math.cos(shape.rotation), sin = Math.sin(shape.rotation);
-  return [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([sx, sy]) => {
-    const x = sx * shape.halfWidth, y = sy * shape.halfHeight;
-    return { x: shape.x + x * cos - y * sin, y: shape.y + x * sin + y * cos };
-  });
-}
-
-function circleRectangleOverlap(circle, rectangle) {
-  const cos = Math.cos(-rectangle.rotation), sin = Math.sin(-rectangle.rotation);
-  const dx = circle.x - rectangle.x, dy = circle.y - rectangle.y;
-  const localX = dx * cos - dy * sin, localY = dx * sin + dy * cos;
-  const closestX = Math.max(-rectangle.halfWidth, Math.min(rectangle.halfWidth, localX));
-  const closestY = Math.max(-rectangle.halfHeight, Math.min(rectangle.halfHeight, localY));
-  return Math.hypot(localX - closestX, localY - closestY) < circle.radius;
-}
-
-function rectangleRectangleOverlap(left, right) {
-  const leftCorners = rectangleCorners(left), rightCorners = rectangleCorners(right);
-  const axes = [left.rotation, left.rotation + Math.PI / 2, right.rotation, right.rotation + Math.PI / 2]
-    .map(angle => ({ x: Math.cos(angle), y: Math.sin(angle) }));
-  for (const axis of axes) {
-    const project = corners => corners.map(point => point.x * axis.x + point.y * axis.y);
-    const a = project(leftCorners), b = project(rightCorners);
-    if (Math.max(...a) <= Math.min(...b) || Math.max(...b) <= Math.min(...a)) return false;
-  }
-  return true;
-}
-
-function footprintsOverlap(left, right) {
-  if (left.kind === 'circle' && right.kind === 'circle') {
-    return Math.hypot(left.x - right.x, left.y - right.y) < left.radius + right.radius;
-  }
-  if (left.kind === 'circle') return circleRectangleOverlap(left, right);
-  if (right.kind === 'circle') return circleRectangleOverlap(right, left);
-  return rectangleRectangleOverlap(left, right);
-}
-
 export function evaluateRepairStaticChecks(level, options = {}) {
-  const width = Number(options.width || 400);
-  const height = Number(options.height || level?.survival?.worldHeight || 600);
-  const pegRadius = Number(level?.pegRadius || 8.5);
-  const launcher = options.launcher || { x: width / 2, y: 40 };
-  const minimumLauncherClearance = Number(options.minimumLauncherClearance || 42);
-  const outOfBounds = [];
-  const footprints = [];
-  let launcherClearance = Infinity;
-  for (const peg of level?.pegs || []) {
-    const extent = pegExtent(peg, pegRadius);
-    if (peg.x - extent.x < 0 || peg.x + extent.x > width
-        || peg.y - extent.y < 0 || peg.y + extent.y > height) outOfBounds.push(peg.memberId || peg.id);
-    launcherClearance = Math.min(launcherClearance,
-      Math.hypot(peg.x - launcher.x, peg.y - launcher.y) - Math.hypot(extent.x, extent.y));
-    footprints.push({ peg, shape: collisionFootprint(peg, pegRadius, Number(options.collisionPadding ?? 0.25)) });
-  }
-  const sourceRefByObject = new Map(Object.entries(level?.metadata?.generatorProgram?.nodes || {})
-    .map(([objectId, node]) => [objectId, node?.source?.strokeId || node?.sourceRef || null]));
-  const crossObjectOverlaps = [];
-  for (let left = 0; left < footprints.length; left++) {
-    for (let right = left + 1; right < footprints.length; right++) {
-      const a = footprints[left], b = footprints[right];
-      if (a.peg.objectId && a.peg.objectId === b.peg.objectId) continue;
-      const leftSource = sourceRefByObject.get(a.peg.objectId);
-      const rightSource = sourceRefByObject.get(b.peg.objectId);
-      if (leftSource && leftSource === rightSource) continue;
-      if (footprintsOverlap(a.shape, b.shape)) {
-        crossObjectOverlaps.push([a.peg.memberId || a.peg.id, b.peg.memberId || b.peg.id]);
-      }
-    }
-  }
-  const failures = [];
-  if (outOfBounds.length) failures.push('out-of-bounds');
-  if (crossObjectOverlaps.length) failures.push('cross-object-overlap');
-  if (launcherClearance < minimumLauncherClearance) failures.push('launcher-clearance');
-  if (!(level?.pegs?.length > 0)) failures.push('empty-level');
-  return {
-    status: failures.length ? 'failed' : 'passed', failures,
-    pegCount: level?.pegs?.length || 0, outOfBounds,
-    crossObjectOverlapCount: crossObjectOverlaps.length,
-    crossObjectOverlapExamples: crossObjectOverlaps.slice(0, 20),
-    launcherClearance, minimumLauncherClearance, width, height
-  };
+  return evaluateCompositionGeometry(level, options);
 }
 
 function meaningfulPatchOperations(patch) {

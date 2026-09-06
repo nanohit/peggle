@@ -2,14 +2,16 @@ import {
   applySimilarityTransform,
   bakePegsFromSamples,
   estimateSimilarityTransformFromPairs,
+  GEOMETRY_EPSILON_PX,
   sampleCubicBezier,
   transformBezierCurve
 } from './bezier-geometry.js';
+import { bakeObjectMembers, hasObjectExecutor, reconcileObjectDefinition, transformObjectDefinition } from './semantic-object-codec.js';
 
 const POINT_KEYS = ['start', 'end', 'h1', 'h2'];
 const RESAMPLE_PROPERTIES = [
   'pegShape', 'pegType', 'spacingPx', 'rotationOffset',
-  'pegRadius', 'brickWidth', 'bakeVersion'
+  'pegRadius', 'brickWidth', 'brickHeight', 'bakeVersion'
 ];
 const DEFAULT_THRESHOLD_PX = 1;
 // This state describes the composition program, not the entire game level.
@@ -117,9 +119,12 @@ const RUNTIME_PEG_REFERENCE_KEYS = new Set(['pvpMirrorOf', 'portalDestinationId'
 
 function memberSnapshot(peg, ordinal = 0, memberIdByRuntimeId = new Map()) {
   const shape = peg.shape || 'circle';
-  const properties = {};
+  const properties = shape === 'brick' ? { width: peg.width ?? 34, height: peg.height ?? 10.2, brickBaseRadius: peg.brickBaseRadius ?? 8.5 } : {};
   for (const [key, value] of Object.entries(peg || {})) {
     if (DERIVED_OR_VOLATILE_PEG_KEYS.has(key)) continue;
+    // Checkpoint one records authored geometry. Creation defaults, effects,
+    // colors and mechanics remain in the native archive as context.
+    if (!['width', 'height'].includes(key)) continue;
     properties[key] = RUNTIME_PEG_REFERENCE_KEYS.has(key) && memberIdByRuntimeId.has(value)
       ? memberIdByRuntimeId.get(value)
       : clone(value);
@@ -134,6 +139,7 @@ function memberSnapshot(peg, ordinal = 0, memberIdByRuntimeId = new Map()) {
     angle: shape === 'brick' ? normalizeBrickAngle(peg.angle) : 0,
     shape,
     type: peg.type || 'blue',
+    ...(shape === 'brick' && Array.isArray(peg.curveSlices) ? { curveSlices: clone(peg.curveSlices) } : {}),
     properties
   };
 }
@@ -153,7 +159,7 @@ function semanticLineage(lineage) {
   if (!lineage || typeof lineage !== 'object') return null;
   const result = {};
   for (const [key, value] of Object.entries(lineage)) {
-    if (['integrity', 'nodeId', 'objectId', 'memberIds', 'binding', 'family'].includes(key)) continue;
+    if (['integrity', 'nodeId', 'objectId', 'memberIds', 'binding', 'family', 'definition'].includes(key)) continue;
     result[key] = key === 'exceptions' ? semanticExceptions(value) : clone(value);
   }
   return result;
@@ -204,8 +210,11 @@ export function captureBezierSemanticState(level) {
       family,
       groupId,
       binding: groupId ? { type: 'bezier', bezierGroupId: groupId } : clone(rawNode?.binding || null),
-      definition: clone(rawNode?.definition || null),
-      curve: clone(groupId ? curves[groupId] || null : null),
+      definition: clone(rawNode?.definition ? reconcileObjectDefinition(rawNode, groupMembers) : null),
+      curve: groupId && curves[groupId] ? {
+        ...clone(curves[groupId]),
+        brickHeight: curves[groupId].brickHeight ?? groupMembers[0]?.properties?.height ?? (level.pegRadius || 8.5) * 1.2
+      } : null,
       lineage: nodeLineage,
       members: groupMembers
     };
@@ -253,8 +262,9 @@ function bakeNodeMembers(node) {
       angle: shape === 'brick' ? normalizeBrickAngle(value.angle) : 0,
       shape,
       type: curve.pegType || 'blue',
+      ...(shape === 'brick' ? { curveSlices: clone(value.slices) } : {}),
       properties: shape === 'brick'
-        ? { width: Number(curve.brickWidth || brickWidth), height: Number(curve.brickHeight || pegRadius * 1.2) }
+        ? { width: Number(curve.brickWidth || brickWidth), height: Number(curve.brickHeight || pegRadius * 1.2), brickBaseRadius: pegRadius }
         : {}
     }];
   });
@@ -275,7 +285,7 @@ function cleanStrokePayload(node) {
 }
 
 function cleanObjectPayload(node) {
-  return {
+  const result = {
     objectId: node.objectId,
     family: node.family || 'LiteralCluster',
     groupId: node.groupId || null,
@@ -285,6 +295,11 @@ function cleanObjectPayload(node) {
     lineage: clone(node.lineage || { family: node.family || 'LiteralCluster' }),
     members: clone(node.members || [])
   };
+  if (hasObjectExecutor(node)) {
+    result.memberDescriptors = result.members.map(({ x, y, ...member }) => member);
+    delete result.members;
+  }
+  return result;
 }
 
 function curvePairs(before, after) {
@@ -300,7 +315,11 @@ function transformMember(member, transform) {
   const angle = transform.reflect === true
     ? Number(transform.angle || 0) - Number(member.angle || 0)
     : Number(member.angle || 0) + Number(transform.angle || 0);
-  return { ...member, x: moved.x, y: moved.y, angle: member.shape === 'brick' ? normalizeBrickAngle(angle) : 0 };
+  return { ...member, x: moved.x, y: moved.y, angle: member.shape === 'brick' ? normalizeBrickAngle(angle) : 0,
+    ...(member.curveSlices ? { curveSlices: member.curveSlices.map(slice => {
+      const normal = applySimilarityTransform({ x: slice.nx, y: slice.ny }, { ...transform, scale: 1, tx: 0, ty: 0 });
+      return { ...applySimilarityTransform(slice, transform), nx: normal.x, ny: normal.y };
+    }) } : {}) };
 }
 
 function transformExceptions(exceptions, transform) {
@@ -339,6 +358,14 @@ function controlPointDeltas(before, after) {
   return deltas;
 }
 
+function slicesClose(left, right, tolerance) {
+  if (!left && !right) return true;
+  if (!left || !right || left.length !== right.length) return false;
+  return left.every((a, i) => pointsClose(a, right[i], tolerance)
+    && ((close(a.nx, right[i].nx, 1e-6) && close(a.ny, right[i].ny, 1e-6))
+      || (close(a.nx, -right[i].nx, 1e-6) && close(a.ny, -right[i].ny, 1e-6))));
+}
+
 function memberDifference(beforeMembers, afterMembers, thresholdPx) {
   const left = new Map((beforeMembers || []).map(member => [memberKey(member), member]));
   const right = new Map((afterMembers || []).map(member => [memberKey(member), member]));
@@ -355,7 +382,7 @@ function memberDifference(beforeMembers, afterMembers, thresholdPx) {
     const propertyChanged = before.shape !== after.shape || before.type !== after.type
       || !close(normalizeBrickAngle(before.angle), normalizeBrickAngle(after.angle), 1e-6)
       || !same(before.properties || {}, after.properties || {});
-    if (positionChanged || propertyChanged) {
+    if (positionChanged || propertyChanged || !slicesClose(before.curveSlices, after.curveSlices, thresholdPx)) {
       changes.push({ memberId: key, index, kind: 'update-member', before: clone(before), after: clone(after) });
     }
   }
@@ -363,6 +390,11 @@ function memberDifference(beforeMembers, afterMembers, thresholdPx) {
 }
 
 function classifyFallbackCause(changes, thresholdPx, context = {}) {
+  const geometricMoves = changes.filter(change => change.before && change.after
+    && !pointsClose(change.before, change.after, GEOMETRY_EPSILON_PX));
+  if (geometricMoves.length === 0 && changes.every(change => change.before && change.after)) {
+    return { reason: 'member-property-edit', languageGap: false, evidence: { changedMemberCount: changes.length } };
+  }
   if (changes.length === 1) {
     return { reason: 'atomic-object-edit', languageGap: false, evidence: { changedMemberCount: 1 } };
   }
@@ -434,6 +466,23 @@ function buildFallbackOperation(groupId, changes, afterLineage, thresholdPx, con
   };
 }
 
+function residualOperations(groupId, changes, afterLineage, thresholdPx, context = {}) {
+  const material = [], precision = [];
+  for (const change of changes) {
+    const subthreshold = change.before && change.after
+      && memberDifference([change.before], [change.after], thresholdPx).length === 0;
+    (subthreshold ? precision : material).push(change);
+  }
+  return [
+    ...(material.length ? [buildFallbackOperation(groupId, material, afterLineage, thresholdPx, context)] : []),
+    ...(precision.length ? [{
+      ...buildFallbackOperation(groupId, precision, afterLineage, thresholdPx),
+      type: 'precision-correction', expressibility: 'ignored', reason: 'subthreshold-position-residual',
+      languageGapCandidate: null
+    }] : [])
+  ];
+}
+
 function applyOperation(result, operation) {
   if (operation.type === 'set-level-properties') {
     result.level = applyRecordChanges(result.level || {}, operation.changes);
@@ -482,6 +531,7 @@ function applyOperation(result, operation) {
       if (source.members.length === 0) delete result.nodes[sourceObjectId];
     }
     const node = clone(operation.object || operation.declaredObject);
+    if (hasObjectExecutor(node)) node.members = bakeObjectMembers(node);
     if (node) result.nodes[node.objectId || objectId] = node;
     return;
   }
@@ -495,12 +545,14 @@ function applyOperation(result, operation) {
   }
   if (operation.type === 'transform-object' || operation.type === 'mirror-object') {
     node.members = (node.members || []).map(member => transformMember(member, operation.transform));
+    if (hasObjectExecutor(node)) node.definition = transformObjectDefinition(node.definition, node.family, operation.transform);
     return;
   }
   if (operation.type === 'update-object-definition') {
     node.family = operation.family || node.family;
     node.definition = clone(operation.definition || null);
     node.lineage = clone(operation.lineage || node.lineage || {});
+    if (hasObjectExecutor(node)) node.members = bakeObjectMembers(node);
     return;
   }
   if (operation.type === 'edit-control-points') {
@@ -520,7 +572,7 @@ function applyOperation(result, operation) {
     node.members = bakeNodeMembers(node);
     return;
   }
-  if (operation.type === 'object-exception') {
+  if (operation.type === 'object-exception' || operation.type === 'precision-correction') {
     const members = new Map((node.members || []).map(member => [memberKey(member), member]));
     node.lineage ||= { family: node.family || 'LiteralCluster' };
     if (node.family === 'BezierStroke') node.lineage.exceptions = semanticExceptions(node.lineage.exceptions);
@@ -612,7 +664,7 @@ function inferDeclarationOperations(before, after) {
     const movedMemberIds = (node.members || []).map(memberKey);
     if (!movedMemberIds.length || !movedMemberIds.every(memberId => beforeMemberOwner.has(memberId))) continue;
     const sourceObjectIds = [...new Set(movedMemberIds.map(memberId => beforeMemberOwner.get(memberId)))];
-    const literal = node.family === 'LiteralCluster';
+    const literal = !hasObjectExecutor(node);
     operations.push({
       type: 'declare-object',
       expressibility: literal ? 'fallback' : 'native',
@@ -621,7 +673,8 @@ function inferDeclarationOperations(before, after) {
       sourceObjectIds,
       movedMemberIds,
       declaredObject: cleanObjectPayload(node),
-      reason: literal ? 'explicit-literal-cluster' : null,
+      reason: literal ? 'declaration-without-executable-sampling' : null,
+      changes: literal ? node.members.map(member => ({ memberId: member.memberId, index: member.index, before: null, after: clone(member) })) : [],
       affectedMemberCount: movedMemberIds.length
     });
   }
@@ -640,9 +693,7 @@ function matchingMemberPairs(beforeMembers, afterMembers) {
 function genericOperationsForNode(before, after, thresholdPx) {
   const operations = [];
   let working = clone(before);
-  const sameProgram = before.family === after.family
-    && same(before.definition || null, after.definition || null)
-    && same(before.lineage || {}, after.lineage || {});
+  const sameProgram = before.family === after.family && same(before.lineage || {}, after.lineage || {});
   const pairs = matchingMemberPairs(before.members, after.members);
   let fit = null;
   if (sameProgram && pairs.length === 1) {
@@ -653,10 +704,10 @@ function genericOperationsForNode(before, after, thresholdPx) {
       maxResidualPx: 0,
       reflect: false
     };
-  } else if (sameProgram && pairs.length >= 2) {
+  } else if (sameProgram && pairs.length >= 3) {
     fit = estimateSimilarityTransformFromPairs(pairs, { allowScale: true, allowReflection: true });
   }
-  if (fit && fit.maxResidualPx <= thresholdPx) {
+  if (fit && fit.maxResidualPx <= GEOMETRY_EPSILON_PX) {
     const material = fit.reflect || Math.abs(fit.angle) > 1e-9 || Math.abs(fit.scale - 1) > 1e-9
       || Math.abs(fit.tx) > 1e-7 || Math.abs(fit.ty) > 1e-7;
     if (material) {
@@ -681,7 +732,7 @@ function genericOperationsForNode(before, after, thresholdPx) {
       || !same(working.definition || null, after.definition || null)
       || !same(working.lineage || {}, after.lineage || {})) {
     const operation = {
-      type: 'update-object-definition', expressibility: 'native',
+      type: 'update-object-definition', expressibility: hasObjectExecutor(after) ? 'native' : 'ignored',
       objectId: after.objectId,
       family: after.family, definition: clone(after.definition), lineage: clone(after.lineage),
       affectedMemberCount: Math.max(working.members.length, after.members.length)
@@ -692,9 +743,9 @@ function genericOperationsForNode(before, after, thresholdPx) {
     working = candidate.nodes[after.objectId];
   }
 
-  const fallbackChanges = memberDifference(working.members, after.members, thresholdPx);
+  const fallbackChanges = memberDifference(working.members, after.members, GEOMETRY_EPSILON_PX);
   if (fallbackChanges.length > 0) {
-    operations.push(buildFallbackOperation(
+    operations.push(...residualOperations(
       after.objectId, fallbackChanges, after.lineage, thresholdPx
     ));
   }
@@ -722,7 +773,7 @@ function nativeOperationsForNode(before, after, thresholdPx, options) {
     allowScale: true,
     allowReflection: true
   });
-  if (fit && fit.maxResidualPx <= thresholdPx) {
+  if (fit && fit.maxResidualPx <= GEOMETRY_EPSILON_PX) {
     const operation = {
       type: fit.reflect ? 'mirror-stroke' : 'transform-stroke', expressibility: 'native',
       objectId: after.objectId, groupId: after.groupId,
@@ -769,9 +820,9 @@ function nativeOperationsForNode(before, after, thresholdPx, options) {
     working = candidate.nodes[after.objectId];
   }
 
-  const fallbackChanges = memberDifference(working.members, after.members, thresholdPx);
+  const fallbackChanges = memberDifference(working.members, after.members, GEOMETRY_EPSILON_PX);
   if (fallbackChanges.length > 0) {
-    const operation = buildFallbackOperation(
+    const corrections = residualOperations(
       after.objectId,
       fallbackChanges,
       after.lineage,
@@ -779,8 +830,8 @@ function nativeOperationsForNode(before, after, thresholdPx, options) {
       { selectionTransformProven: commandProvesSelectionTransform(after.groupId, fallbackChanges, options) }
     );
     const candidate = { nodes: { [after.objectId]: working } };
-    applyOperation(candidate, operation);
-    operations.push(operation);
+    for (const correction of corrections) applyOperation(candidate, correction);
+    operations.push(...corrections);
     working = candidate.nodes[after.objectId];
   }
 
@@ -848,20 +899,9 @@ function annotateDeletedRegions(deleted, options) {
 }
 
 function changedMemberKeys(before, after, thresholdPx) {
-  const keys = new Set();
-  const ids = new Set([...Object.keys(before?.nodes || {}), ...Object.keys(after?.nodes || {})]);
-  for (const objectId of ids) {
-    const left = before?.nodes?.[objectId];
-    const right = after?.nodes?.[objectId];
-    if (!left || !right) {
-      for (const member of left?.members || right?.members || []) keys.add(`${objectId}:${memberKey(member)}`);
-      continue;
-    }
-    for (const change of memberDifference(left.members, right.members, thresholdPx)) {
-      keys.add(`${objectId}:${change.memberId}`);
-    }
-  }
-  return keys;
+  // Changing ownership (e.g. declaring a ring) isn't a geometric delete + add.
+  const members = state => Object.values(state?.nodes || {}).flatMap(node => node.members || []);
+  return new Set(memberDifference(members(before), members(after), thresholdPx).map(change => change.memberId));
 }
 
 export function diffBezierSemanticStates(before, after, options = {}) {
@@ -886,7 +926,7 @@ export function diffBezierSemanticStates(before, after, options = {}) {
     const right = after?.nodes?.[objectId];
     if (!left && right) {
       const isBezier = right.family === 'BezierStroke';
-      const isLiteral = right.family === 'LiteralCluster';
+      const isLiteral = !hasObjectExecutor(right);
       const operation = isBezier ? {
         type: 'add-stroke', expressibility: 'native', objectId, groupId: right.groupId || objectId,
         stroke: cleanStrokePayload(right), affectedMemberCount: right.members.length
@@ -902,9 +942,9 @@ export function diffBezierSemanticStates(before, after, options = {}) {
       operations.push(operation);
       const simulated = { format: 'semantic-object-state', version: 4, level: {}, groups: {}, nodes: {} };
       applyOperation(simulated, operation);
-      const fallbackChanges = memberDifference(simulated.nodes[objectId]?.members, right.members, thresholdPx);
-      if (isBezier && fallbackChanges.length) {
-        operations.push(buildFallbackOperation(
+      const fallbackChanges = memberDifference(simulated.nodes[objectId]?.members, right.members, GEOMETRY_EPSILON_PX);
+      if ((isBezier || !isLiteral) && fallbackChanges.length) {
+        operations.push(...residualOperations(
           objectId, fallbackChanges, right.lineage, thresholdPx,
           { selectionTransformProven: commandProvesSelectionTransform(objectId, fallbackChanges, classificationOptions) }
         ));
@@ -964,21 +1004,25 @@ export function semanticPatchMetrics(operations, before = null, after = null, op
       languageGapReasonCounts[operation.languageGapCandidate] = (languageGapReasonCounts[operation.languageGapCandidate] || 0) + 1;
     }
     for (const change of (Array.isArray(operation.changes) ? operation.changes : [])) {
-      const objectId = operation.objectId || operation.groupId;
       const key = change.memberId || memberKey(change.after || change.before);
-      fallbackChangedKeys.add(`${objectId}:${key}`);
-      if (change.after) fallbackFinalKeys.add(`${objectId}:${key}`);
+      fallbackChangedKeys.add(key);
     }
   }
   const changedKeys = before && after ? changedMemberKeys(before, after, thresholdPx) : new Set();
+  const repairFallbackKeys = new Set([...fallbackChangedKeys].filter(key => changedKeys.has(key)));
+  const precisionKeys = new Set((operations || []).filter(op => op.type === 'precision-correction')
+    .flatMap(op => op.changes || []).map(change => change.memberId));
   const finalMemberCount = Object.values(after?.nodes || {}).reduce((sum, node) => sum + (node.members?.length || 0), 0);
-  for (const [objectId, node] of Object.entries(after?.nodes || {})) {
-    if (node.family === 'LiteralCluster') {
-      for (const member of node.members || []) fallbackFinalKeys.add(`${objectId}:${memberKey(member)}`);
-    }
-    for (const index of Object.keys(node?.lineage?.exceptions?.overrides || {})) {
-      const member = (node.members || []).find(value => value.index === Number(index));
-      fallbackFinalKeys.add(`${objectId}:${member ? memberKey(member) : `index:${index}`}`);
+  for (const node of Object.values(after?.nodes || {})) {
+    let reconstructed = [];
+    if (node.family === 'BezierStroke' && node.curve) {
+      const program = clone(node);
+      program.lineage.exceptions = semanticExceptions(null);
+      reconstructed = bakeNodeMembers(program);
+    } else if (hasObjectExecutor(node)) reconstructed = bakeObjectMembers(node);
+    const differences = new Set(memberDifference(reconstructed, node.members, thresholdPx).map(change => change.memberId));
+    for (const member of node.members || []) {
+      if (differences.has(memberKey(member))) fallbackFinalKeys.add(memberKey(member));
     }
   }
   return {
@@ -992,8 +1036,13 @@ export function semanticPatchMetrics(operations, before = null, after = null, op
       'set-level-properties', 'set-group-properties'
     ].includes(operation.type)).length,
     changedMemberCount: changedKeys.size,
-    fallbackChangedMemberCount: fallbackChangedKeys.size,
-    repairFallbackFraction: changedKeys.size ? fallbackChangedKeys.size / changedKeys.size : 0,
+    fallbackChangedMemberCount: repairFallbackKeys.size,
+    repairFallbackFraction: changedKeys.size ? repairFallbackKeys.size / changedKeys.size : 0,
+    // Intermediate reconstruction costs aren't manual before/after edits.
+    reconstructionFallbackMemberCount: fallbackChangedKeys.size,
+    reconstructionOnlyFallbackMemberCount: fallbackChangedKeys.size - repairFallbackKeys.size,
+    precisionCorrectionMemberCount: precisionKeys.size,
+    meaningfulPositionThresholdPx: thresholdPx,
     finalMemberCount,
     fallbackFinalMemberCount: fallbackFinalKeys.size,
     stateFallbackFraction: finalMemberCount ? fallbackFinalKeys.size / finalMemberCount : 0,

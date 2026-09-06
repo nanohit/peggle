@@ -146,6 +146,8 @@ assert.ok(overlapCheck.failures.includes('cross-object-overlap'));
 const sharedObject = JSON.parse(JSON.stringify(overlapLevel));
 sharedObject.pegs[1].objectId = sharedObject.pegs[0].objectId;
 assert.equal(evaluateRepairStaticChecks(sharedObject).crossObjectOverlapCount, 0);
+assert.equal(evaluateRepairStaticChecks(sharedObject).sameObjectOverlapCount, 1);
+assert.equal(evaluateRepairStaticChecks(sharedObject).status, 'failed');
 
 const malformedLineage = level('malformed-group-lineage');
 malformedLineage.groups.push({ id: 'runtime-group-without-object-id', name: 'broken' });
@@ -157,7 +159,7 @@ assert.ok(malformedAudit.failures.includes('orphan-group-reference'));
 // A save outside Editor.beginResearchCommand still becomes one ordered,
 // state-derived transaction instead of disappearing from the chronology.
 const propertyEdit = JSON.parse(JSON.stringify(session.candidates[1].currentLevel));
-propertyEdit.pegs[0].color = '#445566';
+propertyEdit.pegs[0].x += 4;
 recordRepairTransaction(session.candidates[1], propertyEdit, '2026-01-01T00:10:00.000Z');
 assert.equal(session.candidates[1].transactionLog.length, 1);
 assert.equal(session.candidates[1].transactionLog[0].source, 'state-derived-transaction');

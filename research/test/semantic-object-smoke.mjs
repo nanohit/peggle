@@ -68,15 +68,19 @@ assert.deepEqual(
 );
 assert.equal(diffBezierSemanticStates(freeState, captureBezierSemanticState(imported)).operations.length, 0);
 
-// Non-geometric peg attributes are part of state and replay, not silently lost.
+// Cosmetic defaults survive in the native archive, outside composition diffs.
 const recolored = clone(imported);
 recolored.pegs[4].color = '#123456';
 const propertyPatch = diffBezierSemanticStates(
   captureBezierSemanticState(imported), captureBezierSemanticState(recolored)
 );
-assert.equal(propertyPatch.operations.length, 1);
-assert.equal(propertyPatch.operations[0].type, 'object-exception');
-assert.equal(propertyPatch.operations[0].reason, 'atomic-object-edit');
+assert.equal(propertyPatch.operations.length, 0);
+assert.equal(recolored.pegs[4].color, '#123456');
+const widened = clone(imported);
+widened.pegs[0].width += 3;
+const geometryPatch = diffBezierSemanticStates(captureBezierSemanticState(imported), captureBezierSemanticState(widened));
+assert.equal(geometryPatch.operations[0].type, 'object-exception');
+assert.equal(geometryPatch.operations[0].reason, 'member-property-edit');
 
 // Group structure remains semantic, while level-wide semantic state is an
 // explicit composition whitelist. Gameplay and presentation settings survive

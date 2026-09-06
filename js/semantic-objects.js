@@ -119,7 +119,7 @@ function fitLine(points) {
     definition: {
       center, direction,
       startOffset: Math.min(...projections), endOffset: Math.max(...projections),
-      memberOffsets: projections.slice().sort((left, right) => left - right)
+      memberOffsets: projections
     },
     ...residualStats(residuals)
   };
@@ -270,6 +270,7 @@ export function declareSemanticObject(level, selectedPegIds, requestedFamily, op
   const node = ensureSemanticObjectNode(level, objectId, fit.family);
   node.family = fit.family;
   node.definition = clone(fit.definition);
+  node.definition.memberIds = pegs.map(peg => peg.memberId);
   node.memberIds = [...selectedMemberIds];
   node.declared = true;
   node.fit = clone(fit.diagnostics);

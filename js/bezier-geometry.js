@@ -4,6 +4,8 @@
 
 export const BEZIER_BAKE_VERSION = 1;
 export const DEFAULT_BEZIER_EXCEPTION_THRESHOLD_PX = 1;
+// Reconstruction precision is not a perceptual threshold for author intent.
+export const GEOMETRY_EPSILON_PX = 1e-6;
 
 function finite(value, fallback = 0) {
   return Number.isFinite(Number(value)) ? Number(value) : fallback;
