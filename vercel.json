@@ -1,6 +1,6 @@
 {
-  "buildCommand": "npx esbuild js/player-bootstrap.js --bundle --format=esm --splitting --outdir=dist --minify",
-  "outputDirectory": ".",
+  "buildCommand": "node scripts/build-cdn-shell.mjs",
+  "outputDirectory": "vercel-shell",
   "functions": {
     "api/*.js": {
       "includeFiles": "data/player/**"
@@ -9,27 +9,11 @@
   "rewrites": [
     {
       "source": "/",
-      "has": [{ "type": "host", "value": "al3a.vercel.app" }],
-      "destination": "/player.html"
+      "destination": "/index.html"
     },
     {
-      "source": "/",
-      "has": [{ "type": "host", "value": "alea.sh" }],
-      "destination": "/player.html"
-    },
-    {
-      "source": "/",
-      "has": [{ "type": "host", "value": "www.alea.sh" }],
-      "destination": "/player.html"
-    },
-    {
-      "source": "/",
-      "has": [{ "type": "host", "value": "newpeggle.vercel.app" }],
-      "destination": "/player.html"
-    },
-    {
-      "source": "/",
-      "destination": "/editor.html"
+      "source": "/player.html",
+      "destination": "/index.html"
     }
   ]
 }

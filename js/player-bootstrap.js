@@ -160,19 +160,50 @@ function loadBakedLevel(name) {
   return null;
 }
 
+function isCdnSnapshotFirst() {
+  return typeof window !== 'undefined' && window.__PEGGLE_CDN_SNAPSHOT_FIRST__ === true;
+}
+
+function staticUrl(path) {
+  const value = String(path || '');
+  const base = typeof window !== 'undefined' ? window.__PEGGLE_STATIC_BASE__ : '';
+  if (!base) return value;
+  try {
+    return new URL(value.replace(/^\/+/, ''), base).toString();
+  } catch {
+    return value;
+  }
+}
+
 function staticJson(path) {
-  return fetch(path, { credentials: 'same-origin' })
+  return fetch(staticUrl(path), { credentials: 'same-origin' })
     .then(res => res.ok ? res.json() : null)
     .catch(() => null);
+}
+
+let cdnPrimaryCampaignPromise = null;
+function loadCdnPrimaryCampaign() {
+  if (!isCdnSnapshotFirst()) return Promise.resolve(null);
+  if (!cdnPrimaryCampaignPromise) {
+    cdnPrimaryCampaignPromise = staticJson('/cdn-data/primary.json')
+      .then(data => hasCampaignLevels(data) ? data : null)
+      .catch(() => null);
+  }
+  return cdnPrimaryCampaignPromise;
 }
 
 function staticNamePath(name) {
   return encodeURIComponent(name);
 }
 
-// Fetch a level from the shared backend first; static files remain a deploy
-// seed/offline fallback.
+// CDN deployments use the pinned campaign snapshot first. Other deployments
+// retain the shared backend and checked-in seed fallback order.
 async function fetchLevel(name) {
+  if (isCdnSnapshotFirst()) {
+    const campaign = await loadCdnPrimaryCampaign();
+    const snapshotLevel = campaign?.levels?.find(level => level?.name === name);
+    if (snapshotLevel) return normalizeLevelData(snapshotLevel);
+  }
   const remote = await api.getLevel(name, { playerCache: true });
   const data = remote
     || await staticJson('/data/player/levels/' + staticNamePath(name) + '.json')
@@ -181,7 +212,7 @@ async function fetchLevel(name) {
   return null;
 }
 
-// Load campaign by name: shared backend → static file → local cache fallback.
+// CDN snapshot → shared backend → static seed → local cache fallback.
 const inflightCampaignLoads = new Map();
 function hasCampaignLevels(data) {
   return !!(data && Array.isArray(data.levels) && data.levels.length > 0);
@@ -193,6 +224,15 @@ async function loadCampaign(name) {
     const cacheKey = 'campaign:' + name;
     const cacheTimeKey = 'campaign_ts:' + name;
     const stored = localStorage.getItem(cacheKey);
+
+    const cdnCampaign = await loadCdnPrimaryCampaign();
+    if (cdnCampaign?.name === name) {
+      try {
+        localStorage.setItem(cacheKey, JSON.stringify(cdnCampaign));
+        localStorage.setItem(cacheTimeKey, String(Date.now()));
+      } catch { /* storage full, no big deal */ }
+      return cdnCampaign;
+    }
 
     const remote = await api.getResolvedCampaign(name, { playerCache: true });
     if (hasCampaignLevels(remote)) {
@@ -241,6 +281,11 @@ async function loadCampaign(name) {
 }
 
 async function loadPrimaryCampaignName() {
+  if (isCdnSnapshotFirst()) {
+    const config = await staticJson('/cdn-data/config.json');
+    const value = config?.primaryCampaign || config?.primary;
+    if (typeof value === 'string' && value) return value;
+  }
   const remote = await api.getConfig('primaryCampaign');
   if (typeof remote === 'string' && remote) return remote;
   try {
@@ -252,6 +297,10 @@ async function loadPrimaryCampaignName() {
 }
 
 async function loadPrimaryInitialCampaign() {
+  if (isCdnSnapshotFirst()) {
+    const snapshot = await staticJson('/cdn-data/primary.initial.json');
+    if (hasCampaignLevels(snapshot)) return snapshot;
+  }
   const remote = await api.getPrimaryCampaign({ initial: true, playerCache: true });
   if (hasCampaignLevels(remote)) return remote;
   const data = await staticJson('/data/player/primary.initial.json');
@@ -260,6 +309,8 @@ async function loadPrimaryInitialCampaign() {
 }
 
 async function loadPrimaryFullCampaign() {
+  const snapshot = await loadCdnPrimaryCampaign();
+  if (hasCampaignLevels(snapshot)) return snapshot;
   const remote = await api.getPrimaryCampaign({ initial: false, playerCache: true });
   if (hasCampaignLevels(remote)) return remote;
   const data = await staticJson('/data/player/primary.json');
@@ -270,14 +321,16 @@ async function loadPrimaryFullCampaign() {
 }
 
 async function loadStaticCharacterRegistry() {
-  const remote = await staticJson('/data/player/characters.json')
+  const remote = (isCdnSnapshotFirst() ? await staticJson('/cdn-data/characters.json') : null)
+    || await staticJson('/data/player/characters.json')
     || await staticJson('/characters/registry.json');
   if (!remote || typeof remote !== 'object') return null;
   return normalizeCharacterRegistry(remote);
 }
 
 // Load primary campaign (for player domains with no URL params).
-// The shared backend wins; localStorage is only a last-resort fallback.
+// CDN deployments prefer their immutable snapshot; the shared backend and
+// localStorage remain recovery paths.
 async function loadPrimaryCampaign() {
   const cacheKey = 'config:primaryCampaign';
   const cacheTimeKey = 'config_ts:primaryCampaign';
@@ -347,6 +400,14 @@ function normalizeCharacterIdList(ids) {
 async function fetchCharacterRegistryWithFallback(options = {}) {
   const localFallback = () => loadCharacterRegistry();
   const characterIds = normalizeCharacterIdList(options.characterIds);
+  if (isCdnSnapshotFirst()) {
+    const snapshot = await loadStaticCharacterRegistry();
+    if (snapshot) {
+      snapshot.partial = false;
+      try { saveCharacterRegistry(snapshot); } catch { /* storage unavailable */ }
+      return snapshot;
+    }
+  }
   const remote = await api.getCharacterRegistry({
     playerCache: true,
     characterIds

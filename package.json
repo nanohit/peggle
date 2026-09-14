@@ -3,6 +3,9 @@
   "type": "module",
   "scripts": {
     "build": "esbuild js/player-bootstrap.js --bundle --format=esm --splitting --outdir=dist",
+    "build:cdn": "node scripts/build-cdn-bundle.mjs",
+    "build:cdn-shell": "node scripts/build-cdn-shell.mjs",
+    "snapshot:cdn": "node scripts/snapshot-cdn-player-data.mjs",
     "watch": "esbuild js/player-bootstrap.js --bundle --format=esm --splitting --outdir=dist --watch",
     "serve": "node scripts/dev-server.mjs",
     "dev": "npm run build && npm run serve",
@@ -11,7 +14,8 @@
     "mirror:assets": "node scripts/mirror-assets-to-github.mjs",
     "test:assets": "node scripts/asset-store-smoke.mjs",
     "test:destruction": "node scripts/destruction-smoke.mjs",
-    "test:player-regression": "node scripts/player-regression-smoke.mjs"
+    "test:player-regression": "node scripts/player-regression-smoke.mjs",
+    "test:cdn-shell": "node scripts/cdn-shell-smoke.mjs"
   },
   "dependencies": {
     "ioredis": "^5.10.0",

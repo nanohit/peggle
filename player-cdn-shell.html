@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#000">
+  <base href="__PEGGLE_CDN_BASE__">
+  <title>Peggle</title>
+  <script>
+    (() => {
+      window.__PEGGLE_BOOT_STARTED_AT__ = performance.now();
+      window.__PEGGLE_STATIC_BASE__ = document.baseURI;
+      window.__PEGGLE_CDN_SNAPSHOT_FIRST__ = true;
+      try {
+        const p = new URLSearchParams(location.search);
+        if (location.hash || p.get('campaign') || p.get('level') || p.get('levels')) return;
+        if (/^\/\d{4}\/?$/.test(location.pathname || '') || /^\d{4}$/.test(p.get('room') || '')) return;
+        const snapshot = new URL('cdn-data/primary.initial.json', document.baseURI);
+        const api = '/api/campaigns?primary=true&initial=true&player=1';
+        window.__PEGGLE_PRIMARY_CAMPAIGN_PRELOAD__ = fetch(snapshot, { mode: 'cors' })
+          .then(r => r.ok ? r.json() : null)
+          .then(data => data || fetch(api, { credentials: 'same-origin' }).then(r => r.ok ? r.json() : null))
+          .catch(() => fetch(api, { credentials: 'same-origin' }).then(r => r.ok ? r.json() : null).catch(() => null));
+      } catch (_) {}
+    })();
+  </script>
+  <link rel="modulepreload" crossorigin href="dist/player-bootstrap.js">
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="stylesheet" href="css/visual-layout.css">
+  <link rel="stylesheet" href="css/neon-machine.css">
+  <style>
+    html,body{background:#020712}body{display:flex;justify-content:center;align-items:center;width:100%;height:100%}.visual-viewport{width:100%;height:100%;background:#000}.canvas-container{position:relative}canvas{display:block}#bootCover{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 50% 42%,rgba(17,188,255,.14),transparent 26%),linear-gradient(160deg,#061426,#020610 70%);transition:opacity 180ms ease}.boot-loader{position:relative;width:108px;height:108px}.boot-mark{position:absolute;left:50%;top:50%;width:66px;height:66px;transform:translate(-50%,-50%);border-radius:50%;display:grid;place-items:center;border:1px solid rgba(144,231,255,.66);background:radial-gradient(circle at 35% 28%,#e7fbff 0 4%,#4ad8ff 8%,#06699c 34%,#031424 70%);box-shadow:inset 0 -10px 18px rgba(0,2,12,.72),0 0 28px rgba(20,203,255,.3)}.boot-mark:before{content:'';position:absolute;inset:7px 16px 32px 13px;border-radius:50%;background:linear-gradient(145deg,rgba(255,255,255,.94),rgba(175,238,255,.08));filter:blur(.2px)}.boot-mark b{position:absolute;top:76px;width:150px;text-align:center;font:800 10px/1 system-ui,sans-serif;letter-spacing:.32em;color:#94e8ff;text-shadow:0 0 12px rgba(45,211,255,.6)}.boot-orbit{position:absolute;inset:0;animation:bootOrbit 1.08s linear infinite}.boot-ball{position:absolute;left:50%;top:50%;width:7px;height:7px;border-radius:50%;background:#b8f3ff;box-shadow:0 0 8px rgba(48,211,255,.82);transform:translate(-50%,-50%) rotate(calc(var(--i)*36deg)) translateY(-48px);opacity:var(--o,.88)}html.player-ready #bootCover{opacity:0;pointer-events:none}@keyframes bootOrbit{to{transform:rotate(360deg)}}
+  </style>
+</head>
+<body>
+  <div id="bootCover" aria-label="Loading Peggle"><div class="boot-loader" aria-hidden="true"><div class="boot-mark"><b>NEON DROP</b></div><div class="boot-orbit"><i class="boot-ball" style="--i:0;--o:.42"></i><i class="boot-ball" style="--i:1;--o:.48"></i><i class="boot-ball" style="--i:2;--o:.54"></i><i class="boot-ball" style="--i:3;--o:.60"></i><i class="boot-ball" style="--i:4;--o:.66"></i><i class="boot-ball" style="--i:5;--o:.72"></i><i class="boot-ball" style="--i:6;--o:.78"></i><i class="boot-ball" style="--i:7;--o:.84"></i><i class="boot-ball" style="--i:8;--o:.90"></i><i class="boot-ball" style="--i:9;--o:.96"></i></div></div></div>
+  <div id="canvasContainer" class="canvas-container"><canvas id="gameCanvas"></canvas></div>
+  <script type="module" crossorigin src="dist/player-bootstrap.js"></script>
+</body>
+</html>
