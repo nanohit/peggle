@@ -141,12 +141,14 @@ function testTransitionCaptureSettlesBounceLighting() {
   gpu.height = 600;
   gpu._targets = { lit: 'lit-a', litPrev: 'lit-b' };
   gpu._temporalSettleFrames = 8;
+  gpu._renderCascades = () => calls.push('cascade');
   gpu._renderShading = () => calls.push('shade');
   gpu._renderBloom = () => calls.push('bloom');
   gpu._renderComposite = source => calls.push(`composite:${source}`);
   const targetCtx = { drawImage() { calls.push('copy'); } };
 
   assert.equal(gpu.drawTo2D(targetCtx, 0, 0, 400, 600, { settleLightingFrames: 3 }), true);
+  assert.equal(calls.filter(call => call === 'cascade').length, 3);
   assert.equal(calls.filter(call => call === 'shade').length, 3);
   assert.equal(calls.filter(call => call === 'bloom').length, 1);
   assert.equal(calls.at(-3), 'composite:lit-a');
@@ -179,6 +181,25 @@ function testGpuOwnershipClearsLegacyForeground() {
   assert.doesNotThrow(() => renderer.drawBucket({}, 0));
 }
 
+function testFrameSkipSnapshotsDoNotAliasScratchBuffers() {
+  const renderer = Object.create(Renderer.prototype);
+  renderer._frameSkip = {
+    baseSig: null,
+    baseScratch: [],
+    baseSkipStreak: 0
+  };
+
+  const first = renderer._frameSkip.baseScratch;
+  first.push('first');
+  assert.equal(renderer._adoptSigOrSkip(first, 'baseSig', 'baseScratch', 'baseSkipStreak'), true);
+
+  const second = renderer._frameSkip.baseScratch;
+  assert.notEqual(second, renderer._frameSkip.baseSig);
+  second.push('second');
+  assert.equal(renderer._adoptSigOrSkip(second, 'baseSig', 'baseScratch', 'baseSkipStreak'), true);
+  assert.deepEqual(renderer._frameSkip.baseSig, ['second']);
+}
+
 function testTransitionFreezesCapturedGameUntilReveal() {
   const calls = [];
   const firstGame = {
@@ -208,6 +229,7 @@ const tests = [
   testRendererDisposeClearsSharedCanvasState,
   testTransitionCaptureSettlesBounceLighting,
   testGpuOwnershipClearsLegacyForeground,
+  testFrameSkipSnapshotsDoNotAliasScratchBuffers,
   testTransitionFreezesCapturedGameUntilReveal
 ];
 

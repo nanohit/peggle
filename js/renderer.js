@@ -4157,8 +4157,13 @@ export class Renderer {
       fs[streakProp] = 0;
       return true;
     }
-    fs[scratchProp] = fs[sigProp] || [];
+    // The caller builds `sig` in the scratch array. Keep the previous snapshot
+    // in the other buffer before swapping them; clearing the same array that
+    // `_sigMatches` reads makes every changed frame look unchanged and leaves
+    // moving foreground hardware painted at its previous position.
+    const previous = fs[sigProp];
     fs[sigProp] = sig;
+    fs[scratchProp] = previous && previous !== sig ? previous : [];
     fs[streakProp] = 0;
     return true;
   }

@@ -2992,8 +2992,10 @@ export class GpuPlayfieldRenderer {
     if (settleFrames > 0) {
       const targets = this._targets;
       for (let frame = 0; frame < settleFrames; frame++) {
-        // The G-buffer and light field are already current. Iterate only the
-        // board-bounce feedback, then rebuild bloom once from the final result.
+        // Re-run both the light field and board-bounce passes. Shading alone
+        // leaves the next normal render free to change the cascade immediately
+        // after the transition strip is removed.
+        this._renderCascades(true);
         this._renderShading();
         if (frame === settleFrames - 1) this._renderBloom();
         const previous = targets.litPrev;
