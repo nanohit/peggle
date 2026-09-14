@@ -2365,6 +2365,12 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
         // The transition strip is a still image. Freeze the live destination on
         // that same frame so temporal lighting cannot advance underneath it.
         transitionFreeze.freeze(incomingGame);
+        // Do not depend on the first rAF scheduled by startLevel. WebGL
+        // initialisation and the first 2D fallback frame can race that rAF;
+        // render one complete destination frame while it is frozen, after the
+        // renderer has invalidated any shared canvas contents.
+        incomingGame.renderer?.invalidateAfterTransitionReveal?.();
+        incomingGame.render?.();
         const incomingCanvas = document.createElement('canvas');
         incomingCanvas.width = canvas.width;
         incomingCanvas.height = canvas.height;

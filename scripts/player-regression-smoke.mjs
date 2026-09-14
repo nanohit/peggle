@@ -164,6 +164,10 @@ function testGpuOwnershipClearsLegacyForeground() {
   renderer.height = 600;
   renderer._gpuSceneActive = false;
   renderer._frameSkip = { baseSig: ['old'], fgSig: ['old'] };
+  renderer.baseCtx = {
+    setTransform(...args) { calls.push(['baseSetTransform', ...args]); },
+    clearRect(...args) { calls.push(['baseClearRect', ...args]); }
+  };
   renderer._foregroundCtx = {
     setTransform(...args) { calls.push(['setTransform', ...args]); },
     clearRect(...args) { calls.push(['clearRect', ...args]); }
@@ -173,6 +177,8 @@ function testGpuOwnershipClearsLegacyForeground() {
   assert.equal(renderer._frameSkip.baseSig, null);
   assert.equal(renderer._frameSkip.fgSig, null);
   assert.deepEqual(calls, [
+    ['baseSetTransform', 1, 0, 0, 1, 0, 0],
+    ['baseClearRect', 0, 0, 400, 600],
     ['setTransform', 1, 0, 0, 1, 0, 0],
     ['clearRect', 0, 0, 400, 600]
   ]);

@@ -1213,11 +1213,17 @@ export class Renderer {
     const next = !!active;
     if (this._gpuSceneActive === next) return false;
     this._gpuSceneActive = next;
-    // A fallback frame may have painted 2D machine hardware into this layer.
-    // Invalidate and clear it immediately when WebGL takes ownership, otherwise
-    // frame skipping can preserve the old catcher beside the moving GPU one.
+    // A fallback frame may have painted 2D machine hardware into either 2D
+    // layer. Clear both immediately when WebGL takes ownership. Clearing only
+    // foreground is insufficient: the legacy catcher is painted on the main
+    // canvas, and would remain beside the GPU catcher for the rest of the
+    // session and inside every transition snapshot.
     this._frameSkip.baseSig = null;
     this._frameSkip.fgSig = null;
+    if (this.baseCtx) {
+      this.baseCtx.setTransform(1, 0, 0, 1, 0, 0);
+      this.baseCtx.clearRect(0, 0, this.width, this.height);
+    }
     if (this._foregroundCtx) {
       this._foregroundCtx.setTransform(1, 0, 0, 1, 0, 0);
       this._foregroundCtx.clearRect(0, 0, this.width, this.height);
