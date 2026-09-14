@@ -443,7 +443,11 @@ export class Renderer {
     this._shockwaveLayerCanvas = null;
     this._foregroundCanvas = null;
     this._foregroundCtx = null;
-    this._gpuPlayfield = new GpuPlayfieldRenderer();
+    // Runtime quality is selected explicitly through setPerformanceProfile().
+    // Hit bursts are the worst possible calibration sample: letting two slow
+    // effect frames permanently lower the render ratio made the board grid
+    // thicken as a level progressed.
+    this._gpuPlayfield = new GpuPlayfieldRenderer({ adaptiveQuality: false });
     this._gpuSceneActive = false;
     this._renderLayerHost = null;
     this._renderLayerHostReady = false;
@@ -497,9 +501,7 @@ export class Renderer {
     // Chrome/Safari and extremely slow).
     this._glowCache = new Map();
 
-    // Asset-free gameplay materials. Keeping these fields null preserves the
-    // existing renderer contract while forcing the procedural fallbacks.
-    this._bucketImg = null;
+    // Asset-free gameplay materials.
     this._flipperImg = null;
 
     // Bucket catch particle system
@@ -1277,6 +1279,16 @@ export class Renderer {
       this._shockwavePrewarmHandle = null;
       this._shockwavePrewarmHandleType = '';
     }
+    // The main canvas is shared by consecutive Game instances. Clear its
+    // backing store before handing it to the next renderer so a legacy 2D
+    // prop can never survive the level boundary while the first GPU frame is
+    // being prepared.
+    if (this.baseCtx) {
+      this.baseCtx.setTransform(1, 0, 0, 1, 0, 0);
+      this.baseCtx.clearRect(0, 0, this.width, this.height);
+    }
+    this._bucketParticles.length = 0;
+    this._prevBucketFlash = 0;
     if (this._foregroundCanvas?.parentNode) {
       this._foregroundCanvas.parentNode.removeChild(this._foregroundCanvas);
     }
@@ -1289,7 +1301,7 @@ export class Renderer {
     this.ctx = this.baseCtx;
   }
 
-  drawCompositeTo(targetCtx) {
+  drawCompositeTo(targetCtx, options = {}) {
     if (!targetCtx) return false;
     targetCtx.clearRect(0, 0, this.width, this.height);
 
@@ -1298,7 +1310,7 @@ export class Renderer {
     // that copied only `this.canvas` lost the entire lit board and therefore
     // looked like a flat layer sliding over the real scene.
     if (this._gpuSceneActive && this._gpuPlayfield?.drawTo2D) {
-      this._gpuPlayfield.drawTo2D(targetCtx, 0, 0, this.width, this.height);
+      this._gpuPlayfield.drawTo2D(targetCtx, 0, 0, this.width, this.height, options);
     }
     targetCtx.drawImage(this.canvas, 0, 0);
     if (this._foregroundCanvas) {
@@ -2930,20 +2942,9 @@ export class Renderer {
 
   _bucketMouthGeometry(bucket) {
     const { x, y, width, height } = bucket;
-    const img = this._bucketImg;
-    const hasBucketAsset = Boolean(img && img.width > 0 && img.height > 0);
-    let mouthX = x, mouthY, mouthHalfW;
-    if (hasBucketAsset) {
-      const imgAspect = img.width / img.height;
-      const drawW = width;
-      const drawH = drawW / imgAspect;
-      const drawY = y + height / 2 - drawH;
-      mouthY = drawY + drawH * 0.72 - 12;
-      mouthHalfW = drawW * 0.43;
-    } else {
-      mouthY = y - height / 2 + 5 - 12;
-      mouthHalfW = width * 0.3;
-    }
+    const mouthX = x;
+    let mouthY = y - height / 2 - 7;
+    let mouthHalfW = width * 0.3;
     // Guard against degenerate geometry
     if (!Number.isFinite(mouthY)) mouthY = y - 20;
     if (!Number.isFinite(mouthHalfW) || mouthHalfW <= 0) mouthHalfW = width * 0.3;
@@ -3066,113 +3067,6 @@ export class Renderer {
   drawBucket(bucket, flash = 0) {
     if (this._gpuSceneActive) return;
     drawMachineCatcher(this.ctx, bucket, flash);
-    return;
-
-    const ctx = this.ctx;
-    const { x, y, width, height } = bucket;
-    const intensity = Math.max(0, Math.min(1, flash || 0));
-    const hasBucketAsset = Boolean(this._bucketImg);
-    let drawX = x - width / 2;
-    let drawY = y - height / 2;
-    let drawW = width;
-    let drawH = height;
-
-    if (hasBucketAsset) {
-      const imgAspect = this._bucketImg.width / this._bucketImg.height;
-      drawW = width;
-      drawH = drawW / imgAspect;
-      drawX = x - drawW / 2;
-      drawY = y + height / 2 - drawH;
-    }
-
-    const mouthY = hasBucketAsset ? (drawY + drawH * 0.72) : (y - height / 2 + 5);
-    const mouthHalfW = hasBucketAsset ? (drawW * 0.43) : (width * 0.3);
-    const flareHeight = hasBucketAsset
-      ? (drawH * (0.44 + intensity * 0.62))
-      : (height * (0.92 + intensity * 1.08));
-    const flareTopY = mouthY - flareHeight;
-    const flareTopHalfW = hasBucketAsset
-      ? (drawW * (0.5 + intensity * 0.05))
-      : (mouthHalfW * (1.18 + intensity * 0.12));
-    const bowlGlowRadiusX = hasBucketAsset ? (drawW * 0.44) : (width * 0.34);
-    const bowlGlowRadiusY = hasBucketAsset ? (drawH * 0.24) : (height * 0.18);
-    const rimRadiusX = hasBucketAsset ? (drawW * 0.42) : (width * 0.28);
-    const rimRadiusY = hasBucketAsset ? (drawH * 0.12) : (height * 0.1);
-
-    if (intensity > 0.001) {
-      ctx.save();
-      ctx.globalCompositeOperation = 'screen';
-
-      const beamGradient = ctx.createLinearGradient(x, flareTopY, x, mouthY + drawH * 0.08);
-      beamGradient.addColorStop(0, 'rgba(255,255,255,0)');
-      beamGradient.addColorStop(0.42, `rgba(255,255,255,${0.05 + intensity * 0.08})`);
-      beamGradient.addColorStop(0.82, `rgba(255,255,255,${0.12 + intensity * 0.13})`);
-      beamGradient.addColorStop(1, `rgba(255,255,255,${0.18 + intensity * 0.16})`);
-      ctx.fillStyle = beamGradient;
-      ctx.beginPath();
-      ctx.moveTo(x - mouthHalfW, mouthY + 0.5);
-      ctx.quadraticCurveTo(
-        x - mouthHalfW * 0.98,
-        mouthY - flareHeight * 0.28,
-        x - flareTopHalfW,
-        flareTopY
-      );
-      ctx.lineTo(x + flareTopHalfW, flareTopY);
-      ctx.quadraticCurveTo(
-        x + mouthHalfW * 0.98,
-        mouthY - flareHeight * 0.28,
-        x + mouthHalfW,
-        mouthY + 0.5
-      );
-      ctx.closePath();
-      ctx.fill();
-
-      const bowlGlowY = mouthY + (hasBucketAsset ? drawH * 0.14 : 1);
-      const bowlGlow = ctx.createRadialGradient(x, bowlGlowY, 1, x, bowlGlowY, bowlGlowRadiusX);
-      bowlGlow.addColorStop(0, `rgba(255,255,255,${0.18 + intensity * 0.16})`);
-      bowlGlow.addColorStop(0.58, `rgba(255,255,255,${0.06 + intensity * 0.06})`);
-      bowlGlow.addColorStop(1, 'rgba(255,255,255,0)');
-      ctx.fillStyle = bowlGlow;
-      ctx.beginPath();
-      ctx.ellipse(x, bowlGlowY, bowlGlowRadiusX, bowlGlowRadiusY, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-    }
-
-    if (hasBucketAsset) {
-      // Draw the bucket.webp asset, scaled to fit the bucket bounds
-      // Image is wider than tall — use width as primary, derive height from aspect ratio
-      ctx.drawImage(this._bucketImg, drawX, drawY, drawW, drawH);
-    } else {
-      // Fallback: original trapezoid shape
-      ctx.fillStyle = COLORS.bucket;
-      ctx.beginPath();
-      ctx.moveTo(x - width / 2, y - height / 2);
-      ctx.lineTo(x - width / 2 + 8, y + height / 2);
-      ctx.lineTo(x + width / 2 - 8, y + height / 2);
-      ctx.lineTo(x + width / 2, y - height / 2);
-      ctx.closePath();
-      ctx.fill();
-      ctx.fillStyle = COLORS.bucketInner;
-      ctx.beginPath();
-      ctx.moveTo(x - width / 2 + 4, y - height / 2 + 4);
-      ctx.lineTo(x - width / 2 + 10, y + height / 2 - 2);
-      ctx.lineTo(x + width / 2 - 10, y + height / 2 - 2);
-      ctx.lineTo(x + width / 2 - 4, y - height / 2 + 4);
-      ctx.closePath();
-      ctx.fill();
-    }
-
-    if (intensity > 0.001 && !hasBucketAsset) {
-      ctx.save();
-      ctx.globalCompositeOperation = 'screen';
-      ctx.strokeStyle = `rgba(255,255,255,${0.18 + intensity * 0.32})`;
-      ctx.lineWidth = hasBucketAsset ? (0.85 + intensity * 1.1) : (1.25 + intensity * 1.75);
-      ctx.beginPath();
-      ctx.ellipse(x, mouthY + 0.8, rimRadiusX, rimRadiusY, 0, Math.PI, 0, true);
-      ctx.stroke();
-      ctx.restore();
-    }
   }
 
   drawFlippers(flippers, canvasWidth, selected) {

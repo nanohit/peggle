@@ -2332,23 +2332,35 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     // game.start() queued its first render before this callback. Capture that
     // completed destination frame into the adjacent half of the strip, then
     // move the one surface by exactly one board height (or width for PvP).
+    // Install cleanup before the capture work. A canvas/WebGL readback error
+    // must never strand a frozen transition strip above the live next level.
+    transitionTimer = setTimeout(() => {
+      clearLevelTransitionArtifacts();
+    }, LEVEL_SCROLL_MS + 120);
+
     requestAnimationFrame(() => {
-      const incomingCanvas = document.createElement('canvas');
-      incomingCanvas.width = canvas.width;
-      incomingCanvas.height = canvas.height;
-      const incomingCtx = incomingCanvas.getContext('2d');
-      const copied = game?.renderer?.drawCompositeTo?.(incomingCtx);
-      if (!copied) incomingCtx?.drawImage(canvas, 0, 0);
-      stripCtx.drawImage(incomingCanvas, incomingX, incomingY);
-      strip.style.transition = `transform ${LEVEL_SCROLL_MS}ms cubic-bezier(0.45, 0, 0.20, 1)`;
+      try {
+        const incomingCanvas = document.createElement('canvas');
+        incomingCanvas.width = canvas.width;
+        incomingCanvas.height = canvas.height;
+        const incomingCtx = incomingCanvas.getContext('2d');
+        // A new WebGL board starts with an empty bounce buffer. Settle that
+        // feedback before freezing the transition frame so its lighting is the
+        // same when the live level is revealed at the end of the scroll.
+        const copied = game?.renderer?.drawCompositeTo?.(incomingCtx, {
+          settleLightingFrames: 7
+        });
+        if (!copied) incomingCtx?.drawImage(canvas, 0, 0);
+        stripCtx.drawImage(incomingCanvas, incomingX, incomingY);
+        strip.style.transition = `transform ${LEVEL_SCROLL_MS}ms cubic-bezier(0.45, 0, 0.20, 1)`;
 
-      requestAnimationFrame(() => {
-        strip.style.transform = `translate${axis}(${endPercent}%)`;
-      });
-
-      transitionTimer = setTimeout(() => {
+        requestAnimationFrame(() => {
+          strip.style.transform = `translate${axis}(${endPercent}%)`;
+        });
+      } catch (error) {
+        console.warn('[player] level transition capture failed:', error);
         clearLevelTransitionArtifacts();
-      }, LEVEL_SCROLL_MS + 90);
+      }
     });
   }
 

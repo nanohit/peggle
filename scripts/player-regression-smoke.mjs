@@ -12,6 +12,8 @@ const {
   normalizeCharacterRegistry
 } = await import('../js/character-config.js');
 const { PortraitReactionController } = await import('../js/portrait-reactions.js');
+const { Renderer } = await import('../js/renderer.js');
+const { GpuPlayfieldRenderer } = await import('../js/gpu-playfield.js');
 
 function asset(key) {
   return {
@@ -89,9 +91,74 @@ function testPortraitControllerTreatsAssetObjectsAsAuthoredSlots() {
   assert.equal(calls[1].src.key, 'amused.webp');
 }
 
+function makeCanvasHarness() {
+  const calls = [];
+  const ctx = {
+    setTransform(...args) { calls.push(['setTransform', ...args]); },
+    clearRect(...args) { calls.push(['clearRect', ...args]); },
+    drawImage(...args) { calls.push(['drawImage', ...args]); }
+  };
+  const canvas = {
+    width: 400,
+    height: 600,
+    style: {},
+    getContext() { return ctx; }
+  };
+  return { canvas, ctx, calls };
+}
+
+function testRendererKeepsGameplayQualityStableAcrossHitBursts() {
+  const { canvas } = makeCanvasHarness();
+  const renderer = new Renderer(canvas);
+  assert.equal(renderer._gpuPlayfield.adaptiveQuality, false);
+  assert.equal('_bucketImg' in renderer, false);
+  renderer.dispose();
+}
+
+function testRendererDisposeClearsSharedCanvasState() {
+  const { canvas, calls } = makeCanvasHarness();
+  const renderer = new Renderer(canvas);
+  renderer._bucketParticles.push({ life: 1 });
+  renderer._prevBucketFlash = 1;
+  renderer.dispose();
+
+  assert.deepEqual(calls.slice(-2), [
+    ['setTransform', 1, 0, 0, 1, 0, 0],
+    ['clearRect', 0, 0, 400, 600]
+  ]);
+  assert.equal(renderer._bucketParticles.length, 0);
+  assert.equal(renderer._prevBucketFlash, 0);
+}
+
+function testTransitionCaptureSettlesBounceLighting() {
+  const gpu = new GpuPlayfieldRenderer({ adaptiveQuality: false });
+  const calls = [];
+  gpu.ready = true;
+  gpu.gl = { flush() { calls.push('flush'); } };
+  gpu.canvas = {};
+  gpu.width = 400;
+  gpu.height = 600;
+  gpu._targets = { lit: 'lit-a', litPrev: 'lit-b' };
+  gpu._temporalSettleFrames = 8;
+  gpu._renderShading = () => calls.push('shade');
+  gpu._renderBloom = () => calls.push('bloom');
+  gpu._renderComposite = source => calls.push(`composite:${source}`);
+  const targetCtx = { drawImage() { calls.push('copy'); } };
+
+  assert.equal(gpu.drawTo2D(targetCtx, 0, 0, 400, 600, { settleLightingFrames: 3 }), true);
+  assert.equal(calls.filter(call => call === 'shade').length, 3);
+  assert.equal(calls.filter(call => call === 'bloom').length, 1);
+  assert.equal(calls.at(-3), 'composite:lit-a');
+  assert.deepEqual(calls.slice(-2), ['flush', 'copy']);
+  assert.equal(gpu._temporalSettleFrames, 0);
+}
+
 const tests = [
   testLimePegAliasNormalizesToGreen,
-  testPortraitControllerTreatsAssetObjectsAsAuthoredSlots
+  testPortraitControllerTreatsAssetObjectsAsAuthoredSlots,
+  testRendererKeepsGameplayQualityStableAcrossHitBursts,
+  testRendererDisposeClearsSharedCanvasState,
+  testTransitionCaptureSettlesBounceLighting
 ];
 
 for (const test of tests) {

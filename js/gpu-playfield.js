@@ -2986,8 +2986,22 @@ export class GpuPlayfieldRenderer {
    *  plain drawImage at an arbitrary later time can capture an empty board.
    *  Re-compositing the retained lit texture makes transition captures exact
    *  while costing only one fullscreen blit at the rare level boundary. */
-  drawTo2D(targetCtx, x = 0, y = 0, width = this.width, height = this.height) {
+  drawTo2D(targetCtx, x = 0, y = 0, width = this.width, height = this.height, options = {}) {
     if (!targetCtx || !this.ready || !this.gl || !this._targets) return false;
+    const settleFrames = Math.max(0, Math.min(8, Math.floor(Number(options.settleLightingFrames) || 0)));
+    if (settleFrames > 0) {
+      const targets = this._targets;
+      for (let frame = 0; frame < settleFrames; frame++) {
+        // The G-buffer and light field are already current. Iterate only the
+        // board-bounce feedback, then rebuild bloom once from the final result.
+        this._renderShading();
+        if (frame === settleFrames - 1) this._renderBloom();
+        const previous = targets.litPrev;
+        targets.litPrev = targets.lit;
+        targets.lit = previous;
+      }
+      this._temporalSettleFrames = 0;
+    }
     // render() swaps lit/litPrev after presentation; litPrev is therefore the
     // latest completed lighting result between frames.
     this._renderComposite(this._targets.litPrev);
