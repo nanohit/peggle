@@ -24,6 +24,11 @@
     },
     {
       "source": "/",
+      "has": [{ "type": "host", "value": "newpeggle.vercel.app" }],
+      "destination": "/player.html"
+    },
+    {
+      "source": "/",
       "destination": "/editor.html"
     }
   ]
