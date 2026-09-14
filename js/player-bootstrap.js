@@ -2155,7 +2155,7 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
   let levelStartDialogueTimer = null;
   const transitionFreeze = new LevelTransitionFreeze();
 
-  function clearLevelTransitionArtifacts() {
+  function clearLevelTransitionArtifacts(options = {}) {
     if (transitionTimer) {
       clearTimeout(transitionTimer);
       transitionTimer = null;
@@ -2176,7 +2176,7 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
       gambleRoot.style.transform = '';
       gambleRoot.style.willChange = '';
     }
-    transitionFreeze.release(game);
+    if (options.release !== false) transitionFreeze.release(game);
   }
 
   function prepareGameplayHudEnter(canvasHeight) {
@@ -2338,7 +2338,24 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     // Install cleanup before the capture work. A canvas/WebGL readback error
     // must never strand a frozen transition strip above the live next level.
     transitionTimer = setTimeout(() => {
-      clearLevelTransitionArtifacts();
+      transitionTimer = null;
+      const capturedOverlay = overlay;
+      const revealedGame = game;
+      const canReveal = transitionFreeze.game === revealedGame;
+      if (!canReveal) {
+        clearLevelTransitionArtifacts();
+        return;
+      }
+
+      // Keep the strip over the board while the destination game renders its
+      // first real frame. Removing it in the same task as resume exposed either
+      // the old bucket foreground or a pre-settle WebGL frame.
+      revealedGame.renderer?.invalidateAfterTransitionReveal?.();
+      transitionFreeze.release(revealedGame);
+      requestAnimationFrame(() => {
+        if (transitionOverlay !== capturedOverlay) return;
+        clearLevelTransitionArtifacts({ release: false });
+      });
     }, LEVEL_SCROLL_MS + 120);
 
     requestAnimationFrame(() => {

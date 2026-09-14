@@ -1225,6 +1225,28 @@ export class Renderer {
     return true;
   }
 
+  // A transition strip hides the destination while it is assembled. Before
+  // revealing that destination, force both 2D layers and the GPU scene to take
+  // one complete live frame. This prevents moving hardware from surviving on a
+  // foreground canvas when the old level's snapshot is removed.
+  invalidateAfterTransitionReveal() {
+    this._frameSkip.epoch++;
+    this._frameSkip.baseSig = null;
+    this._frameSkip.baseScratch = [];
+    this._frameSkip.baseSkipStreak = 0;
+    this._frameSkip.fgSig = null;
+    this._frameSkip.fgScratch = [];
+    this._frameSkip.fgSkipStreak = 0;
+    if (this.baseCtx) {
+      this.baseCtx.setTransform(1, 0, 0, 1, 0, 0);
+      this.baseCtx.clearRect(0, 0, this.width, this.height);
+    }
+    if (this._foregroundCtx) {
+      this._foregroundCtx.setTransform(1, 0, 0, 1, 0, 0);
+      this._foregroundCtx.clearRect(0, 0, this.width, this.height);
+    }
+  }
+
   _syncRenderLayers() {
     if (this._gpuPlayfield?.canvas) {
       this._applyLayerLayout(this._gpuPlayfield.canvas, 0);

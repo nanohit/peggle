@@ -154,6 +154,7 @@ function testTransitionCaptureSettlesBounceLighting() {
   assert.equal(calls.at(-3), 'composite:lit-a');
   assert.deepEqual(calls.slice(-2), ['flush', 'copy']);
   assert.equal(gpu._temporalSettleFrames, 0);
+  assert.equal(gpu._transitionLightingPrimed, true);
 }
 
 function testGpuOwnershipClearsLegacyForeground() {
@@ -179,6 +180,42 @@ function testGpuOwnershipClearsLegacyForeground() {
   renderer.ctx = {};
   renderer._gpuSceneActive = true;
   assert.doesNotThrow(() => renderer.drawBucket({}, 0));
+}
+
+function testTransitionRevealInvalidatesBothRenderLayers() {
+  const renderer = Object.create(Renderer.prototype);
+  const calls = [];
+  renderer.width = 400;
+  renderer.height = 600;
+  renderer._frameSkip = {
+    epoch: 4,
+    baseSig: ['base'],
+    baseScratch: ['scratch'],
+    baseSkipStreak: 3,
+    fgSig: ['fg'],
+    fgScratch: ['fg-scratch'],
+    fgSkipStreak: 2
+  };
+  renderer.baseCtx = {
+    setTransform(...args) { calls.push(['baseTransform', ...args]); },
+    clearRect(...args) { calls.push(['baseClear', ...args]); }
+  };
+  renderer._foregroundCtx = {
+    setTransform(...args) { calls.push(['fgTransform', ...args]); },
+    clearRect(...args) { calls.push(['fgClear', ...args]); }
+  };
+
+  renderer.invalidateAfterTransitionReveal();
+
+  assert.equal(renderer._frameSkip.epoch, 5);
+  assert.equal(renderer._frameSkip.baseSig, null);
+  assert.equal(renderer._frameSkip.fgSig, null);
+  assert.deepEqual(calls, [
+    ['baseTransform', 1, 0, 0, 1, 0, 0],
+    ['baseClear', 0, 0, 400, 600],
+    ['fgTransform', 1, 0, 0, 1, 0, 0],
+    ['fgClear', 0, 0, 400, 600]
+  ]);
 }
 
 function testFrameSkipSnapshotsDoNotAliasScratchBuffers() {
@@ -229,6 +266,7 @@ const tests = [
   testRendererDisposeClearsSharedCanvasState,
   testTransitionCaptureSettlesBounceLighting,
   testGpuOwnershipClearsLegacyForeground,
+  testTransitionRevealInvalidatesBothRenderLayers,
   testFrameSkipSnapshotsDoNotAliasScratchBuffers,
   testTransitionFreezesCapturedGameUntilReveal
 ];

@@ -1629,6 +1629,11 @@ export class GpuPlayfieldRenderer {
     // only on its half-second heartbeat — perceived as a shadow that lingers
     // and then vanishes in one step.
     this._temporalSettleFrames = 0;
+    // The transition snapshot is already the settled lighting result. The
+    // first live frame revealed underneath it must use the same no-history
+    // cascade path, otherwise the strip and the live canvas can differ for one
+    // frame when the overlay is removed.
+    this._transitionLightingPrimed = false;
 
     this._programs = {};
     this._targets = null;
@@ -3003,6 +3008,7 @@ export class GpuPlayfieldRenderer {
         targets.lit = previous;
       }
       this._temporalSettleFrames = 0;
+      this._transitionLightingPrimed = true;
     }
     // render() swaps lit/litPrev after presentation; litPrev is therefore the
     // latest completed lighting result between frames.
@@ -3065,7 +3071,7 @@ export class GpuPlayfieldRenderer {
     const flashWasActive = this._flashes.size > 0;
     this._buildScene(pegs, hitPegIds, options, dt);
     const sdfGeometryChanged = this._distanceGeometryChanged();
-    const lifecycleActive = options.bypassTemporalHistory === true;
+    const lifecycleActive = options.bypassTemporalHistory === true || this._transitionLightingPrimed;
     if (sdfGeometryChanged || flashWasActive || this._flashes.size > 0 || lifecycleActive) {
       // Seven .55 blends leave under 0.4% of the old field; eight gives the
       // frame skipper a conservative final frame without a visible snap.
@@ -3097,6 +3103,7 @@ export class GpuPlayfieldRenderer {
     t.lit = previous;
 
     if (this._temporalSettleFrames > 0) this._temporalSettleFrames--;
+    if (this._transitionLightingPrimed) this._transitionLightingPrimed = false;
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     return true;
@@ -3112,5 +3119,6 @@ export class GpuPlayfieldRenderer {
     this.gl = null;
     this.ready = false;
     this._temporalSettleFrames = 0;
+    this._transitionLightingPrimed = false;
   }
 }
