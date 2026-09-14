@@ -11,6 +11,7 @@ import { normalizeLevelData } from './levels.js';
 import { ensureLevelPvp, PVP_DEFAULT_AIM_LENGTH } from './pvp-mode.js';
 import { DialogueController } from './dialogue-controller.js';
 import { GambleSystem } from './gamble-system.js';
+import { LevelTransitionFreeze } from './level-transition-freeze.js';
 import {
   applyCharacterHealthCircleColorToVisuals,
   CHARACTER_REGISTRY_STORAGE_KEY,
@@ -2152,6 +2153,7 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
   let transitionTimer = null;
   let hudEnterTimer = null;
   let levelStartDialogueTimer = null;
+  const transitionFreeze = new LevelTransitionFreeze();
 
   function clearLevelTransitionArtifacts() {
     if (transitionTimer) {
@@ -2174,6 +2176,7 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
       gambleRoot.style.transform = '';
       gambleRoot.style.willChange = '';
     }
+    transitionFreeze.release(game);
   }
 
   function prepareGameplayHudEnter(canvasHeight) {
@@ -2339,7 +2342,12 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     }, LEVEL_SCROLL_MS + 120);
 
     requestAnimationFrame(() => {
+      if (transitionOverlay !== overlay) return;
       try {
+        const incomingGame = game;
+        // The transition strip is a still image. Freeze the live destination on
+        // that same frame so temporal lighting cannot advance underneath it.
+        transitionFreeze.freeze(incomingGame);
         const incomingCanvas = document.createElement('canvas');
         incomingCanvas.width = canvas.width;
         incomingCanvas.height = canvas.height;
@@ -2350,6 +2358,7 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
         const copied = game?.renderer?.drawCompositeTo?.(incomingCtx, {
           settleLightingFrames: 7
         });
+        if (game !== incomingGame) throw new Error('Destination game changed during transition capture');
         if (!copied) incomingCtx?.drawImage(canvas, 0, 0);
         stripCtx.drawImage(incomingCanvas, incomingX, incomingY);
         strip.style.transition = `transform ${LEVEL_SCROLL_MS}ms cubic-bezier(0.45, 0, 0.20, 1)`;

@@ -1209,6 +1209,22 @@ export class Renderer {
     canvas.style.visibility = next;
   }
 
+  _setGpuSceneActive(active) {
+    const next = !!active;
+    if (this._gpuSceneActive === next) return false;
+    this._gpuSceneActive = next;
+    // A fallback frame may have painted 2D machine hardware into this layer.
+    // Invalidate and clear it immediately when WebGL takes ownership, otherwise
+    // frame skipping can preserve the old catcher beside the moving GPU one.
+    this._frameSkip.baseSig = null;
+    this._frameSkip.fgSig = null;
+    if (this._foregroundCtx) {
+      this._foregroundCtx.setTransform(1, 0, 0, 1, 0, 0);
+      this._foregroundCtx.clearRect(0, 0, this.width, this.height);
+    }
+    return true;
+  }
+
   _syncRenderLayers() {
     if (this._gpuPlayfield?.canvas) {
       this._applyLayerLayout(this._gpuPlayfield.canvas, 0);
@@ -4512,7 +4528,7 @@ export class Renderer {
       magnetFieldActive = this._shockwaveEffect.syncFieldRings(magnetFieldRings);
     }
     const useCamera = Math.abs(cameraY) > 0.001;
-    this._gpuSceneActive = !state.isEditor && !state.showGrid && this._ensureGpuPlayfield();
+    this._setGpuSceneActive(!state.isEditor && !state.showGrid && this._ensureGpuPlayfield());
     if (!this._gpuSceneActive && this._gpuPlayfield?.canvas) {
       this._applyLayerVisibility(this._gpuPlayfield.canvas, false);
     }
@@ -4527,7 +4543,7 @@ export class Renderer {
     if (baseRedrawn) {
       this._frameSkip.baseDraws++;
       if (this._gpuSceneActive) {
-        this._gpuSceneActive = this._gpuPlayfield.render(state.pegs, state.hitPegIds, {
+        this._setGpuSceneActive(this._gpuPlayfield.render(state.pegs, state.hitPegIds, {
           width: this.width,
           height: this.height,
           cameraY,
@@ -4547,7 +4563,7 @@ export class Renderer {
               maxWaves: 4
             })
             : null
-        });
+        }));
         this._applyLayerVisibility(this._gpuPlayfield.canvas, this._gpuSceneActive);
       }
       this.clear(state.levelProgress, state);

@@ -14,6 +14,7 @@ const {
 const { PortraitReactionController } = await import('../js/portrait-reactions.js');
 const { Renderer } = await import('../js/renderer.js');
 const { GpuPlayfieldRenderer } = await import('../js/gpu-playfield.js');
+const { LevelTransitionFreeze } = await import('../js/level-transition-freeze.js');
 
 function asset(key) {
   return {
@@ -153,12 +154,61 @@ function testTransitionCaptureSettlesBounceLighting() {
   assert.equal(gpu._temporalSettleFrames, 0);
 }
 
+function testGpuOwnershipClearsLegacyForeground() {
+  const renderer = Object.create(Renderer.prototype);
+  const calls = [];
+  renderer.width = 400;
+  renderer.height = 600;
+  renderer._gpuSceneActive = false;
+  renderer._frameSkip = { baseSig: ['old'], fgSig: ['old'] };
+  renderer._foregroundCtx = {
+    setTransform(...args) { calls.push(['setTransform', ...args]); },
+    clearRect(...args) { calls.push(['clearRect', ...args]); }
+  };
+
+  assert.equal(renderer._setGpuSceneActive(true), true);
+  assert.equal(renderer._frameSkip.baseSig, null);
+  assert.equal(renderer._frameSkip.fgSig, null);
+  assert.deepEqual(calls, [
+    ['setTransform', 1, 0, 0, 1, 0, 0],
+    ['clearRect', 0, 0, 400, 600]
+  ]);
+
+  renderer.ctx = {};
+  renderer._gpuSceneActive = true;
+  assert.doesNotThrow(() => renderer.drawBucket({}, 0));
+}
+
+function testTransitionFreezesCapturedGameUntilReveal() {
+  const calls = [];
+  const firstGame = {
+    pause() { calls.push('pause:first'); },
+    resume() { calls.push('resume:first'); }
+  };
+  const replacementGame = {
+    pause() { calls.push('pause:replacement'); },
+    resume() { calls.push('resume:replacement'); }
+  };
+  const freeze = new LevelTransitionFreeze();
+
+  assert.equal(freeze.freeze(firstGame), true);
+  assert.equal(freeze.freeze(firstGame), false);
+  assert.equal(freeze.release(replacementGame), false);
+  assert.deepEqual(calls, ['pause:first']);
+
+  assert.equal(freeze.freeze(replacementGame), true);
+  assert.equal(freeze.release(replacementGame), true);
+  assert.deepEqual(calls, ['pause:first', 'pause:replacement', 'resume:replacement']);
+}
+
 const tests = [
   testLimePegAliasNormalizesToGreen,
   testPortraitControllerTreatsAssetObjectsAsAuthoredSlots,
   testRendererKeepsGameplayQualityStableAcrossHitBursts,
   testRendererDisposeClearsSharedCanvasState,
-  testTransitionCaptureSettlesBounceLighting
+  testTransitionCaptureSettlesBounceLighting,
+  testGpuOwnershipClearsLegacyForeground,
+  testTransitionFreezesCapturedGameUntilReveal
 ];
 
 for (const test of tests) {
