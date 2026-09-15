@@ -184,7 +184,6 @@ export class VisualLayout {
     chrome.setAttribute('aria-hidden', 'true');
     chrome.innerHTML = `
       <div class="machine-top-bridge">
-        <div class="machine-wordmark"><span>NEON</span><b>DROP</b></div>
         <div class="machine-objective">
           <div class="machine-objective-value">0</div>
           <div class="machine-objective-copy">TARGETS</div>

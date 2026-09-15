@@ -1,4 +1,4 @@
-// NEON DROP procedural material system.
+// Procedural material system.
 //
 // The game deliberately stays on the existing 400 x 600 logical canvas.  These
 // helpers add depth with gradients, cached surfaces and restrained highlights,
