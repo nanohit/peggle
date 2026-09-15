@@ -1,8 +1,8 @@
-# Alea
+# Peggle
 
 Mobile-first browser game inspired by Peggle, with a touch-friendly level editor.
 
-Play the deployed build at [alea.sh](https://alea.sh).
+Play the deployed build at [alea.sh](https://alea.sh). The repository is [nanohit/peggle](https://github.com/nanohit/peggle).
 
 ## App
 
@@ -23,6 +23,24 @@ Classic Peggle gameplay includes orange targets, blue/green/purple pegs, obstacl
 - CPU PvP Duel; online room PvP is feature-flagged
 
 Player progress and editor data are stored locally. Remote levels, campaigns, characters, configuration, and assets are served by Vercel Functions with Redis/Google Drive mirroring and Bunny CDN delivery with fallbacks.
+
+## Visual branch
+
+[`Better-Visuals`](https://github.com/nanohit/peggle/tree/Better-Visuals) is the visual-rendering track for the player:
+
+- `NEON DROP` procedural machine skin built from CSS and Canvas2D materials.
+- WebGL2 playfield with height-field geometry, deferred lighting, radiance cascades, real shadows, bloom, tone mapping, and Canvas2D fallback.
+- Quality profiles, live lighting tuner, and transition-safe layer capture/reveal to prevent stale or ghost frames.
+- Small Vercel shell backed by an immutable jsDelivr bundle and CDN player-data snapshots; same-origin APIs remain the fallback.
+
+Useful branch checks and labs include `npm run test:cdn-shell`, `test/playfield-lab.html`, `test/renderer-lab.html`, `test/gpu-benchmark.html`, `test/shader-check.html`, and `test/tuner-check.html`.
+
+```bash
+git switch Better-Visuals
+npm run dev
+```
+
+The branch is intentionally separate from `main` until its rendering changes are merged.
 
 ## Local development
 
