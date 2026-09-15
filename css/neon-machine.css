@@ -39,7 +39,8 @@
   background: #030a13;
 }
 
-.visual-frame > .canvas-container::after {
+.visual-frame > .canvas-container::after,
+.level-transition-overlay::after {
   content: '';
   position: absolute;
   inset: 0;
@@ -50,6 +51,18 @@
     inset 0 18px 30px rgba(0, 2, 8, 0.3),
     inset 0 -22px 42px rgba(0, 2, 8, 0.46);
   pointer-events: none;
+}
+
+/* The live playfield vignette above belongs to the DOM, not to either render
+   canvas. Level transitions temporarily replace those canvases with a moving
+   snapshot, so the snapshot needs the same fixed glass edge above it. Keeping
+   the shade stationary also prevents it from scrolling with either level. */
+.level-transition-overlay {
+  border-radius: clamp(14px, 3.2vw, 22px);
+}
+
+.level-transition-strip {
+  z-index: 1;
 }
 
 .visual-slot[data-slot-id="columnLeft"],

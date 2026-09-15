@@ -136,6 +136,21 @@ async function testLastPegDoesNotQueueVictoryWarp() {
   assert.equal(gameSource.includes('queueVictoryShockwave('), false);
 }
 
+async function testMovingSurfaceNoiseUsesObjectCoordinates() {
+  const gpuSource = await readFile(new URL('../js/gpu-playfield.js', import.meta.url), 'utf8');
+  assert.equal(gpuSource.includes('float grain = fbm(vWorld * 0.42);'), false);
+  assert.equal(gpuSource.includes('float grain = fbm(vSurface * 0.42);'), true);
+  assert.equal(gpuSource.includes('layout(location=5) in vec2 aSurface;'), true);
+  assert.equal(gpuSource.includes('float micro = hash21(floor(vSurface * 2.3))'), true);
+}
+
+async function testTransitionOverlayKeepsFixedVignette() {
+  const cssSource = await readFile(new URL('../css/neon-machine.css', import.meta.url), 'utf8');
+  assert.match(cssSource, /\.level-transition-overlay::after\s*\{[^}]*box-shadow:/s);
+  assert.match(cssSource, /\.level-transition-overlay\s*\{[^}]*border-radius:/s);
+  assert.match(cssSource, /\.level-transition-strip\s*\{[^}]*z-index:\s*1/s);
+}
+
 function testRendererDisposeClearsSharedCanvasState() {
   const { canvas, calls } = makeCanvasHarness();
   const renderer = new Renderer(canvas);
@@ -324,6 +339,8 @@ const tests = [
   testRendererKeepsGameplayQualityStableAcrossHitBursts,
   testDisabledAdaptiveQualityIgnoresThirtyFpsCadence,
   testLastPegDoesNotQueueVictoryWarp,
+  testMovingSurfaceNoiseUsesObjectCoordinates,
+  testTransitionOverlayKeepsFixedVignette,
   testRendererDisposeClearsSharedCanvasState,
   testTransitionCaptureSettlesBounceLighting,
   testGpuOwnershipClearsLegacyForeground,
