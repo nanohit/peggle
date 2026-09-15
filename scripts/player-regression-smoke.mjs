@@ -224,6 +224,32 @@ function testTransitionRevealInvalidatesBothRenderLayers() {
   ]);
 }
 
+function testRendererPrunesOutgoingForegroundLayers() {
+  const removed = [];
+  const stale = { parentNode: { removeChild(node) { removed.push(node); } } };
+  const current = { parentNode: null };
+  const host = {
+    querySelectorAll(selector) {
+      assert.equal(selector, '.game-foreground-layer');
+      return [stale, current];
+    },
+    appendChild(node) {
+      node.parentElement = this;
+      node.parentNode = this;
+    }
+  };
+  const renderer = Object.create(Renderer.prototype);
+  renderer._foregroundCanvas = current;
+  renderer._foregroundCtx = {};
+  renderer._ensureLayerHost = () => host;
+  renderer._sceneLayerZ = () => ({ foreground: 3 });
+  renderer._applyLayerLayout = () => {};
+  renderer._applyLayerVisibility = () => {};
+
+  assert.equal(renderer._ensureRenderLayers(), true);
+  assert.deepEqual(removed, [stale]);
+}
+
 function testFrameSkipSnapshotsDoNotAliasScratchBuffers() {
   const renderer = Object.create(Renderer.prototype);
   renderer._frameSkip = {
@@ -273,6 +299,7 @@ const tests = [
   testTransitionCaptureSettlesBounceLighting,
   testGpuOwnershipClearsLegacyForeground,
   testTransitionRevealInvalidatesBothRenderLayers,
+  testRendererPrunesOutgoingForegroundLayers,
   testFrameSkipSnapshotsDoNotAliasScratchBuffers,
   testTransitionFreezesCapturedGameUntilReveal
 ];

@@ -391,7 +391,7 @@ export class PhysicsEngine {
       height: 16,
       speed: 1.5,
       // Sine-based oscillation: _phase tracks position in cycle [0, 2*PI)
-      _phase: Math.PI / 2 // start centered (sin(PI/2) = 1 → middle)
+      _phase: 0 // sin(0) keeps the first update at the centered position
     };
     this.portalPegs = [];
     this._pegGrid = null;

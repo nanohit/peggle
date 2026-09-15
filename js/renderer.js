@@ -1054,6 +1054,16 @@ export class Renderer {
     const host = this._ensureLayerHost();
     if (!host) return false;
 
+    // A level transition replaces the Game/Renderer pair while the canvas
+    // host stays shared. Remove any foreground layer left by the outgoing
+    // renderer before attaching the new one; otherwise its old 2D catcher,
+    // launcher, or ball can remain visible beside the WebGL scene.
+    if (typeof host.querySelectorAll === 'function') {
+      for (const layer of host.querySelectorAll('.game-foreground-layer')) {
+        if (layer !== this._foregroundCanvas) layer.parentNode?.removeChild(layer);
+      }
+    }
+
     if (!this._foregroundCanvas) {
       this._foregroundCanvas = document.createElement('canvas');
       this._foregroundCanvas.className = 'game-foreground-layer';
