@@ -223,6 +223,7 @@ export class Game {
     this.rawFrameDeltaSeconds = 0;
     this._currentTimeScale = 1;
     this._lastPegSlowmoElapsedMs = -1;
+    this._lastPegSlowmoPegId = null;
     this._pendingEndResult = null;
     this._gameEndEmitted = false;
     this._levelClearEmitted = false;
@@ -2524,6 +2525,7 @@ export class Game {
     this.rawFrameDeltaSeconds = 0;
     this._currentTimeScale = 1;
     this._lastPegSlowmoElapsedMs = -1;
+    this._lastPegSlowmoPegId = null;
     this._pendingEndResult = null;
     this._gameEndEmitted = false;
     this._levelClearEmitted = false;
@@ -3063,6 +3065,7 @@ export class Game {
         ? this.getSurvivalTargetsLeft(true)
         : this.getOrangePegsLeft();
       if (targetsLeft === 0) {
+        this._lastPegSlowmoPegId = peg.id;
         this._startLastPegSlowmo();
         this._queuePendingEndResult('won', { readyToResolve: this.isSurvivalMode() });
         if (!this._levelClearEmitted) {
@@ -4286,6 +4289,8 @@ export class Game {
       survivalBackground: survivalMode ? this.survivalRuntime.getBackground() : null,
       backgroundFxId: this.levelFxId,
       backgroundEvents: this.backgroundEvents,
+      lastPegSlowmoPegId: this._lastPegSlowmoPegId,
+      lastPegSlowmoActive: this._isLastPegSlowmoActive(),
       playState: this.state,
       baseSceneDynamic: this._isBaseSceneDynamic(),
       fgSceneDynamic: false,

@@ -4598,6 +4598,8 @@ export class Renderer {
           timeSeconds: this._renderTimeSeconds,
           frameDeltaSeconds: state.frameDeltaSeconds,
           progress: state.levelProgress,
+          finalPegSlowmoPegId: state.lastPegSlowmoActive ? state.lastPegSlowmoPegId : null,
+          finalPegSlowmoGlow: state.lastPegSlowmoActive ? 4.0 : 1,
           props: this._collectPlayfieldProps(state),
           ...this._collectPegLifecycle(),
           // Applied inside the composite at full resolution, so a shockwave no

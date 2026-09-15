@@ -635,7 +635,7 @@ void main() {
     // vanishing — is solved, not drawn.
     float core = isBox ? smoothstep(0.0, 3.0, -d) : pow(max(N.z, 0.0), 1.6);
     emission += vTint.rgb * vHit * (1.4 + core * 2.6) * uHitBoost;
-    albedo = mix(albedo, min(albedo * 2.2 + 0.15, vec3(1.0)), vHit * 0.55);
+    albedo = mix(albedo, min(albedo * 2.2 + 0.15, vec3(1.0)), clamp(vHit, 0.0, 1.0) * 0.55);
   }
 
   // An invisible fixture still feeds the solve but leaves no mark of its own:
@@ -730,7 +730,7 @@ void main() {
   vec3 emission = vTint.rgb * vTint.a;
   if (vHit > 0.001) {
     emission += vTint.rgb * vHit * (1.4 + z * 2.2) * uHitBoost;
-    albedo = mix(albedo, min(albedo * 2.2 + 0.15, vec3(1.0)), vHit * 0.55);
+    albedo = mix(albedo, min(albedo * 2.2 + 0.15, vec3(1.0)), clamp(vHit, 0.0, 1.0) * 0.55);
   }
   float metal = vMat > 0.5 && vMat < 1.5 ? 1.0 : 0.0;
 
@@ -2468,6 +2468,10 @@ export class GpuPlayfieldRenderer {
       : null;
 
     const flashes = this._updateFlashes(pegs, hitPegIds, dt);
+    const finalPegSlowmoId = options.finalPegSlowmoPegId;
+    const finalPegSlowmoGlow = options.finalPegSlowmoPegId == null
+      ? 1
+      : Math.max(1, Number(options.finalPegSlowmoGlow) || 1);
     this._updatePortals(pegs, dt);
 
     // Fixtures go in first. There is no depth test, so anything appended later
@@ -2491,7 +2495,8 @@ export class GpuPlayfieldRenderer {
 
     for (const peg of pegs || []) {
       if (!this.isSupported(peg)) continue;
-      const flash = flashes.get(peg.id) || 0;
+      const baseFlash = flashes.get(peg.id) || 0;
+      const flash = peg.id === finalPegSlowmoId ? baseFlash * finalPegSlowmoGlow : baseFlash;
       if (!peg._wrapHideMain) this._appendPeg(peg, flash, cameraY);
       if (Array.isArray(peg._wrapCopies)) {
         for (const copy of peg._wrapCopies) {
@@ -2510,7 +2515,8 @@ export class GpuPlayfieldRenderer {
     for (const exit of options.exits || []) {
       const peg = exit?.peg;
       if (!peg || !this.isSupported(peg)) continue;
-      const glow = Math.max(0, Math.min(1, Number(exit.glow) || 0));
+      const baseGlow = Math.max(0, Math.min(1, Number(exit.glow) || 0));
+      const glow = peg.id === finalPegSlowmoId ? baseGlow * finalPegSlowmoGlow : baseGlow;
       if (exit.sink > 0.001) {
         this._appendPeg(peg, glow, cameraY);
       } else if (glow > 0.01) {
