@@ -22,7 +22,7 @@ Classic Peggle gameplay includes orange targets, blue/green/purple pegs, obstacl
 - Destruction mode with physics-driven groups
 - CPU PvP Duel; online room PvP is feature-flagged
 
-Player progress and editor data are stored locally. Remote levels, campaigns, characters, configuration, and assets are served by Vercel Functions with Redis/Google Drive mirroring and Bunny CDN delivery with fallbacks.
+Player progress and editor data are stored locally. Remote levels, campaigns, characters, configuration.
 
 ## Visuals
 
