@@ -27,7 +27,7 @@ import { normalizePegType } from './peg-types.js';
 import { getPortalScale, isPortalType } from './portal-defaults.js';
 
 const INSTANCE_FLOATS = 16;
-const CURVE_FLOATS = 15;
+const CURVE_FLOATS = 13;
 
 // Emission is stored in a texture that may be RGBA8 when float targets are
 // unavailable, so radiance is written scaled down and read back scaled up.
@@ -306,6 +306,7 @@ layout(location=4) in vec4 aTint;    // rgb albedo, a emissive strength
 layout(location=5) in vec4 aExtra;   // heightScale, emergence, energy, spare
 out vec2 vLocal;
 out vec2 vHalf;
+out vec2 vWorld;
 out vec2 vSurface;
 out vec4 vTint;
 out float vHit;
@@ -330,12 +331,13 @@ void main() {
   vec2 pad = extent + uMargin;
   vLocal = aUnit * pad;
   vec2 world = aCenter + rot * vLocal;
-  // Surface detail belongs to the part, not to the board beneath it. Build a
-  // stable per-design offset from attributes that do not change as hardware
-  // translates or rotates, then sample every material in object-local space.
+  vWorld = world;
+  // Only explicitly tagged moving hardware gets object-local detail. The seed
+  // separates the bucket's individual castings without making every other
+  // grey object repeat the same small texture.
   vec2 surfaceOffset = vec2(
-    dot(aHalf, vec2(0.73, 1.19)) + dot(aTint.rgb, vec3(17.0, 29.0, 43.0)) + aParams.y * 7.0,
-    dot(aHalf, vec2(1.37, 0.61)) + dot(aTint.rgb, vec3(31.0, 13.0, 23.0)) + aParams.y * 11.0
+    dot(aHalf, vec2(0.73, 1.19)) + dot(aTint.rgb, vec3(17.0, 29.0, 43.0)) + aParams.y * 7.0 + aParams.x * 53.0,
+    dot(aHalf, vec2(1.37, 0.61)) + dot(aTint.rgb, vec3(31.0, 13.0, 23.0)) + aParams.y * 11.0 + aParams.x * 97.0
   );
   vSurface = vLocal + surfaceOffset;
   vHalf = aHalf;
@@ -358,6 +360,7 @@ precision highp float;
 ${COMMON}
 in vec2 vLocal;
 in vec2 vHalf;
+in vec2 vWorld;
 in vec2 vSurface;
 in vec4 vTint;
 in float vHit;
@@ -551,10 +554,14 @@ void main() {
     }
   }
 
+  // Bucket parts opt into an attached surface map through aExtra.z. Everything
+  // else keeps the broad world-space field, avoiding obvious cloned patterns
+  // across repeated grey pegs and fixtures.
+  vec2 materialPoint = (!isPortal && vEnergy > 0.5) ? vSurface : vWorld;
   // Micro-relief. Real surfaces are never perfectly smooth, and a little
   // normal jitter is what stops a shaded dome from looking like a gradient.
-  float micro = hash21(floor(vSurface * 2.3)) - 0.5;
-  float micro2 = hash21(floor(vSurface.yx * 2.7 + 31.0)) - 0.5;
+  float micro = hash21(floor(materialPoint * 2.3)) - 0.5;
+  float micro2 = hash21(floor(materialPoint.yx * 2.7 + 31.0)) - 0.5;
   if (!isPortal) N = normalize(N + vec3(micro, micro2, 0.0) * (isBall ? 0.012 : 0.030));
 
   float metalBase = !isPortal && max(vMat > 0.5 && vMat < 1.5 ? 1.0 : 0.0, metalMix) > 0.5 ? 1.0 : 0.0;
@@ -564,11 +571,11 @@ void main() {
     // Gloss is a clearcoat control for the plastic pegs. Running metal through
     // it drove roughness to ~0.03, which is a mirror — that is why these read
     // as glass rods rather than machined parts. Metal keeps its own roughness.
-    float grain = fbm(vSurface * 0.42);
-    float pitting = fbm(vSurface * 1.7 + 11.0);
+    float grain = fbm(materialPoint * 0.42);
+    float pitting = fbm(materialPoint * 1.7 + 11.0);
     rough = clamp(0.30 + grain * 0.26 + micro * 0.07, 0.16, 0.72);
     // Oxide mottling: patches of duller, warmer surface over the base metal.
-    float rust = smoothstep(0.52, 0.86, fbm(vSurface * 0.21 + 5.0));
+    float rust = smoothstep(0.52, 0.86, fbm(materialPoint * 0.21 + 5.0));
     albedo = mix(albedo, vec3(0.24, 0.105, 0.052), rust * 0.72);
     albedo *= 0.82 + pitting * 0.36;
     rough = clamp(rough + rust * 0.24, 0.16, 0.86);
@@ -663,8 +670,7 @@ layout(location=1) in vec2 aNormal;
 layout(location=2) in vec2 aData;   // side, halfWidth
 layout(location=3) in vec4 aTint;
 layout(location=4) in vec3 aExtra;  // hit, matId, emergence
-layout(location=5) in vec2 aSurface; // distance along ribbon, signed cross-width
-out vec2 vSurface;
+out vec2 vWorld;
 out vec2 vCurveN;
 out float vEdge;
 out vec4 vTint;
@@ -676,7 +682,7 @@ void main() {
   float side = aData.x;
   float halfWidth = max(0.01, aData.y);
   vec2 world = aCenter + aNormal * side;
-  vSurface = aSurface;
+  vWorld = world;
   vCurveN = aNormal;
   vEdge = side / halfWidth;
   vTint = aTint;
@@ -690,7 +696,7 @@ void main() {
 const CURVE_FS = `#version 300 es
 precision highp float;
 ${COMMON}
-in vec2 vSurface;
+in vec2 vWorld;
 in vec2 vCurveN;
 in float vEdge;
 in vec4 vTint;
@@ -717,7 +723,7 @@ void main() {
   float z = sqrt(max(1e-3, 1.0 - pow(abs(e), 1.62)));
   vec3 N = normalize(vec3(vCurveN * pow(abs(e), 0.81) * sign(e) * 1.12, z));
   N.y = -N.y;
-  float micro = hash21(floor(vSurface * 2.3)) - 0.5;
+  float micro = hash21(floor(vWorld * 2.3)) - 0.5;
   N = normalize(N + vec3(micro * 0.03, micro * 0.026, 0.0));
 
   vec3 albedo = vTint.rgb;
@@ -1844,7 +1850,7 @@ export class GpuPlayfieldRenderer {
       this._curveBuffer = gl.createBuffer();
       gl.bindBuffer(gl.ARRAY_BUFFER, this._curveBuffer);
       const curveStride = CURVE_FLOATS * 4;
-      const curveAttribs = [[0, 2, 0], [1, 2, 8], [2, 2, 16], [3, 4, 24], [4, 3, 40], [5, 2, 52]];
+      const curveAttribs = [[0, 2, 0], [1, 2, 8], [2, 2, 16], [3, 4, 24], [4, 3, 40]];
       for (const [index, size, offset] of curveAttribs) {
         gl.enableVertexAttribArray(index);
         gl.vertexAttribPointer(index, size, gl.FLOAT, false, curveStride, offset);
@@ -2171,17 +2177,7 @@ export class GpuPlayfieldRenderer {
     // board and the long bars just appear.
     const emerge = this._emergenceFor(peg);
     if (emerge <= 0.001) return;
-    // Arc length and signed width form a material coordinate system that moves
-    // with the ribbon. World-space noise made a moving/destructible curved
-    // brick appear to slide through one board-sized texture.
-    const along = new Float32Array(slices.length);
-    for (let i = 1; i < slices.length; i++) {
-      along[i] = along[i - 1] + Math.hypot(
-        slices[i].x - slices[i - 1].x,
-        slices[i].y - slices[i - 1].y
-      );
-    }
-    const add = (slice, side, fallbackNx, fallbackNy, surfaceAlong) => {
+    const add = (slice, side, fallbackNx, fallbackNy) => {
       const nx = Number.isFinite(slice.nx) ? slice.nx : fallbackNx;
       const ny = Number.isFinite(slice.ny) ? slice.ny : fallbackNy;
       let data = this.curveVertices;
@@ -2199,7 +2195,6 @@ export class GpuPlayfieldRenderer {
       data[at + 6] = color[0]; data[at + 7] = color[1]; data[at + 8] = color[2];
       data[at + 9] = 0;
       data[at + 10] = hit; data[at + 11] = mat; data[at + 12] = emerge;
-      data[at + 13] = surfaceAlong; data[at + 14] = side;
       this.curveLength = at + CURVE_FLOATS;
     };
     for (let i = 1; i < slices.length; i++) {
@@ -2211,12 +2206,12 @@ export class GpuPlayfieldRenderer {
       if (length < 0.1) continue;
       const nx = -dy / length;
       const ny = dx / length;
-      add(a, halfWidth, nx, ny, along[i - 1]);
-      add(a, -halfWidth, nx, ny, along[i - 1]);
-      add(b, halfWidth, nx, ny, along[i]);
-      add(b, halfWidth, nx, ny, along[i]);
-      add(a, -halfWidth, nx, ny, along[i - 1]);
-      add(b, -halfWidth, nx, ny, along[i]);
+      add(a, halfWidth, nx, ny);
+      add(a, -halfWidth, nx, ny);
+      add(b, halfWidth, nx, ny);
+      add(b, halfWidth, nx, ny);
+      add(a, -halfWidth, nx, ny);
+      add(b, -halfWidth, nx, ny);
     }
   }
 
@@ -2547,6 +2542,7 @@ export class GpuPlayfieldRenderer {
       const angle = Number(prop.angle) || 0;
       const x = Number(prop.x) || 0;
       const y = (Number(prop.y) || 0) - (prop.screenSpace ? 0 : cameraY);
+      const surfaceAttached = prop.surfaceAttached ? 1 : 0;
       this._pushInstance(
         x, y,
         halfW, halfH,
@@ -2555,7 +2551,8 @@ export class GpuPlayfieldRenderer {
         Number(prop.hit) || 0,
         mat,
         prop.color || [0.7, 0.95, 1.0],
-        emissive
+        emissive,
+        [1, 1, surfaceAttached, 0]
       );
       this._registerDynamicSolid(x, y, halfW, halfH, angle, shape, mat);
     }

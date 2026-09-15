@@ -136,12 +136,13 @@ async function testLastPegDoesNotQueueVictoryWarp() {
   assert.equal(gameSource.includes('queueVictoryShockwave('), false);
 }
 
-async function testMovingSurfaceNoiseUsesObjectCoordinates() {
+async function testOnlyBucketUsesAttachedSurfaceNoise() {
   const gpuSource = await readFile(new URL('../js/gpu-playfield.js', import.meta.url), 'utf8');
-  assert.equal(gpuSource.includes('float grain = fbm(vWorld * 0.42);'), false);
-  assert.equal(gpuSource.includes('float grain = fbm(vSurface * 0.42);'), true);
-  assert.equal(gpuSource.includes('layout(location=5) in vec2 aSurface;'), true);
-  assert.equal(gpuSource.includes('float micro = hash21(floor(vSurface * 2.3))'), true);
+  const rendererSource = await readFile(new URL('../js/renderer.js', import.meta.url), 'utf8');
+  assert.equal(gpuSource.includes('vec2 materialPoint = (!isPortal && vEnergy > 0.5) ? vSurface : vWorld;'), true);
+  assert.equal(gpuSource.includes('float grain = fbm(materialPoint * 0.42);'), true);
+  assert.equal(gpuSource.includes('layout(location=5) in vec2 aSurface;'), false);
+  assert.equal((rendererSource.match(/surfaceAttached: true/g) || []).length, 2);
 }
 
 async function testTransitionOverlayKeepsFixedVignette() {
@@ -339,7 +340,7 @@ const tests = [
   testRendererKeepsGameplayQualityStableAcrossHitBursts,
   testDisabledAdaptiveQualityIgnoresThirtyFpsCadence,
   testLastPegDoesNotQueueVictoryWarp,
-  testMovingSurfaceNoiseUsesObjectCoordinates,
+  testOnlyBucketUsesAttachedSurfaceNoise,
   testTransitionOverlayKeepsFixedVignette,
   testRendererDisposeClearsSharedCanvasState,
   testTransitionCaptureSettlesBounceLighting,

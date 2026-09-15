@@ -4330,6 +4330,7 @@ export class Renderer {
           halfH: visualHeight * 0.46,
           angle: side * 0.10,
           metal: true,
+          surfaceAttached: true,
           color: [0.34, 0.42, 0.48]
         });
       }
@@ -4340,6 +4341,7 @@ export class Renderer {
         halfW: half * 0.62,
         halfH: visualHeight * 0.16,
         metal: true,
+        surfaceAttached: true,
         color: [0.24, 0.30, 0.35]
       });
       props.push({
