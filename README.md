@@ -1,6 +1,6 @@
-# Peggle
+# Alea
 
-Mobile-first browser game inspired by Peggle, with a touch-friendly level editor.
+Mobile-first browser game inspired by Peggle and Billiard, with a touch-friendly level editor.
 
 Play the deployed build at [alea.sh](https://alea.sh). The repository is [nanohit/peggle](https://github.com/nanohit/peggle).
 
