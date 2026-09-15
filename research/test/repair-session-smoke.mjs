@@ -280,7 +280,7 @@ execFileSync(process.execPath, ['research/tools/digest-repair-session.mjs', resu
 const digest = JSON.parse(await fs.readFile(path.join(digestPath, 'digest.json'), 'utf8'));
 const digestMarkdownText = await fs.readFile(path.join(digestPath, 'digest.md'), 'utf8');
 const digestJsonText = await fs.readFile(path.join(digestPath, 'digest.json'), 'utf8');
-assert.equal(digest.version, 3);
+assert.equal(digest.version, 4);
 assert.equal(digest.candidates.every(candidate => candidate.integrity.storedSummariesAgreeWithRecomputation.all), true);
 assert.equal(digest.candidates[0].gates.control.status, 'passed');
 assert.equal(digest.candidates[0].operations[0].transform.tx, -10);

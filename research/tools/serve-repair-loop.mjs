@@ -2,11 +2,15 @@ import http from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { buildRadialLoop, REPO_ROOT } from './build-radial-loop.mjs';
+import { buildSupportStudy } from './build-support-study.mjs';
 
 const portIndex = process.argv.indexOf('--port');
 const port = portIndex >= 0 ? Number(process.argv[portIndex + 1]) : 8765;
 if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('Port must be 1024..65535');
-await buildRadialLoop();
+const supports = process.argv.includes('--supports');
+const archiveIndex = process.argv.indexOf('--archive');
+if (supports) await buildSupportStudy(archiveIndex >= 0 ? process.argv[archiveIndex + 1] : null);
+else await buildRadialLoop();
 const mime = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.json': 'application/json',
   '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif',
   '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.woff': 'font/woff', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.mp4': 'video/mp4', '.webm': 'video/webm' };
@@ -17,7 +21,7 @@ const server = http.createServer(async (req, res) => {
   if (!['GET', 'HEAD'].includes(req.method)) { res.writeHead(405); res.end('Local research server: remote writes are disabled.'); return; }
   try {
     const url = new URL(req.url, `http://127.0.0.1:${port}`);
-    if (url.pathname === '/') { res.writeHead(302, { Location: '/research/generated/radial-loop-v1/index.html' }); res.end(); return; }
+    if (url.pathname === '/') { res.writeHead(302, { Location: supports ? '/research/generated/support-study-v1/index.html' : '/research/generated/radial-loop-v1/index.html' }); res.end(); return; }
     // This dedicated origin never reaches production Redis. The HTML override
     // is installed before any module can resolve API_BASE.
     if (url.pathname.startsWith('/api/')) { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ names: [], characters: {}, campaigns: [], localResearchOnly: true })); return; }

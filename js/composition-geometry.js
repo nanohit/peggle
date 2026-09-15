@@ -1,3 +1,4 @@
+import { contactRadius } from './peg-contact.js';
 // Pure standard-board geometry. Curved collision bodies match physics.js:
 // one oriented rectangle per centerline segment, NOT a peg-sized flat brick.
 export function effectiveCompositionSize(peg, radius = 8.5) {
@@ -10,7 +11,7 @@ export function effectiveCompositionSize(peg, radius = 8.5) {
 }
 
 export function compositionFootprints(peg, radius = 8.5) {
-  if (peg.shape !== 'brick') return [{ kind: 'circle', x: peg.x, y: peg.y, radius }];
+  if (peg.shape !== 'brick') return [{ kind: 'circle', x: peg.x, y: peg.y, radius: contactRadius(peg, radius) }];
   const { width, height } = effectiveCompositionSize(peg, radius);
   if (peg.curveSlices?.length >= 2) return peg.curveSlices.slice(1).flatMap((b, index) => {
     const a = peg.curveSlices[index], length = Math.hypot(b.x - a.x, b.y - a.y);
@@ -85,6 +86,8 @@ export function evaluateCompositionGeometry(level, options = {}) {
     const id = peg.memberId || peg.id || String(index), shapes = compositionFootprints(peg, radius);
     const bounds = footprintBounds(shapes);
     if (![peg.x, peg.y, ...Object.values(bounds)].every(Number.isFinite)
+      || !(contactRadius(peg, radius) > 0)
+      || (peg.type === 'bumper' && (!Number.isFinite(peg.bumperBounce ?? 0.65) || (peg.bumperBounce ?? 0.65) < 0))
       || (peg.shape === 'brick' && !(effectiveCompositionSize(peg, radius).height > 0))
       || (peg.curveSlices || []).some(s => ![s.x, s.y, s.nx, s.ny].every(Number.isFinite))) invalidGeometry.push(id);
     if (bounds.minX < -tolerance || bounds.maxX > width + tolerance || bounds.minY < -tolerance || bounds.maxY > height + tolerance) outOfBounds.push(id);

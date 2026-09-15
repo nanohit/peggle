@@ -58,10 +58,20 @@ function transactionEvidence(candidate) {
   }));
 }
 
-export function recordRepairTransaction(candidate, nextLevel, now = new Date().toISOString()) {
+export function recordRepairTransaction(candidate, nextLevel, now = new Date().toISOString(), options = {}) {
   if (!candidate || !nextLevel) return null;
   if (!Array.isArray(candidate.transactionLog)) candidate.transactionLog = [];
-  const previousLevel = candidate.currentLevel || candidate.baselineLevel;
+  // Autosave is a state observation, not an author action. Persist the live
+  // drag, but keep one pre-command checkpoint until its explicit commit. The
+  // pending checkpoint also survives a reload; then the net edit is recovered
+  // as state-derived evidence, never lost or counted once per mousemove.
+  if (options.commandInProgress) {
+    candidate.pendingCommandBefore ||= clone(candidate.currentLevel || candidate.baselineLevel);
+    candidate.currentLevel = clone(nextLevel);
+    return [];
+  }
+  const previousLevel = candidate.pendingCommandBefore || candidate.currentLevel || candidate.baselineLevel;
+  delete candidate.pendingCommandBefore;
   const previousCommands = previousLevel?.metadata?.generatorProgram?.commandLog || [];
   const nextCommands = nextLevel?.metadata?.generatorProgram?.commandLog || [];
   const previousHistoryEvent = previousLevel?.metadata?.generatorProgram?.historyEvent || null;
@@ -658,6 +668,19 @@ export function exportRepairSessionDraft(session, now = new Date().toISOString()
   } catch (error) {
     return { ...clone(session), status: 'draft', exportedAt: now, exportError: String(error?.message || error) };
   }
+}
+
+// Delivery and scientific acceptance are independent. Analyze a copy so a
+// successful analysis cannot close the live session before a download works.
+export function prepareRepairSessionExport(session, now = new Date().toISOString(), analyze = finishRepairSession) {
+  let result;
+  try { result = analyze(clone(session), now); }
+  catch (error) {
+    result = { ...clone(session), status: 'draft', exportedAt: now,
+      exportError: String(error?.message || error) };
+  }
+  return { result, text: JSON.stringify(result),
+    filename: `${session.sessionId.replace(/[^a-z0-9_-]/gi, '_')}-${result.status === 'draft' ? 'draft' : 'result'}.json` };
 }
 
 export function resumeRepairArchive(archive) {

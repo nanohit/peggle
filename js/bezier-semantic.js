@@ -7,6 +7,7 @@ import {
   transformBezierCurve
 } from './bezier-geometry.js';
 import { bakeObjectMembers, hasObjectExecutor, reconcileObjectDefinition, transformObjectDefinition } from './semantic-object-codec.js';
+import { bumperContactProperties } from './peg-contact.js';
 
 const POINT_KEYS = ['start', 'end', 'h1', 'h2'];
 const RESAMPLE_PROPERTIES = [
@@ -111,7 +112,7 @@ function memberPropertiesClose(left = {}, right = {}) {
     // Arc lengths can differ by a few ULPs between Node/V8 versions. This
     // numerical epsilon is NOT the 1px author-edit threshold. Real dimension
     // changes still count and a corrupt replay still fails.
-    if (['width', 'height', 'brickBaseRadius'].includes(key)
+    if (['width', 'height', 'brickBaseRadius', 'bumperScale', 'bumperBounce'].includes(key)
       && Number.isFinite(left[key]) && Number.isFinite(right[key])) return close(left[key], right[key], GEOMETRY_EPSILON_PX);
     return same(left[key], right[key]);
   });
@@ -133,6 +134,9 @@ const RUNTIME_PEG_REFERENCE_KEYS = new Set(['pvpMirrorOf', 'portalDestinationId'
 function memberSnapshot(peg, ordinal = 0, memberIdByRuntimeId = new Map()) {
   const shape = peg.shape || 'circle';
   const properties = shape === 'brick' ? { width: peg.width ?? 34, height: peg.height ?? 10.2, brickBaseRadius: peg.brickBaseRadius ?? 8.5 } : {};
+  // Bumpers were already allowed in this checkpoint. Their collision size,
+  // bounce and persistence are part of the object, not cosmetic context.
+  Object.assign(properties, bumperContactProperties(peg));
   for (const [key, value] of Object.entries(peg || {})) {
     if (DERIVED_OR_VOLATILE_PEG_KEYS.has(key)) continue;
     // Checkpoint one records authored geometry. Creation defaults, effects,

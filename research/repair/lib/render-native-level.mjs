@@ -1,4 +1,5 @@
 import { curvedBrickOutline, effectiveCompositionSize } from '../../../js/composition-geometry.js';
+import { contactRadius, bumperContactProperties } from '../../../js/peg-contact.js';
 
 function escapeXml(value) {
   return String(value ?? '')
@@ -27,7 +28,9 @@ function pegSvg(peg, pegRadius, style = {}) {
     const degrees = Number(peg.angle || 0) * 180 / Math.PI;
     return `<rect x="${peg.x - width / 2}" y="${peg.y - height / 2}" width="${width}" height="${height}" rx="3" fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}" opacity="${opacity}"${dash} transform="rotate(${degrees} ${peg.x} ${peg.y})"/>`;
   }
-  return `<circle cx="${peg.x}" cy="${peg.y}" r="${pegRadius}" fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}" opacity="${opacity}"${dash}/>`;
+  const radius = contactRadius(peg, pegRadius);
+  const bumper = peg.type === 'bumper';
+  return `<g><title>${escapeXml(bumper ? `Bumper: radius ${radius}; ${JSON.stringify(bumperContactProperties(peg))}` : peg.type || 'blue')}</title><circle cx="${peg.x}" cy="${peg.y}" r="${radius}" fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}" opacity="${opacity}"${dash}/>${bumper ? `<text x="${peg.x}" y="${peg.y + 3}" text-anchor="middle" font-family="Arial" font-size="9" fill="${stroke}">B</text>` : ''}</g>`;
 }
 
 function gridSvg(width, height) {
@@ -59,6 +62,7 @@ function pegChanged(before, after) {
   return Math.hypot(Number(after.x) - Number(before.x), Number(after.y) - Number(before.y)) > 0.25
     || before.shape !== after.shape
     || before.type !== after.type
+    || JSON.stringify(bumperContactProperties(before)) !== JSON.stringify(bumperContactProperties(after))
     || Math.abs(Number(before.angle || 0) - Number(after.angle || 0)) > 1e-4
     || Math.abs(Number(before.width || 0) - Number(after.width || 0)) > 0.25
     || Math.abs(Number(before.height || 0) - Number(after.height || 0)) > 0.25

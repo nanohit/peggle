@@ -53,14 +53,15 @@ export async function writeRadialComparison(comparison, output) {
   const cards = [];
   for (const pair of comparison.pairs) {
     const figures = [];
+    const targets = pair.targetMemberIds || makeStandardPlayPreview(pair.sides[pair.labels.indexOf('original')].level, pair.seed).metadata.playPreview.targetMemberIds;
     for (const [i, item] of pair.sides.entries()) {
       const label = i ? 'B' : 'A', file = `${pair.id}-${label}.json`;
       await fs.writeFile(path.join(output, file), JSON.stringify(item.level));
-      const playable = makeStandardPlayPreview(item.level, pair.seed);
+      const playable = makeStandardPlayPreview(item.level, pair.seed, targets);
       playable.name = `${pair.id} / ${label}`;
       playable.metadata = { playPreview: playable.metadata.playPreview };
       const hash = deflateSync(JSON.stringify(playable)).toString('base64url');
-      figures.push(`<figure>${renderNativeLevelSvg(item.level, { title: label })}<figcaption>${label} · <a href="/player.html#${hash}" target="_blank" rel="noopener">Играть ${label}</a> · <a href="${file}" download>JSON</a></figcaption></figure>`);
+      figures.push(`<figure>${renderNativeLevelSvg(item.level, { title: label })}<figcaption>${label} · <a href="/player.html#${hash}" target="_blank" rel="noopener">Играть ${label}</a> · <a href="${file}" download>JSON</a>${item.staticChecks.status === 'passed' ? '' : ' · ⚠ Статическая проверка не пройдена; кандидат оставлен в выборке, не скрыт.'}</figcaption></figure>`);
     }
     cards.push(`<section data-id="${pair.id}"><h2>${pair.id}</h2><div class="pair">${figures.join('')}</div>
 <label>Сильнее композиция <select data-key="preference"><option value="">Не оценено</option><option value="A">A</option><option value="B">B</option><option value="tie">Ничья</option><option value="both-bad">Оба плохие</option><option value="cannot-judge">Не могу оценить</option></select></label>
@@ -76,7 +77,7 @@ export async function writeRadialComparison(comparison, output) {
   const literal = JSON.stringify({ comparisonId: comparison.comparisonId, pairIds: publicIds }).replaceAll('<', '\\u003c');
   await fs.writeFile(path.join(output, 'index.html'), `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Проверка переноса правил</title><style>
 body{font:17px/1.5 system-ui;background:#101623;color:#eaf0ff;max-width:1050px;margin:auto;padding:24px}a{color:#8dd1ff}section{margin:30px 0;padding:18px;border:1px solid #49627c;border-radius:10px}.pair{display:flex;gap:20px}figure{margin:0;flex:1}svg{width:100%;max-height:540px}label{display:inline-block;margin:10px}textarea{display:block;width:95%;min-height:65px}button,select{padding:10px}header{position:sticky;top:0;background:#101623;padding:14px;z-index:2}</style></head><body>
-<header><button id="export">Export decisions</button><span id="status"></span></header><h1>Шесть новых пар</h1><p>Стороны перемешаны. Сначала композиция, затем при желании игра. «Лучше» и «уже годится» — разные вопросы. Оба могут быть плохими. Цвета в игровой копии назначены фиксированно, это ещё не политика сложности.</p>
+<header><button id="export">Export decisions</button><span id="status"></span></header><h1>${comparison.pairs.length} новых пар</h1><p>Стороны перемешаны. «Лучше» и «уже годится» — разные вопросы. Оба могут быть плохими. Для игровых выводов поиграй обе стороны; можно оставить только визуальную оценку. Оранжевые в паре закреплены за одними и теми же пегами основного рисунка. Бамперы сохраняют размер и отскок. Это пока не политика сложности.</p>
 ${cards.join('')}<script>
 const spec=${literal}, key='radial-review:'+spec.comparisonId; let saved={}; try{saved=JSON.parse(localStorage.getItem(key)||'{}')}catch{}
 function read(){return [...document.querySelectorAll('section')].map(s=>Object.fromEntries([['id',s.dataset.id],...[...s.querySelectorAll('[data-key]')].map(e=>[e.dataset.key,e.type==='checkbox'?e.checked:e.value])]))}

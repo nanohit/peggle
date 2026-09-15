@@ -4,7 +4,6 @@ import { Game } from './game.js';
 import { Editor } from './editor.js';
 import { LevelManager, cloneLevelSnapshot, normalizeLevelData } from './levels.js';
 import {
-  finishRepairSession,
   exportRepairSessionDraft,
   resumeRepairArchive,
   loadSavedRepairSessionDurable,
@@ -13,6 +12,7 @@ import {
   startRepairSession
 } from './repair-session.js';
 import { makeStandardPlayPreview } from './repair-play-preview.js';
+import { prepareRepairSessionExport } from './repair-session.js';
 import { PHYSICS_CONFIG, DEFAULT_PEG_RADIUS } from './physics.js';
 import { FLIPPER_DEFAULTS, createDefaultFlipperConfig, normalizeFlipperConfig } from './flipper-defaults.js';
 import {
@@ -1735,6 +1735,7 @@ class PeggleApp {
 
     const setScale = (v) => {
       if (!this.editor) return;
+      if (!Number.isFinite(v)) return;
       const clamped = Math.max(0.5, Math.min(7.0, v));
       const level = this.editor.levelManager.getCurrentLevel();
       if (!level) return;
@@ -1817,6 +1818,24 @@ class PeggleApp {
       }
       this.editor.levelManager.save();
     });
+
+    // Range input emits many input events per drag. Save once for Undo, keep
+    // live autosave, and commit only on change/blur. Capture runs before the
+    // existing handlers mutate the selected pegs (also for checkboxes).
+    for (const input of [bounceSlider, bounceInput, scaleSlider, scaleInput, disappearToggle, orangeToggle]) {
+      input.addEventListener('input', () => {
+        if (!this.editor || this.editor._researchCommandBefore) return;
+        this.editor.beginResearchCommand('edit-bumper-properties');
+        this.editor.saveUndoState();
+      }, true);
+      const finish = () => {
+        if (!this.editor) return;
+        this.editor.finishResearchCommand('edit-bumper-properties');
+        this.editor.levelManager.save();
+      };
+      input.addEventListener('change', finish);
+      input.addEventListener('blur', finish);
+    }
   }
 
   setupPortalPanel() {
@@ -3672,6 +3691,7 @@ class PeggleApp {
 
     this.mode = 'editor';
     this.editor = new Editor(this.canvas, this.levelManager);
+    this.editor.onResearchEditorCommand = () => this._autosaveRepairLevel(this.levelManager.getCurrentLevel());
     this.editor.renderer.onVerticalProgress = (progress) => {
       this.visualLayout.updateSurvivalProgressIndicator(progress);
     };
@@ -6670,6 +6690,9 @@ class PeggleApp {
     const candidate = session.candidates[session.activeIndex];
     const level = this.levelManager.getCurrentLevel();
     if (!candidate || !level || level.id !== this._repairRuntimeLevelId) return;
+    // A checkpoint (Play, Next or Export) is also a command boundary. Finalize
+    // the current gesture before taking evidence, even on pointer cancellation.
+    this.editor?.finishResearchCommand('checkpoint-boundary');
     this._captureRepairEditorHistory(candidate);
     recordRepairTransaction(candidate, this._cleanRepairRuntimeSnapshot(level, candidate));
     this._persistRepairSession(session);
@@ -6687,7 +6710,8 @@ class PeggleApp {
       if (!current || current.id !== this._repairRuntimeLevelId) return;
       const candidate = this.repairSession.candidates[this.repairSession.activeIndex];
       this._captureRepairEditorHistory(candidate);
-      recordRepairTransaction(candidate, this._cleanRepairRuntimeSnapshot(current, candidate));
+      recordRepairTransaction(candidate, this._cleanRepairRuntimeSnapshot(current, candidate), new Date().toISOString(),
+        { commandInProgress: !!this.editor?._researchCommandBefore });
       this._persistRepairSession(this.repairSession);
     });
   }
@@ -6725,7 +6749,8 @@ class PeggleApp {
     this._repairSwitching = true;
     try {
       session.comparisonView = 'play';
-      const preview = makeStandardPlayPreview(candidate.currentLevel, candidate.id);
+      const targets = makeStandardPlayPreview(candidate.baselineLevel, candidate.id).metadata.playPreview.targetMemberIds;
+      const preview = makeStandardPlayPreview(candidate.currentLevel, candidate.id, targets);
       preview.id = this._repairRuntimeLevelId;
       preview.metadata.repairSessionRuntime = { sessionId: session.sessionId, candidateId: candidate.id, view: 'play' };
       this.levelManager.levels[this.levelManager.currentLevelIndex] = preview;
@@ -6838,35 +6863,25 @@ class PeggleApp {
     this._captureRepairPanelFields();
     this._captureCurrentRepairLevel();
     const status = document.getElementById('repairSessionStatus');
-    let result;
-    try { result = finishRepairSession(session); }
-    catch (error) {
-      if (status) status.textContent = `Analysis failed: ${error.message}. Use Export draft / backup; your levels are retained.`;
-      return;
-    }
-    if (result.status !== 'complete') {
-      const summary = result.blockingFailures.slice(0, 3)
-        .map(failure => `${failure.candidateId}: ${failure.failures.join(', ')}`).join(' | ');
-      if (status) status.textContent = `Finish blocked — ${summary}. Export draft / backup сохранит всю работу независимо от проверок.`;
-      return;
-    }
-    await this._persistRepairSession(session);
-    if (session.autosave?.status === 'failed') {
-      session.finishedAt = null;
-      if (status) status.textContent = `Finish blocked — durable autosave failed: ${session.autosave.error}`;
-      return;
-    }
-    // Results contain both baseline and final native levels so the analysis can
-    // be recomputed independently. Whitespace is pure transfer overhead.
-    const blob = new Blob([JSON.stringify(result)], { type: 'application/json' });
+    const { result, text, filename } = prepareRepairSessionExport(session);
+    // Initiate the download inside the click gesture, BEFORE awaiting storage.
+    // Keep the session available: browsers do not confirm that a file reached disk.
+    const blob = new Blob([text], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = `${session.sessionId.replace(/[^a-z0-9_-]/gi, '_')}-result.json`;
-    anchor.click();
-    URL.revokeObjectURL(url);
-    if (status) status.textContent = 'All gates passed. One result file exported.';
-    this._endRepairSession();
+    anchor.download = filename;
+    try { anchor.click(); }
+    catch (error) {
+      if (status) status.textContent = `Download failed: ${error.message}. Session retained; retry Export draft / backup.`;
+      return;
+    } finally { setTimeout(() => URL.revokeObjectURL(url), 1000); }
+    const warnings = result.exportError || (result.blockingFailures || []).map(f => `${f.candidateId}: ${f.failures.join(', ')}`).join(' | ');
+    session.lastExport = { at: new Date().toISOString(), filename, diagnosticStatus: result.status };
+    session.finishedAt = null;
+    if (status) status.textContent = `Download requested: ${filename}. Проверь файл в загрузках. Сессия сохранена и остаётся открытой.${warnings ? ` Проверки НЕ пройдены: ${warnings}` : ' Все проверки пройдены.'}`;
+    await this._persistRepairSession(session);
+    if (session.autosave?.status === 'failed' && status) status.textContent += ' Autosave failed; keep the downloaded file as your backup.';
   }
 
   _exportRepairDraft() {

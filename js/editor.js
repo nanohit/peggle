@@ -323,6 +323,7 @@ export class Editor {
         if (handle && Utils.distance(pos.x, pos.y, handle.x, handle.y) < 15) {
           // If only bumpers are selected, use handle for scaling instead of rotation
           if (this.isSelectionAllBumpers()) {
+            this.beginResearchCommand('resize-bumpers');
             this.interactionType = 'bumperScale';
             this.rotationCenter = this.getSelectionCenter();
             this._bumperScaleStartDist = Utils.distance(pos.x, pos.y, this.rotationCenter.x, this.rotationCenter.y);
@@ -619,6 +620,7 @@ export class Editor {
           break;
 
         case 'bumperScale':
+          this.finishResearchCommand('resize-bumpers');
           this.levelManager.save();
           break;
           
@@ -1186,6 +1188,7 @@ export class Editor {
     const level = this.levelManager.getCurrentLevel();
     if (!level) return;
     if (!this._researchCommandBefore) {
+      ensureLevelSemanticIdentity(level);
       this._researchCommandBefore = captureBezierSemanticState(level);
       this._researchCommandHints = [];
     }
@@ -3499,6 +3502,8 @@ export class Editor {
   }
 
   setSelectedBumperBounce(bounce) {
+    if (!Number.isFinite(bounce)) return;
+    bounce = Utils.clamp(bounce, 0.5, 7.0);
     const level = this.levelManager.getCurrentLevel();
     if (!level) return;
     for (const pegId of this.selectedPegIds) {

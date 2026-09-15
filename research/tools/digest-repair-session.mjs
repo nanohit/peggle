@@ -202,9 +202,17 @@ function summarizeFallbackChanges(changes) {
 }
 
 function compactChanges(changes) {
+  if (Array.isArray(changes)) return changes.map(change => ({ index: change.index,
+    ...(change.before ? { before: compactMember(change.before) } : {}),
+    ...(change.after ? { after: compactMember(change.after) } : {}) }));
   return Object.fromEntries(Object.entries(changes || {}).map(([key, change]) => [key, {
-    from: clone(change?.from), to: clone(change?.to)
+    from: clone(change?.from), to: clone(change?.to), ...(change?.remove ? { remove: true } : {})
   }]));
+}
+
+function compactMember(member) {
+  return { type: member.type, shape: member.shape, x: round(member.x, 1), y: round(member.y, 1),
+    ...(Object.keys(member.properties || {}).length ? { properties: roundDeep(member.properties) } : {}) };
 }
 
 function compactCurvePoints(curve) {
@@ -353,7 +361,7 @@ function selectOperationDetails(operations, limit = 3) {
 }
 
 function transactionHints(transaction) {
-  return (transaction?.patch?.hints || transaction?.hints || []).map(String);
+  return [...new Set([...(transaction?.patch?.hints || []), ...(transaction?.hints || [])])].map(String);
 }
 
 function summarizeSequence(operationSequence, detailLimit = 24) {
@@ -362,6 +370,7 @@ function summarizeSequence(operationSequence, detailLimit = 24) {
     return {
       seq: Number.isInteger(transaction.sequence) ? transaction.sequence : index,
       editorSeq: Number.isInteger(transaction.editorSequence) ? transaction.editorSequence : null,
+      source: transaction.source || 'legacy-unspecified',
       hints: transactionHints(transaction),
       retracted: transaction.retracted === true,
       types: Object.fromEntries(tally(operations.map(operation => operation.type || 'unknown'))),
@@ -372,12 +381,18 @@ function summarizeSequence(operationSequence, detailLimit = 24) {
     };
   });
   const aggregate = {
+    countingScope: 'Evidence records, NOT independent author actions. Legacy state observations may overlap editor commands; final net diff is authoritative.',
+    sources: Object.fromEntries(tally(entries.map(entry => entry.source))),
+    activeEditorTypes: Object.fromEntries(tally(entries.filter(entry => !entry.retracted && entry.source === 'editor-command')
+      .flatMap(entry => Object.entries(entry.types).flatMap(([type, count]) => Array.from({ length: count }, () => type))))),
+    activeStateObservationTypes: Object.fromEntries(tally(entries.filter(entry => !entry.retracted && entry.source !== 'editor-command')
+      .flatMap(entry => Object.entries(entry.types).flatMap(([type, count]) => Array.from({ length: count }, () => type))))),
     hints: Object.fromEntries(tally(entries.flatMap(entry => entry.hints))),
     activeTypes: Object.fromEntries(tally(entries.filter(entry => !entry.retracted)
       .flatMap(entry => Object.entries(entry.types).flatMap(([type, count]) => Array.from({ length: count }, () => type))))),
     retractedTypes: Object.fromEntries(tally(entries.filter(entry => entry.retracted)
       .flatMap(entry => Object.entries(entry.types).flatMap(([type, count]) => Array.from({ length: count }, () => type))))),
-    fallbackReasons: Object.fromEntries(tally(entries
+    fallbackReasons: Object.fromEntries(tally(entries.filter(entry => !entry.retracted)
       .flatMap(entry => Object.entries(entry.fallbackReasons).flatMap(([reason, count]) => Array.from({ length: count }, () => reason)))))
   };
   const objectTouches = new Map();
@@ -392,7 +407,7 @@ function summarizeSequence(operationSequence, detailLimit = 24) {
   const runs = [];
   for (const entry of entries) {
     const signature = JSON.stringify({
-      hints: entry.hints, retracted: entry.retracted, types: entry.types,
+      source: entry.source, hints: entry.hints, retracted: entry.retracted, types: entry.types,
       objects: entry.objects, fallbackReasons: entry.fallbackReasons
     });
     const previous = runs.at(-1);
@@ -779,17 +794,18 @@ function renderMarkdown(digest) {
       for (const operation of candidate.operations) lines.push(operationLine(operation));
       lines.push('');
     }
-    lines.push(`Command sequence: ${candidate.sequence.recorded} recorded, ${candidate.sequence.active} active, ${candidate.sequence.retracted} retracted.`
+    lines.push(`Evidence sequence: ${candidate.sequence.recorded} recorded, ${candidate.sequence.active} active, ${candidate.sequence.retracted} retracted.`
       + ` ${candidate.sequence.runCount} semantic runs, ${candidate.sequence.entries.length} shown, ${candidate.sequence.omittedRuns} omitted.`
       + (candidate.sequence.collapsed ? ' Consecutive commands with identical hint, operation, target and reason were collapsed.' : ''));
-    lines.push(`Command aggregate: hints=${formatCounts(candidate.sequence.aggregate.hints)}; active types=${formatCounts(candidate.sequence.aggregate.activeTypes)}; retracted types=${formatCounts(candidate.sequence.aggregate.retractedTypes)}; fallback=${formatCounts(candidate.sequence.aggregate.fallbackReasons)}; most touched=${candidate.sequence.aggregate.mostTouchedObjects.map(entry => `${entry.objectId}:${entry.count}`).join('|') || 'none'}${candidate.sequence.aggregate.omittedTouchedObjects ? ` (+${candidate.sequence.aggregate.omittedTouchedObjects} objects)` : ''}.`);
+    lines.push(candidate.sequence.aggregate.countingScope);
+    lines.push(`Sources: ${formatCounts(candidate.sequence.aggregate.sources)}; active editor operations=${formatCounts(candidate.sequence.aggregate.activeEditorTypes)}; active state observations=${formatCounts(candidate.sequence.aggregate.activeStateObservationTypes)}; retracted=${formatCounts(candidate.sequence.aggregate.retractedTypes)}.`);
     if (candidate.sequence.omittedRuns) lines.push(`Run selection: ${candidate.sequence.selection}.`);
     lines.push('');
     lines.push('```text');
     for (const entry of candidate.sequence.entries) {
       const range = entry.runLength > 1 ? `${entry.seq}-${entry.endSeq} (x${entry.runLength})` : String(entry.seq);
       lines.push(`${range.padStart(10)}  ${entry.retracted ? '[retracted] ' : ''}`
-        + `${entry.hints.join(',') || '(no hint)'}  ${formatCounts(entry.types)}`
+        + `[${entry.source}] ${entry.hints.join(',') || '(no hint)'}  ${formatCounts(entry.types)}`
         + `${entry.objects.length ? `  [${entry.objects.join(',')}]` : ''}`
         + `${Object.keys(entry.fallbackReasons).length ? `  fallback:${formatCounts(entry.fallbackReasons)}` : ''}`);
     }
@@ -956,7 +972,8 @@ async function main() {
     }));
   const digest = {
     format: 'repair-session-digest',
-    version: 3,
+    version: 4,
+    semanticScope: 'Composition plus bumper radius, bounce and persistence. Older archived summaries omitted bumper properties; a recomputation mismatch is reported, not silently repaired.',
     sessionId: result.sessionId,
     seed: result.seed,
     resultStatus: result.status || 'unknown',
@@ -1007,7 +1024,7 @@ async function main() {
       'raw per-command patch bodies (hint, operation counts, target ids, fallback reasons and retraction are retained; exact payloads are available through --command)',
       'full relational detail for low-salience changed objects when a candidate changes more than three objects (complete distributions are retained; exact relations are available through --relations/--relation)',
       'verbose gate evidence such as every offending member id (status, failure codes and key counts are retained)',
-      'per-member coordinates except aggregate fallback displacement and added/deleted counts',
+      'per-member coordinates except compact changed-member payloads and fallback displacement summaries',
       'level configuration outside the composition semantic state'
     ]
   };

@@ -1,0 +1,12 @@
+{
+  "format": "external-support-rules",
+  "version": 1,
+  "revision": "external-support-v1",
+  "hypothesis": "Contact sites outside the frame and beneath its exit may reduce early empty falls. Test position first, then the side-bumper contact package; neither is established as better.",
+  "upperNormalizedY": -0.8,
+  "horizontalGapPx": 30,
+  "bottomGapPx": 25,
+  "minimumWallGapPx": 4,
+  "bumperScale": 1.6,
+  "bumperBounce": 3.2
+}
