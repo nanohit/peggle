@@ -24,14 +24,13 @@ Classic Peggle gameplay includes orange targets, blue/green/purple pegs, obstacl
 
 Player progress and editor data are stored locally. Remote levels, campaigns, characters, configuration, and assets are served by Vercel Functions with Redis/Google Drive mirroring and Bunny CDN delivery with fallbacks.
 
-## Visual branch
+## Visuals
 
 [`Better-Visuals`](https://github.com/nanohit/peggle/tree/Better-Visuals) is the visual-rendering track for the player:
 
-- `NEON DROP` procedural machine skin built from CSS and Canvas2D materials.
-- WebGL2 playfield with height-field geometry, deferred lighting, radiance cascades, real shadows, bloom, tone mapping, and Canvas2D fallback.
+- Procedural machine skin built from CSS and Canvas2D materials.
+- WebGL2 playfield with height-field geometry, deferred lighting, radiance cascades, shadows, bloom, tone mapping, and Canvas2D fallback.
 - Quality profiles, live lighting tuner, and transition-safe layer capture/reveal to prevent stale or ghost frames.
-- Small Vercel shell backed by an immutable jsDelivr bundle and CDN player-data snapshots; same-origin APIs remain the fallback.
 
 Useful branch checks and labs include `npm run test:cdn-shell`, `test/playfield-lab.html`, `test/renderer-lab.html`, `test/gpu-benchmark.html`, `test/shader-check.html`, and `test/tuner-check.html`.
 
@@ -40,27 +39,7 @@ git switch Better-Visuals
 npm run dev
 ```
 
-The branch is intentionally separate from `main` until its rendering changes are merged.
-
-## Local development
-
-Requirements: Node.js, npm, and Python 3.
-
-```bash
-npm install
-./dev.sh
-```
-
-Open `http://localhost:8080/` for the editor or `http://localhost:8080/player.html` for the player. `dev.sh` builds and watches the player bundle, then proxies `/api/*` to the shared Vercel backend.
-
-## Checks
-
-```bash
-npm run check
-npm run test:destruction
-npm run test:player-regression
-npm run test:assets        # requires asset-store environment variables
-```
+The branch is separate from `main` until its rendering changes are merged.
 
 ## Structure
 
