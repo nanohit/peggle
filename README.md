@@ -1,4 +1,4 @@
-# Peggle
+# Alea
 
 Mobile-first browser game inspired by Peggle, with a touch-friendly level editor.
 
