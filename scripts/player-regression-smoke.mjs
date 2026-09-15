@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 
 globalThis.localStorage = {
   getItem() { return null; },
@@ -112,8 +113,27 @@ function testRendererKeepsGameplayQualityStableAcrossHitBursts() {
   const { canvas } = makeCanvasHarness();
   const renderer = new Renderer(canvas);
   assert.equal(renderer._gpuPlayfield.adaptiveQuality, false);
+  assert.equal(renderer._gpuPlayfield.quality, 'high');
+  renderer.setPerformanceProfile('lite');
+  assert.equal(renderer.performanceProfile, 'lite');
+  assert.equal(renderer._gpuPlayfield.quality, 'high');
   assert.equal('_bucketImg' in renderer, false);
   renderer.dispose();
+}
+
+function testDisabledAdaptiveQualityIgnoresThirtyFpsCadence() {
+  const gpu = new GpuPlayfieldRenderer({ adaptiveQuality: false });
+  for (let frame = 0; frame < 100; frame++) {
+    gpu._observeFrameCadence(1 / 30);
+  }
+  assert.equal(gpu.quality, 'high');
+  assert.equal(gpu._cadenceSamples, 0);
+}
+
+async function testLastPegDoesNotQueueVictoryWarp() {
+  const gameSource = await readFile(new URL('../js/game.js', import.meta.url), 'utf8');
+  assert.equal(gameSource.includes("kind: 'victorySplash'"), false);
+  assert.equal(gameSource.includes('queueVictoryShockwave('), false);
 }
 
 function testRendererDisposeClearsSharedCanvasState() {
@@ -141,6 +161,7 @@ function testTransitionCaptureSettlesBounceLighting() {
   gpu.height = 600;
   gpu._targets = { lit: 'lit-a', litPrev: 'lit-b' };
   gpu._temporalSettleFrames = 8;
+  gpu._renderDistanceField = rebuild => calls.push(`distance:${rebuild}`);
   gpu._renderCascades = () => calls.push('cascade');
   gpu._renderShading = () => calls.push('shade');
   gpu._renderBloom = () => calls.push('bloom');
@@ -148,8 +169,14 @@ function testTransitionCaptureSettlesBounceLighting() {
   const targetCtx = { drawImage() { calls.push('copy'); } };
 
   assert.equal(gpu.drawTo2D(targetCtx, 0, 0, 400, 600, { settleLightingFrames: 3 }), true);
+  assert.equal(calls.filter(call => call === 'distance:false').length, 3);
   assert.equal(calls.filter(call => call === 'cascade').length, 3);
   assert.equal(calls.filter(call => call === 'shade').length, 3);
+  assert.deepEqual(calls.slice(0, 9), [
+    'distance:false', 'cascade', 'shade',
+    'distance:false', 'cascade', 'shade',
+    'distance:false', 'cascade', 'shade'
+  ]);
   assert.equal(calls.filter(call => call === 'bloom').length, 1);
   assert.equal(calls.at(-3), 'composite:lit-a');
   assert.deepEqual(calls.slice(-2), ['flush', 'copy']);
@@ -295,6 +322,8 @@ const tests = [
   testLimePegAliasNormalizesToGreen,
   testPortraitControllerTreatsAssetObjectsAsAuthoredSlots,
   testRendererKeepsGameplayQualityStableAcrossHitBursts,
+  testDisabledAdaptiveQualityIgnoresThirtyFpsCadence,
+  testLastPegDoesNotQueueVictoryWarp,
   testRendererDisposeClearsSharedCanvasState,
   testTransitionCaptureSettlesBounceLighting,
   testGpuOwnershipClearsLegacyForeground,

@@ -1921,7 +1921,7 @@ export class GpuPlayfieldRenderer {
   // use sustained delivered cadence, never a device-name guess, as the fallback
   // signal. It is deliberately slower to react than the direct GPU timer.
   _observeFrameCadence(frameDeltaSeconds) {
-    if (this._gpuTimer || this.quality === 'low') return;
+    if (!this.adaptiveQuality || this._gpuTimer || this.quality === 'low') return;
     const milliseconds = Number(frameDeltaSeconds) * 1000;
     if (!Number.isFinite(milliseconds) || milliseconds < 8 || milliseconds > 80) return;
     if (typeof document !== 'undefined' && document.hidden) return;
@@ -2997,9 +2997,12 @@ export class GpuPlayfieldRenderer {
     if (settleFrames > 0) {
       const targets = this._targets;
       for (let frame = 0; frame < settleFrames; frame++) {
-        // Re-run both the light field and board-bounce passes. Shading alone
-        // leaves the next normal render free to change the cascade immediately
-        // after the transition strip is removed.
+        // The downsampled scene contains the previous lit frame as bounce.
+        // Rebuilding only cascades + shading settles against a stale scene,
+        // then the first live render rebuilds it and visibly changes the rig.
+        // Advance the complete feedback cycle used by render() so the captured
+        // destination and the revealed live board converge to the same light.
+        this._renderDistanceField(false);
         this._renderCascades(true);
         this._renderShading();
         if (frame === settleFrames - 1) this._renderBloom();

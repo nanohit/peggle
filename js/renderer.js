@@ -957,9 +957,12 @@ export class Renderer {
     if (nextProfile !== this.performanceProfile) {
       this.performanceProfile = nextProfile;
       this._shockwavePrewarmKey = '';
-      // The lighting solve is fragment-bound: fewer cascades and a coarser
-      // probe grid are what keep it inside frame budget on weak hardware.
-      this._gpuPlayfield?.setQuality(nextProfile === 'lite' ? 'low' : 'high');
+      // Keep the playfield at one visual quality for the lifetime of a level.
+      // The 30 Hz detector can switch this profile several seconds into play;
+      // changing the GPU backing ratio from 1.5-2x to 1x at that point makes
+      // the recessed grid physically wider and changes the solved lighting.
+      // Lite still reduces trails and legacy effects without mutating the
+      // canonical board underneath them.
     }
   }
 

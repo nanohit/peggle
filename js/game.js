@@ -2610,25 +2610,6 @@ export class Game {
     this.backgroundEvents.push(event);
   }
 
-  queueVictoryShockwave(peg, sourceBall = null) {
-    if (!peg || !Number.isFinite(peg.x) || !Number.isFinite(peg.y)) return;
-    this.queueBackgroundEvent({
-      kind: 'victorySplash',
-      x: peg.x,
-      y: peg.y,
-      radius: Math.max(156, PHYSICS_CONFIG.pegRadius * 15.5),
-      strength: 4.1,
-      burst: 3.25,
-      swirl: 1.35,
-      spread: 4.2,
-      speed: Number.isFinite(sourceBall?.vx) || Number.isFinite(sourceBall?.vy)
-        ? Utils.magnitude(sourceBall?.vx || 0, sourceBall?.vy || 0)
-        : 0,
-      normalX: 0,
-      normalY: -1
-    });
-  }
-
   queueBombTargetShockwave(peg, sourceBall = null) {
     if (!peg || !Number.isFinite(peg.x) || !Number.isFinite(peg.y)) return;
     let radius = PHYSICS_CONFIG.pegRadius * 5.2;
@@ -3082,7 +3063,6 @@ export class Game {
         ? this.getSurvivalTargetsLeft(true)
         : this.getOrangePegsLeft();
       if (targetsLeft === 0) {
-        this.queueVictoryShockwave(peg, sourceBall);
         this._startLastPegSlowmo();
         this._queuePendingEndResult('won', { readyToResolve: this.isSurvivalMode() });
         if (!this._levelClearEmitted) {
