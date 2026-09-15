@@ -1,0 +1,1189 @@
+{
+  "benchmarkId": "benchmark:preference-v2:deluxe-100",
+  "byOperator": [
+    {
+      "operator": "band-drift",
+      "originalPreferenceRate": 0.8,
+      "reviewed": 10,
+      "ties": 0
+    },
+    {
+      "operator": "fine-grid",
+      "originalPreferenceRate": 0.9,
+      "reviewed": 10,
+      "ties": 0
+    },
+    {
+      "operator": "jitter-subtle",
+      "originalPreferenceRate": 1,
+      "reviewed": 10,
+      "ties": 0
+    },
+    {
+      "operator": "lateral-bias",
+      "originalPreferenceRate": 0.5,
+      "reviewed": 10,
+      "ties": 0
+    },
+    {
+      "operator": "motif-rhythm-regularize",
+      "originalPreferenceRate": 1,
+      "reviewed": 6,
+      "ties": 0
+    },
+    {
+      "operator": "motif-rotate",
+      "originalPreferenceRate": 0.5,
+      "reviewed": 6,
+      "ties": 0
+    },
+    {
+      "operator": "motif-shift",
+      "originalPreferenceRate": 0.6,
+      "reviewed": 6,
+      "ties": 1
+    },
+    {
+      "operator": "motif-spacing-expand",
+      "originalPreferenceRate": 0.6,
+      "reviewed": 6,
+      "ties": 1
+    },
+    {
+      "operator": "motif-spacing-tighten",
+      "originalPreferenceRate": 1,
+      "reviewed": 6,
+      "ties": 0
+    },
+    {
+      "operator": "spacing-compress",
+      "originalPreferenceRate": 0.7,
+      "reviewed": 10,
+      "ties": 0
+    }
+  ],
+  "counts": {
+    "originalChosen": 60,
+    "queued": 100,
+    "referenceComparisons": 80,
+    "repeatControls": 10,
+    "reviewed": 100,
+    "ties": 2,
+    "variantChosen": 18,
+    "variantDuels": 10
+  },
+  "decisions": [
+    {
+      "choice": "right",
+      "comparisonType": "reference-vs-variant",
+      "operator": "lateral-bias",
+      "outcome": "original",
+      "pairId": "pair:fourdoors:lateral-bias",
+      "parentLevelId": "level:peggle-deluxe:fourdoors",
+      "selectedLevelId": "level:peggle-deluxe:fourdoors"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "reference-vs-variant",
+      "operator": "lateral-bias",
+      "outcome": "variant",
+      "pairId": "pair:level1:lateral-bias",
+      "parentLevelId": "level:peggle-deluxe:level1",
+      "selectedLevelId": "level:peggle-deluxe:level1:mutation:lateral-bias:deluxe-pilot-v1-1-4"
+    },
+    {
+      "choice": "right",
+      "comparisonType": "reference-vs-variant",
+      "operator": "band-drift",
+      "outcome": "variant",
+      "pairId": "pair:crisscross:band-drift",
+      "parentLevelId": "level:peggle-deluxe:crisscross",
+      "selectedLevelId": "level:peggle-deluxe:crisscross:mutation:band-drift:deluxe-pilot-v1-3-3"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "reference-vs-variant",
+      "operator": "jitter-subtle",
+      "outcome": "original",
+      "pairId": "pair:blocks:jitter-subtle",
+      "parentLevelId": "level:peggle-deluxe:blocks",
+      "selectedLevelId": "level:peggle-deluxe:blocks"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "reference-vs-variant",
+      "operator": "jitter-subtle",
+      "outcome": "original",
+      "pairId": "pair:baseball:jitter-subtle",
+      "parentLevelId": "level:peggle-deluxe:baseball",
+      "selectedLevelId": "level:peggle-deluxe:baseball"
+    },
+    {
+      "choice": "right",
+      "comparisonType": "reference-vs-variant",
+      "operator": "fine-grid",
+      "outcome": "original",
+      "pairId": "pair:blocks:fine-grid",
+      "parentLevelId": "level:peggle-deluxe:blocks",
+      "selectedLevelId": "level:peggle-deluxe:blocks"
+    },
+    {
+      "choice": "right",
+      "comparisonType": "reference-vs-variant",
+      "operator": "band-drift",
+      "outcome": "original",
+      "pairId": "pair:blocks:band-drift",
+      "parentLevelId": "level:peggle-deluxe:blocks",
+      "selectedLevelId": "level:peggle-deluxe:blocks"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "reference-vs-variant",
+      "operator": "fine-grid",
+      "outcome": "original",
+      "pairId": "pair:level1:fine-grid",
+      "parentLevelId": "level:peggle-deluxe:level1",
+      "selectedLevelId": "level:peggle-deluxe:level1"
+    },
+    {
+      "choice": "right",
+      "comparisonType": "reference-vs-variant",
+      "operator": "spacing-compress",
+      "outcome": "variant",
+      "pairId": "pair:fourdoors:spacing-compress",
+      "parentLevelId": "level:peggle-deluxe:fourdoors",
+      "selectedLevelId": "level:peggle-deluxe:fourdoors:mutation:spacing-compress:deluxe-pilot-v1-4-1"
+    },
+    {
+      "choice": "right",
+      "comparisonType": "reference-vs-variant",
+      "operator": "spacing-compress",
+      "outcome": "original",
+      "pairId": "pair:dice:spacing-compress",
+      "parentLevelId": "level:peggle-deluxe:dice",
+      "selectedLevelId": "level:peggle-deluxe:dice"
+    },
+    {
+      "choice": "right",
+      "comparisonType": "reference-vs-variant",
+      "operator": "lateral-bias",
+      "outcome": "original",
+      "pairId": "pair:dice:lateral-bias",
+      "parentLevelId": "level:peggle-deluxe:dice",
+      "selectedLevelId": "level:peggle-deluxe:dice"
+    },
+    {
+      "choice": "right",
+      "comparisonType": "reference-vs-variant",
+      "operator": "fine-grid",
+      "outcome": "original",
+      "pairId": "pair:crisscross:fine-grid",
+      "parentLevelId": "level:peggle-deluxe:crisscross",
+      "selectedLevelId": "level:peggle-deluxe:crisscross"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "reference-vs-variant",
+      "operator": "jitter-subtle",
+      "outcome": "original",
+      "pairId": "pair:aim:jitter-subtle",
+      "parentLevelId": "level:peggle-deluxe:aim",
+      "selectedLevelId": "level:peggle-deluxe:aim"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "reference-vs-variant",
+      "operator": "spacing-compress",
+      "outcome": "original",
+      "pairId": "pair:level1:spacing-compress",
+      "parentLevelId": "level:peggle-deluxe:level1",
+      "selectedLevelId": "level:peggle-deluxe:level1"
+    },
+    {
+      "choice": "right",
+      "comparisonType": "reference-vs-variant",
+      "operator": "jitter-subtle",
+      "outcome": "original",
+      "pairId": "pair:crisscross:jitter-subtle",
+      "parentLevelId": "level:peggle-deluxe:crisscross",
+      "selectedLevelId": "level:peggle-deluxe:crisscross"
+    },
+    {
+      "choice": "right",
+      "comparisonType": "reference-vs-variant",
+      "operator": "fine-grid",
+      "outcome": "variant",
+      "pairId": "pair:aim:fine-grid",
+      "parentLevelId": "level:peggle-deluxe:aim",
+      "selectedLevelId": "level:peggle-deluxe:aim:mutation:fine-grid:deluxe-pilot-v1-6-2"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "reference-vs-variant",
+      "operator": "fine-grid",
+      "outcome": "original",
+      "pairId": "pair:baseball:fine-grid",
+      "parentLevelId": "level:peggle-deluxe:baseball",
+      "selectedLevelId": "level:peggle-deluxe:baseball"
+    },
+    {
+      "choice": "right",
+      "comparisonType": "reference-vs-variant",
+      "operator": "spacing-compress",
+      "outcome": "variant",
+      "pairId": "pair:crisscross:spacing-compress",
+      "parentLevelId": "level:peggle-deluxe:crisscross",
+      "selectedLevelId": "level:peggle-deluxe:crisscross:mutation:spacing-compress:deluxe-pilot-v1-3-1"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "reference-vs-variant",
+      "operator": "band-drift",
+      "outcome": "original",
+      "pairId": "pair:level1:band-drift",
+      "parentLevelId": "level:peggle-deluxe:level1",
+      "selectedLevelId": "level:peggle-deluxe:level1"
+    },
+    {
+      "choice": "right",
+      "comparisonType": "reference-vs-variant",
+      "operator": "lateral-bias",
+      "outcome": "original",
+      "pairId": "pair:plinko:lateral-bias",
+      "parentLevelId": "level:peggle-deluxe:plinko",
+      "selectedLevelId": "level:peggle-deluxe:plinko"
+    },
+    {
+      "choice": "tie",
+      "comparisonType": "reference-vs-variant",
+      "operator": "motif-shift",
+      "outcome": "tie",
+      "pairId": "pair:fourdoors:motif-shift",
+      "parentLevelId": "level:peggle-deluxe:fourdoors",
+      "selectedLevelId": null
+    },
+    {
+      "choice": "right",
+      "comparisonType": "reference-vs-variant",
+      "operator": "spacing-compress",
+      "outcome": "original",
+      "pairId": "pair:blindfold:spacing-compress",
+      "parentLevelId": "level:peggle-deluxe:blindfold",
+      "selectedLevelId": "level:peggle-deluxe:blindfold"
+    },
+    {
+      "choice": "tie",
+      "comparisonType": "reference-vs-variant",
+      "operator": "motif-spacing-expand",
+      "outcome": "tie",
+      "pairId": "pair:holes:motif-spacing-expand",
+      "parentLevelId": "level:peggle-deluxe:holes",
+      "selectedLevelId": null
+    },
+    {
+      "choice": "right",
+      "comparisonType": "reference-vs-variant",
+      "operator": "motif-shift",
+      "outcome": "original",
+      "pairId": "pair:dice:motif-shift",
+      "parentLevelId": "level:peggle-deluxe:dice",
+      "selectedLevelId": "level:peggle-deluxe:dice"
+    },
+    {
+      "choice": "right",
+      "comparisonType": "variant-vs-variant",
+      "leftOperator": "lateral-bias",
+      "outcome": "selected-candidate",
+      "pairId": "pair:holes:variant-duel:10",
+      "parentLevelId": "level:peggle-deluxe:holes",
+      "repeatOf": null,
+      "rightOperator": "motif-rotate",
+      "selectedLevelId": "level:peggle-deluxe:holes:mutation:motif-rotate:deluxe-pilot-v1-11-7",
+      "selectedOperator": "motif-rotate"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "reference-vs-variant",
+      "operator": "motif-spacing-expand",
+      "outcome": "original",
+      "pairId": "pair:dice:motif-spacing-expand",
+      "parentLevelId": "level:peggle-deluxe:dice",
+      "selectedLevelId": "level:peggle-deluxe:dice"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "reference-vs-variant",
+      "operator": "fine-grid",
+      "outcome": "original",
+      "pairId": "pair:level3:fine-grid",
+      "parentLevelId": "level:peggle-deluxe:level3",
+      "selectedLevelId": "level:peggle-deluxe:level3"
+    },
+    {
+      "choice": "right",
+      "comparisonType": "repeat-control",
+      "leftOperator": "band-drift",
+      "outcome": "selected-candidate",
+      "pairId": "pair:repeat-control:01:pair-crisscross-band-drift",
+      "parentLevelId": null,
+      "repeatOf": "pair:crisscross:band-drift",
+      "rightOperator": null,
+      "selectedLevelId": "level:peggle-deluxe:crisscross",
+      "selectedOperator": null
+    },
+    {
+      "choice": "right",
+      "comparisonType": "reference-vs-variant",
+      "operator": "motif-rotate",
+      "outcome": "original",
+      "pairId": "pair:spiderweb:motif-rotate",
+      "parentLevelId": "level:peggle-deluxe:spiderweb",
+      "selectedLevelId": "level:peggle-deluxe:spiderweb"
+    },
+    {
+      "choice": "right",
+      "comparisonType": "reference-vs-variant",
+      "operator": "motif-rotate",
+      "outcome": "original",
+      "pairId": "pair:baseball:motif-rotate",
+      "parentLevelId": "level:peggle-deluxe:baseball",
+      "selectedLevelId": "level:peggle-deluxe:baseball"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "reference-vs-variant",
+      "operator": "motif-rotate",
+      "outcome": "variant",
+      "pairId": "pair:blockers:motif-rotate",
+      "parentLevelId": "level:peggle-deluxe:blockers",
+      "selectedLevelId": "level:peggle-deluxe:blockers:mutation:motif-rotate:deluxe-pilot-v1-9-7"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "reference-vs-variant",
+      "operator": "jitter-subtle",
+      "outcome": "original",
+      "pairId": "pair:holes:jitter-subtle",
+      "parentLevelId": "level:peggle-deluxe:holes",
+      "selectedLevelId": "level:peggle-deluxe:holes"
+    },
+    {
+      "choice": "right",
+      "comparisonType": "reference-vs-variant",
+      "operator": "motif-spacing-tighten",
+      "outcome": "original",
+      "pairId": "pair:cards:motif-spacing-tighten",
+      "parentLevelId": "level:peggle-deluxe:cards",
+      "selectedLevelId": "level:peggle-deluxe:cards"
+    },
+    {
+      "choice": "right",
+      "comparisonType": "reference-vs-variant",
+      "operator": "lateral-bias",
+      "outcome": "variant",
+      "pairId": "pair:aim:lateral-bias",
+      "parentLevelId": "level:peggle-deluxe:aim",
+      "selectedLevelId": "level:peggle-deluxe:aim:mutation:lateral-bias:deluxe-pilot-v1-6-4"
+    },
+    {
+      "choice": "right",
+      "comparisonType": "reference-vs-variant",
+      "operator": "motif-rhythm-regularize",
+      "outcome": "original",
+      "pairId": "pair:spiderweb:motif-rhythm-regularize",
+      "parentLevelId": "level:peggle-deluxe:spiderweb",
+      "selectedLevelId": "level:peggle-deluxe:spiderweb"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "repeat-control",
+      "leftOperator": null,
+      "outcome": "selected-candidate",
+      "pairId": "pair:repeat-control:02:pair-crisscross-jitter-subtle",
+      "parentLevelId": null,
+      "repeatOf": "pair:crisscross:jitter-subtle",
+      "rightOperator": "jitter-subtle",
+      "selectedLevelId": "level:peggle-deluxe:crisscross",
+      "selectedOperator": null
+    },
+    {
+      "choice": "right",
+      "comparisonType": "reference-vs-variant",
+      "operator": "lateral-bias",
+      "outcome": "variant",
+      "pairId": "pair:level3:lateral-bias",
+      "parentLevelId": "level:peggle-deluxe:level3",
+      "selectedLevelId": "level:peggle-deluxe:level3:mutation:lateral-bias:deluxe-pilot-v1-12-4"
+    },
+    {
+      "choice": "right",
+      "comparisonType": "reference-vs-variant",
+      "operator": "motif-spacing-tighten",
+      "outcome": "original",
+      "pairId": "pair:blockers:motif-spacing-tighten",
+      "parentLevelId": "level:peggle-deluxe:blockers",
+      "selectedLevelId": "level:peggle-deluxe:blockers"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "reference-vs-variant",
+      "operator": "motif-rhythm-regularize",
+      "outcome": "original",
+      "pairId": "pair:level3:motif-rhythm-regularize",
+      "parentLevelId": "level:peggle-deluxe:level3",
+      "selectedLevelId": "level:peggle-deluxe:level3"
+    },
+    {
+      "choice": "right",
+      "comparisonType": "reference-vs-variant",
+      "operator": "jitter-subtle",
+      "outcome": "original",
+      "pairId": "pair:cards:jitter-subtle",
+      "parentLevelId": "level:peggle-deluxe:cards",
+      "selectedLevelId": "level:peggle-deluxe:cards"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "reference-vs-variant",
+      "operator": "motif-spacing-expand",
+      "outcome": "original",
+      "pairId": "pair:plinko:motif-spacing-expand",
+      "parentLevelId": "level:peggle-deluxe:plinko",
+      "selectedLevelId": "level:peggle-deluxe:plinko"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "reference-vs-variant",
+      "operator": "spacing-compress",
+      "outcome": "original",
+      "pairId": "pair:sideaction:spacing-compress",
+      "parentLevelId": "level:peggle-deluxe:sideaction",
+      "selectedLevelId": "level:peggle-deluxe:sideaction"
+    },
+    {
+      "choice": "right",
+      "comparisonType": "variant-vs-variant",
+      "leftOperator": "band-drift",
+      "outcome": "selected-candidate",
+      "pairId": "pair:blockers:variant-duel:04",
+      "parentLevelId": "level:peggle-deluxe:blockers",
+      "repeatOf": null,
+      "rightOperator": "motif-rhythm-regularize",
+      "selectedLevelId": "level:peggle-deluxe:blockers:mutation:motif-rhythm-regularize:deluxe-pilot-v1-9-9",
+      "selectedOperator": "motif-rhythm-regularize"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "repeat-control",
+      "leftOperator": null,
+      "outcome": "selected-candidate",
+      "pairId": "pair:repeat-control:03:pair-dice-lateral-bias",
+      "parentLevelId": null,
+      "repeatOf": "pair:dice:lateral-bias",
+      "rightOperator": "lateral-bias",
+      "selectedLevelId": "level:peggle-deluxe:dice",
+      "selectedOperator": null
+    },
+    {
+      "choice": "left",
+      "comparisonType": "variant-vs-variant",
+      "leftOperator": "motif-spacing-expand",
+      "outcome": "selected-candidate",
+      "pairId": "pair:blindfold:variant-duel:03",
+      "parentLevelId": "level:peggle-deluxe:blindfold",
+      "repeatOf": null,
+      "rightOperator": "fine-grid",
+      "selectedLevelId": "level:peggle-deluxe:blindfold:mutation:motif-spacing-expand:deluxe-pilot-v1-8-6",
+      "selectedOperator": "motif-spacing-expand"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "variant-vs-variant",
+      "leftOperator": "motif-spacing-tighten",
+      "outcome": "selected-candidate",
+      "pairId": "pair:cards:variant-duel:06",
+      "parentLevelId": "level:peggle-deluxe:cards",
+      "repeatOf": null,
+      "rightOperator": "jitter-subtle",
+      "selectedLevelId": "level:peggle-deluxe:cards:mutation:motif-spacing-tighten:deluxe-pilot-v1-10-5",
+      "selectedOperator": "motif-spacing-tighten"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "reference-vs-variant",
+      "operator": "spacing-compress",
+      "outcome": "variant",
+      "pairId": "pair:cards:spacing-compress",
+      "parentLevelId": "level:peggle-deluxe:cards",
+      "selectedLevelId": "level:peggle-deluxe:cards:mutation:spacing-compress:deluxe-pilot-v1-10-1"
+    },
+    {
+      "choice": "right",
+      "comparisonType": "reference-vs-variant",
+      "operator": "spacing-compress",
+      "outcome": "original",
+      "pairId": "pair:spiderweb:spacing-compress",
+      "parentLevelId": "level:peggle-deluxe:spiderweb",
+      "selectedLevelId": "level:peggle-deluxe:spiderweb"
+    },
+    {
+      "choice": "right",
+      "comparisonType": "reference-vs-variant",
+      "operator": "spacing-compress",
+      "outcome": "original",
+      "pairId": "pair:holes:spacing-compress",
+      "parentLevelId": "level:peggle-deluxe:holes",
+      "selectedLevelId": "level:peggle-deluxe:holes"
+    },
+    {
+      "choice": "right",
+      "comparisonType": "reference-vs-variant",
+      "operator": "motif-shift",
+      "outcome": "variant",
+      "pairId": "pair:crisscross:motif-shift",
+      "parentLevelId": "level:peggle-deluxe:crisscross",
+      "selectedLevelId": "level:peggle-deluxe:crisscross:mutation:motif-shift:deluxe-pilot-v1-3-8"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "reference-vs-variant",
+      "operator": "lateral-bias",
+      "outcome": "variant",
+      "pairId": "pair:spiderweb:lateral-bias",
+      "parentLevelId": "level:peggle-deluxe:spiderweb",
+      "selectedLevelId": "level:peggle-deluxe:spiderweb:mutation:lateral-bias:deluxe-pilot-v1-15-4"
+    },
+    {
+      "choice": "right",
+      "comparisonType": "repeat-control",
+      "leftOperator": "fine-grid",
+      "outcome": "selected-candidate",
+      "pairId": "pair:repeat-control:04:pair-level1-fine-grid",
+      "parentLevelId": null,
+      "repeatOf": "pair:level1:fine-grid",
+      "rightOperator": null,
+      "selectedLevelId": "level:peggle-deluxe:level1",
+      "selectedOperator": null
+    },
+    {
+      "choice": "right",
+      "comparisonType": "reference-vs-variant",
+      "operator": "motif-rhythm-regularize",
+      "outcome": "original",
+      "pairId": "pair:level5:motif-rhythm-regularize",
+      "parentLevelId": "level:peggle-deluxe:level5",
+      "selectedLevelId": "level:peggle-deluxe:level5"
+    },
+    {
+      "choice": "right",
+      "comparisonType": "reference-vs-variant",
+      "operator": "band-drift",
+      "outcome": "original",
+      "pairId": "pair:baseball:band-drift",
+      "parentLevelId": "level:peggle-deluxe:baseball",
+      "selectedLevelId": "level:peggle-deluxe:baseball"
+    },
+    {
+      "choice": "right",
+      "comparisonType": "reference-vs-variant",
+      "operator": "motif-shift",
+      "outcome": "original",
+      "pairId": "pair:blocks:motif-shift",
+      "parentLevelId": "level:peggle-deluxe:blocks",
+      "selectedLevelId": "level:peggle-deluxe:blocks"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "reference-vs-variant",
+      "operator": "fine-grid",
+      "outcome": "original",
+      "pairId": "pair:level5:fine-grid",
+      "parentLevelId": "level:peggle-deluxe:level5",
+      "selectedLevelId": "level:peggle-deluxe:level5"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "variant-vs-variant",
+      "leftOperator": "spacing-compress",
+      "outcome": "selected-candidate",
+      "pairId": "pair:baseball:variant-duel:02",
+      "parentLevelId": "level:peggle-deluxe:baseball",
+      "repeatOf": null,
+      "rightOperator": "motif-shift",
+      "selectedLevelId": "level:peggle-deluxe:baseball:mutation:spacing-compress:deluxe-pilot-v1-0-1",
+      "selectedOperator": "spacing-compress"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "reference-vs-variant",
+      "operator": "band-drift",
+      "outcome": "original",
+      "pairId": "pair:aim:band-drift",
+      "parentLevelId": "level:peggle-deluxe:aim",
+      "selectedLevelId": "level:peggle-deluxe:aim"
+    },
+    {
+      "choice": "right",
+      "comparisonType": "reference-vs-variant",
+      "operator": "motif-spacing-expand",
+      "outcome": "variant",
+      "pairId": "pair:level5:motif-spacing-expand",
+      "parentLevelId": "level:peggle-deluxe:level5",
+      "selectedLevelId": "level:peggle-deluxe:level5:mutation:motif-spacing-expand:deluxe-pilot-v1-13-6"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "repeat-control",
+      "leftOperator": null,
+      "outcome": "selected-candidate",
+      "pairId": "pair:repeat-control:05:pair-blocks-band-drift",
+      "parentLevelId": null,
+      "repeatOf": "pair:blocks:band-drift",
+      "rightOperator": "band-drift",
+      "selectedLevelId": "level:peggle-deluxe:blocks",
+      "selectedOperator": null
+    },
+    {
+      "choice": "left",
+      "comparisonType": "reference-vs-variant",
+      "operator": "lateral-bias",
+      "outcome": "original",
+      "pairId": "pair:sideaction:lateral-bias",
+      "parentLevelId": "level:peggle-deluxe:sideaction",
+      "selectedLevelId": "level:peggle-deluxe:sideaction"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "reference-vs-variant",
+      "operator": "motif-shift",
+      "outcome": "variant",
+      "pairId": "pair:holes:motif-shift",
+      "parentLevelId": "level:peggle-deluxe:holes",
+      "selectedLevelId": "level:peggle-deluxe:holes:mutation:motif-shift:deluxe-pilot-v1-11-8"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "reference-vs-variant",
+      "operator": "motif-rhythm-regularize",
+      "outcome": "original",
+      "pairId": "pair:plinko:motif-rhythm-regularize",
+      "parentLevelId": "level:peggle-deluxe:plinko",
+      "selectedLevelId": "level:peggle-deluxe:plinko"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "variant-vs-variant",
+      "leftOperator": "band-drift",
+      "outcome": "selected-candidate",
+      "pairId": "pair:fourdoors:variant-duel:09",
+      "parentLevelId": "level:peggle-deluxe:fourdoors",
+      "repeatOf": null,
+      "rightOperator": "motif-rhythm-regularize",
+      "selectedLevelId": "level:peggle-deluxe:fourdoors:mutation:band-drift:deluxe-pilot-v1-4-3",
+      "selectedOperator": "band-drift"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "variant-vs-variant",
+      "leftOperator": "motif-shift",
+      "outcome": "selected-candidate",
+      "pairId": "pair:crisscross:variant-duel:07",
+      "parentLevelId": "level:peggle-deluxe:crisscross",
+      "repeatOf": null,
+      "rightOperator": "spacing-compress",
+      "selectedLevelId": "level:peggle-deluxe:crisscross:mutation:motif-shift:deluxe-pilot-v1-3-8",
+      "selectedOperator": "motif-shift"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "repeat-control",
+      "leftOperator": null,
+      "outcome": "selected-candidate",
+      "pairId": "pair:repeat-control:06:pair-fourdoors-motif-shift",
+      "parentLevelId": "level:peggle-deluxe:fourdoors",
+      "repeatOf": "pair:fourdoors:motif-shift",
+      "rightOperator": "motif-shift",
+      "selectedLevelId": "level:peggle-deluxe:fourdoors",
+      "selectedOperator": null
+    },
+    {
+      "choice": "left",
+      "comparisonType": "reference-vs-variant",
+      "operator": "jitter-subtle",
+      "outcome": "original",
+      "pairId": "pair:blindfold:jitter-subtle",
+      "parentLevelId": "level:peggle-deluxe:blindfold",
+      "selectedLevelId": "level:peggle-deluxe:blindfold"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "variant-vs-variant",
+      "leftOperator": "motif-spacing-expand",
+      "outcome": "selected-candidate",
+      "pairId": "pair:dice:variant-duel:08",
+      "parentLevelId": "level:peggle-deluxe:dice",
+      "repeatOf": null,
+      "rightOperator": "fine-grid",
+      "selectedLevelId": "level:peggle-deluxe:dice:mutation:motif-spacing-expand:deluxe-pilot-v1-5-6",
+      "selectedOperator": "motif-spacing-expand"
+    },
+    {
+      "choice": "right",
+      "comparisonType": "reference-vs-variant",
+      "operator": "motif-rhythm-regularize",
+      "outcome": "original",
+      "pairId": "pair:level1:motif-rhythm-regularize",
+      "parentLevelId": "level:peggle-deluxe:level1",
+      "selectedLevelId": "level:peggle-deluxe:level1"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "reference-vs-variant",
+      "operator": "motif-shift",
+      "outcome": "original",
+      "pairId": "pair:cards:motif-shift",
+      "parentLevelId": "level:peggle-deluxe:cards",
+      "selectedLevelId": "level:peggle-deluxe:cards"
+    },
+    {
+      "choice": "right",
+      "comparisonType": "reference-vs-variant",
+      "operator": "fine-grid",
+      "outcome": "original",
+      "pairId": "pair:sideaction:fine-grid",
+      "parentLevelId": "level:peggle-deluxe:sideaction",
+      "selectedLevelId": "level:peggle-deluxe:sideaction"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "reference-vs-variant",
+      "operator": "lateral-bias",
+      "outcome": "variant",
+      "pairId": "pair:holes:lateral-bias",
+      "parentLevelId": "level:peggle-deluxe:holes",
+      "selectedLevelId": "level:peggle-deluxe:holes:mutation:lateral-bias:deluxe-pilot-v1-11-4"
+    },
+    {
+      "choice": "right",
+      "comparisonType": "reference-vs-variant",
+      "operator": "motif-spacing-expand",
+      "outcome": "variant",
+      "pairId": "pair:fourdoors:motif-spacing-expand",
+      "parentLevelId": "level:peggle-deluxe:fourdoors",
+      "selectedLevelId": "level:peggle-deluxe:fourdoors:mutation:motif-spacing-expand:deluxe-pilot-v1-4-6"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "repeat-control",
+      "leftOperator": null,
+      "outcome": "selected-candidate",
+      "pairId": "pair:repeat-control:07:pair-blindfold-spacing-compress",
+      "parentLevelId": "level:peggle-deluxe:blindfold",
+      "repeatOf": "pair:blindfold:spacing-compress",
+      "rightOperator": "spacing-compress",
+      "selectedLevelId": "level:peggle-deluxe:blindfold",
+      "selectedOperator": null
+    },
+    {
+      "choice": "right",
+      "comparisonType": "reference-vs-variant",
+      "operator": "spacing-compress",
+      "outcome": "original",
+      "pairId": "pair:blockers:spacing-compress",
+      "parentLevelId": "level:peggle-deluxe:blockers",
+      "selectedLevelId": "level:peggle-deluxe:blockers"
+    },
+    {
+      "choice": "right",
+      "comparisonType": "reference-vs-variant",
+      "operator": "motif-spacing-tighten",
+      "outcome": "original",
+      "pairId": "pair:blindfold:motif-spacing-tighten",
+      "parentLevelId": "level:peggle-deluxe:blindfold",
+      "selectedLevelId": "level:peggle-deluxe:blindfold"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "reference-vs-variant",
+      "operator": "motif-spacing-tighten",
+      "outcome": "original",
+      "pairId": "pair:blocks:motif-spacing-tighten",
+      "parentLevelId": "level:peggle-deluxe:blocks",
+      "selectedLevelId": "level:peggle-deluxe:blocks"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "reference-vs-variant",
+      "operator": "motif-rotate",
+      "outcome": "original",
+      "pairId": "pair:sideaction:motif-rotate",
+      "parentLevelId": "level:peggle-deluxe:sideaction",
+      "selectedLevelId": "level:peggle-deluxe:sideaction"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "reference-vs-variant",
+      "operator": "motif-spacing-expand",
+      "outcome": "original",
+      "pairId": "pair:level3:motif-spacing-expand",
+      "parentLevelId": "level:peggle-deluxe:level3",
+      "selectedLevelId": "level:peggle-deluxe:level3"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "reference-vs-variant",
+      "operator": "band-drift",
+      "outcome": "variant",
+      "pairId": "pair:blindfold:band-drift",
+      "parentLevelId": "level:peggle-deluxe:blindfold",
+      "selectedLevelId": "level:peggle-deluxe:blindfold:mutation:band-drift:deluxe-pilot-v1-8-3"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "reference-vs-variant",
+      "operator": "fine-grid",
+      "outcome": "original",
+      "pairId": "pair:spiderweb:fine-grid",
+      "parentLevelId": "level:peggle-deluxe:spiderweb",
+      "selectedLevelId": "level:peggle-deluxe:spiderweb"
+    },
+    {
+      "choice": "right",
+      "comparisonType": "repeat-control",
+      "leftOperator": null,
+      "outcome": "selected-candidate",
+      "pairId": "pair:repeat-control:08:pair-holes-motif-spacing-expand",
+      "parentLevelId": "level:peggle-deluxe:holes",
+      "repeatOf": "pair:holes:motif-spacing-expand",
+      "rightOperator": "motif-spacing-expand",
+      "selectedLevelId": "level:peggle-deluxe:holes:mutation:motif-spacing-expand:deluxe-pilot-v1-11-6",
+      "selectedOperator": "motif-spacing-expand"
+    },
+    {
+      "choice": "right",
+      "comparisonType": "variant-vs-variant",
+      "leftOperator": "jitter-subtle",
+      "outcome": "selected-candidate",
+      "pairId": "pair:aim:variant-duel:01",
+      "parentLevelId": "level:peggle-deluxe:aim",
+      "repeatOf": null,
+      "rightOperator": "motif-spacing-tighten",
+      "selectedLevelId": "level:peggle-deluxe:aim:mutation:motif-spacing-tighten:deluxe-pilot-v1-6-5",
+      "selectedOperator": "motif-spacing-tighten"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "reference-vs-variant",
+      "operator": "motif-rotate",
+      "outcome": "variant",
+      "pairId": "pair:aim:motif-rotate",
+      "parentLevelId": "level:peggle-deluxe:aim",
+      "selectedLevelId": "level:peggle-deluxe:aim:mutation:motif-rotate:deluxe-pilot-v1-6-7"
+    },
+    {
+      "choice": "right",
+      "comparisonType": "reference-vs-variant",
+      "operator": "band-drift",
+      "outcome": "original",
+      "pairId": "pair:blockers:band-drift",
+      "parentLevelId": "level:peggle-deluxe:blockers",
+      "selectedLevelId": "level:peggle-deluxe:blockers"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "variant-vs-variant",
+      "leftOperator": "lateral-bias",
+      "outcome": "selected-candidate",
+      "pairId": "pair:blocks:variant-duel:05",
+      "parentLevelId": "level:peggle-deluxe:blocks",
+      "repeatOf": null,
+      "rightOperator": "motif-rotate",
+      "selectedLevelId": "level:peggle-deluxe:blocks:mutation:lateral-bias:deluxe-pilot-v1-2-4",
+      "selectedOperator": "lateral-bias"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "reference-vs-variant",
+      "operator": "band-drift",
+      "outcome": "original",
+      "pairId": "pair:fourdoors:band-drift",
+      "parentLevelId": "level:peggle-deluxe:fourdoors",
+      "selectedLevelId": "level:peggle-deluxe:fourdoors"
+    },
+    {
+      "choice": "right",
+      "comparisonType": "reference-vs-variant",
+      "operator": "jitter-subtle",
+      "outcome": "original",
+      "pairId": "pair:level3:jitter-subtle",
+      "parentLevelId": "level:peggle-deluxe:level3",
+      "selectedLevelId": "level:peggle-deluxe:level3"
+    },
+    {
+      "choice": "right",
+      "comparisonType": "reference-vs-variant",
+      "operator": "lateral-bias",
+      "outcome": "original",
+      "pairId": "pair:level5:lateral-bias",
+      "parentLevelId": "level:peggle-deluxe:level5",
+      "selectedLevelId": "level:peggle-deluxe:level5"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "repeat-control",
+      "leftOperator": null,
+      "outcome": "selected-candidate",
+      "pairId": "pair:repeat-control:09:pair-dice-motif-shift",
+      "parentLevelId": "level:peggle-deluxe:dice",
+      "repeatOf": "pair:dice:motif-shift",
+      "rightOperator": "motif-shift",
+      "selectedLevelId": "level:peggle-deluxe:dice",
+      "selectedOperator": null
+    },
+    {
+      "choice": "right",
+      "comparisonType": "reference-vs-variant",
+      "operator": "motif-rotate",
+      "outcome": "variant",
+      "pairId": "pair:blindfold:motif-rotate",
+      "parentLevelId": "level:peggle-deluxe:blindfold",
+      "selectedLevelId": "level:peggle-deluxe:blindfold:mutation:motif-rotate:deluxe-pilot-v1-8-7"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "reference-vs-variant",
+      "operator": "jitter-subtle",
+      "outcome": "original",
+      "pairId": "pair:blockers:jitter-subtle",
+      "parentLevelId": "level:peggle-deluxe:blockers",
+      "selectedLevelId": "level:peggle-deluxe:blockers"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "reference-vs-variant",
+      "operator": "band-drift",
+      "outcome": "original",
+      "pairId": "pair:cards:band-drift",
+      "parentLevelId": "level:peggle-deluxe:cards",
+      "selectedLevelId": "level:peggle-deluxe:cards"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "reference-vs-variant",
+      "operator": "motif-spacing-tighten",
+      "outcome": "original",
+      "pairId": "pair:plinko:motif-spacing-tighten",
+      "parentLevelId": "level:peggle-deluxe:plinko",
+      "selectedLevelId": "level:peggle-deluxe:plinko"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "reference-vs-variant",
+      "operator": "band-drift",
+      "outcome": "original",
+      "pairId": "pair:dice:band-drift",
+      "parentLevelId": "level:peggle-deluxe:dice",
+      "selectedLevelId": "level:peggle-deluxe:dice"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "reference-vs-variant",
+      "operator": "motif-rhythm-regularize",
+      "outcome": "original",
+      "pairId": "pair:sideaction:motif-rhythm-regularize",
+      "parentLevelId": "level:peggle-deluxe:sideaction",
+      "selectedLevelId": "level:peggle-deluxe:sideaction"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "reference-vs-variant",
+      "operator": "motif-spacing-tighten",
+      "outcome": "original",
+      "pairId": "pair:baseball:motif-spacing-tighten",
+      "parentLevelId": "level:peggle-deluxe:baseball",
+      "selectedLevelId": "level:peggle-deluxe:baseball"
+    },
+    {
+      "choice": "left",
+      "comparisonType": "repeat-control",
+      "leftOperator": "motif-rotate",
+      "outcome": "selected-candidate",
+      "pairId": "pair:repeat-control:10:pair-holes-variant-duel-10",
+      "parentLevelId": "level:peggle-deluxe:holes",
+      "repeatOf": "pair:holes:variant-duel:10",
+      "rightOperator": "lateral-bias",
+      "selectedLevelId": "level:peggle-deluxe:holes:mutation:motif-rotate:deluxe-pilot-v1-11-7",
+      "selectedOperator": "motif-rotate"
+    },
+    {
+      "choice": "right",
+      "comparisonType": "reference-vs-variant",
+      "operator": "fine-grid",
+      "outcome": "original",
+      "pairId": "pair:plinko:fine-grid",
+      "parentLevelId": "level:peggle-deluxe:plinko",
+      "selectedLevelId": "level:peggle-deluxe:plinko"
+    },
+    {
+      "choice": "right",
+      "comparisonType": "reference-vs-variant",
+      "operator": "jitter-subtle",
+      "outcome": "original",
+      "pairId": "pair:level5:jitter-subtle",
+      "parentLevelId": "level:peggle-deluxe:level5",
+      "selectedLevelId": "level:peggle-deluxe:level5"
+    }
+  ],
+  "format": "peggle-benchmark-review-summary",
+  "formatVersion": 3,
+  "interpretation": "Human calibration of synthetic negative hypotheses; variant choices identify unsafe mutation labels or useful alternative compositions.",
+  "originalPreferenceRate": 0.7692307692307693,
+  "repeatConsistency": {
+    "consistent": 7,
+    "controls": [
+      {
+        "choice": "right",
+        "comparisonType": "repeat-control",
+        "consistent": false,
+        "leftOperator": "band-drift",
+        "outcome": "selected-candidate",
+        "pairId": "pair:repeat-control:01:pair-crisscross-band-drift",
+        "parentLevelId": null,
+        "repeatOf": "pair:crisscross:band-drift",
+        "rightOperator": null,
+        "selectedLevelId": "level:peggle-deluxe:crisscross",
+        "selectedOperator": null,
+        "sourceChoice": "right"
+      },
+      {
+        "choice": "left",
+        "comparisonType": "repeat-control",
+        "consistent": true,
+        "leftOperator": null,
+        "outcome": "selected-candidate",
+        "pairId": "pair:repeat-control:02:pair-crisscross-jitter-subtle",
+        "parentLevelId": null,
+        "repeatOf": "pair:crisscross:jitter-subtle",
+        "rightOperator": "jitter-subtle",
+        "selectedLevelId": "level:peggle-deluxe:crisscross",
+        "selectedOperator": null,
+        "sourceChoice": "right"
+      },
+      {
+        "choice": "left",
+        "comparisonType": "repeat-control",
+        "consistent": true,
+        "leftOperator": null,
+        "outcome": "selected-candidate",
+        "pairId": "pair:repeat-control:03:pair-dice-lateral-bias",
+        "parentLevelId": null,
+        "repeatOf": "pair:dice:lateral-bias",
+        "rightOperator": "lateral-bias",
+        "selectedLevelId": "level:peggle-deluxe:dice",
+        "selectedOperator": null,
+        "sourceChoice": "right"
+      },
+      {
+        "choice": "right",
+        "comparisonType": "repeat-control",
+        "consistent": true,
+        "leftOperator": "fine-grid",
+        "outcome": "selected-candidate",
+        "pairId": "pair:repeat-control:04:pair-level1-fine-grid",
+        "parentLevelId": null,
+        "repeatOf": "pair:level1:fine-grid",
+        "rightOperator": null,
+        "selectedLevelId": "level:peggle-deluxe:level1",
+        "selectedOperator": null,
+        "sourceChoice": "left"
+      },
+      {
+        "choice": "left",
+        "comparisonType": "repeat-control",
+        "consistent": true,
+        "leftOperator": null,
+        "outcome": "selected-candidate",
+        "pairId": "pair:repeat-control:05:pair-blocks-band-drift",
+        "parentLevelId": null,
+        "repeatOf": "pair:blocks:band-drift",
+        "rightOperator": "band-drift",
+        "selectedLevelId": "level:peggle-deluxe:blocks",
+        "selectedOperator": null,
+        "sourceChoice": "right"
+      },
+      {
+        "choice": "left",
+        "comparisonType": "repeat-control",
+        "consistent": false,
+        "leftOperator": null,
+        "outcome": "selected-candidate",
+        "pairId": "pair:repeat-control:06:pair-fourdoors-motif-shift",
+        "parentLevelId": "level:peggle-deluxe:fourdoors",
+        "repeatOf": "pair:fourdoors:motif-shift",
+        "rightOperator": "motif-shift",
+        "selectedLevelId": "level:peggle-deluxe:fourdoors",
+        "selectedOperator": null,
+        "sourceChoice": "tie"
+      },
+      {
+        "choice": "left",
+        "comparisonType": "repeat-control",
+        "consistent": true,
+        "leftOperator": null,
+        "outcome": "selected-candidate",
+        "pairId": "pair:repeat-control:07:pair-blindfold-spacing-compress",
+        "parentLevelId": "level:peggle-deluxe:blindfold",
+        "repeatOf": "pair:blindfold:spacing-compress",
+        "rightOperator": "spacing-compress",
+        "selectedLevelId": "level:peggle-deluxe:blindfold",
+        "selectedOperator": null,
+        "sourceChoice": "right"
+      },
+      {
+        "choice": "right",
+        "comparisonType": "repeat-control",
+        "consistent": false,
+        "leftOperator": null,
+        "outcome": "selected-candidate",
+        "pairId": "pair:repeat-control:08:pair-holes-motif-spacing-expand",
+        "parentLevelId": "level:peggle-deluxe:holes",
+        "repeatOf": "pair:holes:motif-spacing-expand",
+        "rightOperator": "motif-spacing-expand",
+        "selectedLevelId": "level:peggle-deluxe:holes:mutation:motif-spacing-expand:deluxe-pilot-v1-11-6",
+        "selectedOperator": "motif-spacing-expand",
+        "sourceChoice": "tie"
+      },
+      {
+        "choice": "left",
+        "comparisonType": "repeat-control",
+        "consistent": true,
+        "leftOperator": null,
+        "outcome": "selected-candidate",
+        "pairId": "pair:repeat-control:09:pair-dice-motif-shift",
+        "parentLevelId": "level:peggle-deluxe:dice",
+        "repeatOf": "pair:dice:motif-shift",
+        "rightOperator": "motif-shift",
+        "selectedLevelId": "level:peggle-deluxe:dice",
+        "selectedOperator": null,
+        "sourceChoice": "right"
+      },
+      {
+        "choice": "left",
+        "comparisonType": "repeat-control",
+        "consistent": true,
+        "leftOperator": "motif-rotate",
+        "outcome": "selected-candidate",
+        "pairId": "pair:repeat-control:10:pair-holes-variant-duel-10",
+        "parentLevelId": "level:peggle-deluxe:holes",
+        "repeatOf": "pair:holes:variant-duel:10",
+        "rightOperator": "lateral-bias",
+        "selectedLevelId": "level:peggle-deluxe:holes:mutation:motif-rotate:deluxe-pilot-v1-11-7",
+        "selectedOperator": "motif-rotate",
+        "sourceChoice": "right"
+      }
+    ],
+    "rate": 0.7,
+    "reviewed": 10
+  },
+  "reviewExportedAt": "2026-08-25T14:48:56.244Z"
+}

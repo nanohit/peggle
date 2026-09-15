@@ -1,0 +1,25 @@
+{
+  "format": "peggle-benchmark-review-invalidation",
+  "formatVersion": 1,
+  "benchmarkId": "benchmark:quality-v0:deluxe-pilot-v0",
+  "status": "invalid-for-training-and-evaluation",
+  "review": {
+    "path": "J:/Dark Souls 2/benchmark-review-benchmark-quality-v0-deluxe-pilot-v0.json",
+    "sha256": "06b4086b5c88703781e191ddc7596ee9a25fed39aec27df6d10a833e75191398",
+    "decisionCount": 40,
+    "tieCount": 24,
+    "exportedAt": "2026-08-25T13:05:12.282Z"
+  },
+  "reasonCodes": [
+    "curved-brick-length-misread-as-rectangle-width",
+    "straight-brick-source-angle-used-with-wrong-canonical-convention",
+    "moving-object-base-transform-rendered-instead-of-initial-phase-transform",
+    "object-wise-mutations-applied-to-curved-and-moving-structures",
+    "mutation-identity-leaked-in-blind-preview-title"
+  ],
+  "supersededBy": {
+    "benchmarkId": "benchmark:quality-v1:deluxe-pilot-v1",
+    "representationRevision": "peggleedit-semantic-v2"
+  },
+  "note": "The review file is preserved unchanged for audit only. Its decisions must not be summarized, trained on, or reported as human preference labels."
+}

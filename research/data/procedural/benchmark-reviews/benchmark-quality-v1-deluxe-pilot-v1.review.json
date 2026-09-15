@@ -1,0 +1,112 @@
+{
+  "format": "peggle-benchmark-review",
+  "formatVersion": 2,
+  "benchmarkId": "benchmark:quality-v1:deluxe-pilot-v1",
+  "benchmarkCreatedAt": "2026-08-25T13:21:33.511Z",
+  "benchmarkFormatVersion": 2,
+  "representationRevision": "peggleedit-semantic-v2",
+  "exportedAt": "2026-08-25T14:11:54.815Z",
+  "completed": true,
+  "decisions": [
+    {
+      "pairId": "pair:fourdoors:lateral-bias",
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:11:02.593Z"
+    },
+    {
+      "pairId": "pair:level1:lateral-bias",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:11:05.997Z"
+    },
+    {
+      "pairId": "pair:crisscross:band-drift",
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:11:08.424Z"
+    },
+    {
+      "pairId": "pair:blocks:jitter-subtle",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:11:10.538Z"
+    },
+    {
+      "pairId": "pair:baseball:jitter-subtle",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:11:12.882Z"
+    },
+    {
+      "pairId": "pair:blocks:fine-grid",
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:11:14.438Z"
+    },
+    {
+      "pairId": "pair:blocks:band-drift",
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:11:16.032Z"
+    },
+    {
+      "pairId": "pair:level1:fine-grid",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:11:17.429Z"
+    },
+    {
+      "pairId": "pair:fourdoors:spacing-compress",
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:11:21.650Z"
+    },
+    {
+      "pairId": "pair:dice:spacing-compress",
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:11:25.401Z"
+    },
+    {
+      "pairId": "pair:dice:lateral-bias",
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:11:31.219Z"
+    },
+    {
+      "pairId": "pair:crisscross:fine-grid",
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:11:33.839Z"
+    },
+    {
+      "pairId": "pair:aim:jitter-subtle",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:11:37.754Z"
+    },
+    {
+      "pairId": "pair:level1:spacing-compress",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:11:39.983Z"
+    },
+    {
+      "pairId": "pair:crisscross:jitter-subtle",
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:11:42.222Z"
+    },
+    {
+      "pairId": "pair:aim:fine-grid",
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:11:45.665Z"
+    },
+    {
+      "pairId": "pair:baseball:fine-grid",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:11:48.944Z"
+    },
+    {
+      "pairId": "pair:crisscross:spacing-compress",
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:11:50.327Z"
+    },
+    {
+      "pairId": "pair:level1:band-drift",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:11:52.252Z"
+    },
+    {
+      "pairId": "pair:plinko:lateral-bias",
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:11:53.692Z"
+    }
+  ]
+}

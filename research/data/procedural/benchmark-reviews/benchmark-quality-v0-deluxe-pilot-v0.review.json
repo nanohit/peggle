@@ -1,0 +1,210 @@
+{
+  "format": "peggle-benchmark-review",
+  "formatVersion": 1,
+  "benchmarkId": "benchmark:quality-v0:deluxe-pilot-v0",
+  "benchmarkCreatedAt": "2026-08-25T11:24:30.391Z",
+  "exportedAt": "2026-08-25T13:05:12.282Z",
+  "completed": true,
+  "decisions": [
+    {
+      "pairId": "pair:level1:jitter-moderate",
+      "choice": "left",
+      "decidedAt": "2026-08-25T13:01:10.177Z"
+    },
+    {
+      "pairId": "pair:fever:overlap-pairs",
+      "choice": "tie",
+      "decidedAt": "2026-08-25T13:01:27.806Z"
+    },
+    {
+      "pairId": "pair:hollywoodcircles:coarse-grid",
+      "choice": "right",
+      "decidedAt": "2026-08-25T13:01:36.557Z"
+    },
+    {
+      "pairId": "pair:tubing:coarse-grid",
+      "choice": "tie",
+      "decidedAt": "2026-08-25T13:01:58.672Z"
+    },
+    {
+      "pairId": "pair:tubing:jitter-severe",
+      "choice": "tie",
+      "decidedAt": "2026-08-25T13:02:00.552Z"
+    },
+    {
+      "pairId": "pair:Cyclops:four-clusters",
+      "choice": "tie",
+      "decidedAt": "2026-08-25T13:02:04.273Z"
+    },
+    {
+      "pairId": "pair:level1:four-clusters",
+      "choice": "right",
+      "decidedAt": "2026-08-25T13:02:06.768Z"
+    },
+    {
+      "pairId": "pair:aim:uniform-random",
+      "choice": "left",
+      "decidedAt": "2026-08-25T13:02:08.869Z"
+    },
+    {
+      "pairId": "pair:car:jitter-moderate",
+      "choice": "tie",
+      "decidedAt": "2026-08-25T13:02:32.198Z"
+    },
+    {
+      "pairId": "pair:hollywoodcircles:jitter-moderate",
+      "choice": "left",
+      "decidedAt": "2026-08-25T13:02:35.127Z"
+    },
+    {
+      "pairId": "pair:level1:shuffle-axes",
+      "choice": "right",
+      "decidedAt": "2026-08-25T13:02:37.291Z"
+    },
+    {
+      "pairId": "pair:vortex:shuffle-axes",
+      "choice": "tie",
+      "decidedAt": "2026-08-25T13:02:51.086Z"
+    },
+    {
+      "pairId": "pair:vortex:four-clusters",
+      "choice": "tie",
+      "decidedAt": "2026-08-25T13:02:52.988Z"
+    },
+    {
+      "pairId": "pair:aim:coarse-grid",
+      "choice": "right",
+      "decidedAt": "2026-08-25T13:02:54.803Z"
+    },
+    {
+      "pairId": "pair:car:uniform-random",
+      "choice": "tie",
+      "decidedAt": "2026-08-25T13:02:56.151Z"
+    },
+    {
+      "pairId": "pair:tubing:overlap-pairs",
+      "choice": "tie",
+      "decidedAt": "2026-08-25T13:02:57.470Z"
+    },
+    {
+      "pairId": "pair:dna:center-collapse",
+      "choice": "right",
+      "decidedAt": "2026-08-25T13:02:59.467Z"
+    },
+    {
+      "pairId": "pair:dna:overlap-pairs",
+      "choice": "right",
+      "decidedAt": "2026-08-25T13:03:00.997Z"
+    },
+    {
+      "pairId": "pair:Cyclops:shuffle-axes",
+      "choice": "tie",
+      "decidedAt": "2026-08-25T13:04:32.603Z"
+    },
+    {
+      "pairId": "pair:tubing:jitter-moderate",
+      "choice": "tie",
+      "decidedAt": "2026-08-25T13:04:33.978Z"
+    },
+    {
+      "pairId": "pair:vortex:edge-pack",
+      "choice": "tie",
+      "decidedAt": "2026-08-25T13:04:35.481Z"
+    },
+    {
+      "pairId": "pair:level1:jitter-severe",
+      "choice": "left",
+      "decidedAt": "2026-08-25T13:04:36.620Z"
+    },
+    {
+      "pairId": "pair:aim:center-collapse",
+      "choice": "left",
+      "decidedAt": "2026-08-25T13:04:38.172Z"
+    },
+    {
+      "pairId": "pair:tubing:four-clusters",
+      "choice": "tie",
+      "decidedAt": "2026-08-25T13:04:40.132Z"
+    },
+    {
+      "pairId": "pair:car:coarse-grid",
+      "choice": "tie",
+      "decidedAt": "2026-08-25T13:04:41.751Z"
+    },
+    {
+      "pairId": "pair:fever:center-collapse",
+      "choice": "tie",
+      "decidedAt": "2026-08-25T13:04:42.906Z"
+    },
+    {
+      "pairId": "pair:vortex:coarse-grid",
+      "choice": "tie",
+      "decidedAt": "2026-08-25T13:04:49.793Z"
+    },
+    {
+      "pairId": "pair:bunches:shuffle-axes",
+      "choice": "left",
+      "decidedAt": "2026-08-25T13:04:51.645Z"
+    },
+    {
+      "pairId": "pair:bunches:coarse-grid",
+      "choice": "right",
+      "decidedAt": "2026-08-25T13:04:52.680Z"
+    },
+    {
+      "pairId": "pair:dna:uniform-random",
+      "choice": "right",
+      "decidedAt": "2026-08-25T13:04:54.326Z"
+    },
+    {
+      "pairId": "pair:vortex:jitter-moderate",
+      "choice": "tie",
+      "decidedAt": "2026-08-25T13:04:55.619Z"
+    },
+    {
+      "pairId": "pair:level1:coarse-grid",
+      "choice": "left",
+      "decidedAt": "2026-08-25T13:04:57.237Z"
+    },
+    {
+      "pairId": "pair:bunches:overlap-pairs",
+      "choice": "tie",
+      "decidedAt": "2026-08-25T13:04:59.163Z"
+    },
+    {
+      "pairId": "pair:car:jitter-severe",
+      "choice": "tie",
+      "decidedAt": "2026-08-25T13:05:00.141Z"
+    },
+    {
+      "pairId": "pair:Cyclops:vertical-band-collapse",
+      "choice": "tie",
+      "decidedAt": "2026-08-25T13:05:02.853Z"
+    },
+    {
+      "pairId": "pair:level1:overlap-pairs",
+      "choice": "left",
+      "decidedAt": "2026-08-25T13:05:04.046Z"
+    },
+    {
+      "pairId": "pair:aim:overlap-pairs",
+      "choice": "tie",
+      "decidedAt": "2026-08-25T13:05:05.581Z"
+    },
+    {
+      "pairId": "pair:tubing:center-collapse",
+      "choice": "tie",
+      "decidedAt": "2026-08-25T13:05:08.195Z"
+    },
+    {
+      "pairId": "pair:car:vertical-band-collapse",
+      "choice": "tie",
+      "decidedAt": "2026-08-25T13:05:09.077Z"
+    },
+    {
+      "pairId": "pair:Cyclops:jitter-moderate",
+      "choice": "tie",
+      "decidedAt": "2026-08-25T13:05:09.958Z"
+    }
+  ]
+}

@@ -1,0 +1,512 @@
+{
+  "format": "peggle-benchmark-review",
+  "formatVersion": 3,
+  "benchmarkId": "benchmark:preference-v2:deluxe-100",
+  "benchmarkCreatedAt": "2026-08-25T14:39:35.207Z",
+  "benchmarkFormatVersion": 3,
+  "representationRevision": "peggleedit-motif-semantic-v1",
+  "exportedAt": "2026-08-25T14:48:56.244Z",
+  "completed": true,
+  "decisions": [
+    {
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:11:02.593Z",
+      "pairId": "pair:fourdoors:lateral-bias"
+    },
+    {
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:11:05.997Z",
+      "pairId": "pair:level1:lateral-bias"
+    },
+    {
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:11:08.424Z",
+      "pairId": "pair:crisscross:band-drift"
+    },
+    {
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:11:10.538Z",
+      "pairId": "pair:blocks:jitter-subtle"
+    },
+    {
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:11:12.882Z",
+      "pairId": "pair:baseball:jitter-subtle"
+    },
+    {
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:11:14.438Z",
+      "pairId": "pair:blocks:fine-grid"
+    },
+    {
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:11:16.032Z",
+      "pairId": "pair:blocks:band-drift"
+    },
+    {
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:11:17.429Z",
+      "pairId": "pair:level1:fine-grid"
+    },
+    {
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:11:21.650Z",
+      "pairId": "pair:fourdoors:spacing-compress"
+    },
+    {
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:11:25.401Z",
+      "pairId": "pair:dice:spacing-compress"
+    },
+    {
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:11:31.219Z",
+      "pairId": "pair:dice:lateral-bias"
+    },
+    {
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:11:33.839Z",
+      "pairId": "pair:crisscross:fine-grid"
+    },
+    {
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:11:37.754Z",
+      "pairId": "pair:aim:jitter-subtle"
+    },
+    {
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:11:39.983Z",
+      "pairId": "pair:level1:spacing-compress"
+    },
+    {
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:11:42.222Z",
+      "pairId": "pair:crisscross:jitter-subtle"
+    },
+    {
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:11:45.665Z",
+      "pairId": "pair:aim:fine-grid"
+    },
+    {
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:11:48.944Z",
+      "pairId": "pair:baseball:fine-grid"
+    },
+    {
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:11:50.327Z",
+      "pairId": "pair:crisscross:spacing-compress"
+    },
+    {
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:11:52.252Z",
+      "pairId": "pair:level1:band-drift"
+    },
+    {
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:11:53.692Z",
+      "pairId": "pair:plinko:lateral-bias"
+    },
+    {
+      "pairId": "pair:fourdoors:motif-shift",
+      "choice": "tie",
+      "decidedAt": "2026-08-25T14:44:26.421Z"
+    },
+    {
+      "pairId": "pair:blindfold:spacing-compress",
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:44:33.510Z"
+    },
+    {
+      "pairId": "pair:holes:motif-spacing-expand",
+      "choice": "tie",
+      "decidedAt": "2026-08-25T14:44:37.681Z"
+    },
+    {
+      "pairId": "pair:dice:motif-shift",
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:44:43.939Z"
+    },
+    {
+      "pairId": "pair:holes:variant-duel:10",
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:44:46.916Z"
+    },
+    {
+      "pairId": "pair:dice:motif-spacing-expand",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:44:49.601Z"
+    },
+    {
+      "pairId": "pair:level3:fine-grid",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:44:52.972Z"
+    },
+    {
+      "pairId": "pair:repeat-control:01:pair-crisscross-band-drift",
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:44:55.159Z"
+    },
+    {
+      "pairId": "pair:spiderweb:motif-rotate",
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:45:13.518Z"
+    },
+    {
+      "pairId": "pair:baseball:motif-rotate",
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:45:26.918Z"
+    },
+    {
+      "pairId": "pair:blockers:motif-rotate",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:45:34.100Z"
+    },
+    {
+      "pairId": "pair:holes:jitter-subtle",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:45:36.799Z"
+    },
+    {
+      "pairId": "pair:cards:motif-spacing-tighten",
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:45:38.694Z"
+    },
+    {
+      "pairId": "pair:aim:lateral-bias",
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:45:42.462Z"
+    },
+    {
+      "pairId": "pair:spiderweb:motif-rhythm-regularize",
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:45:44.495Z"
+    },
+    {
+      "pairId": "pair:repeat-control:02:pair-crisscross-jitter-subtle",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:45:48.341Z"
+    },
+    {
+      "pairId": "pair:level3:lateral-bias",
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:45:52.270Z"
+    },
+    {
+      "pairId": "pair:blockers:motif-spacing-tighten",
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:45:59.096Z"
+    },
+    {
+      "pairId": "pair:level3:motif-rhythm-regularize",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:46:00.870Z"
+    },
+    {
+      "pairId": "pair:cards:jitter-subtle",
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:46:02.242Z"
+    },
+    {
+      "pairId": "pair:plinko:motif-spacing-expand",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:46:03.972Z"
+    },
+    {
+      "pairId": "pair:sideaction:spacing-compress",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:46:09.604Z"
+    },
+    {
+      "pairId": "pair:blockers:variant-duel:04",
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:46:13.990Z"
+    },
+    {
+      "pairId": "pair:repeat-control:03:pair-dice-lateral-bias",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:46:26.790Z"
+    },
+    {
+      "pairId": "pair:blindfold:variant-duel:03",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:46:30.158Z"
+    },
+    {
+      "pairId": "pair:cards:variant-duel:06",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:46:32.488Z"
+    },
+    {
+      "pairId": "pair:cards:spacing-compress",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:46:35.503Z"
+    },
+    {
+      "pairId": "pair:spiderweb:spacing-compress",
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:46:37.291Z"
+    },
+    {
+      "pairId": "pair:holes:spacing-compress",
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:46:39.709Z"
+    },
+    {
+      "pairId": "pair:crisscross:motif-shift",
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:46:46.036Z"
+    },
+    {
+      "pairId": "pair:spiderweb:lateral-bias",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:46:48.155Z"
+    },
+    {
+      "pairId": "pair:repeat-control:04:pair-level1-fine-grid",
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:46:49.407Z"
+    },
+    {
+      "pairId": "pair:level5:motif-rhythm-regularize",
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:46:51.530Z"
+    },
+    {
+      "pairId": "pair:baseball:band-drift",
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:46:53.970Z"
+    },
+    {
+      "pairId": "pair:blocks:motif-shift",
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:46:55.655Z"
+    },
+    {
+      "pairId": "pair:level5:fine-grid",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:46:56.802Z"
+    },
+    {
+      "pairId": "pair:baseball:variant-duel:02",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:47:00.074Z"
+    },
+    {
+      "pairId": "pair:aim:band-drift",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:47:02.090Z"
+    },
+    {
+      "pairId": "pair:level5:motif-spacing-expand",
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:47:05.663Z"
+    },
+    {
+      "pairId": "pair:repeat-control:05:pair-blocks-band-drift",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:47:06.813Z"
+    },
+    {
+      "pairId": "pair:sideaction:lateral-bias",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:47:11.816Z"
+    },
+    {
+      "pairId": "pair:holes:motif-shift",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:47:17.020Z"
+    },
+    {
+      "pairId": "pair:plinko:motif-rhythm-regularize",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:47:18.720Z"
+    },
+    {
+      "pairId": "pair:fourdoors:variant-duel:09",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:47:31.435Z"
+    },
+    {
+      "pairId": "pair:crisscross:variant-duel:07",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:47:33.339Z"
+    },
+    {
+      "pairId": "pair:repeat-control:06:pair-fourdoors-motif-shift",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:47:35.287Z"
+    },
+    {
+      "pairId": "pair:blindfold:jitter-subtle",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:47:37.289Z"
+    },
+    {
+      "pairId": "pair:dice:variant-duel:08",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:47:39.291Z"
+    },
+    {
+      "pairId": "pair:level1:motif-rhythm-regularize",
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:47:40.632Z"
+    },
+    {
+      "pairId": "pair:cards:motif-shift",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:47:42.149Z"
+    },
+    {
+      "pairId": "pair:sideaction:fine-grid",
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:47:43.716Z"
+    },
+    {
+      "pairId": "pair:holes:lateral-bias",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:47:47.034Z"
+    },
+    {
+      "pairId": "pair:fourdoors:motif-spacing-expand",
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:47:50.849Z"
+    },
+    {
+      "pairId": "pair:repeat-control:07:pair-blindfold-spacing-compress",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:47:54.797Z"
+    },
+    {
+      "pairId": "pair:blockers:spacing-compress",
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:47:56.459Z"
+    },
+    {
+      "pairId": "pair:blindfold:motif-spacing-tighten",
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:48:00.705Z"
+    },
+    {
+      "pairId": "pair:blocks:motif-spacing-tighten",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:48:02.655Z"
+    },
+    {
+      "pairId": "pair:sideaction:motif-rotate",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:48:05.733Z"
+    },
+    {
+      "pairId": "pair:level3:motif-spacing-expand",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:48:08.878Z"
+    },
+    {
+      "pairId": "pair:blindfold:band-drift",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:48:11.656Z"
+    },
+    {
+      "pairId": "pair:spiderweb:fine-grid",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:48:14.923Z"
+    },
+    {
+      "pairId": "pair:repeat-control:08:pair-holes-motif-spacing-expand",
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:48:19.216Z"
+    },
+    {
+      "pairId": "pair:aim:variant-duel:01",
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:48:21.399Z"
+    },
+    {
+      "pairId": "pair:aim:motif-rotate",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:48:23.914Z"
+    },
+    {
+      "pairId": "pair:blockers:band-drift",
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:48:26.153Z"
+    },
+    {
+      "pairId": "pair:blocks:variant-duel:05",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:48:27.524Z"
+    },
+    {
+      "pairId": "pair:fourdoors:band-drift",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:48:29.875Z"
+    },
+    {
+      "pairId": "pair:level3:jitter-subtle",
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:48:30.973Z"
+    },
+    {
+      "pairId": "pair:level5:lateral-bias",
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:48:33.371Z"
+    },
+    {
+      "pairId": "pair:repeat-control:09:pair-dice-motif-shift",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:48:35.246Z"
+    },
+    {
+      "pairId": "pair:blindfold:motif-rotate",
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:48:39.346Z"
+    },
+    {
+      "pairId": "pair:blockers:jitter-subtle",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:48:40.834Z"
+    },
+    {
+      "pairId": "pair:cards:band-drift",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:48:42.400Z"
+    },
+    {
+      "pairId": "pair:plinko:motif-spacing-tighten",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:48:44.177Z"
+    },
+    {
+      "pairId": "pair:dice:band-drift",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:48:45.534Z"
+    },
+    {
+      "pairId": "pair:sideaction:motif-rhythm-regularize",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:48:46.975Z"
+    },
+    {
+      "pairId": "pair:baseball:motif-spacing-tighten",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:48:49.008Z"
+    },
+    {
+      "pairId": "pair:repeat-control:10:pair-holes-variant-duel-10",
+      "choice": "left",
+      "decidedAt": "2026-08-25T14:48:51.984Z"
+    },
+    {
+      "pairId": "pair:plinko:fine-grid",
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:48:53.238Z"
+    },
+    {
+      "pairId": "pair:level5:jitter-subtle",
+      "choice": "right",
+      "decidedAt": "2026-08-25T14:48:54.757Z"
+    }
+  ]
+}

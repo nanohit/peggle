@@ -1,0 +1,189 @@
+{
+  "benchmarkId": "benchmark:quality-v1:deluxe-pilot-v1",
+  "byOperator": [
+    {
+      "operator": "band-drift",
+      "originalPreferenceRate": 0.6666666666666666,
+      "reviewed": 3,
+      "ties": 0
+    },
+    {
+      "operator": "fine-grid",
+      "originalPreferenceRate": 0.8,
+      "reviewed": 5,
+      "ties": 0
+    },
+    {
+      "operator": "jitter-subtle",
+      "originalPreferenceRate": 1,
+      "reviewed": 4,
+      "ties": 0
+    },
+    {
+      "operator": "lateral-bias",
+      "originalPreferenceRate": 0.75,
+      "reviewed": 4,
+      "ties": 0
+    },
+    {
+      "operator": "spacing-compress",
+      "originalPreferenceRate": 0.5,
+      "reviewed": 4,
+      "ties": 0
+    }
+  ],
+  "counts": {
+    "originalChosen": 15,
+    "queued": 20,
+    "reviewed": 20,
+    "ties": 0,
+    "variantChosen": 5
+  },
+  "decisions": [
+    {
+      "choice": "right",
+      "operator": "lateral-bias",
+      "outcome": "original",
+      "pairId": "pair:fourdoors:lateral-bias",
+      "parentLevelId": "level:peggle-deluxe:fourdoors"
+    },
+    {
+      "choice": "left",
+      "operator": "lateral-bias",
+      "outcome": "variant",
+      "pairId": "pair:level1:lateral-bias",
+      "parentLevelId": "level:peggle-deluxe:level1"
+    },
+    {
+      "choice": "right",
+      "operator": "band-drift",
+      "outcome": "variant",
+      "pairId": "pair:crisscross:band-drift",
+      "parentLevelId": "level:peggle-deluxe:crisscross"
+    },
+    {
+      "choice": "left",
+      "operator": "jitter-subtle",
+      "outcome": "original",
+      "pairId": "pair:blocks:jitter-subtle",
+      "parentLevelId": "level:peggle-deluxe:blocks"
+    },
+    {
+      "choice": "left",
+      "operator": "jitter-subtle",
+      "outcome": "original",
+      "pairId": "pair:baseball:jitter-subtle",
+      "parentLevelId": "level:peggle-deluxe:baseball"
+    },
+    {
+      "choice": "right",
+      "operator": "fine-grid",
+      "outcome": "original",
+      "pairId": "pair:blocks:fine-grid",
+      "parentLevelId": "level:peggle-deluxe:blocks"
+    },
+    {
+      "choice": "right",
+      "operator": "band-drift",
+      "outcome": "original",
+      "pairId": "pair:blocks:band-drift",
+      "parentLevelId": "level:peggle-deluxe:blocks"
+    },
+    {
+      "choice": "left",
+      "operator": "fine-grid",
+      "outcome": "original",
+      "pairId": "pair:level1:fine-grid",
+      "parentLevelId": "level:peggle-deluxe:level1"
+    },
+    {
+      "choice": "right",
+      "operator": "spacing-compress",
+      "outcome": "variant",
+      "pairId": "pair:fourdoors:spacing-compress",
+      "parentLevelId": "level:peggle-deluxe:fourdoors"
+    },
+    {
+      "choice": "right",
+      "operator": "spacing-compress",
+      "outcome": "original",
+      "pairId": "pair:dice:spacing-compress",
+      "parentLevelId": "level:peggle-deluxe:dice"
+    },
+    {
+      "choice": "right",
+      "operator": "lateral-bias",
+      "outcome": "original",
+      "pairId": "pair:dice:lateral-bias",
+      "parentLevelId": "level:peggle-deluxe:dice"
+    },
+    {
+      "choice": "right",
+      "operator": "fine-grid",
+      "outcome": "original",
+      "pairId": "pair:crisscross:fine-grid",
+      "parentLevelId": "level:peggle-deluxe:crisscross"
+    },
+    {
+      "choice": "left",
+      "operator": "jitter-subtle",
+      "outcome": "original",
+      "pairId": "pair:aim:jitter-subtle",
+      "parentLevelId": "level:peggle-deluxe:aim"
+    },
+    {
+      "choice": "left",
+      "operator": "spacing-compress",
+      "outcome": "original",
+      "pairId": "pair:level1:spacing-compress",
+      "parentLevelId": "level:peggle-deluxe:level1"
+    },
+    {
+      "choice": "right",
+      "operator": "jitter-subtle",
+      "outcome": "original",
+      "pairId": "pair:crisscross:jitter-subtle",
+      "parentLevelId": "level:peggle-deluxe:crisscross"
+    },
+    {
+      "choice": "right",
+      "operator": "fine-grid",
+      "outcome": "variant",
+      "pairId": "pair:aim:fine-grid",
+      "parentLevelId": "level:peggle-deluxe:aim"
+    },
+    {
+      "choice": "left",
+      "operator": "fine-grid",
+      "outcome": "original",
+      "pairId": "pair:baseball:fine-grid",
+      "parentLevelId": "level:peggle-deluxe:baseball"
+    },
+    {
+      "choice": "right",
+      "operator": "spacing-compress",
+      "outcome": "variant",
+      "pairId": "pair:crisscross:spacing-compress",
+      "parentLevelId": "level:peggle-deluxe:crisscross"
+    },
+    {
+      "choice": "left",
+      "operator": "band-drift",
+      "outcome": "original",
+      "pairId": "pair:level1:band-drift",
+      "parentLevelId": "level:peggle-deluxe:level1"
+    },
+    {
+      "choice": "right",
+      "operator": "lateral-bias",
+      "outcome": "original",
+      "pairId": "pair:plinko:lateral-bias",
+      "parentLevelId": "level:peggle-deluxe:plinko"
+    }
+  ],
+  "format": "peggle-benchmark-review-summary",
+  "formatVersion": 2,
+  "interpretation": "Human calibration of synthetic negative hypotheses; variant choices identify unsafe mutation labels or useful alternative compositions.",
+  "originalPreferenceRate": 0.75,
+  "reviewExportedAt": "2026-08-25T14:11:54.815Z"
+}
