@@ -3241,11 +3241,11 @@ export class DestructionPegSystem {
     const rAy = activeA ? (cpy - bodyA.y) : 0;
     const rBx = activeB ? (cpx - bodyB.x) : 0;
     const rBy = activeB ? (cpy - bodyB.y) : 0;
-    // Kinematic carriers (bucket, flippers) push purely linearly — they should carry/
-    // shove bodies, not spin them — so suppress the angular term for those contacts.
+    // Keep the legacy linear carry for flat bodies. Round pegs must still roll
+    // against moving platforms, buckets and animated pegs.
     const kinematicContact = this.isKinematicCollider(a) || this.isKinematicCollider(b);
-    let invIA = (activeA && !kinematicContact) ? (bodyA.invInertia || 0) : 0;
-    let invIB = (activeB && !kinematicContact) ? (bodyB.invInertia || 0) : 0;
+    let invIA = (activeA && (!kinematicContact || bodyA.singleCircle)) ? (bodyA.invInertia || 0) : 0;
+    let invIB = (activeB && (!kinematicContact || bodyB.singleCircle)) ? (bodyB.invInertia || 0) : 0;
     const avA = activeA ? (bodyA.av || 0) : 0;
     const avB = activeB ? (bodyB.av || 0) : 0;
 

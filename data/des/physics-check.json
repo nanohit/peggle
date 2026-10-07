@@ -1,6 +1,6 @@
 {
   "physics": "rolling-contact-v1",
-  "implementationFingerprint": "c4e232f3ab0e6c8bb4c1914e9e4db64928c6744abe8a70c62f1728136d190d16",
+  "implementationFingerprint": "19d4ed979b59737d70b9232ce83305b48b62414f4eada616e86f651728e986d0",
   "selectionPhysicsFingerprint": "45cbd9a1b8cca8acb2f6ec83abd67ac12315fc3ebef0c35d1434e6b43eaf5ecc",
   "scope": "10-second idle stability and two independent native launch probes; original selection routes are historical",
   "levels": [
@@ -282,11 +282,11 @@
           "angle": 0.7415926535897932,
           "seconds": 4.608333333333668,
           "orangeBefore": 24,
-          "orangeAfter": 21,
-          "cleared": 3,
+          "orangeAfter": 20,
+          "cleared": 4,
           "timeout": false,
           "state": "idle",
-          "fallenTargets": 1,
+          "fallenTargets": 2,
           "directTargets": 2,
           "hitCount": 6
         }

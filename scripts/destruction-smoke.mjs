@@ -777,6 +777,20 @@ function testCircleRollsAcrossJoinedSurfaces() {
   assert.ok(pegs[2].x - startX > 30, 'two aligned support contacts must not lock rolling at a seam');
 }
 
+function testCircleRollsOnMovingPlatform() {
+  const angle = 0.3, radius = PHYSICS_CONFIG.pegRadius;
+  const pegs = [circle('roller', 600 + Math.sin(angle) * (radius + 6), 500 - Math.cos(angle) * (radius + 6))];
+  const system = makeSystem({ restitution: 0 });
+  system.reset(pegs, []);
+  const startX = pegs[0].x;
+  for (let i = 0; i < 60; i++) {
+    system.step(pegs, [], 1 / 120, { width: 2000, height: 2000, lossY: 2200, bucketEnabled: false,
+      flipperRects: [{ x: 600 + i * 0.05, y: 500, width: 1200, height: 12, angle, vx: 0.05, vy: 0 }] });
+  }
+  assert.ok(pegs[0].x - startX > 30, 'moving support must allow downhill rolling');
+  assert.ok(system.getBodyForPeg(pegs[0]).av > 0.1);
+}
+
 function testDefaultGripRowSlidesOnStaticSlope() {
   const pegs = [
     brick('slope', 240, 260, {
@@ -1394,6 +1408,7 @@ const tests = [
   testSeparatingContactDoesNotBrakeTangentialMotion,
   testCircleDoesNotSleepOnGentleSlope,
   testCircleRollsAcrossJoinedSurfaces,
+  testCircleRollsOnMovingPlatform,
   testDefaultGripRowSlidesOnStaticSlope,
   testSlopedSleeperRequestsFixedStepAndWakes,
   testSleeperOnDynamicSupportWakesWhenSupportMoves,
