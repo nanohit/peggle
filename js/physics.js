@@ -708,6 +708,7 @@ export class PhysicsEngine {
   findPortalExit(entryPortal) {
     if (!entryPortal) return null;
     const targetType = entryPortal.type === 'portalBlue' ? 'portalOrange' : 'portalBlue';
+    if (entryPortal.portalTargetId) return this.pegs.find(peg => peg?.id === entryPortal.portalTargetId && peg.type === targetType) || null;
     let best = null;
     let bestDistSq = Infinity;
     for (const peg of this.pegs) {

@@ -4128,7 +4128,7 @@ class PeggleApp {
     const b64 = btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
     console.log(`[bake] JSON ${json.length} bytes → compressed ${compressed.length} → base64url ${b64.length}`);
-    const url = 'player.html#' + b64;
+    const url = new URL((location.protocol==='file:' ? 'player.html#' : '/player.html#') + b64,location.href).href;
     window.open(url, '_blank');
   }
 
@@ -7843,7 +7843,7 @@ class PeggleApp {
     if (remotePublishMessage) {
       alert(`${remotePublishMessage} Opened local preview only.`);
     }
-    window.open('player.html?campaign=' + encodeURIComponent(localName), '_blank');
+    window.open(new URL((location.protocol==='file:' ? 'player.html' : '/player.html')+'?campaign=' + encodeURIComponent(localName),location.href).href, '_blank');
   }
 }
 

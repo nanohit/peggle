@@ -3,14 +3,16 @@
   "collections": [
     {
       "id": "alea",
-      "title": "Alea · 24",
+      "title": "Alea · 8",
+      "playlistCount": 8,
       "count": 24,
       "file": "data/gen/alea.json",
       "sha256": "23e1dbf0e2466e41ed4f3fc58a926b3268c13f315491e25c1a36ea0889dc38ff"
     },
     {
       "id": "original",
-      "title": "Gen 0.1 · 24",
+      "title": "Gen 0.1 · 8",
+      "playlistCount": 8,
       "count": 24,
       "file": "data/gen/original.json",
       "sha256": "1b9042c1cba8fad6613b0887109e832fd1b29f2a0f51bddb1e7a1d2a03fc1529"

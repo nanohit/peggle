@@ -17,6 +17,8 @@
     "test:hinges": "node scripts/destruction-hinge-smoke.mjs",
     "test:des-generator": "node scripts/destruction-generator-smoke.mjs",
     "generate:des": "node generators/destruction/build-catalog.mjs && node generators/destruction/build-report.mjs",
+    "generate:des1": "node generators/destruction1/build-catalog.mjs && node generators/destruction1/build-report.mjs",
+    "test:des1": "node scripts/destruction-intents-smoke.mjs",
     "test:player-regression": "node scripts/player-regression-smoke.mjs",
     "test:cdn-shell": "node scripts/cdn-shell-smoke.mjs"
   },

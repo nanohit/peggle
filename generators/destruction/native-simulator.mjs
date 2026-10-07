@@ -3,6 +3,7 @@ if (typeof window === 'undefined') {
     getItem:key=>memory.get(key)??null,setItem:(key,value)=>memory.set(key,String(value)),removeItem:key=>memory.delete(key)}});
 }
 const {Game}=await import('../../js/game.js');
+const {normalizeLevelData}=await import('../../js/levels.js');
 const {PHYSICS_CONFIG}=await import('../../js/physics.js');
 const {DestructionPegSystem}=await import('../../js/destruction-mode.js');
 const {setMuted}=await import('../../js/haptics.js');
@@ -54,7 +55,7 @@ export class NativeSimulation {
   constructor(level,{seed='native'}={}){
     this.clock=0;this.timers=new Map();this.nextTimer=0;this.samples=[];this.shots=[];
     this.levelRadius=level.pegRadius||8.5;this.original=new Map(level.pegs.map(p=>[p.id,{x:p.x,y:p.y,type:p.type}]));
-    this.scope(()=>{this.game=new HeadlessGame();this.game.physics.setRandomSource(seededRandom(seed));this.game.loadLevel(structuredClone(level));this.game.destructionSystem.simContacts=new Map();});
+    this.scope(()=>{this.game=new HeadlessGame();this.game.physics.setRandomSource(seededRandom(seed));this.game.loadLevel(normalizeLevelData(structuredClone(level)));this.game.destructionSystem.simContacts=new Map();});
   }
   scope(action){
     const realPerformance=globalThis.performance,setTimer=globalThis.setTimeout,clearTimer=globalThis.clearTimeout,config={...PHYSICS_CONFIG};
@@ -96,11 +97,12 @@ export class NativeSimulation {
     });
   }
   summary(){
-    const g=this.game;return {complete:g.state==='won'||g.getOrangePegsLeft()===0,state:g.state,
+    const g=this.game;return {complete:g.state==='won'||g.isLevelObjectiveComplete(),state:g.state,
       orangeLeft:g.getOrangePegsLeft(),orangeTotal:g.initialOrangePegs,fraction:1-g.getOrangePegsLeft()/Math.max(1,g.initialOrangePegs),
       fallenTargets:g.simMetrics.fallen,directTargets:g.simMetrics.direct,shots:this.shots,
       crossAssemblyImpacts:[...g.destructionSystem.simContacts.entries()].map(([pair,speed])=>({assemblies:pair.split('|'),speed})),
       maxDrift:Math.max(0,...g.pegs.map(p=>Math.hypot(p.x-this.original.get(p.id).x,p.y-this.original.get(p.id).y))),
+      intent:g.intentObjectives?.snapshot()||null,intentEvents:g.intentObjectives?.events.map(e=>({...e}))||[],
       pose:g.pegs.map(p=>({...p})),bodies:[...g.destructionSystem.bodies.values()].map(b=>({id:b.id,x:b.x,y:b.y,angle:b.angle,sleeping:b.sleeping,hinge:!!b.hinge}))};
   }
 }

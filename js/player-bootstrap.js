@@ -4,6 +4,7 @@
 
 import { Game } from './game.js';
 import { mirrorDestructionHinge } from './destruction-hinge.js';
+import { curateGeneratedPlaylist } from './generated-playlist.js';
 import { PvpRuntime } from './pvp-runtime.js';
 import { isMuted, setMuted } from './haptics.js';
 import { VisualLayout } from './visual-layout.js';
@@ -45,6 +46,7 @@ const ASPECT_RATIO = 3 / 4.5;
 const FRAME_RATIO = 9 / 17;
 const GENERATED_PLAYER = window.__PEGGLE_GENERATED_PLAYER__ === true;
 const DESTRUCTION_PLAYER = window.__PEGGLE_DESTRUCTION_PLAYER__ === true;
+const INTENT_PLAYER = window.__PEGGLE_INTENT_PLAYER__ === true;
 const WORLD_W = 400;
 const WORLD_H = Math.round(WORLD_W / ASPECT_RATIO); // 600
 const PVP_DUEL_LEVELS_STORAGE_KEY = 'pvp:duel:levels';
@@ -178,6 +180,8 @@ function staticUrl(path) {
     return value;
   }
 }
+
+function appUrl(path) { return new URL(path,location.href).href; }
 
 function staticJson(path) {
   return fetch(staticUrl(path), { credentials: 'same-origin' })
@@ -723,18 +727,30 @@ resolve();
 async function resolve() {
   if (DESTRUCTION_PLAYER) {
     try {
-      const campaign = await staticJson('/data/des/campaign.json');
+      const campaign = await staticJson(INTENT_PLAYER ? '/data/des1/campaign.json' : '/data/des/campaign.json');
       const seed = getQueryParam('seed');
-      let levels = campaign.levels.map(normalizeLevelData);
+      let levels = curateGeneratedPlaylist(campaign.levels.map(normalizeLevelData), {
+        variants: getQueryParam('variants') === '1', selectedId: getQueryParam('id')
+      });
       if (seed) {
-        const {generateLevel} = await import('../generators/destruction/grammar.js');
-        const {validateGeometry} = await import('../generators/destruction/geometry.js');
-        const generated = normalizeLevelData(generateLevel(seed, getQueryParam('family') || 'counterweights'));
+        const validateGeometry = INTENT_PLAYER ? (await import('../generators/destruction1/geometry.js')).validateIntentGeometry
+          : (await import('../generators/destruction/geometry.js')).validateGeometry;
+        let generated;
+        if (INTENT_PLAYER) {
+          const {generateIntentLevel} = await import('../generators/destruction1/grammar.js');
+          const saved = sessionStorage.getItem('alea_intent_generated');
+          let cached = null; try {cached=JSON.parse(saved);} catch {}
+          generated = cached?.metadata?.generator?.seed === seed && cached.metadata.generator.mode === getQueryParam('mode')
+            ? normalizeLevelData(cached) : normalizeLevelData(generateIntentLevel(seed,getQueryParam('mode') || 'compose'));
+        } else {
+          const {generateLevel} = await import('../generators/destruction/grammar.js');
+          generated = normalizeLevelData(generateLevel(seed, getQueryParam('family') || 'counterweights'));
+        }
         if (!validateGeometry(generated).valid) throw new Error('Invalid construction geometry');
-        levels = [generated, ...levels];
+        levels = [generated, ...levels.filter(l => INTENT_PLAYER ? l.id !== generated.id : l.metadata?.generator?.family !== generated.metadata.generator.family)];
       }
       await bootWithLevels(levels, seed ? 'Destruction · '+seed : campaign.name, {...campaign, levels, graph: graphFromLevels(levels)}, {
-        unlockAll: true, initialLevelId: getQueryParam('id'), destructionGenerator: true
+        unlockAll: true, initialLevelId: getQueryParam('id'), destructionGenerator: true, intentGenerator: INTENT_PLAYER
       });
     } catch (error) {
       console.error('[des]', error);
@@ -750,7 +766,9 @@ async function resolve() {
       if (!collection) throw new Error('Unknown generated collection');
       const campaign = await staticJson(collection.file);
       if (!hasCampaignLevels(campaign)) throw new Error('Generated levels unavailable');
-      const levels = campaign.levels.map(normalizeLevelData);
+      const levels = curateGeneratedPlaylist(campaign.levels.map(normalizeLevelData), {
+        variants: getQueryParam('variants') === '1', selectedId: getQueryParam('id')
+      });
       await bootWithLevels(levels, campaign.name, campaign, {
         unlockAll: true,
         initialLevelId: getQueryParam('id'),
@@ -910,6 +928,7 @@ async function bootPvpDuelRoom(roomCode) {
   function showPause() {
     if (paused || !game) return;
     paused = true;
+    const intentStatus=document.getElementById('intentStatus');if(intentStatus)intentStatus.hidden=true;
     game.pause();
     pauseOverlay.classList.add('visible');
     visualLayout.frame.classList.add('visual-frame--paused');
@@ -1684,6 +1703,7 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     const fromMap = !!options.fromMap;
     if (!paused) return;
     paused = false;
+    const intentStatus=document.getElementById('intentStatus');if(intentStatus)intentStatus.hidden=false;
     setHudLockedByMap(false);
     if (fromMap) pauseOverlay.classList.add('pause-overlay--instant');
     pauseOverlay.classList.remove('visible');
@@ -1715,9 +1735,9 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
   function goToMenu() {
     const campaignParam = new URLSearchParams(location.search).get('campaign');
     if (campaignParam) {
-      location.href = location.pathname + '?campaign=' + encodeURIComponent(campaignParam) + '&select=1';
+      location.href = appUrl(location.pathname + '?campaign=' + encodeURIComponent(campaignParam) + '&select=1');
     } else {
-      location.href = location.pathname;
+      location.href = appUrl(location.pathname);
     }
   }
 
@@ -2080,12 +2100,22 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     picker.setAttribute('aria-label', 'Наборы уровней');
     for (const collection of options.generatedCatalog.collections) {
       const link = document.createElement('a');
-      link.href = '/gen?set=' + encodeURIComponent(collection.id);
+      link.href = appUrl('/gen?set=' + encodeURIComponent(collection.id));
       link.textContent = collection.title;
       if (collection.id === options.generatedCollection) link.setAttribute('aria-current', 'page');
       picker.appendChild(link);
     }
     pauseLevelBtn.after(picker);
+  }
+  if (GENERATED_PLAYER && !INTENT_PLAYER && !getQueryParam('seed')) {
+    const variantsLink = document.createElement('a');
+    const query = new URLSearchParams(location.search);
+    const showingVariants = query.get('variants') === '1';
+    if (showingVariants) query.delete('variants'); else query.set('variants', '1');
+    variantsLink.href = appUrl(location.pathname + '?' + query);
+    variantsLink.textContent = showingVariants ? 'Различные композиции' : 'Все seed-варианты';
+    variantsLink.className = 'des-report-link';
+    pauseLevelBtn.after(variantsLink);
   }
   if (options.destructionGenerator) {
     const tools = document.createElement('div');
@@ -2093,31 +2123,51 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     const create = document.createElement('button');
     create.textContent = 'Новая конструкция';
     create.addEventListener('click', async () => {
-      const {FAMILIES} = await import('../generators/destruction/grammar.js');
+      const families = options.intentGenerator
+        ? (await import('../generators/destruction1/grammar.js')).MODES
+        : (await import('../generators/destruction/grammar.js')).FAMILIES;
       const dialog = document.createElement('dialog');
       dialog.className = 'des-generator-dialog';
       const form = document.createElement('form');
       const heading = document.createElement('h2'); heading.textContent = 'Собрать конструкцию';
       const select = document.createElement('select'); select.name = 'family'; select.setAttribute('aria-label','Семейство');
-      for (const family of FAMILIES) { const option = document.createElement('option'); option.value=family.id;option.textContent=family.name;select.append(option); }
-      select.value = activeLevelData?.metadata?.generator?.family || 'counterweights';
+      for (const family of families) { const option = document.createElement('option'); option.value=family.id;option.textContent=family.name;select.append(option); }
+      select.value = options.intentGenerator ? 'compose' : (activeLevelData?.metadata?.generator?.family || 'counterweights');
       const input = document.createElement('input'); input.name='seed'; input.maxLength=40; input.setAttribute('aria-label','Seed');input.value='des-'+Math.random().toString(36).slice(2,9);
-      const hint = document.createElement('p');hint.textContent='Одинаковый seed воспроизводит ту же конструкцию. Новые варианты не проходили автоматический отбор, как уровни в карте.';
+      const hint = document.createElement('p');hint.textContent=options.intentGenerator ? 'Соберём новую цепочку и проверим её настоящими выстрелами. Проверка займёт некоторое время; её можно отменить.' : 'Одинаковый seed воспроизводит ту же конструкцию. Новые варианты не проходили автоматический отбор, как уровни в карте.';
       const submit = document.createElement('button');submit.type='submit';submit.textContent='Собрать и играть';
       const cancel = document.createElement('button');cancel.type='button';cancel.textContent='Отмена';cancel.onclick=()=>dialog.close();
       form.append(heading,select,input,hint,submit,cancel);dialog.append(form);document.body.append(dialog);
-      form.onsubmit=event=>{event.preventDefault();location.href='/des?'+new URLSearchParams({family:select.value,seed:input.value.trim()||'des-001'});};
-      dialog.onclose=()=>dialog.remove();dialog.showModal();
+      let worker=null,workerUrl=null;
+      const stopWorker=()=>{worker?.terminate();worker=null;if(workerUrl)URL.revokeObjectURL(workerUrl);workerUrl=null;};
+      form.onsubmit=async event=>{
+        event.preventDefault();
+        if (!options.intentGenerator) {location.href=appUrl('/des?'+new URLSearchParams({family:select.value,seed:input.value.trim()||'des-001'}));return;}
+        submit.disabled=true;select.disabled=true;input.disabled=true;
+        hint.textContent='Загружаем проверку физики…';
+        workerUrl=URL.createObjectURL(new Blob(['import '+JSON.stringify(staticUrl('dist/intent-worker.js'))+';'],{type:'text/javascript'}));
+        worker=new Worker(workerUrl,{type:'module'});
+        worker.onmessage=event=>{
+          const data=event.data;
+          if(data.ready){worker.postMessage({seed:input.value.trim()||'intent-001',mode:select.value});return;}
+          if(data.progress){hint.textContent=data.progress;return;}
+          stopWorker();
+          if(data.level){sessionStorage.setItem('alea_intent_generated',JSON.stringify(data.level));location.href=appUrl('/des1?'+new URLSearchParams({mode:data.level.metadata.generator.mode,seed:data.level.metadata.generator.seed}));}
+          else {hint.textContent=data.error || 'Не удалось подобрать цепочку. Попробуй другой seed.';submit.disabled=false;select.disabled=false;input.disabled=false;}
+        };
+        worker.onerror=error=>{console.error('[intent worker]',error.message);stopWorker();hint.textContent='Не удалось проверить конструкцию. Попробуй снова.';submit.disabled=false;select.disabled=false;input.disabled=false;};
+      };
+      dialog.onclose=()=>{stopWorker();dialog.remove();};dialog.showModal();
     });
     const editorLink=document.createElement('a');editorLink.textContent='Редактор';
     editorLink.addEventListener('click',()=>{
       if(activeLevelData){sessionStorage.setItem('peggle_des_editor_import',JSON.stringify(activeLevelData));}
-    });editorLink.href='/des/editor';
+    });editorLink.href=appUrl('/des/editor');
     tools.append(create,editorLink);pauseLevelBtn.after(tools);
     const hint=document.createElement('p');hint.className='des-hint';
     hint.textContent=activeLevelData?.metadata?.authorNotes || 'Разрушайте опоры, меняйте нагрузку и запускайте цепные падения.';
     tools.after(hint);
-    const report=document.createElement('a');report.className='des-report-link';report.href='/des/report/';report.textContent='Устройство генератора и результаты отбора';hint.after(report);
+    const report=document.createElement('a');report.className='des-report-link';report.href=appUrl(options.intentGenerator ? '/des1/report/' : '/des/report/');report.textContent='Устройство генератора и результаты отбора';hint.after(report);
   }
   const pausePvpDuelBtn = pauseOverlay.querySelector('#pausePvpDuelBtn');
   pausePvpDuelBtn?.addEventListener('click', (event) => {
@@ -2577,7 +2627,8 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
         }
       })
       : new Game(canvas);
-    if (DESTRUCTION_PLAYER) window.__aleaDes = { getGame: () => game, getLevel: () => activeLevelData };
+    window.__aleaPlayer = {getGame:()=>game,getLevel:()=>activeLevelData,getLevels:()=>originalLevels,startLevel};
+    if (DESTRUCTION_PLAYER) window.__aleaDes = window.__aleaPlayer;
     if (Number.isFinite(options.suppressInputMs) && options.suppressInputMs > 0) {
       game.suppressInputFor?.(options.suppressInputMs);
     }
@@ -2589,6 +2640,8 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     // Apply visuals (background + frame + slots)
     const visuals = resolveVisualsWithCharacter(levelData);
     visualLayout.setConfig(visuals);
+    const objectiveCopy=visualLayout.frame.querySelector('.machine-objective-copy');
+    if(objectiveCopy)objectiveCopy.textContent=levelData.metadata?.intentGraph?.required ? 'STAGES' : 'TARGETS';
     game.renderer.setBackground(visuals.background);
     game.renderer.setBallTrail(visuals.ballTrail);
     game.renderer.setShockwave(visuals.shockwave);
@@ -2657,8 +2710,15 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
         visualLayout.updateBallCounter(snapshot.ballsLeft, snapshot.initialBallCount);
       }
       if (Number.isFinite(snapshot.orangePegsLeft)) {
-        visualLayout.updateHealthBar(snapshot.orangePegsLeft, snapshot.totalOrangePegs);
+        const intent=snapshot.intentProgress;
+        visualLayout.updateHealthBar(intent ? intent.total-intent.done : snapshot.orangePegsLeft, intent ? intent.total : snapshot.totalOrangePegs);
       }
+      let status=document.getElementById('intentStatus');
+      if(snapshot.intentProgress){
+        if(!status){status=document.createElement('div');status.id='intentStatus';status.className='intent-status';document.body.append(status);}
+        const intent=snapshot.intentProgress;
+        status.replaceChildren();const progress=document.createElement('small');progress.textContent=`Цепочка ${intent.done}/${intent.total}`;status.append(progress,document.createTextNode(intent.instruction));status.hidden=paused || !!activeLevelMap;
+      } else status?.remove();
       visualLayout.setBilliardTopLauncherActive?.(
         !!snapshot.billiardPhase && snapshot.billiardLauncherIndex === 0
       );
@@ -2786,7 +2846,7 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
           }, { ignoreEarlyMs: 450 });
         } else {
           // Defeat — toggle mirror and restart same level
-          mirrorState = !mirrorState;
+          mirrorState = GENERATED_PLAYER ? false : !mirrorState;
           onceAction(() => transitionToLevel(currentNodeId));
         }
       }, bindDelayMs);

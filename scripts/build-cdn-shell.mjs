@@ -1,71 +1,32 @@
-import { readFile, mkdir, writeFile, cp, rm } from 'node:fs/promises';
+import {readFile, mkdir, writeFile, rm} from 'node:fs/promises';
 import path from 'node:path';
-import { build } from 'esbuild';
-
-const root = process.cwd();
-const templatePath = path.join(root, 'player-cdn-shell.html');
-const refPath = path.join(root, 'cdn-ref.json');
-const outputPath = path.join(root, 'vercel-shell', 'index.html');
-const maxShellBytes = 7 * 1024;
-
-async function main() {
-  const template = await readFile(templatePath, 'utf8');
-  const config = JSON.parse(await readFile(refPath, 'utf8'));
-  const repository = String(config.repository || 'nanohit/peggle').trim();
-  const ref = String(process.env.PEGGLE_CDN_REF || config.ref || '').trim();
-  if (!/^[a-f0-9]{7,40}$/i.test(ref)) throw new Error('cdn-ref.json must contain a Git commit SHA');
-  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) throw new Error('invalid CDN repository');
-
-  const cdnBase = `https://cdn.jsdelivr.net/gh/${repository}@${ref}/`;
-  const html = template.replaceAll('__PEGGLE_CDN_BASE__', cdnBase);
-  if (html.includes('__PEGGLE_CDN_BASE__')) throw new Error('unresolved CDN base placeholder');
-  const bytes = Buffer.byteLength(html);
-  if (bytes > maxShellBytes) throw new Error(`HTML shell is ${bytes} bytes; limit is ${maxShellBytes}`);
-
-  await mkdir(path.dirname(outputPath), { recursive: true });
-  await writeFile(outputPath, html);
-  console.log(`Vercel shell: ${bytes} bytes -> ${outputPath}`);
-  console.log(`Static base: ${cdnBase}`);
-  const genBase = path.join(root, 'vercel-shell', 'gen-static');
-  await rm(genBase, { recursive: true, force: true });
-  await mkdir(genBase, { recursive: true });
-  await build({
-    entryPoints: {
-      'player-bootstrap': path.join(root, 'js/player-bootstrap.js'),
-      'des-editor': path.join(root, 'js/des-editor-bootstrap.js')
-    },
-    bundle: true, format: 'esm', splitting: true, minify: true,
-    outdir: path.join(genBase, 'dist'), platform: 'browser', logLevel: 'info'
-  });
-  for (const dir of ['css', 'fonts', 'cdn-data', 'data/gen', 'data/des']) {
-    await cp(path.join(root, dir), path.join(genBase, dir), { recursive: true });
-  }
-  await mkdir(path.join(genBase, 'visuals/assets_webtp'), { recursive: true });
-  await cp(path.join(root, 'visuals/assets_webtp/flipper.webp'), path.join(genBase, 'visuals/assets_webtp/flipper.webp'));
-  await mkdir(path.join(root, 'vercel-shell', 'gen'), { recursive: true });
-  await cp(path.join(root, 'player-gen-shell.html'), path.join(root, 'vercel-shell', 'gen', 'index.html'));
-  const desStyle = `<style>
-    .des-tools{display:flex;gap:8px;margin:8px 0}.des-tools>*{flex:1;text-align:center;border:1px solid #285e76;border-radius:8px;padding:11px 6px;background:#062033;color:#a5e9ff;text-decoration:none;font:600 12px system-ui}
-    .des-hint{max-width:320px;margin:6px auto;color:#a0bdc9;font:12px/1.4 system-ui;text-align:center}.des-report-link{display:block;text-align:center;font:11px system-ui;color:#81b7ce;margin:6px}
-    .des-generator-dialog{max-width:340px;width:calc(100% - 40px);padding:20px;border:1px solid #285e76;border-radius:14px;color:#d7f4ff;background:#061827;z-index:100000}.des-generator-dialog::backdrop{background:#000b}.des-generator-dialog h2{font:600 20px system-ui}.des-generator-dialog p{font:12px/1.5 system-ui;color:#a0bdc9}.des-generator-dialog select,.des-generator-dialog input,.des-generator-dialog button{box-sizing:border-box;width:100%;margin:6px 0;padding:12px;border:1px solid #285e76;border-radius:8px;color:#d7f4ff;background:#0b2b3d;font:14px system-ui}
-    .pause-panel{max-height:90dvh;overflow:auto}.des-tools{width:100%}
-  </style>`;
-  const desShell=(await readFile(path.join(root,'player-gen-shell.html'),'utf8'))
-    .replace('Alea · Generated levels','Alea · Destruction')
-    .replace('window.__PEGGLE_GENERATED_PLAYER__ = true;','window.__PEGGLE_GENERATED_PLAYER__ = true; window.__PEGGLE_DESTRUCTION_PLAYER__ = true;')
-    .replace('</head>',desStyle+'</head>');
-  await mkdir(path.join(root,'vercel-shell/des/editor'),{recursive:true});
-  await writeFile(path.join(root,'vercel-shell/des/index.html'),desShell);
-  const editorShell=(await readFile(path.join(root,'editor.html'),'utf8'))
-    .replace('<head>','<head><base href="/gen-static/"><script>window.__PEGGLE_LOCAL_EDITOR__=true;</script>')
-    .replace('src="js/main.js"','src="dist/des-editor.js"');
-  await writeFile(path.join(root,'vercel-shell/des/editor/index.html'),editorShell);
-  await cp(path.join(root,'generators/destruction/report'),path.join(root,'vercel-shell/des/report'),{recursive:true});
-  console.log('Destruction: /des; generator, unlocked catalogue, native seesaw editor');
-  console.log('Generated player: /gen; three unlocked collections, 340 unchanged levels');
+const root=process.cwd(), out=path.join(root,'vercel-shell');
+const config=JSON.parse(await readFile('cdn-ref.json','utf8'));
+const ref=String(process.env.PEGGLE_CDN_REF || config.ref);
+if(!/^[a-f0-9]{7,40}$/i.test(ref)||!/^nanohit\/peggle$/.test(config.repository)) throw Error('Use an immutable nanohit/peggle commit');
+const base=`https://cdn.jsdelivr.net/gh/${config.repository}@${ref}/`;
+await rm(out,{recursive:true,force:true});
+async function save(file,html){
+ const size=Buffer.byteLength(html);if(size>2500)throw Error(`${file}: ${size} bytes exceeds tiny launcher limit`);
+ await mkdir(path.dirname(path.join(out,file)),{recursive:true});await writeFile(path.join(out,file),html);console.log(file,size,'bytes');
 }
-
-main().catch(error => {
-  console.error(error);
-  process.exit(1);
-});
+const template=await readFile('player-cdn-shell.html','utf8');
+for(const [file,title,flags] of [
+ ['index.html','Alea',''],
+ ['gen/index.html','Alea · Generated','window.__PEGGLE_GENERATED_PLAYER__=true;'],
+ ['des/index.html','Alea · Destruction','window.__PEGGLE_GENERATED_PLAYER__=true;window.__PEGGLE_DESTRUCTION_PLAYER__=true;'],
+ ['des1/index.html','Alea · Destruction intents','window.__PEGGLE_GENERATED_PLAYER__=true;window.__PEGGLE_DESTRUCTION_PLAYER__=true;window.__PEGGLE_INTENT_PLAYER__=true;']
+]) await save(file,template.replaceAll('__PEGGLE_CDN_BASE__',base).replace('__PEGGLE_TITLE__',title).replace('__PEGGLE_FLAGS__',flags));
+// The editor and reports live on the CDN too. document.write creates a parser
+// document so existing module/DOMContentLoaded initialization runs normally.
+async function documentLauncher(file,source,{editor=false,local=false}={}){
+ const sourceBase=new URL('.',new URL(source,base)).href;
+ const transform=editor ? `.replace('src="js/main.js"','src="dist/${local?'des-editor':'editor'}.js"').replace(/<link[^>]*fonts\\.(?:googleapis|gstatic)[^>]*>/g,'')` : '';
+ const flags=editor ? `window.__PEGGLE_STATIC_BASE__=${JSON.stringify(base)};window.__PEGGLE_CDN_SNAPSHOT_FIRST__=true;window.__PEGGLE_LOCAL_EDITOR__=${local};` : '';
+ await save(file,`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Alea</title><body style="background:#020712;color:#a5e9ff;font:16px system-ui">Загрузка…<script>${flags}fetch(${JSON.stringify(new URL(source,base).href)}).then(r=>{if(!r.ok)throw Error(r.status);return r.text()}).then(t=>{t=t${transform};t=t.replace(/href="\\/(?!\\/)/g,'href="'+location.origin+'/');t=t.replace(/<head>/,'<head><base href="${editor?base:sourceBase}">');if(!/<head>/.test(t))t=t.replace(/<html[^>]*>/,'$&<head><base href="${sourceBase}"></head>');document.open();document.write(t);document.close()}).catch(e=>{document.body.textContent='Не удалось загрузить. Обновите страницу.';console.error(e)})</script>`);
+}
+await documentLauncher('des/editor/index.html','editor.html',{editor:true,local:true});
+await documentLauncher('editor.html','editor.html',{editor:true});
+await documentLauncher('des/report/index.html','generators/destruction/report/index.html');
+await documentLauncher('des1/report/index.html','generators/destruction1/report/index.html');
+console.log('CDN:',base,'— Vercel contains only HTML launchers');

@@ -1,15 +1,13 @@
 # Generated levels player
 
-`https://alea.sh/gen` uses the current Better-Visuals player and defaults to the 24 Alea-sized levels from blast_generator0.2.1.
+All public player/editor launchers use one immutable `nanohit/peggle` commit on jsDelivr. Vercel output contains only 1–2 KB HTML launchers; client JS/CSS, fonts, catalogues and report documents are on the CDN. Shared campaign APIs stay on the page origin. `build:cdn` publishes the player, editor, destruction editor and native validation worker with shared code chunks. Publish that Git commit first, then pin its full SHA in `cdn-ref.json` and deploy the shell.
 
-All levels are immediately selectable in Pause → Levels. The collection buttons below Levels select:
+`/gen` defaults to eight distinct Alea-sized compositions. `/gen?set=original` has eight original compositions. `?variants=1` restores all 24 source variants, interleaved by family. `/gen?set=blast` keeps all 292 imported Blast levels. `?id=<native-level-id>` selects a specific variant even in a curated playlist.
 
-- `/gen?set=alea`: 24 Alea-sized levels, native compound Bezier strokes.
-- `/gen?set=original`: 24 original blast_generator0.1 levels.
-- `/gen?set=blast`: all 292 imported Blast levels, preserving their original campaign graph.
+The three `data/gen/*.json` source exports remain byte-for-byte identical to research. The source repository `/Users/pavel/Desktop/peggle-procedural` is not modified.
 
-`/gen?set=alea&id=<native-level-id>` opens a specific level.
+`/des` has eight compositions; `?variants=1` opens all 16 historical seed variants. Central bridge openings now admit the standard 17px ball; their blue lock spans the opening below the two leaves. The earlier selection routes are historical, while `physics-check.json` records current stability and interaction probes.
 
-The campaigns in `data/gen` are byte-for-byte copies of the completed research exports. `catalog.json` records their SHA-256 hashes. Do not regenerate or resize them in the production build.
+`/des1` uses a separately generated graph of physical intentions. Every selected composition has native capture/release/transport witnesses, an exact route replay and an independent route with different timing/randomness. All levels are unlocked. New construction generation runs the real game in a cancellable worker and publishes only a candidate with a complete native route. Direct seed URLs are reproducible but bypass worker validation unless that seed was generated in this session.
 
-`build-cdn-shell.mjs` builds `/gen` into a separate same-origin asset directory. The normal homepage continues using the unchanged CDN ref in `cdn-ref.json`. No research files or shared backend campaign records are modified.
+Retries retain generated geometry. The normal campaign keeps its established defeat/mirror behavior. Local editing at `/des/editor` imports the current level without changing the production campaign. `/editor.html` also uses the same shared physics from the CDN.

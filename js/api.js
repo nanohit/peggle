@@ -18,7 +18,7 @@ function resolveApiBase() {
   if (typeof location !== 'undefined' && (location.protocol === 'file:' || isLocalHost(location.hostname))) {
     return `${REMOTE_API_ORIGIN}/api`;
   }
-  return '/api';
+  return typeof location !== 'undefined' ? new URL('/api', location.origin).href : '/api';
 }
 
 const API_BASE = resolveApiBase();

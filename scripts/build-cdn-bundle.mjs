@@ -6,7 +6,7 @@ const outdir = path.resolve(process.cwd(), 'dist');
 
 await rm(outdir, { recursive: true, force: true });
 await build({
-  entryPoints: ['js/player-bootstrap.js'],
+  entryPoints: {'player-bootstrap':'js/player-bootstrap.js','des-editor':'js/des-editor-bootstrap.js','editor':'js/main.js','intent-worker':'generators/destruction1/worker.js'},
   bundle: true,
   format: 'esm',
   splitting: true,

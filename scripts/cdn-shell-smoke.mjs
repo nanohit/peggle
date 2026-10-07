@@ -1,38 +1,22 @@
-import { readFile, stat } from 'node:fs/promises';
-
-function assert(condition, message) {
-  if (!condition) throw new Error(message);
+import assert from 'node:assert/strict';
+import {readFile,readdir,stat} from 'node:fs/promises';
+import {createHash} from 'node:crypto';
+import {curateGeneratedPlaylist} from '../js/generated-playlist.js';
+const ref=JSON.parse(await readFile('cdn-ref.json','utf8')),base=`https://cdn.jsdelivr.net/gh/${ref.repository}@${ref.ref}/`;
+assert.equal(ref.repository,'nanohit/peggle');assert(/^[a-f0-9]{7,40}$/i.test(ref.ref));
+async function files(dir){return (await Promise.all((await readdir(dir,{withFileTypes:true})).map(e=>e.isDirectory()?files(dir+'/'+e.name):dir+'/'+e.name))).flat();}
+for(const file of await files('vercel-shell')){
+ assert(file.endsWith('.html'),'Only launchers belong on Vercel: '+file);
+ const html=await readFile(file,'utf8');assert(Buffer.byteLength(html)<=2500,file+' exceeds launcher budget');
+ assert(html.includes(base),'Unpinned launcher: '+file);assert(!html.includes('/gen-static/'),'Local static bundle remains');
+ assert(!/(?:src|href)="\/(?!api\/)/.test(html),'Absolute static URL under CDN base');
+ console.log('ok',file,Buffer.byteLength(html));
 }
-
-const [html, refConfig, vercelConfig, primaryText, initialText, charactersText, manifest] = await Promise.all([
-  readFile('vercel-shell/index.html', 'utf8'),
-  readFile('cdn-ref.json', 'utf8').then(JSON.parse),
-  readFile('vercel.json', 'utf8').then(JSON.parse),
-  readFile('cdn-data/primary.json', 'utf8'),
-  readFile('cdn-data/primary.initial.json', 'utf8'),
-  readFile('cdn-data/characters.json', 'utf8'),
-  readFile('cdn-data/manifest.json', 'utf8').then(JSON.parse)
-]);
-
-const primary = JSON.parse(primaryText);
-const initial = JSON.parse(initialText);
-const characters = JSON.parse(charactersText);
-const shellBytes = Buffer.byteLength(html);
-const expectedBase = `https://cdn.jsdelivr.net/gh/${refConfig.repository}@${refConfig.ref}/`;
-
-assert(shellBytes < 7 * 1024, `HTML shell is too large: ${shellBytes}`);
-assert(html.includes(`<base href="${expectedBase}">`), 'HTML shell is not pinned to cdn-ref.json');
-assert(html.includes('window.__PEGGLE_CDN_SNAPSHOT_FIRST__ = true'), 'CDN snapshot mode is not enabled');
-assert(html.includes("import(new URL('/gen-static/dist/player-bootstrap.js', location.origin).href)"), 'main player must resolve current physics against the page origin, not the CDN base');
-assert(!/(?:src|href)="\/(?!api\/)/.test(html), 'unexpected static reference resolved against the CDN base');
-assert(vercelConfig.outputDirectory === 'vercel-shell', 'Vercel must publish only vercel-shell');
-assert(vercelConfig.buildCommand === 'node scripts/build-cdn-shell.mjs', 'Vercel build must only generate the shell');
-assert(Array.isArray(primary.levels) && primary.levels.length === manifest.levelCount, 'primary snapshot level count mismatch');
-assert(Array.isArray(initial.levels) && initial.levels.length > 0, 'initial snapshot is empty');
-assert(Object.keys(characters.characters || {}).length === manifest.characterCount, 'character snapshot count mismatch');
-assert(!/data:(?:image|audio)\//i.test(primaryText + charactersText), 'CDN snapshots contain inline media');
-await stat('dist/player-bootstrap.js');
-
-console.log(`ok CDN shell ${shellBytes} bytes`);
-console.log(`ok snapshot ${manifest.levelCount} levels, ${manifest.characterCount} characters`);
-console.log(`ok static base ${expectedBase}`);
+const html=await readFile('vercel-shell/des1/index.html','utf8');assert(html.includes('__PEGGLE_INTENT_PLAYER__=true'));
+const config=JSON.parse(await readFile('vercel.json','utf8'));assert.equal(config.outputDirectory,'vercel-shell');
+for(const route of ['/gen','/des','/des1','/des/editor','/des1/report'])assert(config.rewrites.some(r=>r.source===route));
+for(const file of ['player-bootstrap','des-editor','editor','intent-worker'])await stat('dist/'+file+'.js');
+const catalog=JSON.parse(await readFile('data/gen/catalog.json','utf8'));
+for(const collection of catalog.collections){const text=await readFile(collection.file,'utf8');assert.equal(createHash('sha256').update(text).digest('hex'),collection.sha256,'Source export changed');const levels=JSON.parse(text).levels;assert.equal(curateGeneratedPlaylist(levels).length,collection.playlistCount||collection.count);assert.equal(curateGeneratedPlaylist(levels,{variants:true}).length,collection.count);}
+const des=JSON.parse(await readFile('data/des/campaign.json','utf8'));assert.equal(curateGeneratedPlaylist(des.levels).length,8);assert.equal(curateGeneratedPlaylist(des.levels,{variants:true}).length,16);
+console.log('ok source exports preserved; 8 distinct compositions per legacy generated playlist');

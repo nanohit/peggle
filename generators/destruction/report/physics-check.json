@@ -1,6 +1,6 @@
 {
   "physics": "rolling-contact-v1",
-  "implementationFingerprint": "19d4ed979b59737d70b9232ce83305b48b62414f4eada616e86f651728e986d0",
+  "implementationFingerprint": "c966b68b47dd0663f5a6da1e0b5539b3abad582247058e337bc6cc744c50cb36",
   "selectionPhysicsFingerprint": "45cbd9a1b8cca8acb2f6ec83abd67ac12315fc3ebef0c35d1434e6b43eaf5ecc",
   "scope": "10-second idle stability and two independent native launch probes; original selection routes are historical",
   "levels": [
@@ -8,31 +8,31 @@
       "id": "des-counterweights-v01-01r",
       "idleTargets": 27,
       "idleFallen": 0,
-      "lateDrift": 0.02743411951190876,
+      "lateDrift": 0.000013169892057114854,
       "shots": [
         {
           "angle": 2.4,
-          "seconds": 3.366666666666912,
+          "seconds": 4.40000000000032,
           "orangeBefore": 27,
-          "orangeAfter": 24,
-          "cleared": 3,
+          "orangeAfter": 18,
+          "cleared": 9,
           "timeout": false,
           "state": "idle",
           "fallenTargets": 0,
-          "directTargets": 3,
-          "hitCount": 8
+          "directTargets": 9,
+          "hitCount": 15
         },
         {
           "angle": 0.7415926535897932,
           "seconds": 21.999999999998195,
           "orangeBefore": 27,
-          "orangeAfter": 11,
-          "cleared": 16,
+          "orangeAfter": 16,
+          "cleared": 11,
           "timeout": true,
           "state": "playing",
-          "fallenTargets": 7,
-          "directTargets": 10,
-          "hitCount": 16
+          "fallenTargets": 6,
+          "directTargets": 6,
+          "hitCount": 10
         }
       ]
     },
@@ -40,31 +40,31 @@
       "id": "des-counterweights-v01-02r",
       "idleTargets": 27,
       "idleFallen": 0,
-      "lateDrift": 0.019726084611154906,
+      "lateDrift": 0.000007480512159000097,
       "shots": [
         {
           "angle": 2.4,
-          "seconds": 2.2250000000001617,
+          "seconds": 2.5416666666668517,
           "orangeBefore": 27,
           "orangeAfter": 24,
           "cleared": 3,
           "timeout": false,
           "state": "idle",
-          "fallenTargets": 0,
-          "directTargets": 3,
+          "fallenTargets": 1,
+          "directTargets": 2,
           "hitCount": 4
         },
         {
           "angle": 0.7415926535897932,
-          "seconds": 21.999999999998195,
+          "seconds": 2.891666666666877,
           "orangeBefore": 27,
-          "orangeAfter": 11,
-          "cleared": 16,
-          "timeout": true,
-          "state": "playing",
-          "fallenTargets": 9,
-          "directTargets": 7,
-          "hitCount": 10
+          "orangeAfter": 21,
+          "cleared": 6,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 4,
+          "directTargets": 2,
+          "hitCount": 4
         }
       ]
     },
@@ -136,11 +136,11 @@
       "id": "des-bridges-v01-01r",
       "idleTargets": 25,
       "idleFallen": 0,
-      "lateDrift": 0.02743411951190876,
+      "lateDrift": 0.0007881156410839939,
       "shots": [
         {
           "angle": 2.4,
-          "seconds": 1.9750000000001438,
+          "seconds": 2.183333333333492,
           "orangeBefore": 25,
           "orangeAfter": 24,
           "cleared": 1,
@@ -168,19 +168,19 @@
       "id": "des-bridges-v01-02",
       "idleTargets": 25,
       "idleFallen": 0,
-      "lateDrift": 0.2879019739186471,
+      "lateDrift": 0.00026687094351342326,
       "shots": [
         {
           "angle": 2.4,
-          "seconds": 21.999999999998195,
+          "seconds": 3.841666666666946,
           "orangeBefore": 25,
-          "orangeAfter": 16,
-          "cleared": 9,
-          "timeout": true,
-          "state": "playing",
-          "fallenTargets": 0,
-          "directTargets": 9,
-          "hitCount": 16
+          "orangeAfter": 17,
+          "cleared": 8,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 5,
+          "directTargets": 7,
+          "hitCount": 11
         },
         {
           "angle": 0.7415926535897932,
@@ -328,11 +328,11 @@
       "id": "des-dominoes-v01-01r",
       "idleTargets": 25,
       "idleFallen": 0,
-      "lateDrift": 0.02743411951190876,
+      "lateDrift": 0.0000018026164206654777,
       "shots": [
         {
           "angle": 2.4,
-          "seconds": 2.066666666666817,
+          "seconds": 2.183333333333492,
           "orangeBefore": 25,
           "orangeAfter": 24,
           "cleared": 1,
@@ -360,11 +360,11 @@
       "id": "des-dominoes-v01-02r",
       "idleTargets": 25,
       "idleFallen": 0,
-      "lateDrift": 0.019726084611154906,
+      "lateDrift": 0,
       "shots": [
         {
           "angle": 2.4,
-          "seconds": 2.3000000000001672,
+          "seconds": 1.9916666666668115,
           "orangeBefore": 25,
           "orangeAfter": 24,
           "cleared": 1,
@@ -376,7 +376,7 @@
         },
         {
           "angle": 0.7415926535897932,
-          "seconds": 4.366666666666984,
+          "seconds": 4.700000000000342,
           "orangeBefore": 25,
           "orangeAfter": 23,
           "cleared": 2,
@@ -456,23 +456,23 @@
       "id": "des-workshops-v01-01rr",
       "idleTargets": 24,
       "idleFallen": 0,
-      "lateDrift": 0.019726260106341525,
+      "lateDrift": 0.0002101196590626661,
       "shots": [
         {
           "angle": 2.4,
-          "seconds": 3.466666666666919,
+          "seconds": 3.441666666666917,
           "orangeBefore": 24,
-          "orangeAfter": 21,
-          "cleared": 3,
+          "orangeAfter": 19,
+          "cleared": 5,
           "timeout": false,
           "state": "idle",
-          "fallenTargets": 0,
-          "directTargets": 3,
+          "fallenTargets": 1,
+          "directTargets": 4,
           "hitCount": 10
         },
         {
           "angle": 0.7415926535897932,
-          "seconds": 2.1583333333334904,
+          "seconds": 2.1500000000001562,
           "orangeBefore": 24,
           "orangeAfter": 24,
           "cleared": 0,
@@ -488,7 +488,7 @@
       "id": "des-workshops-v01-02",
       "idleTargets": 24,
       "idleFallen": 0,
-      "lateDrift": 0.2879019739186471,
+      "lateDrift": 0.00026687094351342326,
       "shots": [
         {
           "angle": 2.4,

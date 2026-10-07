@@ -19,7 +19,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if(imported){app.levelManager.setCurrentLevelById(imported.id);app.startEditor();app.updateLevelTitle();app.updateLevelSettings();}
   }
   else if(savedId){app.startEditor();app.updateLevelTitle();app.updateLevelSettings();}
-  const link=document.createElement('a');link.href='/des';link.textContent='← Destruction';link.style.cssText='color:#a5e9ff;font:12px system-ui;margin-right:8px';
+  const link=document.createElement('a');link.href=new URL('/des',location.href).href;link.textContent='← Destruction';link.style.cssText='color:#a5e9ff;font:12px system-ui;margin-right:8px';
   document.querySelector('.header')?.prepend(link);
   window.__aleaDesEditorReady=true;
 });

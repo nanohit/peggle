@@ -82,12 +82,19 @@ export function generateLevel(seed='des-001',familyId='counterweights') {
   }
   function bridge(cx,base,w,index) {
     for(const side of [-1,1]){
-      const built=createSeesaw({id:current.id+(side<0?':left':':right'),x:cx+side*50,y:base-28,width:96,
+      const built=createSeesaw({id:current.id+(side<0?':left':':right'),x:cx+side*55,y:base-28,width:80,
         pivotFraction:side<0?.2:.8,minAngle:-.65,maxAngle:.65});
       pegs.push(...built.pegs);groups.push(...built.groups);
-      cargo(cx+side*46,base-41.8,[3,2]);
+      cargo(cx+side*55,base-41.8,[3,2]);
+      // Fixed guide posts keep rolling cargo out of the shooting channel while
+      // the bridge is closed. Once a leaf drops, cargo can pass underneath.
+      put(plank(cx+side*18,base-48,6,26,0,'obstacle',{destructionStatic:true,constructionRole:'cargo-guide'}));
+      put(plank(cx+side*94,base-48,6,26,0,'obstacle',{destructionStatic:true,constructionRole:'cargo-guide'}));
     }
-    put(sphere(cx,base-14.2,'blue',{destructionPhysicsOnHit:true,destructionPhysicsOnHitBallOnly:true,constructionRole:'bridge-lock'}));
+    // Thirty-pixel opening admits the native 17px ball. A visible crossbar under
+    // the opening supports both leaves and can actually be hit from above.
+    put(plank(cx,base-17.8,44,10.2,0,'blue',{destructionPhysicsOnHit:true,destructionPhysicsOnHitBallOnly:true,constructionRole:'bridge-lock'}));
+    current.shooterOpening=30;
     current.trigger='remove-central-lock';current.supportContacts=[['bridge-lock','beam'],['bearing','beam'],['beam','cargo']];
   }
   const recipes={tower,seesaw,cage,cradle,bridge};

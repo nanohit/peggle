@@ -153,8 +153,11 @@ export function normalizeDestructionPegProperties(peg) {
   if (peg.destructionHinge) {
     peg.destructionHinge = normalizeDestructionHinge(peg.destructionHinge);
     peg.destructionStatic = false;
-    peg.destructionPhysicsOnHit = false;
-    peg.destructionPhysicsOnHitBallOnly = false;
+    // A bearing may be locked until a ball hits its actuator. Preserve an
+    // explicit latch instead of silently waking the whole rigid assembly when
+    // normalizing a level for the player/editor.
+    peg.destructionPhysicsOnHit = peg.destructionPhysicsOnHit === true;
+    peg.destructionPhysicsOnHitBallOnly = peg.destructionPhysicsOnHit && peg.destructionPhysicsOnHitBallOnly === true;
   }
   delete peg._destructionHingeBroken;
   delete peg._destructionBodyId;
@@ -2457,6 +2460,7 @@ export class DestructionPegSystem {
   findPortalExit(entryPortal, pegs = []) {
     if (!entryPortal || !Array.isArray(pegs)) return null;
     const targetType = entryPortal.type === 'portalBlue' ? 'portalOrange' : 'portalBlue';
+    if (entryPortal.portalTargetId) return pegs.find(peg => peg?.id === entryPortal.portalTargetId && peg.type === targetType) || null;
     let best = null;
     let bestDistSq = Infinity;
     for (const peg of pegs) {

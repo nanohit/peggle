@@ -221,7 +221,7 @@ function resolveApiPath(path) {
   if (typeof location !== 'undefined' && (location.protocol === 'file:' || isLocalHost(location.hostname))) {
     return `${REMOTE_API_ORIGIN}${value}`;
   }
-  return value;
+  return typeof location !== 'undefined' ? new URL(value, location.origin).href : value;
 }
 
 function cleanUrl(value) {
@@ -313,6 +313,7 @@ function candidateRank(url) {
   const origin = urlOrigin(url);
   const status = getOriginStatus(origin);
   if (status === 'down') return 4;
+  if (typeof window !== 'undefined' && window.__PEGGLE_CDN_SNAPSHOT_FIRST__ && origin === 'https://cdn.jsdelivr.net') return -1;
   if (status === 'ok') return 0;
   if (RU_SUSPECT_ORIGINS.has(origin) && isLikelyRuClient()) return 3;
   return 1;
