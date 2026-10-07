@@ -9,7 +9,7 @@ export function curateGeneratedPlaylist(levels, { variants = false, selectedId =
       p.magnetMode,p.magnetRadius,p.magnetStrength,p.magnetBlast,p.magnetKnockout,
       p.portalScale,p.portalOneWay,p.portalOneWayFlip,level.pegs.findIndex(q=>q.id===p.portalTargetId),
       level.groups?.findIndex(g=>g.id===p.groupId)]),level.groups?.map(g=>[g.destructionBody,g.animation]),
-      level.destruction,level.pvp,level.flippers,level.ballCount,level.metadata?.intentGraph]);
+      level.destruction,level.pvp,level.flippers,level.ballCount]);
     if (exact.has(geometry)) return false;
     exact.add(geometry);
     return true;

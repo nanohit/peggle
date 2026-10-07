@@ -1,4455 +1,749 @@
 {
-  "version": 1,
-  "implementationFingerprint": "8245435ee16a9c80da6a682d231d07a9445604d2c830a2b42a74fa36f73e8e1a",
+  "version": 2,
+  "implementationFingerprint": "9e4179a93ddb1989b7a204c97e4fcb46e068ed10165a635a7074e8025395a692",
   "sources": [
     "generators/destruction1/grammar.js",
     "generators/destruction1/geometry.js",
     "generators/destruction1/evaluate.mjs",
     "generators/destruction/grammar.js",
-    "generators/destruction/native-simulator.mjs",
     "js/game.js",
-    "js/levels.js",
-    "js/portal-defaults.js",
-    "js/magnet-defaults.js",
-    "js/intent-objectives.js",
-    "js/physics.js",
-    "js/destruction-mode.js",
-    "js/destruction-hinge.js"
+    "js/destruction-mode.js"
   ],
+  "checks": "Native idle stability and actual source shots; no mandatory order, full-route guarantee or additional objectives.",
   "accepted": [
     {
       "id": "des1-cascade-first",
-      "structure": "{\"nodes\":[[\"source\",\"hopper\",2,null],[\"cup\",\"break\",2,null],[\"outlet\",null,2,null]],\"edges\":[[0,1,\"collect-then-release\"],[1,2,\"deliver\"]],\"portalTargets\":[]}",
+      "structure": "{\"assemblies\":[[\"hopper\",null],[\"cup\",\"tilt\"],[\"tower\",null],[\"seesaw\",null],[\"cradle\",null],[\"seesaw\",null]],\"flow\":[[0,1,\"fall-into-cup\"],[1,5,\"fall-to-lower-construction\"]]}",
       "accepted": true,
       "geometry": {
         "valid": true,
         "errors": [],
-        "pegCount": 14,
-        "targets": 1
+        "pegCount": 62,
+        "targets": 25
       },
       "idle": {
-        "initialDrift": 0.30000000000001137,
-        "lateDrift": 0,
-        "progress": 0
+        "seconds": 4,
+        "orangeLeft": 25,
+        "lateDrift": 0.001242277872034812
       },
-      "seed": "intent-proof",
-      "idleSeconds": 6,
-      "route": [
+      "seed": "des1-proof",
+      "shots": [
         {
-          "angle": 0.8587580409572783,
-          "seconds": 0.7416666666666397,
-          "orangeBefore": 1,
-          "orangeAfter": 0,
-          "cleared": 1,
+          "angle": 1.1903509472758231,
+          "seconds": 2.124999999999928,
+          "orangeBefore": 25,
+          "orangeAfter": 20,
+          "cleared": 5,
           "timeout": false,
           "state": "idle",
-          "fallenTargets": 0,
-          "directTargets": 1,
-          "hitCount": 1
-        },
-        {
-          "angle": 0.10603185307179586,
-          "seconds": 2.7333333333335323,
-          "orangeBefore": 0,
-          "orangeAfter": 0,
-          "cleared": 0,
-          "timeout": false,
-          "state": "idle",
-          "fallenTargets": 0,
-          "directTargets": 0,
-          "hitCount": 3
+          "fallenTargets": 4,
+          "directTargets": 3,
+          "hitCount": 4,
+          "orangeLeft": 18,
+          "crossAssemblyImpacts": [
+            {
+              "assemblies": [
+                "des1-cascade-first:assembly0",
+                "des1-cascade-first:assembly1"
+              ],
+              "speed": 5.27250034559365
+            },
+            {
+              "assemblies": [
+                "des1-cascade-first:assembly0",
+                "des1-cascade-first:assembly3"
+              ],
+              "speed": 3.9897750186800574
+            }
+          ]
         }
-      ],
-      "progress": {
-        "done": 4,
-        "total": 4,
-        "complete": true,
-        "failed": false,
-        "instruction": "Цепочка завершена",
-        "captures": 0,
-        "required": 0
-      },
-      "events": [
-        {
-          "type": "activate",
-          "stage": "des1-cascade-first:source0",
-          "pegId": "des1-cascade-first:p2",
-          "time": 6.125000000000094
-        },
-        {
-          "type": "complete",
-          "stage": "des1-cascade-first:source0",
-          "cargoIds": [
-            "des1-cascade-first:p4",
-            "des1-cascade-first:p5",
-            "des1-cascade-first:p6",
-            "des1-cascade-first:p7"
-          ],
-          "time": 6.350000000000105
-        },
-        {
-          "type": "capture",
-          "stage": "des1-cascade-first:cup0",
-          "cargoIds": [
-            "des1-cascade-first:p6",
-            "des1-cascade-first:p7"
-          ],
-          "time": 6.8416666666667965
-        },
-        {
-          "type": "activate",
-          "stage": "des1-cascade-first:cup0",
-          "pegId": "des1-cascade-first:p8",
-          "time": 9.825000000000083
-        },
-        {
-          "type": "complete",
-          "stage": "des1-cascade-first:cup0",
-          "cargoIds": [
-            "des1-cascade-first:p5",
-            "des1-cascade-first:p3"
-          ],
-          "time": 11.97499999999996
-        },
-        {
-          "type": "complete",
-          "stage": "des1-cascade-first:outlet",
-          "cargoIds": [
-            "des1-cascade-first:p5",
-            "des1-cascade-first:p3"
-          ],
-          "time": 12.508333333333264
-        }
-      ],
-      "probes": 21,
-      "holdout": {
-        "complete": true,
-        "route": [
-          {
-            "angle": 0.98082174710087,
-            "seconds": 3.0083333333333377,
-            "orangeBefore": 1,
-            "orangeAfter": 0,
-            "cleared": 1,
-            "timeout": false,
-            "state": "idle",
-            "fallenTargets": 0,
-            "directTargets": 1,
-            "hitCount": 3
-          },
-          {
-            "angle": 0.1467197551196598,
-            "seconds": 0.8333333333333303,
-            "orangeBefore": 0,
-            "orangeAfter": 0,
-            "cleared": 0,
-            "timeout": false,
-            "state": "idle",
-            "fallenTargets": 0,
-            "directTargets": 0,
-            "hitCount": 1
-          }
-        ],
-        "progress": {
-          "done": 4,
-          "total": 4,
-          "complete": true,
-          "failed": false,
-          "instruction": "Цепочка завершена",
-          "captures": 0,
-          "required": 0
-        },
-        "events": [
-          {
-            "type": "activate",
-            "stage": "des1-cascade-first:source0",
-            "pegId": "des1-cascade-first:p2",
-            "time": 2.116666666666662
-          },
-          {
-            "type": "complete",
-            "stage": "des1-cascade-first:source0",
-            "cargoIds": [
-              "des1-cascade-first:p4",
-              "des1-cascade-first:p5",
-              "des1-cascade-first:p6",
-              "des1-cascade-first:p7"
-            ],
-            "time": 2.341666666666661
-          },
-          {
-            "type": "capture",
-            "stage": "des1-cascade-first:cup0",
-            "cargoIds": [
-              "des1-cascade-first:p6",
-              "des1-cascade-first:p7"
-            ],
-            "time": 2.833333333333326
-          },
-          {
-            "type": "activate",
-            "stage": "des1-cascade-first:cup0",
-            "pegId": "des1-cascade-first:p8",
-            "time": 3.57499999999999
-          },
-          {
-            "type": "complete",
-            "stage": "des1-cascade-first:cup0",
-            "cargoIds": [
-              "des1-cascade-first:p5",
-              "des1-cascade-first:p4"
-            ],
-            "time": 8.550000000000155
-          },
-          {
-            "type": "complete",
-            "stage": "des1-cascade-first:outlet",
-            "cargoIds": [
-              "des1-cascade-first:p5",
-              "des1-cascade-first:p4"
-            ],
-            "time": 9.050000000000127
-          }
-        ],
-        "seed": "intent-holdout",
-        "idleSeconds": 2
-      },
-      "earlyReplay": {
-        "complete": false,
-        "progress": {
-          "done": 2,
-          "total": 4,
-          "complete": false,
-          "failed": false,
-          "instruction": "Груз собран. Разбей нижнюю часть синей чаши.",
-          "current": "des1-cascade-first:cup0",
-          "captures": 5,
-          "required": 2
-        }
-      }
+      ]
     },
     {
       "id": "des1-parallel-first",
-      "structure": "{\"nodes\":[[\"source\",\"hopper\",2,null],[\"source\",\"hopper\",2,null],[\"cup\",\"break\",2,null],[\"cup\",\"break\",2,null],[\"outlet\",null,4,2]],\"edges\":[[0,2,\"collect-then-release\"],[1,3,\"collect-then-release\"],[2,4,\"deliver\"],[3,4,\"deliver\"]],\"portalTargets\":[]}",
+      "structure": "{\"assemblies\":[[\"hopper\",null],[\"hopper\",null],[\"cup\",\"tilt\"],[\"cup\",\"break\"],[\"tower\",null],[\"tower\",null]],\"flow\":[[0,2,\"fall-into-cup\"],[1,3,\"fall-into-cup\"],[2,4,\"fall-to-lower-constructions\"],[3,4,\"fall-to-lower-constructions\"],[2,5,\"fall-to-lower-constructions\"],[3,5,\"fall-to-lower-constructions\"]]}",
       "accepted": true,
       "geometry": {
         "valid": true,
         "errors": [],
-        "pegCount": 27,
-        "targets": 2
+        "pegCount": 55,
+        "targets": 22
       },
       "idle": {
-        "initialDrift": 0.30000000000001137,
-        "lateDrift": 0,
-        "progress": 0
+        "seconds": 4,
+        "orangeLeft": 22,
+        "lateDrift": 0.001364674531158131
       },
-      "seed": "intent-proof",
-      "idleSeconds": 6,
-      "route": [
+      "seed": "des1-proof",
+      "shots": [
         {
-          "angle": 1.0215096491487339,
-          "seconds": 1.37499999999995,
-          "orangeBefore": 2,
-          "orangeAfter": 0,
+          "angle": 2.1269289527113764,
+          "seconds": 1.4333333333332867,
+          "orangeBefore": 22,
+          "orangeAfter": 20,
           "cleared": 2,
           "timeout": false,
           "state": "idle",
           "fallenTargets": 0,
           "directTargets": 2,
-          "hitCount": 2
+          "hitCount": 2,
+          "orangeLeft": 20,
+          "crossAssemblyImpacts": [
+            {
+              "assemblies": [
+                "des1-parallel-first:assembly0",
+                "des1-parallel-first:assembly2"
+              ],
+              "speed": 5.408628735382136
+            }
+          ]
         },
         {
-          "angle": 0.3094713633111154,
-          "seconds": 14.466666666665962,
-          "orangeBefore": 0,
-          "orangeAfter": 0,
-          "cleared": 0,
+          "angle": 1.0350797617462952,
+          "seconds": 2.4499999999999162,
+          "orangeBefore": 22,
+          "orangeAfter": 16,
+          "cleared": 6,
           "timeout": false,
           "state": "idle",
           "fallenTargets": 0,
-          "directTargets": 0,
-          "hitCount": 4
-        },
-        {
-          "angle": 1.9573313962496035,
-          "seconds": 2.899999999999578,
-          "orangeBefore": 0,
-          "orangeAfter": 0,
-          "cleared": 0,
-          "timeout": false,
-          "state": "idle",
-          "fallenTargets": 0,
-          "directTargets": 0,
-          "hitCount": 2
-        },
-        {
-          "angle": 2.0997390534171276,
-          "seconds": 0.8416666666668098,
-          "orangeBefore": 0,
-          "orangeAfter": 0,
-          "cleared": 0,
-          "timeout": false,
-          "state": "idle",
-          "fallenTargets": 0,
-          "directTargets": 0,
-          "hitCount": 0
+          "directTargets": 6,
+          "hitCount": 6,
+          "orangeLeft": 16,
+          "crossAssemblyImpacts": [
+            {
+              "assemblies": [
+                "des1-parallel-first:assembly1",
+                "des1-parallel-first:assembly3"
+              ],
+              "speed": 5.326090378170335
+            }
+          ]
         }
-      ],
-      "progress": {
-        "done": 7,
-        "total": 7,
-        "complete": true,
-        "failed": false,
-        "instruction": "Цепочка завершена",
-        "captures": 0,
-        "required": 0
-      },
-      "events": [
-        {
-          "type": "activate",
-          "stage": "des1-parallel-first:source1",
-          "pegId": "des1-parallel-first:p8",
-          "time": 6.108333333333427
-        },
-        {
-          "type": "activate",
-          "stage": "des1-parallel-first:source0",
-          "pegId": "des1-parallel-first:p2",
-          "time": 6.275000000000102
-        },
-        {
-          "type": "complete",
-          "stage": "des1-parallel-first:source1",
-          "cargoIds": [
-            "des1-parallel-first:p9",
-            "des1-parallel-first:p10",
-            "des1-parallel-first:p11"
-          ],
-          "time": 6.333333333333438
-        },
-        {
-          "type": "complete",
-          "stage": "des1-parallel-first:source0",
-          "cargoIds": [
-            "des1-parallel-first:p5",
-            "des1-parallel-first:p6"
-          ],
-          "time": 6.500000000000113
-        },
-        {
-          "type": "capture",
-          "stage": "des1-parallel-first:cup1",
-          "cargoIds": [
-            "des1-parallel-first:p9",
-            "des1-parallel-first:p10"
-          ],
-          "time": 6.8416666666667965
-        },
-        {
-          "type": "capture",
-          "stage": "des1-parallel-first:cup0",
-          "cargoIds": [
-            "des1-parallel-first:p6",
-            "des1-parallel-first:p5"
-          ],
-          "time": 7.041666666666806
-        },
-        {
-          "type": "activate",
-          "stage": "des1-parallel-first:cup1",
-          "pegId": "des1-parallel-first:p20",
-          "time": 10.358333333333386
-        },
-        {
-          "type": "complete",
-          "stage": "des1-parallel-first:cup1",
-          "cargoIds": [
-            "des1-parallel-first:p12",
-            "des1-parallel-first:p11"
-          ],
-          "time": 22.883333333332676
-        },
-        {
-          "type": "activate",
-          "stage": "des1-parallel-first:cup0",
-          "pegId": "des1-parallel-first:p19",
-          "time": 28.23333333333237
-        },
-        {
-          "type": "complete",
-          "stage": "des1-parallel-first:cup0",
-          "cargoIds": [
-            "des1-parallel-first:p5",
-            "des1-parallel-first:p3"
-          ],
-          "time": 32.924999999998775
-        },
-        {
-          "type": "complete",
-          "stage": "des1-parallel-first:outlet",
-          "cargoIds": [
-            "des1-parallel-first:p12",
-            "des1-parallel-first:p11",
-            "des1-parallel-first:p10",
-            "des1-parallel-first:p9",
-            "des1-parallel-first:p5",
-            "des1-parallel-first:p3"
-          ],
-          "time": 33.566666666665405
-        }
-      ],
-      "probes": 70,
-      "holdout": {
-        "complete": true,
-        "route": [
-          {
-            "angle": 1.0215096491487339,
-            "seconds": 3.59166666666665,
-            "orangeBefore": 2,
-            "orangeAfter": 1,
-            "cleared": 1,
-            "timeout": false,
-            "state": "idle",
-            "fallenTargets": 0,
-            "directTargets": 1,
-            "hitCount": 4
-          },
-          {
-            "angle": 1.245293110411985,
-            "seconds": 1.1666666666667516,
-            "orangeBefore": 1,
-            "orangeAfter": 0,
-            "cleared": 1,
-            "timeout": false,
-            "state": "idle",
-            "fallenTargets": 0,
-            "directTargets": 1,
-            "hitCount": 3
-          },
-          {
-            "angle": 1.1435733552923255,
-            "seconds": 2.4333333333335103,
-            "orangeBefore": 0,
-            "orangeAfter": 0,
-            "cleared": 0,
-            "timeout": false,
-            "state": "idle",
-            "fallenTargets": 0,
-            "directTargets": 0,
-            "hitCount": 3
-          },
-          {
-            "angle": 0.16706370614359173,
-            "seconds": 0.7416666666665588,
-            "orangeBefore": 0,
-            "orangeAfter": 0,
-            "cleared": 0,
-            "timeout": false,
-            "state": "idle",
-            "fallenTargets": 0,
-            "directTargets": 0,
-            "hitCount": 0
-          }
-        ],
-        "progress": {
-          "done": 7,
-          "total": 7,
-          "complete": true,
-          "failed": false,
-          "instruction": "Цепочка завершена",
-          "captures": 0,
-          "required": 0
-        },
-        "events": [
-          {
-            "type": "activate",
-            "stage": "des1-parallel-first:source1",
-            "pegId": "des1-parallel-first:p8",
-            "time": 2.1083333333333285
-          },
-          {
-            "type": "complete",
-            "stage": "des1-parallel-first:source1",
-            "cargoIds": [
-              "des1-parallel-first:p9",
-              "des1-parallel-first:p10",
-              "des1-parallel-first:p11"
-            ],
-            "time": 2.3333333333333277
-          },
-          {
-            "type": "capture",
-            "stage": "des1-parallel-first:cup1",
-            "cargoIds": [
-              "des1-parallel-first:p9",
-              "des1-parallel-first:p10"
-            ],
-            "time": 2.8416666666666592
-          },
-          {
-            "type": "activate",
-            "stage": "des1-parallel-first:cup1",
-            "pegId": "des1-parallel-first:p20",
-            "time": 3.5666666666666567
-          },
-          {
-            "type": "complete",
-            "stage": "des1-parallel-first:cup1",
-            "cargoIds": [
-              "des1-parallel-first:p11",
-              "des1-parallel-first:p10"
-            ],
-            "time": 8.600000000000152
-          },
-          {
-            "type": "activate",
-            "stage": "des1-parallel-first:source0",
-            "pegId": "des1-parallel-first:p2",
-            "time": 8.775000000000142
-          },
-          {
-            "type": "complete",
-            "stage": "des1-parallel-first:source0",
-            "cargoIds": [
-              "des1-parallel-first:p6",
-              "des1-parallel-first:p5"
-            ],
-            "time": 9.05833333333346
-          },
-          {
-            "type": "capture",
-            "stage": "des1-parallel-first:cup0",
-            "cargoIds": [
-              "des1-parallel-first:p6",
-              "des1-parallel-first:p5"
-            ],
-            "time": 9.625000000000094
-          },
-          {
-            "type": "activate",
-            "stage": "des1-parallel-first:cup0",
-            "pegId": "des1-parallel-first:p13",
-            "time": 12.724999999999918
-          },
-          {
-            "type": "complete",
-            "stage": "des1-parallel-first:cup0",
-            "cargoIds": [
-              "des1-parallel-first:p4",
-              "des1-parallel-first:p5"
-            ],
-            "time": 17.233333333332997
-          },
-          {
-            "type": "complete",
-            "stage": "des1-parallel-first:outlet",
-            "cargoIds": [
-              "des1-parallel-first:p11",
-              "des1-parallel-first:p10",
-              "des1-parallel-first:p9",
-              "des1-parallel-first:p4",
-              "des1-parallel-first:p5"
-            ],
-            "time": 17.783333333332966
-          }
-        ],
-        "seed": "intent-holdout",
-        "idleSeconds": 2
-      },
-      "earlyReplay": {
-        "complete": false,
-        "progress": {
-          "done": 2,
-          "total": 7,
-          "complete": false,
-          "failed": true,
-          "instruction": "Накопитель открыт раньше времени. Сначала собери груз, затем выпусти его.",
-          "current": "des1-parallel-first:source0",
-          "captures": 0,
-          "required": 2
-        }
-      }
+      ]
     },
     {
       "id": "des1-merge-first",
-      "structure": "{\"nodes\":[[\"source\",\"hopper\",2,null],[\"source\",\"hopper\",2,null],[\"cup\",\"break\",4,2],[\"outlet\",null,4,2]],\"edges\":[[0,2,\"collect-then-release\"],[1,2,\"collect-then-release\"],[2,3,\"deliver\"]],\"portalTargets\":[]}",
+      "structure": "{\"assemblies\":[[\"ramp\",null],[\"hopper\",null],[\"cup\",\"tilt\"],[\"tower\",null],[\"tower\",null]],\"flow\":[[0,2,\"fall-into-cup\"],[1,2,\"fall-into-cup\"],[2,3,\"fall-to-lower-constructions\"],[2,4,\"fall-to-lower-constructions\"]]}",
       "accepted": true,
       "geometry": {
         "valid": true,
         "errors": [],
-        "pegCount": 19,
-        "targets": 2
+        "pegCount": 48,
+        "targets": 22
       },
       "idle": {
-        "initialDrift": 0.30000000000001137,
-        "lateDrift": 0,
-        "progress": 0
+        "seconds": 4,
+        "orangeLeft": 22,
+        "lateDrift": 0.001364674531158131
       },
-      "seed": "intent-proof",
-      "idleSeconds": 6,
-      "route": [
+      "seed": "des1-proof",
+      "shots": [
         {
-          "angle": 1.5504523757709645,
-          "seconds": 1.3499999999999508,
-          "orangeBefore": 2,
-          "orangeAfter": 0,
-          "cleared": 2,
+          "angle": 2.2110723605240614,
+          "seconds": 2.2749999999999226,
+          "orangeBefore": 22,
+          "orangeAfter": 15,
+          "cleared": 7,
           "timeout": false,
           "state": "idle",
-          "fallenTargets": 0,
+          "fallenTargets": 6,
           "directTargets": 2,
-          "hitCount": 2
+          "hitCount": 5,
+          "orangeLeft": 14,
+          "crossAssemblyImpacts": [
+            {
+              "assemblies": [
+                "des1-merge-first:assembly0",
+                "des1-merge-first:assembly2"
+              ],
+              "speed": 5.24788424029306
+            }
+          ]
         },
         {
-          "angle": 0.1467197551196598,
-          "seconds": 0.8583333333333958,
-          "orangeBefore": 0,
-          "orangeAfter": 0,
-          "cleared": 0,
+          "angle": 1.0350797617462952,
+          "seconds": 2.9583333333332313,
+          "orangeBefore": 22,
+          "orangeAfter": 11,
+          "cleared": 11,
           "timeout": false,
           "state": "idle",
-          "fallenTargets": 0,
-          "directTargets": 0,
-          "hitCount": 1
-        },
-        {
-          "angle": 0.10603185307179586,
-          "seconds": 1.2583333333334248,
-          "orangeBefore": 0,
-          "orangeAfter": 0,
-          "cleared": 0,
-          "timeout": false,
-          "state": "idle",
-          "fallenTargets": 0,
-          "directTargets": 0,
-          "hitCount": 1
-        },
-        {
-          "angle": 0.9604777960769381,
-          "seconds": 1.0499999999998473,
-          "orangeBefore": 0,
-          "orangeAfter": 0,
-          "cleared": 0,
-          "timeout": false,
-          "state": "idle",
-          "fallenTargets": 0,
-          "directTargets": 0,
-          "hitCount": 0
+          "fallenTargets": 5,
+          "directTargets": 6,
+          "hitCount": 8,
+          "orangeLeft": 11,
+          "crossAssemblyImpacts": [
+            {
+              "assemblies": [
+                "des1-merge-first:assembly1",
+                "des1-merge-first:assembly4"
+              ],
+              "speed": 6.803185067892099
+            },
+            {
+              "assemblies": [
+                "des1-merge-first:assembly1",
+                "des1-merge-first:assembly3"
+              ],
+              "speed": 4.072090875364866
+            }
+          ]
         }
-      ],
-      "progress": {
-        "done": 5,
-        "total": 5,
-        "complete": true,
-        "failed": false,
-        "instruction": "Цепочка завершена",
-        "captures": 0,
-        "required": 0
-      },
-      "events": [
-        {
-          "type": "activate",
-          "stage": "des1-merge-first:source1",
-          "pegId": "des1-merge-first:p8",
-          "time": 6.091666666666759
-        },
-        {
-          "type": "activate",
-          "stage": "des1-merge-first:source0",
-          "pegId": "des1-merge-first:p2",
-          "time": 6.11666666666676
-        },
-        {
-          "type": "complete",
-          "stage": "des1-merge-first:source0",
-          "cargoIds": [
-            "des1-merge-first:p6",
-            "des1-merge-first:p5"
-          ],
-          "time": 6.291666666666769
-        },
-        {
-          "type": "complete",
-          "stage": "des1-merge-first:source1",
-          "cargoIds": [
-            "des1-merge-first:p9",
-            "des1-merge-first:p10",
-            "des1-merge-first:p11"
-          ],
-          "time": 6.31666666666677
-        },
-        {
-          "type": "capture",
-          "stage": "des1-merge-first:cup0",
-          "cargoIds": [
-            "des1-merge-first:p9",
-            "des1-merge-first:p10",
-            "des1-merge-first:p6",
-            "des1-merge-first:p11",
-            "des1-merge-first:p12",
-            "des1-merge-first:p5"
-          ],
-          "time": 7.166666666666813
-        },
-        {
-          "type": "activate",
-          "stage": "des1-merge-first:cup0",
-          "pegId": "des1-merge-first:p13",
-          "time": 10.416666666666716
-        },
-        {
-          "type": "complete",
-          "stage": "des1-merge-first:cup0",
-          "cargoIds": [
-            "des1-merge-first:p12",
-            "des1-merge-first:p11",
-            "des1-merge-first:p4",
-            "des1-merge-first:p5"
-          ],
-          "time": 17.67499999999964
-        },
-        {
-          "type": "complete",
-          "stage": "des1-merge-first:outlet",
-          "cargoIds": [
-            "des1-merge-first:p12",
-            "des1-merge-first:p11",
-            "des1-merge-first:p4",
-            "des1-merge-first:p5"
-          ],
-          "time": 18.391666666666264
-        }
-      ],
-      "probes": 72,
-      "holdout": {
-        "complete": true,
-        "route": [
-          {
-            "angle": 1.5504523757709645,
-            "seconds": 1.258333333333355,
-            "orangeBefore": 2,
-            "orangeAfter": 0,
-            "cleared": 2,
-            "timeout": false,
-            "state": "idle",
-            "fallenTargets": 0,
-            "directTargets": 2,
-            "hitCount": 2
-          },
-          {
-            "angle": 1.326668914507713,
-            "seconds": 0.7166666666666406,
-            "orangeBefore": 0,
-            "orangeAfter": 0,
-            "cleared": 0,
-            "timeout": false,
-            "state": "idle",
-            "fallenTargets": 0,
-            "directTargets": 0,
-            "hitCount": 1
-          },
-          {
-            "angle": 0.919789894029074,
-            "seconds": 2.0583333333334832,
-            "orangeBefore": 0,
-            "orangeAfter": 0,
-            "cleared": 0,
-            "timeout": false,
-            "state": "idle",
-            "fallenTargets": 0,
-            "directTargets": 0,
-            "hitCount": 2
-          },
-          {
-            "angle": 0.10603185307179586,
-            "seconds": 1.2666666666667588,
-            "orangeBefore": 0,
-            "orangeAfter": 0,
-            "cleared": 0,
-            "timeout": false,
-            "state": "idle",
-            "fallenTargets": 0,
-            "directTargets": 0,
-            "hitCount": 1
-          },
-          {
-            "angle": 0.10603185307179586,
-            "seconds": 0.7999999999998836,
-            "orangeBefore": 0,
-            "orangeAfter": 0,
-            "cleared": 0,
-            "timeout": false,
-            "state": "idle",
-            "fallenTargets": 0,
-            "directTargets": 0,
-            "hitCount": 1
-          }
-        ],
-        "progress": {
-          "done": 5,
-          "total": 5,
-          "complete": true,
-          "failed": false,
-          "instruction": "Цепочка завершена",
-          "captures": 0,
-          "required": 0
-        },
-        "events": [
-          {
-            "type": "activate",
-            "stage": "des1-merge-first:source1",
-            "pegId": "des1-merge-first:p8",
-            "time": 2.091666666666662
-          },
-          {
-            "type": "activate",
-            "stage": "des1-merge-first:source0",
-            "pegId": "des1-merge-first:p2",
-            "time": 2.116666666666662
-          },
-          {
-            "type": "complete",
-            "stage": "des1-merge-first:source0",
-            "cargoIds": [
-              "des1-merge-first:p6",
-              "des1-merge-first:p5"
-            ],
-            "time": 2.291666666666661
-          },
-          {
-            "type": "complete",
-            "stage": "des1-merge-first:source1",
-            "cargoIds": [
-              "des1-merge-first:p9",
-              "des1-merge-first:p10",
-              "des1-merge-first:p11"
-            ],
-            "time": 2.316666666666661
-          },
-          {
-            "type": "capture",
-            "stage": "des1-merge-first:cup0",
-            "cargoIds": [
-              "des1-merge-first:p9",
-              "des1-merge-first:p10",
-              "des1-merge-first:p6",
-              "des1-merge-first:p11",
-              "des1-merge-first:p12",
-              "des1-merge-first:p5"
-            ],
-            "time": 3.166666666666658
-          },
-          {
-            "type": "activate",
-            "stage": "des1-merge-first:cup0",
-            "pegId": "des1-merge-first:p13",
-            "time": 6.075000000000092
-          },
-          {
-            "type": "complete",
-            "stage": "des1-merge-first:cup0",
-            "cargoIds": [
-              "des1-merge-first:p12",
-              "des1-merge-first:p5",
-              "des1-merge-first:p4",
-              "des1-merge-first:p6",
-              "des1-merge-first:p11"
-            ],
-            "time": 18.599999999999586
-          },
-          {
-            "type": "complete",
-            "stage": "des1-merge-first:outlet",
-            "cargoIds": [
-              "des1-merge-first:p12",
-              "des1-merge-first:p5",
-              "des1-merge-first:p4",
-              "des1-merge-first:p6",
-              "des1-merge-first:p11"
-            ],
-            "time": 19.124999999999556
-          }
-        ],
-        "seed": "intent-holdout",
-        "idleSeconds": 2
-      },
-      "earlyReplay": {
-        "complete": false,
-        "progress": {
-          "done": 3,
-          "total": 5,
-          "complete": false,
-          "failed": false,
-          "instruction": "Груз собран. Разбей нижнюю часть синей чаши.",
-          "current": "des1-merge-first:cup0",
-          "captures": 7,
-          "required": 4
-        }
-      }
+      ]
     },
     {
       "id": "des1-portal-first",
-      "structure": "{\"nodes\":[[\"source\",\"hopper\",2,null],[\"portal\",null,2,null],[\"cup\",\"break\",2,null],[\"outlet\",null,2,null]],\"edges\":[[0,1,\"transport-cargo\"],[1,2,\"collect-then-release\"],[2,3,\"deliver\"]],\"portalTargets\":[2]}",
+      "structure": "{\"assemblies\":[[\"ramp\",null],[\"portal\",null],[\"cup\",\"break\"],[\"tower\",null],[\"tower\",null],[\"seesaw\",null]],\"flow\":[[0,1,\"portal-transfer\"],[1,2,\"fall-into-cup\"],[2,5,\"fall-to-lower-construction\"]]}",
       "accepted": true,
       "geometry": {
         "valid": true,
         "errors": [],
-        "pegCount": 15,
-        "targets": 1
+        "pegCount": 54,
+        "targets": 23
       },
       "idle": {
-        "initialDrift": 0.30000000000001137,
-        "lateDrift": 0,
-        "progress": 0
+        "seconds": 4,
+        "orangeLeft": 23,
+        "lateDrift": 0.0012422778720587086
       },
-      "seed": "intent-proof",
-      "idleSeconds": 6,
-      "route": [
+      "seed": "des1-proof",
+      "shots": [
         {
-          "angle": 2.5879938779914946,
-          "seconds": 2.6499999999999537,
-          "orangeBefore": 1,
-          "orangeAfter": 0,
-          "cleared": 1,
+          "angle": 2.372924142148718,
+          "seconds": 2.1583333333332604,
+          "orangeBefore": 23,
+          "orangeAfter": 20,
+          "cleared": 3,
           "timeout": false,
           "state": "idle",
-          "fallenTargets": 0,
-          "directTargets": 1,
-          "hitCount": 5
+          "fallenTargets": 4,
+          "directTargets": 3,
+          "hitCount": 5,
+          "orangeLeft": 16,
+          "crossAssemblyImpacts": [
+            {
+              "assemblies": [
+                "des1-portal-first:assembly0",
+                "des1-portal-first:assembly2"
+              ],
+              "speed": 4.548489249230102
+            }
+          ]
         }
-      ],
-      "progress": {
-        "done": 5,
-        "total": 5,
-        "complete": true,
-        "failed": false,
-        "instruction": "Цепочка завершена",
-        "captures": 0,
-        "required": 0
-      },
-      "events": [
-        {
-          "type": "activate",
-          "stage": "des1-portal-first:source0",
-          "pegId": "des1-portal-first:p2",
-          "time": 6.525000000000114
-        },
-        {
-          "type": "complete",
-          "stage": "des1-portal-first:source0",
-          "cargoIds": [
-            "des1-portal-first:p3",
-            "des1-portal-first:p5"
-          ],
-          "time": 6.750000000000125
-        },
-        {
-          "type": "transport",
-          "stage": "des1-portal-first:portal0",
-          "cargoId": "des1-portal-first:p5",
-          "time": 6.825000000000129
-        },
-        {
-          "type": "transport",
-          "stage": "des1-portal-first:portal0",
-          "cargoId": "des1-portal-first:p4",
-          "time": 6.858333333333464
-        },
-        {
-          "type": "complete",
-          "stage": "des1-portal-first:portal0",
-          "cargoIds": [
-            "des1-portal-first:p5",
-            "des1-portal-first:p4"
-          ],
-          "time": 6.858333333333464
-        },
-        {
-          "type": "capture",
-          "stage": "des1-portal-first:cup0",
-          "cargoIds": [
-            "des1-portal-first:p5",
-            "des1-portal-first:p4"
-          ],
-          "time": 7.208333333333481
-        },
-        {
-          "type": "activate",
-          "stage": "des1-portal-first:cup0",
-          "pegId": "des1-portal-first:p9",
-          "time": 7.233333333333483
-        },
-        {
-          "type": "complete",
-          "stage": "des1-portal-first:cup0",
-          "cargoIds": [
-            "des1-portal-first:p5",
-            "des1-portal-first:p4"
-          ],
-          "time": 8.566666666666821
-        },
-        {
-          "type": "complete",
-          "stage": "des1-portal-first:outlet",
-          "cargoIds": [
-            "des1-portal-first:p5",
-            "des1-portal-first:p4"
-          ],
-          "time": 9.091666666666791
-        }
-      ],
-      "probes": 14,
-      "holdout": {
-        "complete": true,
-        "route": [
-          {
-            "angle": 2.242146710584651,
-            "seconds": 2.800000000000012,
-            "orangeBefore": 1,
-            "orangeAfter": 0,
-            "cleared": 1,
-            "timeout": false,
-            "state": "idle",
-            "fallenTargets": 0,
-            "directTargets": 1,
-            "hitCount": 4
-          },
-          {
-            "angle": 0.045,
-            "seconds": 0.7916666666666379,
-            "orangeBefore": 0,
-            "orangeAfter": 0,
-            "cleared": 0,
-            "timeout": false,
-            "state": "idle",
-            "fallenTargets": 0,
-            "directTargets": 0,
-            "hitCount": 1
-          }
-        ],
-        "progress": {
-          "done": 5,
-          "total": 5,
-          "complete": true,
-          "failed": false,
-          "instruction": "Цепочка завершена",
-          "captures": 0,
-          "required": 0
-        },
-        "events": [
-          {
-            "type": "activate",
-            "stage": "des1-portal-first:source0",
-            "pegId": "des1-portal-first:p2",
-            "time": 2.7333333333333263
-          },
-          {
-            "type": "complete",
-            "stage": "des1-portal-first:source0",
-            "cargoIds": [
-              "des1-portal-first:p5",
-              "des1-portal-first:p6"
-            ],
-            "time": 2.9583333333333255
-          },
-          {
-            "type": "transport",
-            "stage": "des1-portal-first:portal0",
-            "cargoId": "des1-portal-first:p5",
-            "time": 3.033333333333325
-          },
-          {
-            "type": "transport",
-            "stage": "des1-portal-first:portal0",
-            "cargoId": "des1-portal-first:p6",
-            "time": 3.033333333333325
-          },
-          {
-            "type": "complete",
-            "stage": "des1-portal-first:portal0",
-            "cargoIds": [
-              "des1-portal-first:p5",
-              "des1-portal-first:p6"
-            ],
-            "time": 3.033333333333325
-          },
-          {
-            "type": "transport",
-            "stage": "des1-portal-first:portal0",
-            "cargoId": "des1-portal-first:p4",
-            "time": 3.049999999999992
-          },
-          {
-            "type": "transport",
-            "stage": "des1-portal-first:portal0",
-            "cargoId": "des1-portal-first:p3",
-            "time": 3.1499999999999915
-          },
-          {
-            "type": "capture",
-            "stage": "des1-portal-first:cup0",
-            "cargoIds": [
-              "des1-portal-first:p5",
-              "des1-portal-first:p6"
-            ],
-            "time": 3.383333333333324
-          },
-          {
-            "type": "activate",
-            "stage": "des1-portal-first:cup0",
-            "pegId": "des1-portal-first:p9",
-            "time": 3.3999999999999906
-          },
-          {
-            "type": "complete",
-            "stage": "des1-portal-first:cup0",
-            "cargoIds": [
-              "des1-portal-first:p6",
-              "des1-portal-first:p5"
-            ],
-            "time": 8.266666666666838
-          },
-          {
-            "type": "complete",
-            "stage": "des1-portal-first:outlet",
-            "cargoIds": [
-              "des1-portal-first:p6",
-              "des1-portal-first:p5"
-            ],
-            "time": 8.808333333333474
-          }
-        ],
-        "seed": "intent-holdout",
-        "idleSeconds": 2
-      },
-      "earlyReplay": {
-        "complete": false,
-        "progress": {
-          "done": 3,
-          "total": 5,
-          "complete": false,
-          "failed": false,
-          "instruction": "Груз собран. Разбей нижнюю часть синей чаши.",
-          "current": "des1-portal-first:cup0",
-          "captures": 3,
-          "required": 2
-        }
-      }
+      ]
     },
     {
-      "id": "des1-cascade-layers-0",
-      "structure": "{\"nodes\":[[\"source\",\"hopper\",2,null],[\"cup\",\"tilt\",2,null],[\"cup\",\"tilt\",2,null],[\"outlet\",null,2,null]],\"edges\":[[0,1,\"collect-then-release\"],[1,2,\"collect-then-release\"],[2,3,\"deliver\"]],\"portalTargets\":[]}",
+      "id": "des1-magnet-first",
+      "structure": "{\"assemblies\":[[\"ramp\",null],[\"magnet\",null],[\"cup\",\"break\"],[\"tower\",null],[\"tower\",null],[\"seesaw\",null],[\"seesaw\",null]],\"flow\":[[0,1,\"magnetic-deflection\"],[1,2,\"fall-into-cup\"],[2,6,\"fall-to-lower-construction\"]]}",
       "accepted": true,
       "geometry": {
         "valid": true,
         "errors": [],
-        "pegCount": 25,
-        "targets": 1
+        "pegCount": 64,
+        "targets": 28
       },
       "idle": {
-        "initialDrift": 0.30000000000001137,
-        "lateDrift": 0,
-        "progress": 0
+        "seconds": 4,
+        "orangeLeft": 28,
+        "lateDrift": 0.0029850993760192177
       },
-      "seed": "intent-proof",
-      "idleSeconds": 6,
-      "route": [
+      "seed": "des1-proof",
+      "shots": [
         {
-          "angle": 1.1842612573401894,
-          "seconds": 1.37499999999995,
-          "orangeBefore": 1,
-          "orangeAfter": 0,
-          "cleared": 1,
+          "angle": 0.9472906870171447,
+          "seconds": 3.5499999999998764,
+          "orangeBefore": 28,
+          "orangeAfter": 10,
+          "cleared": 18,
           "timeout": false,
           "state": "idle",
-          "fallenTargets": 0,
-          "directTargets": 1,
-          "hitCount": 1
-        },
-        {
-          "angle": 2.8728091923265415,
-          "seconds": 1.4333333333334377,
-          "orangeBefore": 0,
-          "orangeAfter": 0,
-          "cleared": 0,
-          "timeout": false,
-          "state": "idle",
-          "fallenTargets": 0,
-          "directTargets": 0,
-          "hitCount": 2
-        },
-        {
-          "angle": 0.08568790204786392,
-          "seconds": 0.9500000000000691,
-          "orangeBefore": 0,
-          "orangeAfter": 0,
-          "cleared": 0,
-          "timeout": false,
-          "state": "idle",
-          "fallenTargets": 0,
-          "directTargets": 0,
-          "hitCount": 1
+          "fallenTargets": 17,
+          "directTargets": 3,
+          "hitCount": 9,
+          "orangeLeft": 10,
+          "crossAssemblyImpacts": [
+            {
+              "assemblies": [
+                "des1-magnet-first:assembly3",
+                "des1-magnet-first:assembly4"
+              ],
+              "speed": 6.124404144230045
+            },
+            {
+              "assemblies": [
+                "des1-magnet-first:assembly2",
+                "des1-magnet-first:assembly3"
+              ],
+              "speed": 4.261149476387113
+            },
+            {
+              "assemblies": [
+                "des1-magnet-first:assembly0",
+                "des1-magnet-first:assembly1"
+              ],
+              "speed": 3.50524972882018
+            },
+            {
+              "assemblies": [
+                "des1-magnet-first:assembly3",
+                "des1-magnet-first:assembly5"
+              ],
+              "speed": 4.8601669082927135
+            },
+            {
+              "assemblies": [
+                "des1-magnet-first:assembly3",
+                "des1-magnet-first:assembly6"
+              ],
+              "speed": 6.1575583022547775
+            },
+            {
+              "assemblies": [
+                "des1-magnet-first:assembly4",
+                "des1-magnet-first:assembly5"
+              ],
+              "speed": 3.8874450138766887
+            },
+            {
+              "assemblies": [
+                "des1-magnet-first:assembly0",
+                "des1-magnet-first:assembly6"
+              ],
+              "speed": 6.149325842759453
+            }
+          ]
         }
-      ],
-      "progress": {
-        "done": 6,
-        "total": 6,
-        "complete": true,
-        "failed": false,
-        "instruction": "Цепочка завершена",
-        "captures": 0,
-        "required": 0
-      },
-      "events": [
-        {
-          "type": "activate",
-          "stage": "des1-cascade-layers-0:source0",
-          "pegId": "des1-cascade-layers-0:p2",
-          "time": 6.108333333333427
-        },
-        {
-          "type": "complete",
-          "stage": "des1-cascade-layers-0:source0",
-          "cargoIds": [
-            "des1-cascade-layers-0:p4",
-            "des1-cascade-layers-0:p5",
-            "des1-cascade-layers-0:p6",
-            "des1-cascade-layers-0:p7"
-          ],
-          "time": 6.333333333333438
-        },
-        {
-          "type": "capture",
-          "stage": "des1-cascade-layers-0:cup0",
-          "cargoIds": [
-            "des1-cascade-layers-0:p7",
-            "des1-cascade-layers-0:p6"
-          ],
-          "time": 6.833333333333463
-        },
-        {
-          "type": "activate",
-          "stage": "des1-cascade-layers-0:cup0",
-          "pegId": "des1-cascade-layers-0:p15",
-          "time": 10.391666666666717
-        },
-        {
-          "type": "complete",
-          "stage": "des1-cascade-layers-0:cup0",
-          "cargoIds": [
-            "des1-cascade-layers-0:p7",
-            "des1-cascade-layers-0:p4"
-          ],
-          "time": 10.508333333333377
-        },
-        {
-          "type": "capture",
-          "stage": "des1-cascade-layers-0:cup1",
-          "cargoIds": [
-            "des1-cascade-layers-0:p3",
-            "des1-cascade-layers-0:p7"
-          ],
-          "time": 11.658333333333312
-        },
-        {
-          "type": "activate",
-          "stage": "des1-cascade-layers-0:cup1",
-          "pegId": "des1-cascade-layers-0:p24",
-          "time": 14.658333333333141
-        },
-        {
-          "type": "complete",
-          "stage": "des1-cascade-layers-0:cup1",
-          "cargoIds": [
-            "des1-cascade-layers-0:p7",
-            "des1-cascade-layers-0:p5"
-          ],
-          "time": 14.749999999999803
-        },
-        {
-          "type": "complete",
-          "stage": "des1-cascade-layers-0:outlet",
-          "cargoIds": [
-            "des1-cascade-layers-0:p5",
-            "des1-cascade-layers-0:p7"
-          ],
-          "time": 15.016666666666454
-        }
-      ],
-      "probes": 41,
-      "holdout": {
-        "complete": true,
-        "route": [
-          {
-            "angle": 1.1842612573401894,
-            "seconds": 1.3833333333333573,
-            "orangeBefore": 1,
-            "orangeAfter": 0,
-            "cleared": 1,
-            "timeout": false,
-            "state": "idle",
-            "fallenTargets": 0,
-            "directTargets": 1,
-            "hitCount": 1
-          },
-          {
-            "angle": 2.8728091923265415,
-            "seconds": 1.5249999999999446,
-            "orangeBefore": 0,
-            "orangeAfter": 0,
-            "cleared": 0,
-            "timeout": false,
-            "state": "idle",
-            "fallenTargets": 0,
-            "directTargets": 0,
-            "hitCount": 2
-          },
-          {
-            "angle": 0.08568790204786392,
-            "seconds": 0.8500000000000618,
-            "orangeBefore": 0,
-            "orangeAfter": 0,
-            "cleared": 0,
-            "timeout": false,
-            "state": "idle",
-            "fallenTargets": 0,
-            "directTargets": 0,
-            "hitCount": 1
-          }
-        ],
-        "progress": {
-          "done": 6,
-          "total": 6,
-          "complete": true,
-          "failed": false,
-          "instruction": "Цепочка завершена",
-          "captures": 0,
-          "required": 0
-        },
-        "events": [
-          {
-            "type": "activate",
-            "stage": "des1-cascade-layers-0:source0",
-            "pegId": "des1-cascade-layers-0:p2",
-            "time": 2.1083333333333285
-          },
-          {
-            "type": "complete",
-            "stage": "des1-cascade-layers-0:source0",
-            "cargoIds": [
-              "des1-cascade-layers-0:p4",
-              "des1-cascade-layers-0:p5",
-              "des1-cascade-layers-0:p6",
-              "des1-cascade-layers-0:p7"
-            ],
-            "time": 2.3333333333333277
-          },
-          {
-            "type": "capture",
-            "stage": "des1-cascade-layers-0:cup0",
-            "cargoIds": [
-              "des1-cascade-layers-0:p7",
-              "des1-cascade-layers-0:p6"
-            ],
-            "time": 2.833333333333326
-          },
-          {
-            "type": "activate",
-            "stage": "des1-cascade-layers-0:cup0",
-            "pegId": "des1-cascade-layers-0:p15",
-            "time": 6.400000000000108
-          },
-          {
-            "type": "complete",
-            "stage": "des1-cascade-layers-0:cup0",
-            "cargoIds": [
-              "des1-cascade-layers-0:p7",
-              "des1-cascade-layers-0:p4"
-            ],
-            "time": 6.51666666666678
-          },
-          {
-            "type": "capture",
-            "stage": "des1-cascade-layers-0:cup1",
-            "cargoIds": [
-              "des1-cascade-layers-0:p3",
-              "des1-cascade-layers-0:p7"
-            ],
-            "time": 7.6666666666668375
-          },
-          {
-            "type": "activate",
-            "stage": "des1-cascade-layers-0:cup1",
-            "pegId": "des1-cascade-layers-0:p24",
-            "time": 10.758333333333363
-          },
-          {
-            "type": "complete",
-            "stage": "des1-cascade-layers-0:cup1",
-            "cargoIds": [
-              "des1-cascade-layers-0:p7",
-              "des1-cascade-layers-0:p5"
-            ],
-            "time": 10.850000000000025
-          },
-          {
-            "type": "complete",
-            "stage": "des1-cascade-layers-0:outlet",
-            "cargoIds": [
-              "des1-cascade-layers-0:p5",
-              "des1-cascade-layers-0:p7"
-            ],
-            "time": 11.116666666666676
-          }
-        ],
-        "seed": "intent-holdout",
-        "idleSeconds": 2
-      },
-      "earlyReplay": {
-        "complete": true,
-        "progress": {
-          "done": 6,
-          "total": 6,
-          "complete": true,
-          "failed": false,
-          "instruction": "Цепочка завершена",
-          "captures": 0,
-          "required": 0
-        }
-      }
+      ]
     },
     {
       "id": "des1-cross-first",
-      "structure": "{\"nodes\":[[\"source\",\"hopper\",2,null],[\"source\",\"hopper\",2,null],[\"portal\",null,2,null],[\"cup\",\"break\",2,null],[\"portal\",null,2,null],[\"cup\",\"break\",2,null],[\"outlet\",null,4,2]],\"edges\":[[0,2,\"transport-cargo\"],[2,3,\"collect-then-release\"],[1,4,\"transport-cargo\"],[4,5,\"collect-then-release\"],[3,6,\"deliver\"],[5,6,\"deliver\"]],\"portalTargets\":[3,5]}",
+      "structure": "{\"assemblies\":[[\"hopper\",null],[\"hopper\",null],[\"portal\",null],[\"cup\",\"tilt\"],[\"portal\",null],[\"cup\",\"break\"],[\"tower\",null],[\"tower\",null]],\"flow\":[[0,2,\"portal-transfer\"],[2,3,\"fall-into-cup\"],[1,4,\"portal-transfer\"],[4,5,\"fall-into-cup\"],[3,6,\"fall-to-lower-constructions\"],[5,6,\"fall-to-lower-constructions\"],[3,7,\"fall-to-lower-constructions\"],[5,7,\"fall-to-lower-constructions\"]]}",
       "accepted": true,
       "geometry": {
         "valid": true,
         "errors": [],
-        "pegCount": 31,
-        "targets": 2
+        "pegCount": 59,
+        "targets": 22
       },
       "idle": {
-        "initialDrift": 0.30000000000001137,
-        "lateDrift": 0,
-        "progress": 0
+        "seconds": 4,
+        "orangeLeft": 22,
+        "lateDrift": 0.001364674531158131
       },
-      "seed": "intent-proof",
-      "idleSeconds": 6,
-      "route": [
+      "seed": "des1-proof",
+      "shots": [
         {
-          "angle": 0.6146306286700948,
-          "seconds": 2.0999999999999237,
-          "orangeBefore": 2,
-          "orangeAfter": 0,
+          "angle": 2.1269289527113764,
+          "seconds": 1.4083333333332875,
+          "orangeBefore": 22,
+          "orangeAfter": 20,
           "cleared": 2,
           "timeout": false,
           "state": "idle",
-          "fallenTargets": 0,
+          "fallenTargets": 6,
           "directTargets": 2,
-          "hitCount": 2
+          "hitCount": 2,
+          "orangeLeft": 14,
+          "crossAssemblyImpacts": [
+            {
+              "assemblies": [
+                "des1-cross-first:assembly0",
+                "des1-cross-first:assembly3"
+              ],
+              "speed": 3.9700774486292123
+            }
+          ]
         },
         {
-          "angle": 1.7945797880581478,
-          "seconds": 3.1583333333335633,
-          "orangeBefore": 0,
-          "orangeAfter": 0,
-          "cleared": 0,
+          "angle": 1.0350797617462952,
+          "seconds": 1.9249999999999354,
+          "orangeBefore": 22,
+          "orangeAfter": 19,
+          "cleared": 3,
           "timeout": false,
           "state": "idle",
-          "fallenTargets": 0,
-          "directTargets": 0,
-          "hitCount": 4
-        },
-        {
-          "angle": 0.43153506945470715,
-          "seconds": 2.708333333332939,
-          "orangeBefore": 0,
-          "orangeAfter": 0,
-          "cleared": 0,
-          "timeout": false,
-          "state": "idle",
-          "fallenTargets": 0,
-          "directTargets": 0,
-          "hitCount": 2
-        },
-        {
-          "angle": 0.5332548245743669,
-          "seconds": 1.583333333333103,
-          "orangeBefore": 0,
-          "orangeAfter": 0,
-          "cleared": 0,
-          "timeout": false,
-          "state": "idle",
-          "fallenTargets": 0,
-          "directTargets": 0,
-          "hitCount": 2
-        },
-        {
-          "angle": 0.32981531433504735,
-          "seconds": 1.2999999999998109,
-          "orangeBefore": 0,
-          "orangeAfter": 0,
-          "cleared": 0,
-          "timeout": false,
-          "state": "idle",
-          "fallenTargets": 0,
-          "directTargets": 0,
-          "hitCount": 1
+          "fallenTargets": 1,
+          "directTargets": 3,
+          "hitCount": 3,
+          "orangeLeft": 18,
+          "crossAssemblyImpacts": [
+            {
+              "assemblies": [
+                "des1-cross-first:assembly1",
+                "des1-cross-first:assembly5"
+              ],
+              "speed": 4.0033462813764995
+            }
+          ]
         }
-      ],
-      "progress": {
-        "done": 9,
-        "total": 9,
-        "complete": true,
-        "failed": false,
-        "instruction": "Цепочка завершена",
-        "captures": 0,
-        "required": 0
-      },
-      "events": [
-        {
-          "type": "activate",
-          "stage": "des1-cross-first:source1",
-          "pegId": "des1-cross-first:p8",
-          "time": 6.758333333333459
-        },
-        {
-          "type": "complete",
-          "stage": "des1-cross-first:source1",
-          "cargoIds": [
-            "des1-cross-first:p9",
-            "des1-cross-first:p10"
-          ],
-          "time": 7.075000000000141
-        },
-        {
-          "type": "transport",
-          "stage": "des1-cross-first:portal1",
-          "cargoId": "des1-cross-first:p9",
-          "time": 7.100000000000143
-        },
-        {
-          "type": "activate",
-          "stage": "des1-cross-first:source0",
-          "pegId": "des1-cross-first:p2",
-          "time": 7.125000000000144
-        },
-        {
-          "type": "transport",
-          "stage": "des1-cross-first:portal1",
-          "cargoId": "des1-cross-first:p10",
-          "time": 7.175000000000146
-        },
-        {
-          "type": "complete",
-          "stage": "des1-cross-first:portal1",
-          "cargoIds": [
-            "des1-cross-first:p9",
-            "des1-cross-first:p10"
-          ],
-          "time": 7.175000000000146
-        },
-        {
-          "type": "transport",
-          "stage": "des1-cross-first:portal1",
-          "cargoId": "des1-cross-first:p11",
-          "time": 7.216666666666815
-        },
-        {
-          "type": "transport",
-          "stage": "des1-cross-first:portal1",
-          "cargoId": "des1-cross-first:p12",
-          "time": 7.275000000000151
-        },
-        {
-          "type": "complete",
-          "stage": "des1-cross-first:source0",
-          "cargoIds": [
-            "des1-cross-first:p6",
-            "des1-cross-first:p5"
-          ],
-          "time": 7.375000000000156
-        },
-        {
-          "type": "transport",
-          "stage": "des1-cross-first:portal0",
-          "cargoId": "des1-cross-first:p6",
-          "time": 7.425000000000159
-        },
-        {
-          "type": "transport",
-          "stage": "des1-cross-first:portal0",
-          "cargoId": "des1-cross-first:p5",
-          "time": 7.4666666666668275
-        },
-        {
-          "type": "complete",
-          "stage": "des1-cross-first:portal0",
-          "cargoIds": [
-            "des1-cross-first:p6",
-            "des1-cross-first:p5"
-          ],
-          "time": 7.4666666666668275
-        },
-        {
-          "type": "transport",
-          "stage": "des1-cross-first:portal0",
-          "cargoId": "des1-cross-first:p4",
-          "time": 7.5333333333334975
-        },
-        {
-          "type": "capture",
-          "stage": "des1-cross-first:cup1",
-          "cargoIds": [
-            "des1-cross-first:p9",
-            "des1-cross-first:p10"
-          ],
-          "time": 7.5333333333334975
-        },
-        {
-          "type": "transport",
-          "stage": "des1-cross-first:portal0",
-          "cargoId": "des1-cross-first:p3",
-          "time": 7.6333333333335025
-        },
-        {
-          "type": "capture",
-          "stage": "des1-cross-first:cup0",
-          "cargoIds": [
-            "des1-cross-first:p6",
-            "des1-cross-first:p5"
-          ],
-          "time": 7.816666666666845
-        },
-        {
-          "type": "activate",
-          "stage": "des1-cross-first:cup1",
-          "pegId": "des1-cross-first:p24",
-          "time": 10.92500000000002
-        },
-        {
-          "type": "complete",
-          "stage": "des1-cross-first:cup1",
-          "cargoIds": [
-            "des1-cross-first:p10",
-            "des1-cross-first:p9"
-          ],
-          "time": 13.658333333333198
-        },
-        {
-          "type": "activate",
-          "stage": "des1-cross-first:cup0",
-          "pegId": "des1-cross-first:p15",
-          "time": 17.316666666666325
-        },
-        {
-          "type": "complete",
-          "stage": "des1-cross-first:cup0",
-          "cargoIds": [
-            "des1-cross-first:p4",
-            "des1-cross-first:p3"
-          ],
-          "time": 21.741666666666074
-        },
-        {
-          "type": "complete",
-          "stage": "des1-cross-first:outlet",
-          "cargoIds": [
-            "des1-cross-first:p10",
-            "des1-cross-first:p9",
-            "des1-cross-first:p12",
-            "des1-cross-first:p3",
-            "des1-cross-first:p11",
-            "des1-cross-first:p4"
-          ],
-          "time": 28.191666666665707
-        }
-      ],
-      "probes": 88,
-      "holdout": {
-        "complete": true,
-        "route": [
-          {
-            "angle": 0.5332548245743669,
-            "seconds": 2.1583333333333683,
-            "orangeBefore": 2,
-            "orangeAfter": 0,
-            "cleared": 2,
-            "timeout": false,
-            "state": "idle",
-            "fallenTargets": 0,
-            "directTargets": 2,
-            "hitCount": 2
-          },
-          {
-            "angle": 1.7945797880581478,
-            "seconds": 1.9499999999999855,
-            "orangeBefore": 0,
-            "orangeAfter": 0,
-            "cleared": 0,
-            "timeout": false,
-            "state": "idle",
-            "fallenTargets": 0,
-            "directTargets": 0,
-            "hitCount": 2
-          },
-          {
-            "angle": 1.326668914507713,
-            "seconds": 3.02500000000022,
-            "orangeBefore": 0,
-            "orangeAfter": 0,
-            "cleared": 0,
-            "timeout": false,
-            "state": "idle",
-            "fallenTargets": 0,
-            "directTargets": 0,
-            "hitCount": 4
-          },
-          {
-            "angle": 1.8352676901060119,
-            "seconds": 0.6666666666665697,
-            "orangeBefore": 0,
-            "orangeAfter": 0,
-            "cleared": 0,
-            "timeout": false,
-            "state": "idle",
-            "fallenTargets": 0,
-            "directTargets": 0,
-            "hitCount": 2
-          },
-          {
-            "angle": 1.8352676901060119,
-            "seconds": 0.6249999999999091,
-            "orangeBefore": 0,
-            "orangeAfter": 0,
-            "cleared": 0,
-            "timeout": false,
-            "state": "idle",
-            "fallenTargets": 0,
-            "directTargets": 0,
-            "hitCount": 1
-          }
-        ],
-        "progress": {
-          "done": 9,
-          "total": 9,
-          "complete": true,
-          "failed": false,
-          "instruction": "Цепочка завершена",
-          "captures": 0,
-          "required": 0
-        },
-        "events": [
-          {
-            "type": "activate",
-            "stage": "des1-cross-first:source0",
-            "pegId": "des1-cross-first:p2",
-            "time": 2.8499999999999925
-          },
-          {
-            "type": "complete",
-            "stage": "des1-cross-first:source0",
-            "cargoIds": [
-              "des1-cross-first:p6",
-              "des1-cross-first:p5"
-            ],
-            "time": 3.1499999999999915
-          },
-          {
-            "type": "transport",
-            "stage": "des1-cross-first:portal0",
-            "cargoId": "des1-cross-first:p6",
-            "time": 3.1833333333333247
-          },
-          {
-            "type": "activate",
-            "stage": "des1-cross-first:source1",
-            "pegId": "des1-cross-first:p8",
-            "time": 3.1999999999999913
-          },
-          {
-            "type": "transport",
-            "stage": "des1-cross-first:portal0",
-            "cargoId": "des1-cross-first:p5",
-            "time": 3.2333333333333245
-          },
-          {
-            "type": "complete",
-            "stage": "des1-cross-first:portal0",
-            "cargoIds": [
-              "des1-cross-first:p6",
-              "des1-cross-first:p5"
-            ],
-            "time": 3.2333333333333245
-          },
-          {
-            "type": "transport",
-            "stage": "des1-cross-first:portal0",
-            "cargoId": "des1-cross-first:p4",
-            "time": 3.2916666666666576
-          },
-          {
-            "type": "transport",
-            "stage": "des1-cross-first:portal0",
-            "cargoId": "des1-cross-first:p3",
-            "time": 3.3749999999999907
-          },
-          {
-            "type": "complete",
-            "stage": "des1-cross-first:source1",
-            "cargoIds": [
-              "des1-cross-first:p9",
-              "des1-cross-first:p10"
-            ],
-            "time": 3.5583333333333234
-          },
-          {
-            "type": "transport",
-            "stage": "des1-cross-first:portal1",
-            "cargoId": "des1-cross-first:p9",
-            "time": 3.5833333333333233
-          },
-          {
-            "type": "capture",
-            "stage": "des1-cross-first:cup0",
-            "cargoIds": [
-              "des1-cross-first:p6",
-              "des1-cross-first:p5"
-            ],
-            "time": 3.5916666666666566
-          },
-          {
-            "type": "transport",
-            "stage": "des1-cross-first:portal1",
-            "cargoId": "des1-cross-first:p10",
-            "time": 3.6499999999999897
-          },
-          {
-            "type": "complete",
-            "stage": "des1-cross-first:portal1",
-            "cargoIds": [
-              "des1-cross-first:p9",
-              "des1-cross-first:p10"
-            ],
-            "time": 3.6499999999999897
-          },
-          {
-            "type": "transport",
-            "stage": "des1-cross-first:portal1",
-            "cargoId": "des1-cross-first:p11",
-            "time": 3.691666666666656
-          },
-          {
-            "type": "transport",
-            "stage": "des1-cross-first:portal1",
-            "cargoId": "des1-cross-first:p12",
-            "time": 3.7499999999999893
-          },
-          {
-            "type": "capture",
-            "stage": "des1-cross-first:cup1",
-            "cargoIds": [
-              "des1-cross-first:p9",
-              "des1-cross-first:p10"
-            ],
-            "time": 4.008333333333322
-          },
-          {
-            "type": "activate",
-            "stage": "des1-cross-first:cup1",
-            "pegId": "des1-cross-first:p24",
-            "time": 6.98333333333347
-          },
-          {
-            "type": "activate",
-            "stage": "des1-cross-first:cup0",
-            "pegId": "des1-cross-first:p21",
-            "time": 11.533333333333319
-          },
-          {
-            "type": "complete",
-            "stage": "des1-cross-first:cup0",
-            "cargoIds": [
-              "des1-cross-first:p3",
-              "des1-cross-first:p6"
-            ],
-            "time": 16.30833333333305
-          },
-          {
-            "type": "complete",
-            "stage": "des1-cross-first:cup1",
-            "cargoIds": [
-              "des1-cross-first:p12",
-              "des1-cross-first:p11"
-            ],
-            "time": 21.016666666666115
-          },
-          {
-            "type": "complete",
-            "stage": "des1-cross-first:outlet",
-            "cargoIds": [
-              "des1-cross-first:p12",
-              "des1-cross-first:p3",
-              "des1-cross-first:p6",
-              "des1-cross-first:p4",
-              "des1-cross-first:p11"
-            ],
-            "time": 21.55833333333275
-          }
-        ],
-        "seed": "intent-holdout",
-        "idleSeconds": 2
-      },
-      "earlyReplay": {
-        "complete": false,
-        "progress": {
-          "done": 2,
-          "total": 9,
-          "complete": false,
-          "failed": true,
-          "instruction": "Накопитель открыт раньше времени. Сначала собери груз, затем выпусти его.",
-          "current": "des1-cross-first:source0",
-          "captures": 0,
-          "required": 2
-        }
-      }
+      ]
     },
     {
-      "id": "des1-compose-compose-0",
-      "structure": "{\"nodes\":[[\"source\",\"hopper\",2,null],[\"source\",\"ramp\",2,null],[\"cup\",\"tilt\",4,2],[\"outlet\",null,4,2]],\"edges\":[[0,2,\"collect-then-release\"],[1,2,\"collect-then-release\"],[2,3,\"deliver\"]],\"portalTargets\":[]}",
+      "id": "des1-cascade-layers-0",
+      "structure": "{\"assemblies\":[[\"ramp\",null],[\"cup\",\"tilt\"],[\"cup\",\"tilt\"],[\"cage\",null],[\"cradle\",null],[\"cradle\",null],[\"cage\",null]],\"flow\":[[0,1,\"fall-into-cup\"],[1,2,\"fall-into-cup\"],[2,6,\"fall-to-lower-construction\"]]}",
       "accepted": true,
       "geometry": {
         "valid": true,
         "errors": [],
-        "pegCount": 21,
-        "targets": 2
+        "pegCount": 77,
+        "targets": 18
       },
       "idle": {
-        "initialDrift": 5.6201102985683,
-        "lateDrift": 0,
-        "progress": 0
+        "seconds": 4,
+        "orangeLeft": 18,
+        "lateDrift": 0.7339948223523174
       },
-      "seed": "intent-proof",
-      "idleSeconds": 6,
-      "route": [
+      "seed": "des1-proof",
+      "shots": [
         {
-          "angle": 1.5301084247470327,
-          "seconds": 1.2999999999999527,
-          "orangeBefore": 2,
-          "orangeAfter": 0,
-          "cleared": 2,
-          "timeout": false,
-          "state": "idle",
-          "fallenTargets": 0,
-          "directTargets": 2,
-          "hitCount": 2
-        },
-        {
-          "angle": 0.24843951023931954,
-          "seconds": 0.7666666666667225,
-          "orangeBefore": 0,
-          "orangeAfter": 0,
-          "cleared": 0,
-          "timeout": false,
-          "state": "idle",
-          "fallenTargets": 0,
-          "directTargets": 0,
-          "hitCount": 1
-        }
-      ],
-      "progress": {
-        "done": 5,
-        "total": 5,
-        "complete": true,
-        "failed": false,
-        "instruction": "Цепочка завершена",
-        "captures": 0,
-        "required": 0
-      },
-      "events": [
-        {
-          "type": "activate",
-          "stage": "des1-compose-compose-0:source0",
-          "pegId": "des1-compose-compose-0:p2",
-          "time": 6.100000000000093
-        },
-        {
-          "type": "activate",
-          "stage": "des1-compose-compose-0:source1",
-          "pegId": "des1-compose-compose-0:p8",
-          "time": 6.158333333333429
-        },
-        {
-          "type": "complete",
-          "stage": "des1-compose-compose-0:source0",
-          "cargoIds": [
-            "des1-compose-compose-0:p4",
-            "des1-compose-compose-0:p5",
-            "des1-compose-compose-0:p6"
-          ],
-          "time": 6.325000000000104
-        },
-        {
-          "type": "complete",
-          "stage": "des1-compose-compose-0:source1",
-          "cargoIds": [
-            "des1-compose-compose-0:p9",
-            "des1-compose-compose-0:p10"
-          ],
-          "time": 7.291666666666819
-        },
-        {
-          "type": "capture",
-          "stage": "des1-compose-compose-0:cup0",
-          "cargoIds": [
-            "des1-compose-compose-0:p6",
-            "des1-compose-compose-0:p5",
-            "des1-compose-compose-0:p4",
-            "des1-compose-compose-0:p3",
-            "des1-compose-compose-0:p9",
-            "des1-compose-compose-0:p10"
-          ],
-          "time": 7.816666666666845
-        },
-        {
-          "type": "activate",
-          "stage": "des1-compose-compose-0:cup0",
-          "pegId": "des1-compose-compose-0:p21",
-          "time": 10.333333333333387
-        },
-        {
-          "type": "complete",
-          "stage": "des1-compose-compose-0:cup0",
-          "cargoIds": [
-            "des1-compose-compose-0:p4",
-            "des1-compose-compose-0:p5",
-            "des1-compose-compose-0:p3",
-            "des1-compose-compose-0:p6",
-            "des1-compose-compose-0:p9",
-            "des1-compose-compose-0:p10"
-          ],
-          "time": 10.541666666666709
-        },
-        {
-          "type": "complete",
-          "stage": "des1-compose-compose-0:outlet",
-          "cargoIds": [
-            "des1-compose-compose-0:p3",
-            "des1-compose-compose-0:p9",
-            "des1-compose-compose-0:p12",
-            "des1-compose-compose-0:p10",
-            "des1-compose-compose-0:p6"
-          ],
-          "time": 11.374999999999995
-        }
-      ],
-      "probes": 22,
-      "holdout": {
-        "complete": true,
-        "route": [
-          {
-            "angle": 1.5301084247470327,
-            "seconds": 1.258333333333355,
-            "orangeBefore": 2,
-            "orangeAfter": 0,
-            "cleared": 2,
-            "timeout": false,
-            "state": "idle",
-            "fallenTargets": 0,
-            "directTargets": 2,
-            "hitCount": 2
-          },
-          {
-            "angle": 0.24843951023931954,
-            "seconds": 0.7666666666666387,
-            "orangeBefore": 0,
-            "orangeAfter": 0,
-            "cleared": 0,
-            "timeout": false,
-            "state": "idle",
-            "fallenTargets": 0,
-            "directTargets": 0,
-            "hitCount": 1
-          }
-        ],
-        "progress": {
-          "done": 5,
-          "total": 5,
-          "complete": true,
-          "failed": false,
-          "instruction": "Цепочка завершена",
-          "captures": 0,
-          "required": 0
-        },
-        "events": [
-          {
-            "type": "activate",
-            "stage": "des1-compose-compose-0:source0",
-            "pegId": "des1-compose-compose-0:p2",
-            "time": 2.099999999999995
-          },
-          {
-            "type": "activate",
-            "stage": "des1-compose-compose-0:source1",
-            "pegId": "des1-compose-compose-0:p8",
-            "time": 2.1583333333333283
-          },
-          {
-            "type": "complete",
-            "stage": "des1-compose-compose-0:source0",
-            "cargoIds": [
-              "des1-compose-compose-0:p4",
-              "des1-compose-compose-0:p5",
-              "des1-compose-compose-0:p6"
-            ],
-            "time": 2.3249999999999944
-          },
-          {
-            "type": "complete",
-            "stage": "des1-compose-compose-0:source1",
-            "cargoIds": [
-              "des1-compose-compose-0:p9",
-              "des1-compose-compose-0:p10"
-            ],
-            "time": 3.2916666666666576
-          },
-          {
-            "type": "capture",
-            "stage": "des1-compose-compose-0:cup0",
-            "cargoIds": [
-              "des1-compose-compose-0:p6",
-              "des1-compose-compose-0:p5",
-              "des1-compose-compose-0:p4",
-              "des1-compose-compose-0:p3",
-              "des1-compose-compose-0:p9",
-              "des1-compose-compose-0:p10"
-            ],
-            "time": 3.8333333333333224
-          },
-          {
-            "type": "activate",
-            "stage": "des1-compose-compose-0:cup0",
-            "pegId": "des1-compose-compose-0:p21",
-            "time": 6.291666666666769
-          },
-          {
-            "type": "complete",
-            "stage": "des1-compose-compose-0:cup0",
-            "cargoIds": [
-              "des1-compose-compose-0:p4",
-              "des1-compose-compose-0:p5",
-              "des1-compose-compose-0:p3",
-              "des1-compose-compose-0:p6",
-              "des1-compose-compose-0:p9",
-              "des1-compose-compose-0:p10"
-            ],
-            "time": 6.500000000000113
-          },
-          {
-            "type": "complete",
-            "stage": "des1-compose-compose-0:outlet",
-            "cargoIds": [
-              "des1-compose-compose-0:p9",
-              "des1-compose-compose-0:p3",
-              "des1-compose-compose-0:p12",
-              "des1-compose-compose-0:p10",
-              "des1-compose-compose-0:p4"
-            ],
-            "time": 7.325000000000154
-          }
-        ],
-        "seed": "intent-holdout",
-        "idleSeconds": 2
-      },
-      "earlyReplay": {
-        "complete": true,
-        "progress": {
-          "done": 5,
-          "total": 5,
-          "complete": true,
-          "failed": false,
-          "instruction": "Цепочка завершена",
-          "captures": 0,
-          "required": 0
-        }
-      }
-    },
-    {
-      "id": "des1-cascade-layers-4",
-      "structure": "{\"nodes\":[[\"source\",\"ramp\",2,null],[\"cup\",\"tilt\",2,null],[\"cup\",\"break\",2,null],[\"outlet\",null,2,null]],\"edges\":[[0,1,\"collect-then-release\"],[1,2,\"collect-then-release\"],[2,3,\"deliver\"]],\"portalTargets\":[]}",
-      "accepted": true,
-      "geometry": {
-        "valid": true,
-        "errors": [],
-        "pegCount": 23,
-        "targets": 1
-      },
-      "idle": {
-        "initialDrift": 5.6219736020631945,
-        "lateDrift": 0,
-        "progress": 0
-      },
-      "seed": "intent-proof",
-      "idleSeconds": 6,
-      "route": [
-        {
-          "angle": 1.1028854532444616,
-          "seconds": 2.7083333333332913,
-          "orangeBefore": 1,
-          "orangeAfter": 0,
+          "angle": 0.9528555104227187,
+          "seconds": 0.6666666666666479,
+          "orangeBefore": 18,
+          "orangeAfter": 17,
           "cleared": 1,
           "timeout": false,
           "state": "idle",
-          "fallenTargets": 0,
+          "fallenTargets": 6,
           "directTargets": 1,
-          "hitCount": 2
-        },
-        {
-          "angle": 1.8149237390820798,
-          "seconds": 0.8583333333333958,
-          "orangeBefore": 0,
-          "orangeAfter": 0,
-          "cleared": 0,
-          "timeout": false,
-          "state": "idle",
-          "fallenTargets": 0,
-          "directTargets": 0,
-          "hitCount": 2
-        },
-        {
-          "angle": 1.5504523757709645,
-          "seconds": 1.9333333333334066,
-          "orangeBefore": 0,
-          "orangeAfter": 0,
-          "cleared": 0,
-          "timeout": false,
-          "state": "idle",
-          "fallenTargets": 0,
-          "directTargets": 0,
-          "hitCount": 2
+          "hitCount": 2,
+          "orangeLeft": 11,
+          "crossAssemblyImpacts": [
+            {
+              "assemblies": [
+                "des1-cascade-layers-0:assembly3",
+                "des1-cascade-layers-0:assembly4"
+              ],
+              "speed": 4.300887025827399
+            },
+            {
+              "assemblies": [
+                "des1-cascade-layers-0:assembly0",
+                "des1-cascade-layers-0:assembly1"
+              ],
+              "speed": 4.773132141821076
+            },
+            {
+              "assemblies": [
+                "des1-cascade-layers-0:assembly0",
+                "des1-cascade-layers-0:assembly5"
+              ],
+              "speed": 6.446093739397501
+            },
+            {
+              "assemblies": [
+                "des1-cascade-layers-0:assembly0",
+                "des1-cascade-layers-0:assembly2"
+              ],
+              "speed": 6.713394323695946
+            },
+            {
+              "assemblies": [
+                "des1-cascade-layers-0:assembly3",
+                "des1-cascade-layers-0:assembly5"
+              ],
+              "speed": 4.971627170731958
+            },
+            {
+              "assemblies": [
+                "des1-cascade-layers-0:assembly2",
+                "des1-cascade-layers-0:assembly3"
+              ],
+              "speed": 4.6706844690755664
+            }
+          ]
         }
-      ],
-      "progress": {
-        "done": 6,
-        "total": 6,
-        "complete": true,
-        "failed": false,
-        "instruction": "Цепочка завершена",
-        "captures": 0,
-        "required": 0
-      },
-      "events": [
-        {
-          "type": "activate",
-          "stage": "des1-cascade-layers-4:source0",
-          "pegId": "des1-cascade-layers-4:p2",
-          "time": 6.11666666666676
-        },
-        {
-          "type": "complete",
-          "stage": "des1-cascade-layers-4:source0",
-          "cargoIds": [
-            "des1-cascade-layers-4:p3",
-            "des1-cascade-layers-4:p4"
-          ],
-          "time": 7.066666666666808
-        },
-        {
-          "type": "capture",
-          "stage": "des1-cascade-layers-4:cup0",
-          "cargoIds": [
-            "des1-cascade-layers-4:p3",
-            "des1-cascade-layers-4:p4"
-          ],
-          "time": 7.575000000000166
-        },
-        {
-          "type": "activate",
-          "stage": "des1-cascade-layers-4:cup0",
-          "pegId": "des1-cascade-layers-4:p14",
-          "time": 7.900000000000182
-        },
-        {
-          "type": "complete",
-          "stage": "des1-cascade-layers-4:cup0",
-          "cargoIds": [
-            "des1-cascade-layers-4:p4",
-            "des1-cascade-layers-4:p3"
-          ],
-          "time": 8.016666666666852
-        },
-        {
-          "type": "capture",
-          "stage": "des1-cascade-layers-4:cup1",
-          "cargoIds": [
-            "des1-cascade-layers-4:p4",
-            "des1-cascade-layers-4:p5"
-          ],
-          "time": 8.59166666666682
-        },
-        {
-          "type": "activate",
-          "stage": "des1-cascade-layers-4:cup1",
-          "pegId": "des1-cascade-layers-4:p23",
-          "time": 11.658333333333312
-        },
-        {
-          "type": "complete",
-          "stage": "des1-cascade-layers-4:cup1",
-          "cargoIds": [
-            "des1-cascade-layers-4:p5",
-            "des1-cascade-layers-4:p4"
-          ],
-          "time": 16.724999999999692
-        },
-        {
-          "type": "complete",
-          "stage": "des1-cascade-layers-4:outlet",
-          "cargoIds": [
-            "des1-cascade-layers-4:p5",
-            "des1-cascade-layers-4:p4"
-          ],
-          "time": 16.999999999999677
-        }
-      ],
-      "probes": 51,
-      "holdout": {
-        "complete": true,
-        "route": [
-          {
-            "angle": 1.1028854532444616,
-            "seconds": 1.583333333333361,
-            "orangeBefore": 1,
-            "orangeAfter": 0,
-            "cleared": 1,
-            "timeout": false,
-            "state": "idle",
-            "fallenTargets": 0,
-            "directTargets": 1,
-            "hitCount": 1
-          },
-          {
-            "angle": 1.326668914507713,
-            "seconds": 1.8999999999999309,
-            "orangeBefore": 0,
-            "orangeAfter": 0,
-            "cleared": 0,
-            "timeout": false,
-            "state": "idle",
-            "fallenTargets": 0,
-            "directTargets": 0,
-            "hitCount": 3
-          },
-          {
-            "angle": 2.6693696820872224,
-            "seconds": 5.641666666667077,
-            "orangeBefore": 0,
-            "orangeAfter": 0,
-            "cleared": 0,
-            "timeout": false,
-            "state": "idle",
-            "fallenTargets": 0,
-            "directTargets": 0,
-            "hitCount": 4
-          }
-        ],
-        "progress": {
-          "done": 6,
-          "total": 6,
-          "complete": true,
-          "failed": false,
-          "instruction": "Цепочка завершена",
-          "captures": 0,
-          "required": 0
-        },
-        "events": [
-          {
-            "type": "activate",
-            "stage": "des1-cascade-layers-4:source0",
-            "pegId": "des1-cascade-layers-4:p2",
-            "time": 2.116666666666662
-          },
-          {
-            "type": "complete",
-            "stage": "des1-cascade-layers-4:source0",
-            "cargoIds": [
-              "des1-cascade-layers-4:p3",
-              "des1-cascade-layers-4:p4"
-            ],
-            "time": 3.0916666666666583
-          },
-          {
-            "type": "capture",
-            "stage": "des1-cascade-layers-4:cup0",
-            "cargoIds": [
-              "des1-cascade-layers-4:p3",
-              "des1-cascade-layers-4:p4"
-            ],
-            "time": 3.5916666666666566
-          },
-          {
-            "type": "activate",
-            "stage": "des1-cascade-layers-4:cup0",
-            "pegId": "des1-cascade-layers-4:p15",
-            "time": 6.425000000000109
-          },
-          {
-            "type": "complete",
-            "stage": "des1-cascade-layers-4:cup0",
-            "cargoIds": [
-              "des1-cascade-layers-4:p4",
-              "des1-cascade-layers-4:p3"
-            ],
-            "time": 6.500000000000113
-          },
-          {
-            "type": "capture",
-            "stage": "des1-cascade-layers-4:cup1",
-            "cargoIds": [
-              "des1-cascade-layers-4:p4",
-              "des1-cascade-layers-4:p6"
-            ],
-            "time": 7.150000000000145
-          },
-          {
-            "type": "activate",
-            "stage": "des1-cascade-layers-4:cup1",
-            "pegId": "des1-cascade-layers-4:p16",
-            "time": 7.608333333333501
-          },
-          {
-            "type": "complete",
-            "stage": "des1-cascade-layers-4:cup1",
-            "cargoIds": [
-              "des1-cascade-layers-4:p5",
-              "des1-cascade-layers-4:p4"
-            ],
-            "time": 16.099999999999728
-          },
-          {
-            "type": "complete",
-            "stage": "des1-cascade-layers-4:outlet",
-            "cargoIds": [
-              "des1-cascade-layers-4:p5",
-              "des1-cascade-layers-4:p4"
-            ],
-            "time": 16.391666666666378
-          }
-        ],
-        "seed": "intent-holdout",
-        "idleSeconds": 2
-      },
-      "earlyReplay": {
-        "complete": false,
-        "progress": {
-          "done": 2,
-          "total": 6,
-          "complete": false,
-          "failed": true,
-          "instruction": "Накопитель открыт раньше времени. Сначала собери груз, затем выпусти его.",
-          "current": "des1-cascade-layers-4:cup0",
-          "captures": 4,
-          "required": 2
-        }
-      }
+      ]
     },
     {
       "id": "des1-compose-compose-3",
-      "structure": "{\"nodes\":[[\"source\",\"hopper\",2,null],[\"source\",\"hopper\",2,null],[\"cup\",\"tilt\",2,null],[\"cup\",\"break\",2,null],[\"outlet\",null,4,2]],\"edges\":[[0,2,\"collect-then-release\"],[1,3,\"collect-then-release\"],[2,4,\"deliver\"],[3,4,\"deliver\"]],\"portalTargets\":[]}",
+      "structure": "{\"assemblies\":[[\"hopper\",null],[\"hopper\",null],[\"cup\",\"tilt\"],[\"cup\",\"break\"],[\"tower\",null],[\"cradle\",null]],\"flow\":[[0,2,\"fall-into-cup\"],[1,3,\"fall-into-cup\"],[2,4,\"fall-to-lower-constructions\"],[3,4,\"fall-to-lower-constructions\"],[2,5,\"fall-to-lower-constructions\"],[3,5,\"fall-to-lower-constructions\"]]}",
       "accepted": true,
       "geometry": {
         "valid": true,
         "errors": [],
-        "pegCount": 31,
-        "targets": 2
+        "pegCount": 54,
+        "targets": 19
       },
       "idle": {
-        "initialDrift": 0.30000000000001137,
-        "lateDrift": 0,
-        "progress": 0
+        "seconds": 4,
+        "orangeLeft": 19,
+        "lateDrift": 0
       },
-      "seed": "intent-proof",
-      "idleSeconds": 6,
-      "route": [
+      "seed": "des1-proof",
+      "shots": [
         {
-          "angle": 2.1811148575128554,
-          "seconds": 1.3583333333332839,
-          "orangeBefore": 2,
-          "orangeAfter": 1,
+          "angle": 2.1270158341285725,
+          "seconds": 1.5416666666666161,
+          "orangeBefore": 19,
+          "orangeAfter": 18,
           "cleared": 1,
           "timeout": false,
           "state": "idle",
           "fallenTargets": 0,
           "directTargets": 1,
-          "hitCount": 2
+          "hitCount": 1,
+          "orangeLeft": 18,
+          "crossAssemblyImpacts": [
+            {
+              "assemblies": [
+                "des1-compose-compose-3:assembly0",
+                "des1-compose-compose-3:assembly2"
+              ],
+              "speed": 5.4085974811361055
+            }
+          ]
         },
         {
-          "angle": 0.6553185307179586,
-          "seconds": 2.116666666666821,
-          "orangeBefore": 1,
-          "orangeAfter": 0,
-          "cleared": 1,
-          "timeout": false,
-          "state": "idle",
-          "fallenTargets": 0,
-          "directTargets": 1,
-          "hitCount": 2
-        },
-        {
-          "angle": 1.0215096491487339,
-          "seconds": 2.050000000000076,
-          "orangeBefore": 0,
-          "orangeAfter": 0,
-          "cleared": 0,
-          "timeout": false,
-          "state": "idle",
-          "fallenTargets": 0,
-          "directTargets": 0,
-          "hitCount": 2
-        },
-        {
-          "angle": 1.0621975511965978,
-          "seconds": 1.8166666666664022,
-          "orangeBefore": 0,
-          "orangeAfter": 0,
-          "cleared": 0,
-          "timeout": false,
-          "state": "idle",
-          "fallenTargets": 0,
-          "directTargets": 0,
-          "hitCount": 1
-        }
-      ],
-      "progress": {
-        "done": 7,
-        "total": 7,
-        "complete": true,
-        "failed": false,
-        "instruction": "Цепочка завершена",
-        "captures": 0,
-        "required": 0
-      },
-      "events": [
-        {
-          "type": "activate",
-          "stage": "des1-compose-compose-3:source0",
-          "pegId": "des1-compose-compose-3:p2",
-          "time": 6.125000000000094
-        },
-        {
-          "type": "complete",
-          "stage": "des1-compose-compose-3:source0",
-          "cargoIds": [
-            "des1-compose-compose-3:p5",
-            "des1-compose-compose-3:p4",
-            "des1-compose-compose-3:p6"
-          ],
-          "time": 6.350000000000105
-        },
-        {
-          "type": "capture",
-          "stage": "des1-compose-compose-3:cup0",
-          "cargoIds": [
-            "des1-compose-compose-3:p6",
-            "des1-compose-compose-3:p5"
-          ],
-          "time": 6.85000000000013
-        },
-        {
-          "type": "activate",
-          "stage": "des1-compose-compose-3:cup0",
-          "pegId": "des1-compose-compose-3:p13",
-          "time": 7.016666666666805
-        },
-        {
-          "type": "complete",
-          "stage": "des1-compose-compose-3:cup0",
-          "cargoIds": [
-            "des1-compose-compose-3:p6",
-            "des1-compose-compose-3:p4"
-          ],
-          "time": 7.11666666666681
-        },
-        {
-          "type": "activate",
-          "stage": "des1-compose-compose-3:source1",
-          "pegId": "des1-compose-compose-3:p8",
-          "time": 10.725000000000032
-        },
-        {
-          "type": "complete",
-          "stage": "des1-compose-compose-3:source1",
-          "cargoIds": [
-            "des1-compose-compose-3:p10",
-            "des1-compose-compose-3:p9"
-          ],
-          "time": 10.950000000000019
-        },
-        {
-          "type": "capture",
-          "stage": "des1-compose-compose-3:cup1",
-          "cargoIds": [
-            "des1-compose-compose-3:p9",
-            "des1-compose-compose-3:p10"
-          ],
-          "time": 11.516666666666653
-        },
-        {
-          "type": "activate",
-          "stage": "des1-compose-compose-3:cup1",
-          "pegId": "des1-compose-compose-3:p23",
-          "time": 14.933333333333126
-        },
-        {
-          "type": "complete",
-          "stage": "des1-compose-compose-3:cup1",
-          "cargoIds": [
-            "des1-compose-compose-3:p11",
-            "des1-compose-compose-3:p9"
-          ],
-          "time": 20.666666666666135
-        },
-        {
-          "type": "complete",
-          "stage": "des1-compose-compose-3:outlet",
-          "cargoIds": [
-            "des1-compose-compose-3:p4",
-            "des1-compose-compose-3:p6",
-            "des1-compose-compose-3:p3",
-            "des1-compose-compose-3:p5",
-            "des1-compose-compose-3:p11",
-            "des1-compose-compose-3:p9"
-          ],
-          "time": 21.399999999999427
-        }
-      ],
-      "probes": 70,
-      "holdout": {
-        "complete": true,
-        "route": [
-          {
-            "angle": 1.0011656981248018,
-            "seconds": 2.2666666666666977,
-            "orangeBefore": 2,
-            "orangeAfter": 0,
-            "cleared": 2,
-            "timeout": false,
-            "state": "idle",
-            "fallenTargets": 0,
-            "directTargets": 2,
-            "hitCount": 2
-          },
-          {
-            "angle": 1.3063249634837812,
-            "seconds": 1.9249999999999954,
-            "orangeBefore": 0,
-            "orangeAfter": 0,
-            "cleared": 0,
-            "timeout": false,
-            "state": "idle",
-            "fallenTargets": 0,
-            "directTargets": 0,
-            "hitCount": 2
-          },
-          {
-            "angle": 1.9776753472735356,
-            "seconds": 3.6750000000002676,
-            "orangeBefore": 0,
-            "orangeAfter": 0,
-            "cleared": 0,
-            "timeout": false,
-            "state": "idle",
-            "fallenTargets": 0,
-            "directTargets": 0,
-            "hitCount": 4
-          }
-        ],
-        "progress": {
-          "done": 7,
-          "total": 7,
-          "complete": true,
-          "failed": false,
-          "instruction": "Цепочка завершена",
-          "captures": 0,
-          "required": 0
-        },
-        "events": [
-          {
-            "type": "activate",
-            "stage": "des1-compose-compose-3:source1",
-            "pegId": "des1-compose-compose-3:p8",
-            "time": 2.116666666666662
-          },
-          {
-            "type": "complete",
-            "stage": "des1-compose-compose-3:source1",
-            "cargoIds": [
-              "des1-compose-compose-3:p9",
-              "des1-compose-compose-3:p10",
-              "des1-compose-compose-3:p11"
-            ],
-            "time": 2.341666666666661
-          },
-          {
-            "type": "capture",
-            "stage": "des1-compose-compose-3:cup1",
-            "cargoIds": [
-              "des1-compose-compose-3:p9",
-              "des1-compose-compose-3:p10"
-            ],
-            "time": 2.8749999999999925
-          },
-          {
-            "type": "activate",
-            "stage": "des1-compose-compose-3:source0",
-            "pegId": "des1-compose-compose-3:p2",
-            "time": 3.3666666666666574
-          },
-          {
-            "type": "complete",
-            "stage": "des1-compose-compose-3:source0",
-            "cargoIds": [
-              "des1-compose-compose-3:p5",
-              "des1-compose-compose-3:p6"
-            ],
-            "time": 3.5916666666666566
-          },
-          {
-            "type": "capture",
-            "stage": "des1-compose-compose-3:cup0",
-            "cargoIds": [
-              "des1-compose-compose-3:p6",
-              "des1-compose-compose-3:p5"
-            ],
-            "time": 4.108333333333327
-          },
-          {
-            "type": "activate",
-            "stage": "des1-compose-compose-3:cup1",
-            "pegId": "des1-compose-compose-3:p31",
-            "time": 7.100000000000143
-          },
-          {
-            "type": "activate",
-            "stage": "des1-compose-compose-3:cup0",
-            "pegId": "des1-compose-compose-3:p22",
-            "time": 8.00833333333352
-          },
-          {
-            "type": "complete",
-            "stage": "des1-compose-compose-3:cup0",
-            "cargoIds": [
-              "des1-compose-compose-3:p6",
-              "des1-compose-compose-3:p5"
-            ],
-            "time": 8.12500000000018
-          },
-          {
-            "type": "complete",
-            "stage": "des1-compose-compose-3:cup1",
-            "cargoIds": [
-              "des1-compose-compose-3:p9",
-              "des1-compose-compose-3:p10"
-            ],
-            "time": 14.658333333333141
-          },
-          {
-            "type": "complete",
-            "stage": "des1-compose-compose-3:outlet",
-            "cargoIds": [
-              "des1-compose-compose-3:p3",
-              "des1-compose-compose-3:p6",
-              "des1-compose-compose-3:p5",
-              "des1-compose-compose-3:p4",
-              "des1-compose-compose-3:p9",
-              "des1-compose-compose-3:p10"
-            ],
-            "time": 15.174999999999779
-          }
-        ],
-        "seed": "intent-holdout",
-        "idleSeconds": 2
-      },
-      "earlyReplay": {
-        "complete": false,
-        "progress": {
-          "done": 5,
-          "total": 7,
-          "complete": false,
-          "failed": false,
-          "instruction": "Груз собран. Разбей нижнюю часть синей чаши.",
-          "current": "des1-compose-compose-3:cup1",
-          "captures": 4,
-          "required": 2
-        }
-      }
-    },
-    {
-      "id": "des1-compose-compose-7",
-      "structure": "{\"nodes\":[[\"source\",\"hopper\",2,null],[\"portal\",null,2,null],[\"cup\",\"tilt\",2,null],[\"outlet\",null,2,null]],\"edges\":[[0,1,\"transport-cargo\"],[1,2,\"collect-then-release\"],[2,3,\"deliver\"]],\"portalTargets\":[2]}",
-      "accepted": true,
-      "geometry": {
-        "valid": true,
-        "errors": [],
-        "pegCount": 16,
-        "targets": 1
-      },
-      "idle": {
-        "initialDrift": 0.30000000000001137,
-        "lateDrift": 0,
-        "progress": 0
-      },
-      "seed": "intent-proof",
-      "idleSeconds": 6,
-      "route": [
-        {
-          "angle": 1.1232294042683937,
-          "seconds": 1.908333333333264,
-          "orangeBefore": 1,
-          "orangeAfter": 0,
-          "cleared": 1,
-          "timeout": false,
-          "state": "idle",
-          "fallenTargets": 0,
-          "directTargets": 1,
-          "hitCount": 1
-        },
-        {
-          "angle": 1.8149237390820798,
-          "seconds": 0.6333333333333794,
-          "orangeBefore": 0,
-          "orangeAfter": 0,
-          "cleared": 0,
-          "timeout": false,
-          "state": "idle",
-          "fallenTargets": 0,
-          "directTargets": 0,
-          "hitCount": 1
-        }
-      ],
-      "progress": {
-        "done": 5,
-        "total": 5,
-        "complete": true,
-        "failed": false,
-        "instruction": "Цепочка завершена",
-        "captures": 0,
-        "required": 0
-      },
-      "events": [
-        {
-          "type": "activate",
-          "stage": "des1-compose-compose-7:source0",
-          "pegId": "des1-compose-compose-7:p2",
-          "time": 6.108333333333427
-        },
-        {
-          "type": "complete",
-          "stage": "des1-compose-compose-7:source0",
-          "cargoIds": [
-            "des1-compose-compose-7:p4",
-            "des1-compose-compose-7:p3"
-          ],
-          "time": 6.416666666666775
-        },
-        {
-          "type": "transport",
-          "stage": "des1-compose-compose-7:portal0",
-          "cargoId": "des1-compose-compose-7:p3",
-          "time": 6.500000000000113
-        },
-        {
-          "type": "transport",
-          "stage": "des1-compose-compose-7:portal0",
-          "cargoId": "des1-compose-compose-7:p4",
-          "time": 6.500000000000113
-        },
-        {
-          "type": "complete",
-          "stage": "des1-compose-compose-7:portal0",
-          "cargoIds": [
-            "des1-compose-compose-7:p3",
-            "des1-compose-compose-7:p4"
-          ],
-          "time": 6.500000000000113
-        },
-        {
-          "type": "transport",
-          "stage": "des1-compose-compose-7:portal0",
-          "cargoId": "des1-compose-compose-7:p6",
-          "time": 6.733333333333458
-        },
-        {
-          "type": "capture",
-          "stage": "des1-compose-compose-7:cup0",
-          "cargoIds": [
-            "des1-compose-compose-7:p3",
-            "des1-compose-compose-7:p4"
-          ],
-          "time": 6.8750000000001315
-        },
-        {
-          "type": "activate",
-          "stage": "des1-compose-compose-7:cup0",
-          "pegId": "des1-compose-compose-7:p15",
-          "time": 10.741666666666697
-        },
-        {
-          "type": "complete",
-          "stage": "des1-compose-compose-7:cup0",
-          "cargoIds": [
-            "des1-compose-compose-7:p4",
-            "des1-compose-compose-7:p6"
-          ],
-          "time": 10.833333333333359
-        },
-        {
-          "type": "complete",
-          "stage": "des1-compose-compose-7:outlet",
-          "cargoIds": [
-            "des1-compose-compose-7:p3",
-            "des1-compose-compose-7:p4",
-            "des1-compose-compose-7:p6"
-          ],
-          "time": 11.341666666666663
-        }
-      ],
-      "probes": 22,
-      "holdout": {
-        "complete": true,
-        "route": [
-          {
-            "angle": 1.1232294042683937,
-            "seconds": 1.9000000000000334,
-            "orangeBefore": 1,
-            "orangeAfter": 0,
-            "cleared": 1,
-            "timeout": false,
-            "state": "idle",
-            "fallenTargets": 0,
-            "directTargets": 1,
-            "hitCount": 1
-          },
-          {
-            "angle": 1.8149237390820798,
-            "seconds": 0.6416666666666433,
-            "orangeBefore": 0,
-            "orangeAfter": 0,
-            "cleared": 0,
-            "timeout": false,
-            "state": "idle",
-            "fallenTargets": 0,
-            "directTargets": 0,
-            "hitCount": 1
-          }
-        ],
-        "progress": {
-          "done": 5,
-          "total": 5,
-          "complete": true,
-          "failed": false,
-          "instruction": "Цепочка завершена",
-          "captures": 0,
-          "required": 0
-        },
-        "events": [
-          {
-            "type": "activate",
-            "stage": "des1-compose-compose-7:source0",
-            "pegId": "des1-compose-compose-7:p2",
-            "time": 2.1083333333333285
-          },
-          {
-            "type": "complete",
-            "stage": "des1-compose-compose-7:source0",
-            "cargoIds": [
-              "des1-compose-compose-7:p4",
-              "des1-compose-compose-7:p3"
-            ],
-            "time": 2.4166666666666607
-          },
-          {
-            "type": "transport",
-            "stage": "des1-compose-compose-7:portal0",
-            "cargoId": "des1-compose-compose-7:p3",
-            "time": 2.499999999999994
-          },
-          {
-            "type": "transport",
-            "stage": "des1-compose-compose-7:portal0",
-            "cargoId": "des1-compose-compose-7:p4",
-            "time": 2.508333333333327
-          },
-          {
-            "type": "complete",
-            "stage": "des1-compose-compose-7:portal0",
-            "cargoIds": [
-              "des1-compose-compose-7:p3",
-              "des1-compose-compose-7:p4"
-            ],
-            "time": 2.508333333333327
-          },
-          {
-            "type": "transport",
-            "stage": "des1-compose-compose-7:portal0",
-            "cargoId": "des1-compose-compose-7:p6",
-            "time": 2.7333333333333263
-          },
-          {
-            "type": "capture",
-            "stage": "des1-compose-compose-7:cup0",
-            "cargoIds": [
-              "des1-compose-compose-7:p3",
-              "des1-compose-compose-7:p4"
-            ],
-            "time": 2.8833333333333258
-          },
-          {
-            "type": "activate",
-            "stage": "des1-compose-compose-7:cup0",
-            "pegId": "des1-compose-compose-7:p15",
-            "time": 6.733333333333458
-          },
-          {
-            "type": "complete",
-            "stage": "des1-compose-compose-7:cup0",
-            "cargoIds": [
-              "des1-compose-compose-7:p3",
-              "des1-compose-compose-7:p4"
-            ],
-            "time": 6.825000000000129
-          },
-          {
-            "type": "complete",
-            "stage": "des1-compose-compose-7:outlet",
-            "cargoIds": [
-              "des1-compose-compose-7:p3",
-              "des1-compose-compose-7:p4"
-            ],
-            "time": 7.333333333333488
-          }
-        ],
-        "seed": "intent-holdout",
-        "idleSeconds": 2
-      },
-      "earlyReplay": {
-        "complete": true,
-        "progress": {
-          "done": 5,
-          "total": 5,
-          "complete": true,
-          "failed": false,
-          "instruction": "Цепочка завершена",
-          "captures": 0,
-          "required": 0
-        }
-      }
-    },
-    {
-      "id": "des1-compose-compose-31",
-      "structure": "{\"nodes\":[[\"source\",\"hopper\",2,null],[\"magnet\",null,2,null],[\"cup\",\"tilt\",2,null],[\"cup\",\"tilt\",2,null],[\"outlet\",null,2,null]],\"edges\":[[0,1,\"hold-with-force-field\"],[1,2,\"collect-then-release\"],[2,3,\"collect-then-release\"],[3,4,\"deliver\"]],\"portalTargets\":[]}",
-      "accepted": true,
-      "geometry": {
-        "valid": true,
-        "errors": [],
-        "pegCount": 26,
-        "targets": 1
-      },
-      "idle": {
-        "initialDrift": 0.30000000000001137,
-        "lateDrift": 0,
-        "progress": 0
-      },
-      "seed": "intent-proof",
-      "idleSeconds": 6,
-      "route": [
-        {
-          "angle": 1.6928600329384884,
-          "seconds": 0.49166666666664877,
-          "orangeBefore": 1,
-          "orangeAfter": 0,
-          "cleared": 1,
-          "timeout": false,
-          "state": "idle",
-          "fallenTargets": 0,
-          "directTargets": 1,
-          "hitCount": 1
-        },
-        {
-          "angle": 2.9541849964222693,
-          "seconds": 1.4416666666667715,
-          "orangeBefore": 0,
-          "orangeAfter": 0,
-          "cleared": 0,
-          "timeout": false,
-          "state": "idle",
-          "fallenTargets": 0,
-          "directTargets": 0,
-          "hitCount": 1
-        },
-        {
-          "angle": 2.8728091923265415,
-          "seconds": 1.1583333333334176,
-          "orangeBefore": 0,
-          "orangeAfter": 0,
-          "cleared": 0,
-          "timeout": false,
-          "state": "idle",
-          "fallenTargets": 0,
-          "directTargets": 0,
-          "hitCount": 2
-        },
-        {
-          "angle": 0.2687834612632515,
-          "seconds": 0.966666666666526,
-          "orangeBefore": 0,
-          "orangeAfter": 0,
-          "cleared": 0,
-          "timeout": false,
-          "state": "idle",
-          "fallenTargets": 0,
-          "directTargets": 0,
-          "hitCount": 1
-        }
-      ],
-      "progress": {
-        "done": 8,
-        "total": 8,
-        "complete": true,
-        "failed": false,
-        "instruction": "Цепочка завершена",
-        "captures": 0,
-        "required": 0
-      },
-      "events": [
-        {
-          "type": "activate",
-          "stage": "des1-compose-compose-31:source0",
-          "pegId": "des1-compose-compose-31:p2",
-          "time": 6.11666666666676
-        },
-        {
-          "type": "complete",
-          "stage": "des1-compose-compose-31:source0",
-          "cargoIds": [
-            "des1-compose-compose-31:p5",
-            "des1-compose-compose-31:p6",
-            "des1-compose-compose-31:p7"
-          ],
-          "time": 6.341666666666772
-        },
-        {
-          "type": "capture",
-          "stage": "des1-compose-compose-31:magnet",
-          "cargoIds": [
-            "des1-compose-compose-31:p6",
-            "des1-compose-compose-31:p5"
-          ],
-          "time": 6.78333333333346
-        },
-        {
-          "type": "activate",
-          "stage": "des1-compose-compose-31:magnet",
-          "pegId": "des1-compose-compose-31:p8",
-          "time": 9.483333333333436
-        },
-        {
-          "type": "complete",
-          "stage": "des1-compose-compose-31:magnet",
-          "cargoIds": [
-            "des1-compose-compose-31:p5",
-            "des1-compose-compose-31:p6"
-          ],
-          "time": 9.491666666666768
-        },
-        {
-          "type": "capture",
-          "stage": "des1-compose-compose-31:cup0",
-          "cargoIds": [
-            "des1-compose-compose-31:p5",
-            "des1-compose-compose-31:p6"
-          ],
-          "time": 9.783333333333418
-        },
-        {
-          "type": "activate",
-          "stage": "des1-compose-compose-31:cup0",
-          "pegId": "des1-compose-compose-31:p9",
-          "time": 13.624999999999867
-        },
-        {
-          "type": "complete",
-          "stage": "des1-compose-compose-31:cup0",
-          "cargoIds": [
-            "des1-compose-compose-31:p3",
-            "des1-compose-compose-31:p5"
-          ],
-          "time": 13.658333333333198
-        },
-        {
-          "type": "capture",
-          "stage": "des1-compose-compose-31:cup1",
-          "cargoIds": [
-            "des1-compose-compose-31:p4",
-            "des1-compose-compose-31:p3"
-          ],
-          "time": 14.641666666666476
-        },
-        {
-          "type": "activate",
-          "stage": "des1-compose-compose-31:cup1",
-          "pegId": "des1-compose-compose-31:p26",
-          "time": 17.458333333332984
-        },
-        {
-          "type": "complete",
-          "stage": "des1-compose-compose-31:cup1",
-          "cargoIds": [
-            "des1-compose-compose-31:p3",
-            "des1-compose-compose-31:p5"
-          ],
-          "time": 17.56666666666631
-        },
-        {
-          "type": "complete",
-          "stage": "des1-compose-compose-31:outlet",
-          "cargoIds": [
-            "des1-compose-compose-31:p7",
-            "des1-compose-compose-31:p6"
-          ],
-          "time": 17.91666666666629
-        }
-      ],
-      "probes": 64,
-      "holdout": {
-        "complete": true,
-        "route": [
-          {
-            "angle": 1.6928600329384884,
-            "seconds": 0.500000000000008,
-            "orangeBefore": 1,
-            "orangeAfter": 0,
-            "cleared": 1,
-            "timeout": false,
-            "state": "idle",
-            "fallenTargets": 0,
-            "directTargets": 1,
-            "hitCount": 1
-          },
-          {
-            "angle": 2.9541849964222693,
-            "seconds": 3.2083333333332296,
-            "orangeBefore": 0,
-            "orangeAfter": 0,
-            "cleared": 0,
-            "timeout": false,
-            "state": "idle",
-            "fallenTargets": 0,
-            "directTargets": 0,
-            "hitCount": 4
-          }
-        ],
-        "progress": {
-          "done": 8,
-          "total": 8,
-          "complete": true,
-          "failed": false,
-          "instruction": "Цепочка завершена",
-          "captures": 0,
-          "required": 0
-        },
-        "events": [
-          {
-            "type": "activate",
-            "stage": "des1-compose-compose-31:source0",
-            "pegId": "des1-compose-compose-31:p2",
-            "time": 2.116666666666662
-          },
-          {
-            "type": "complete",
-            "stage": "des1-compose-compose-31:source0",
-            "cargoIds": [
-              "des1-compose-compose-31:p5",
-              "des1-compose-compose-31:p6",
-              "des1-compose-compose-31:p7"
-            ],
-            "time": 2.341666666666661
-          },
-          {
-            "type": "capture",
-            "stage": "des1-compose-compose-31:magnet",
-            "cargoIds": [
-              "des1-compose-compose-31:p6",
-              "des1-compose-compose-31:p5"
-            ],
-            "time": 2.783333333333326
-          },
-          {
-            "type": "activate",
-            "stage": "des1-compose-compose-31:magnet",
-            "pegId": "des1-compose-compose-31:p8",
-            "time": 5.491666666666729
-          },
-          {
-            "type": "complete",
-            "stage": "des1-compose-compose-31:magnet",
-            "cargoIds": [
-              "des1-compose-compose-31:p5",
-              "des1-compose-compose-31:p6"
-            ],
-            "time": 5.500000000000063
-          },
-          {
-            "type": "capture",
-            "stage": "des1-compose-compose-31:cup0",
-            "cargoIds": [
-              "des1-compose-compose-31:p5",
-              "des1-compose-compose-31:p6"
-            ],
-            "time": 5.791666666666744
-          },
-          {
-            "type": "activate",
-            "stage": "des1-compose-compose-31:cup0",
-            "pegId": "des1-compose-compose-31:p9",
-            "time": 6.300000000000103
-          },
-          {
-            "type": "complete",
-            "stage": "des1-compose-compose-31:cup0",
-            "cargoIds": [
-              "des1-compose-compose-31:p5",
-              "des1-compose-compose-31:p6"
-            ],
-            "time": 6.38333333333344
-          },
-          {
-            "type": "capture",
-            "stage": "des1-compose-compose-31:cup1",
-            "cargoIds": [
-              "des1-compose-compose-31:p3",
-              "des1-compose-compose-31:p4"
-            ],
-            "time": 7.075000000000141
-          },
-          {
-            "type": "activate",
-            "stage": "des1-compose-compose-31:cup1",
-            "pegId": "des1-compose-compose-31:p24",
-            "time": 7.741666666666841
-          },
-          {
-            "type": "complete",
-            "stage": "des1-compose-compose-31:cup1",
-            "cargoIds": [
-              "des1-compose-compose-31:p3",
-              "des1-compose-compose-31:p6"
-            ],
-            "time": 7.825000000000179
-          },
-          {
-            "type": "complete",
-            "stage": "des1-compose-compose-31:outlet",
-            "cargoIds": [
-              "des1-compose-compose-31:p6",
-              "des1-compose-compose-31:p3"
-            ],
-            "time": 8.441666666666828
-          }
-        ],
-        "seed": "intent-holdout",
-        "idleSeconds": 2
-      },
-      "earlyReplay": {
-        "complete": true,
-        "progress": {
-          "done": 8,
-          "total": 8,
-          "complete": true,
-          "failed": false,
-          "instruction": "Цепочка завершена",
-          "captures": 0,
-          "required": 0
-        }
-      }
-    },
-    {
-      "id": "des1-cascade-layers-5",
-      "structure": "{\"nodes\":[[\"source\",\"ramp\",2,null],[\"cup\",\"break\",2,null],[\"cup\",\"break\",2,null],[\"outlet\",null,2,null]],\"edges\":[[0,1,\"collect-then-release\"],[1,2,\"collect-then-release\"],[2,3,\"deliver\"]],\"portalTargets\":[]}",
-      "accepted": true,
-      "geometry": {
-        "valid": true,
-        "errors": [],
-        "pegCount": 20,
-        "targets": 1
-      },
-      "idle": {
-        "initialDrift": 5.622707166569772,
-        "lateDrift": 0,
-        "progress": 0
-      },
-      "seed": "intent-proof",
-      "idleSeconds": 6,
-      "route": [
-        {
-          "angle": 1.855611641129944,
-          "seconds": 0.5749999999999791,
-          "orangeBefore": 1,
-          "orangeAfter": 0,
-          "cleared": 1,
-          "timeout": false,
-          "state": "idle",
-          "fallenTargets": 0,
-          "directTargets": 1,
-          "hitCount": 1
-        },
-        {
-          "angle": 0.045,
-          "seconds": 1.4583333333334394,
-          "orangeBefore": 0,
-          "orangeAfter": 0,
-          "cleared": 0,
-          "timeout": false,
-          "state": "idle",
-          "fallenTargets": 0,
-          "directTargets": 0,
-          "hitCount": 2
-        },
-        {
-          "angle": 0.06534395102393195,
-          "seconds": 0.8916666666667316,
-          "orangeBefore": 0,
-          "orangeAfter": 0,
-          "cleared": 0,
-          "timeout": false,
-          "state": "idle",
-          "fallenTargets": 0,
-          "directTargets": 0,
-          "hitCount": 1
-        },
-        {
-          "angle": 0.24843951023931954,
-          "seconds": 3.174999999999538,
-          "orangeBefore": 0,
-          "orangeAfter": 0,
-          "cleared": 0,
-          "timeout": false,
-          "state": "idle",
-          "fallenTargets": 0,
-          "directTargets": 0,
-          "hitCount": 5
-        }
-      ],
-      "progress": {
-        "done": 6,
-        "total": 6,
-        "complete": true,
-        "failed": false,
-        "instruction": "Цепочка завершена",
-        "captures": 0,
-        "required": 0
-      },
-      "events": [
-        {
-          "type": "activate",
-          "stage": "des1-cascade-layers-5:source0",
-          "pegId": "des1-cascade-layers-5:p2",
-          "time": 6.11666666666676
-        },
-        {
-          "type": "complete",
-          "stage": "des1-cascade-layers-5:source0",
-          "cargoIds": [
-            "des1-cascade-layers-5:p3",
-            "des1-cascade-layers-5:p4"
-          ],
-          "time": 7.133333333333478
-        },
-        {
-          "type": "capture",
-          "stage": "des1-cascade-layers-5:cup0",
-          "cargoIds": [
-            "des1-cascade-layers-5:p3",
-            "des1-cascade-layers-5:p4"
-          ],
-          "time": 7.65000000000017
-        },
-        {
-          "type": "activate",
-          "stage": "des1-cascade-layers-5:cup0",
-          "pegId": "des1-cascade-layers-5:p7",
-          "time": 9.708333333333423
-        },
-        {
-          "type": "complete",
-          "stage": "des1-cascade-layers-5:cup0",
-          "cargoIds": [
-            "des1-cascade-layers-5:p6",
-            "des1-cascade-layers-5:p5"
-          ],
-          "time": 15.358333333333102
-        },
-        {
-          "type": "capture",
-          "stage": "des1-cascade-layers-5:cup1",
-          "cargoIds": [
-            "des1-cascade-layers-5:p6",
-            "des1-cascade-layers-5:p5"
-          ],
-          "time": 15.974999999999733
-        },
-        {
-          "type": "activate",
-          "stage": "des1-cascade-layers-5:cup1",
-          "pegId": "des1-cascade-layers-5:p20",
-          "time": 17.33333333333299
-        },
-        {
-          "type": "complete",
-          "stage": "des1-cascade-layers-5:cup1",
-          "cargoIds": [
-            "des1-cascade-layers-5:p6",
-            "des1-cascade-layers-5:p5"
-          ],
-          "time": 19.98333333333284
-        },
-        {
-          "type": "complete",
-          "stage": "des1-cascade-layers-5:outlet",
-          "cargoIds": [
-            "des1-cascade-layers-5:p6",
-            "des1-cascade-layers-5:p5"
-          ],
-          "time": 20.458333333332813
-        }
-      ],
-      "probes": 75,
-      "holdout": {
-        "complete": true,
-        "route": [
-          {
-            "angle": 1.855611641129944,
-            "seconds": 0.6500000000000107,
-            "orangeBefore": 1,
-            "orangeAfter": 0,
-            "cleared": 1,
-            "timeout": false,
-            "state": "idle",
-            "fallenTargets": 0,
-            "directTargets": 1,
-            "hitCount": 1
-          },
-          {
-            "angle": 0.045,
-            "seconds": 1.37499999999995,
-            "orangeBefore": 0,
-            "orangeAfter": 0,
-            "cleared": 0,
-            "timeout": false,
-            "state": "idle",
-            "fallenTargets": 0,
-            "directTargets": 0,
-            "hitCount": 2
-          },
-          {
-            "angle": 0.06534395102393195,
-            "seconds": 0.8916666666667316,
-            "orangeBefore": 0,
-            "orangeAfter": 0,
-            "cleared": 0,
-            "timeout": false,
-            "state": "idle",
-            "fallenTargets": 0,
-            "directTargets": 0,
-            "hitCount": 1
-          },
-          {
-            "angle": 0.24843951023931954,
-            "seconds": 3.433333333333583,
-            "orangeBefore": 0,
-            "orangeAfter": 0,
-            "cleared": 0,
-            "timeout": false,
-            "state": "idle",
-            "fallenTargets": 0,
-            "directTargets": 0,
-            "hitCount": 6
-          }
-        ],
-        "progress": {
-          "done": 6,
-          "total": 6,
-          "complete": true,
-          "failed": false,
-          "instruction": "Цепочка завершена",
-          "captures": 0,
-          "required": 0
-        },
-        "events": [
-          {
-            "type": "activate",
-            "stage": "des1-cascade-layers-5:source0",
-            "pegId": "des1-cascade-layers-5:p2",
-            "time": 2.116666666666662
-          },
-          {
-            "type": "complete",
-            "stage": "des1-cascade-layers-5:source0",
-            "cargoIds": [
-              "des1-cascade-layers-5:p3",
-              "des1-cascade-layers-5:p4"
-            ],
-            "time": 3.133333333333325
-          },
-          {
-            "type": "capture",
-            "stage": "des1-cascade-layers-5:cup0",
-            "cargoIds": [
-              "des1-cascade-layers-5:p3",
-              "des1-cascade-layers-5:p4"
-            ],
-            "time": 3.6499999999999897
-          },
-          {
-            "type": "activate",
-            "stage": "des1-cascade-layers-5:cup0",
-            "pegId": "des1-cascade-layers-5:p7",
-            "time": 5.7833333333334105
-          },
-          {
-            "type": "complete",
-            "stage": "des1-cascade-layers-5:cup0",
-            "cargoIds": [
-              "des1-cascade-layers-5:p6",
-              "des1-cascade-layers-5:p5"
-            ],
-            "time": 11.349999999999996
-          },
-          {
-            "type": "capture",
-            "stage": "des1-cascade-layers-5:cup1",
-            "cargoIds": [
-              "des1-cascade-layers-5:p6",
-              "des1-cascade-layers-5:p5"
-            ],
-            "time": 11.958333333333295
-          },
-          {
-            "type": "activate",
-            "stage": "des1-cascade-layers-5:cup1",
-            "pegId": "des1-cascade-layers-5:p20",
-            "time": 13.324999999999884
-          },
-          {
-            "type": "complete",
-            "stage": "des1-cascade-layers-5:cup1",
-            "cargoIds": [
-              "des1-cascade-layers-5:p5",
-              "des1-cascade-layers-5:p6"
-            ],
-            "time": 15.983333333333066
-          },
-          {
-            "type": "complete",
-            "stage": "des1-cascade-layers-5:outlet",
-            "cargoIds": [
-              "des1-cascade-layers-5:p5",
-              "des1-cascade-layers-5:p6"
-            ],
-            "time": 16.349999999999714
-          }
-        ],
-        "seed": "intent-holdout",
-        "idleSeconds": 2
-      },
-      "earlyReplay": {
-        "complete": true,
-        "progress": {
-          "done": 6,
-          "total": 6,
-          "complete": true,
-          "failed": false,
-          "instruction": "Цепочка завершена",
-          "captures": 0,
-          "required": 0
-        }
-      }
-    },
-    {
-      "id": "des1-compose-compose-22",
-      "structure": "{\"nodes\":[[\"source\",\"hopper\",2,null],[\"source\",\"hopper\",2,null],[\"cup\",\"tilt\",2,null],[\"cup\",\"break\",2,null],[\"cup\",\"tilt\",2,null],[\"cup\",\"tilt\",2,null],[\"outlet\",null,4,2]],\"edges\":[[0,2,\"collect-then-release\"],[2,3,\"collect-then-release\"],[1,4,\"collect-then-release\"],[4,5,\"collect-then-release\"],[3,6,\"deliver\"],[5,6,\"deliver\"]],\"portalTargets\":[]}",
-      "accepted": true,
-      "geometry": {
-        "valid": true,
-        "errors": [],
-        "pegCount": 45,
-        "targets": 2
-      },
-      "idle": {
-        "initialDrift": 0.30000000000001137,
-        "lateDrift": 0,
-        "progress": 0
-      },
-      "seed": "intent-proof",
-      "idleSeconds": 6,
-      "route": [
-        {
-          "angle": 2.0590511513692635,
-          "seconds": 1.4499999999999473,
-          "orangeBefore": 2,
-          "orangeAfter": 0,
+          "angle": 1.0349985288321366,
+          "seconds": 1.52499999999995,
+          "orangeBefore": 19,
+          "orangeAfter": 17,
           "cleared": 2,
           "timeout": false,
           "state": "idle",
           "fallenTargets": 0,
           "directTargets": 2,
-          "hitCount": 2
-        },
-        {
-          "angle": 2.7710894372068817,
-          "seconds": 3.1916666666668987,
-          "orangeBefore": 0,
-          "orangeAfter": 0,
-          "cleared": 0,
-          "timeout": false,
-          "state": "idle",
-          "fallenTargets": 0,
-          "directTargets": 0,
-          "hitCount": 7
-        },
-        {
-          "angle": 1.5504523757709645,
-          "seconds": 1.9583333333331685,
-          "orangeBefore": 0,
-          "orangeAfter": 0,
-          "cleared": 0,
-          "timeout": false,
-          "state": "idle",
-          "fallenTargets": 0,
-          "directTargets": 0,
-          "hitCount": 4
-        },
-        {
-          "angle": 1.6725160819145564,
-          "seconds": 0.5583333333332521,
-          "orangeBefore": 0,
-          "orangeAfter": 0,
-          "cleared": 0,
-          "timeout": false,
-          "state": "idle",
-          "fallenTargets": 0,
-          "directTargets": 0,
-          "hitCount": 2
+          "hitCount": 2,
+          "orangeLeft": 17,
+          "crossAssemblyImpacts": [
+            {
+              "assemblies": [
+                "des1-compose-compose-3:assembly1",
+                "des1-compose-compose-3:assembly3"
+              ],
+              "speed": 5.326081835757601
+            }
+          ]
         }
-      ],
-      "progress": {
-        "done": 11,
-        "total": 11,
-        "complete": true,
-        "failed": false,
-        "instruction": "Цепочка завершена",
-        "captures": 0,
-        "required": 0
-      },
-      "events": [
-        {
-          "type": "activate",
-          "stage": "des1-compose-compose-22:source0",
-          "pegId": "des1-compose-compose-22:p2",
-          "time": 6.125000000000094
-        },
-        {
-          "type": "activate",
-          "stage": "des1-compose-compose-22:source1",
-          "pegId": "des1-compose-compose-22:p8",
-          "time": 6.258333333333434
-        },
-        {
-          "type": "complete",
-          "stage": "des1-compose-compose-22:source0",
-          "cargoIds": [
-            "des1-compose-compose-22:p4",
-            "des1-compose-compose-22:p5",
-            "des1-compose-compose-22:p6"
-          ],
-          "time": 6.350000000000105
-        },
-        {
-          "type": "complete",
-          "stage": "des1-compose-compose-22:source1",
-          "cargoIds": [
-            "des1-compose-compose-22:p9",
-            "des1-compose-compose-22:p10"
-          ],
-          "time": 6.483333333333445
-        },
-        {
-          "type": "capture",
-          "stage": "des1-compose-compose-22:cup0",
-          "cargoIds": [
-            "des1-compose-compose-22:p6",
-            "des1-compose-compose-22:p5"
-          ],
-          "time": 6.833333333333463
-        },
-        {
-          "type": "capture",
-          "stage": "des1-compose-compose-22:cup2",
-          "cargoIds": [
-            "des1-compose-compose-22:p9",
-            "des1-compose-compose-22:p10"
-          ],
-          "time": 6.98333333333347
-        },
-        {
-          "type": "activate",
-          "stage": "des1-compose-compose-22:cup0",
-          "pegId": "des1-compose-compose-22:p21",
-          "time": 10.416666666666716
-        },
-        {
-          "type": "complete",
-          "stage": "des1-compose-compose-22:cup0",
-          "cargoIds": [
-            "des1-compose-compose-22:p4",
-            "des1-compose-compose-22:p6"
-          ],
-          "time": 10.508333333333377
-        },
-        {
-          "type": "activate",
-          "stage": "des1-compose-compose-22:cup2",
-          "pegId": "des1-compose-compose-22:p35",
-          "time": 11.15833333333334
-        },
-        {
-          "type": "complete",
-          "stage": "des1-compose-compose-22:cup2",
-          "cargoIds": [
-            "des1-compose-compose-22:p9",
-            "des1-compose-compose-22:p10"
-          ],
-          "time": 11.250000000000002
-        },
-        {
-          "type": "capture",
-          "stage": "des1-compose-compose-22:cup1",
-          "cargoIds": [
-            "des1-compose-compose-22:p3",
-            "des1-compose-compose-22:p4"
-          ],
-          "time": 11.499999999999988
-        },
-        {
-          "type": "capture",
-          "stage": "des1-compose-compose-22:cup3",
-          "cargoIds": [
-            "des1-compose-compose-22:p9",
-            "des1-compose-compose-22:p10"
-          ],
-          "time": 11.883333333333299
-        },
-        {
-          "type": "activate",
-          "stage": "des1-compose-compose-22:cup1",
-          "pegId": "des1-compose-compose-22:p22",
-          "time": 12.49999999999993
-        },
-        {
-          "type": "activate",
-          "stage": "des1-compose-compose-22:cup3",
-          "pegId": "des1-compose-compose-22:p45",
-          "time": 12.691666666666586
-        },
-        {
-          "type": "complete",
-          "stage": "des1-compose-compose-22:cup3",
-          "cargoIds": [
-            "des1-compose-compose-22:p10",
-            "des1-compose-compose-22:p9"
-          ],
-          "time": 12.799999999999914
-        },
-        {
-          "type": "complete",
-          "stage": "des1-compose-compose-22:cup1",
-          "cargoIds": [
-            "des1-compose-compose-22:p3",
-            "des1-compose-compose-22:p4"
-          ],
-          "time": 21.083333333332778
-        },
-        {
-          "type": "complete",
-          "stage": "des1-compose-compose-22:outlet",
-          "cargoIds": [
-            "des1-compose-compose-22:p10",
-            "des1-compose-compose-22:p11",
-            "des1-compose-compose-22:p9",
-            "des1-compose-compose-22:p12",
-            "des1-compose-compose-22:p3",
-            "des1-compose-compose-22:p4"
-          ],
-          "time": 21.391666666666094
-        }
-      ],
-      "probes": 67,
-      "holdout": {
-        "complete": true,
-        "route": [
-          {
-            "angle": 2.0590511513692635,
-            "seconds": 2.1333333333333693,
-            "orangeBefore": 2,
-            "orangeAfter": 0,
-            "cleared": 2,
-            "timeout": false,
-            "state": "idle",
-            "fallenTargets": 0,
-            "directTargets": 2,
-            "hitCount": 3
-          },
-          {
-            "angle": 2.1811148575128554,
-            "seconds": 3.283333333333413,
-            "orangeBefore": 0,
-            "orangeAfter": 0,
-            "cleared": 0,
-            "timeout": false,
-            "state": "idle",
-            "fallenTargets": 0,
-            "directTargets": 0,
-            "hitCount": 7
-          },
-          {
-            "angle": 2.608337829015426,
-            "seconds": 3.1000000000002257,
-            "orangeBefore": 0,
-            "orangeAfter": 0,
-            "cleared": 0,
-            "timeout": false,
-            "state": "idle",
-            "fallenTargets": 0,
-            "directTargets": 0,
-            "hitCount": 4
-          }
-        ],
-        "progress": {
-          "done": 11,
-          "total": 11,
-          "complete": true,
-          "failed": false,
-          "instruction": "Цепочка завершена",
-          "captures": 0,
-          "required": 0
-        },
-        "events": [
-          {
-            "type": "activate",
-            "stage": "des1-compose-compose-22:source0",
-            "pegId": "des1-compose-compose-22:p2",
-            "time": 2.124999999999995
-          },
-          {
-            "type": "activate",
-            "stage": "des1-compose-compose-22:source1",
-            "pegId": "des1-compose-compose-22:p8",
-            "time": 2.258333333333328
-          },
-          {
-            "type": "complete",
-            "stage": "des1-compose-compose-22:source0",
-            "cargoIds": [
-              "des1-compose-compose-22:p4",
-              "des1-compose-compose-22:p5",
-              "des1-compose-compose-22:p6"
-            ],
-            "time": 2.3499999999999943
-          },
-          {
-            "type": "complete",
-            "stage": "des1-compose-compose-22:source1",
-            "cargoIds": [
-              "des1-compose-compose-22:p9",
-              "des1-compose-compose-22:p10"
-            ],
-            "time": 2.483333333333327
-          },
-          {
-            "type": "capture",
-            "stage": "des1-compose-compose-22:cup0",
-            "cargoIds": [
-              "des1-compose-compose-22:p6",
-              "des1-compose-compose-22:p5"
-            ],
-            "time": 2.833333333333326
-          },
-          {
-            "type": "capture",
-            "stage": "des1-compose-compose-22:cup2",
-            "cargoIds": [
-              "des1-compose-compose-22:p9",
-              "des1-compose-compose-22:p10"
-            ],
-            "time": 2.9833333333333254
-          },
-          {
-            "type": "activate",
-            "stage": "des1-compose-compose-22:cup2",
-            "pegId": "des1-compose-compose-22:p36",
-            "time": 3.166666666666658
-          },
-          {
-            "type": "complete",
-            "stage": "des1-compose-compose-22:cup2",
-            "cargoIds": [
-              "des1-compose-compose-22:p10",
-              "des1-compose-compose-22:p9"
-            ],
-            "time": 3.2833333333333243
-          },
-          {
-            "type": "capture",
-            "stage": "des1-compose-compose-22:cup3",
-            "cargoIds": [
-              "des1-compose-compose-22:p11",
-              "des1-compose-compose-22:p9"
-            ],
-            "time": 4.149999999999996
-          },
-          {
-            "type": "activate",
-            "stage": "des1-compose-compose-22:cup0",
-            "pegId": "des1-compose-compose-22:p21",
-            "time": 6.975000000000136
-          },
-          {
-            "type": "complete",
-            "stage": "des1-compose-compose-22:cup0",
-            "cargoIds": [
-              "des1-compose-compose-22:p4",
-              "des1-compose-compose-22:p6"
-            ],
-            "time": 7.066666666666808
-          },
-          {
-            "type": "capture",
-            "stage": "des1-compose-compose-22:cup1",
-            "cargoIds": [
-              "des1-compose-compose-22:p3",
-              "des1-compose-compose-22:p4"
-            ],
-            "time": 8.075000000000182
-          },
-          {
-            "type": "activate",
-            "stage": "des1-compose-compose-22:cup1",
-            "pegId": "des1-compose-compose-22:p22",
-            "time": 9.17500000000012
-          },
-          {
-            "type": "activate",
-            "stage": "des1-compose-compose-22:cup3",
-            "pegId": "des1-compose-compose-22:p45",
-            "time": 9.358333333333443
-          },
-          {
-            "type": "complete",
-            "stage": "des1-compose-compose-22:cup3",
-            "cargoIds": [
-              "des1-compose-compose-22:p9",
-              "des1-compose-compose-22:p10",
-              "des1-compose-compose-22:p11"
-            ],
-            "time": 9.483333333333436
-          },
-          {
-            "type": "complete",
-            "stage": "des1-compose-compose-22:cup1",
-            "cargoIds": [
-              "des1-compose-compose-22:p3",
-              "des1-compose-compose-22:p4"
-            ],
-            "time": 16.041666666666398
-          },
-          {
-            "type": "complete",
-            "stage": "des1-compose-compose-22:outlet",
-            "cargoIds": [
-              "des1-compose-compose-22:p10",
-              "des1-compose-compose-22:p9",
-              "des1-compose-compose-22:p11",
-              "des1-compose-compose-22:p3",
-              "des1-compose-compose-22:p4"
-            ],
-            "time": 16.333333333333048
-          }
-        ],
-        "seed": "intent-holdout",
-        "idleSeconds": 2
-      },
-      "earlyReplay": {
-        "complete": false,
-        "progress": {
-          "done": 9,
-          "total": 11,
-          "complete": false,
-          "failed": false,
-          "instruction": "Груз собран. Разбей нижнюю часть синей чаши.",
-          "current": "des1-compose-compose-22:cup1",
-          "captures": 2,
-          "required": 2
-        }
-      }
+      ]
     },
     {
-      "id": "des1-compose-compose-49",
-      "structure": "{\"nodes\":[[\"source\",\"hopper\",2,null],[\"portal\",null,2,null],[\"cup\",\"tilt\",2,null],[\"cup\",\"tilt\",2,null],[\"outlet\",null,2,null]],\"edges\":[[0,1,\"transport-cargo\"],[1,2,\"collect-then-release\"],[2,3,\"collect-then-release\"],[3,4,\"deliver\"]],\"portalTargets\":[2]}",
+      "id": "des1-compose-compose-7",
+      "structure": "{\"assemblies\":[[\"hopper\",null],[\"portal\",null],[\"cup\",\"break\"],[\"seesaw\",null],[\"seesaw\",null],[\"cage\",null]],\"flow\":[[0,1,\"portal-transfer\"],[1,2,\"fall-into-cup\"],[2,5,\"fall-to-lower-construction\"]]}",
       "accepted": true,
       "geometry": {
         "valid": true,
         "errors": [],
-        "pegCount": 27,
-        "targets": 1
+        "pegCount": 52,
+        "targets": 17
       },
       "idle": {
-        "initialDrift": 0.30000000000001137,
-        "lateDrift": 0,
-        "progress": 0
+        "seconds": 4,
+        "orangeLeft": 17,
+        "lateDrift": 1.91446021359902
       },
-      "seed": "intent-proof",
-      "idleSeconds": 6,
-      "route": [
+      "seed": "des1-proof",
+      "shots": [
         {
-          "angle": 1.245293110411985,
-          "seconds": 2.3333333333332638,
-          "orangeBefore": 1,
-          "orangeAfter": 0,
+          "angle": 0.6219269092050907,
+          "seconds": 1.6833333333332776,
+          "orangeBefore": 17,
+          "orangeAfter": 15,
+          "cleared": 2,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 0,
+          "directTargets": 2,
+          "hitCount": 2,
+          "orangeLeft": 15,
+          "crossAssemblyImpacts": []
+        }
+      ]
+    },
+    {
+      "id": "des1-cascade-layers-4",
+      "structure": "{\"assemblies\":[[\"hopper\",null],[\"cup\",\"break\"],[\"cup\",\"break\"],[\"seesaw\",null],[\"cradle\",null],[\"tower\",null],[\"seesaw\",null]],\"flow\":[[0,1,\"fall-into-cup\"],[1,2,\"fall-into-cup\"],[2,6,\"fall-to-lower-construction\"]]}",
+      "accepted": true,
+      "geometry": {
+        "valid": true,
+        "errors": [],
+        "pegCount": 69,
+        "targets": 25
+      },
+      "idle": {
+        "seconds": 4,
+        "orangeLeft": 25,
+        "lateDrift": 0.0027605068208415135
+      },
+      "seed": "des1-proof",
+      "shots": [
+        {
+          "angle": 1.9278522133995513,
+          "seconds": 1.5916666666666142,
+          "orangeBefore": 25,
+          "orangeAfter": 24,
           "cleared": 1,
           "timeout": false,
           "state": "idle",
-          "fallenTargets": 0,
+          "fallenTargets": 5,
           "directTargets": 1,
-          "hitCount": 3
-        },
+          "hitCount": 2,
+          "orangeLeft": 19,
+          "crossAssemblyImpacts": [
+            {
+              "assemblies": [
+                "des1-cascade-layers-4:assembly0",
+                "des1-cascade-layers-4:assembly1"
+              ],
+              "speed": 4.857680124334797
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "des1-cascade-layers-5",
+      "structure": "{\"assemblies\":[[\"ramp\",null],[\"cup\",\"break\"],[\"cup\",\"tilt\"],[\"cage\",null],[\"cradle\",null],[\"seesaw\",null],[\"seesaw\",null]],\"flow\":[[0,1,\"fall-into-cup\"],[1,2,\"fall-into-cup\"],[2,6,\"fall-to-lower-construction\"]]}",
+      "accepted": true,
+      "geometry": {
+        "valid": true,
+        "errors": [],
+        "pegCount": 71,
+        "targets": 21
+      },
+      "idle": {
+        "seconds": 4,
+        "orangeLeft": 21,
+        "lateDrift": 0.18201109372268923
+      },
+      "seed": "des1-proof",
+      "shots": [
         {
-          "angle": 1.7945797880581478,
-          "seconds": 1.5833333333334485,
-          "orangeBefore": 0,
-          "orangeAfter": 0,
-          "cleared": 0,
+          "angle": 0.9519323208108532,
+          "seconds": 1.4499999999999527,
+          "orangeBefore": 21,
+          "orangeAfter": 20,
+          "cleared": 1,
           "timeout": false,
           "state": "idle",
-          "fallenTargets": 0,
-          "directTargets": 0,
-          "hitCount": 1
+          "fallenTargets": 8,
+          "directTargets": 1,
+          "hitCount": 5,
+          "orangeLeft": 12,
+          "crossAssemblyImpacts": [
+            {
+              "assemblies": [
+                "des1-cascade-layers-5:assembly4",
+                "des1-cascade-layers-5:assembly5"
+              ],
+              "speed": 3.8041776887166856
+            },
+            {
+              "assemblies": [
+                "des1-cascade-layers-5:assembly2",
+                "des1-cascade-layers-5:assembly6"
+              ],
+              "speed": 1.3167567501852253
+            },
+            {
+              "assemblies": [
+                "des1-cascade-layers-5:assembly0",
+                "des1-cascade-layers-5:assembly1"
+              ],
+              "speed": 4.656961984256286
+            },
+            {
+              "assemblies": [
+                "des1-cascade-layers-5:assembly3",
+                "des1-cascade-layers-5:assembly5"
+              ],
+              "speed": 4.833847208903189
+            },
+            {
+              "assemblies": [
+                "des1-cascade-layers-5:assembly3",
+                "des1-cascade-layers-5:assembly6"
+              ],
+              "speed": 6.218855585639823
+            },
+            {
+              "assemblies": [
+                "des1-cascade-layers-5:assembly0",
+                "des1-cascade-layers-5:assembly3"
+              ],
+              "speed": 2.579777160410195
+            },
+            {
+              "assemblies": [
+                "des1-cascade-layers-5:assembly3",
+                "des1-cascade-layers-5:assembly4"
+              ],
+              "speed": 4.923454893561165
+            },
+            {
+              "assemblies": [
+                "des1-cascade-layers-5:assembly0",
+                "des1-cascade-layers-5:assembly5"
+              ],
+              "speed": 6.241929392812007
+            },
+            {
+              "assemblies": [
+                "des1-cascade-layers-5:assembly0",
+                "des1-cascade-layers-5:assembly6"
+              ],
+              "speed": 7.548558244085483
+            }
+          ]
         }
-      ],
-      "progress": {
-        "done": 7,
-        "total": 7,
-        "complete": true,
-        "failed": false,
-        "instruction": "Цепочка завершена",
-        "captures": 0,
-        "required": 0
-      },
-      "events": [
-        {
-          "type": "activate",
-          "stage": "des1-compose-compose-49:source0",
-          "pegId": "des1-compose-compose-49:p2",
-          "time": 6.108333333333427
-        },
-        {
-          "type": "complete",
-          "stage": "des1-compose-compose-49:source0",
-          "cargoIds": [
-            "des1-compose-compose-49:p3",
-            "des1-compose-compose-49:p4"
-          ],
-          "time": 6.333333333333438
-        },
-        {
-          "type": "transport",
-          "stage": "des1-compose-compose-49:portal0",
-          "cargoId": "des1-compose-compose-49:p3",
-          "time": 6.408333333333442
-        },
-        {
-          "type": "transport",
-          "stage": "des1-compose-compose-49:portal0",
-          "cargoId": "des1-compose-compose-49:p4",
-          "time": 6.408333333333442
-        },
-        {
-          "type": "complete",
-          "stage": "des1-compose-compose-49:portal0",
-          "cargoIds": [
-            "des1-compose-compose-49:p3",
-            "des1-compose-compose-49:p4"
-          ],
-          "time": 6.408333333333442
-        },
-        {
-          "type": "transport",
-          "stage": "des1-compose-compose-49:portal0",
-          "cargoId": "des1-compose-compose-49:p6",
-          "time": 6.5416666666667815
-        },
-        {
-          "type": "transport",
-          "stage": "des1-compose-compose-49:portal0",
-          "cargoId": "des1-compose-compose-49:p5",
-          "time": 6.5750000000001165
-        },
-        {
-          "type": "transport",
-          "stage": "des1-compose-compose-49:portal0",
-          "cargoId": "des1-compose-compose-49:p7",
-          "time": 6.6083333333334515
-        },
-        {
-          "type": "capture",
-          "stage": "des1-compose-compose-49:cup0",
-          "cargoIds": [
-            "des1-compose-compose-49:p3",
-            "des1-compose-compose-49:p4"
-          ],
-          "time": 6.758333333333459
-        },
-        {
-          "type": "activate",
-          "stage": "des1-compose-compose-49:cup0",
-          "pegId": "des1-compose-compose-49:p17",
-          "time": 6.900000000000133
-        },
-        {
-          "type": "complete",
-          "stage": "des1-compose-compose-49:cup0",
-          "cargoIds": [
-            "des1-compose-compose-49:p4",
-            "des1-compose-compose-49:p3"
-          ],
-          "time": 6.98333333333347
-        },
-        {
-          "type": "capture",
-          "stage": "des1-compose-compose-49:cup1",
-          "cargoIds": [
-            "des1-compose-compose-49:p3",
-            "des1-compose-compose-49:p6"
-          ],
-          "time": 7.608333333333501
-        },
-        {
-          "type": "activate",
-          "stage": "des1-compose-compose-49:cup1",
-          "pegId": "des1-compose-compose-49:p27",
-          "time": 11.275
-        },
-        {
-          "type": "complete",
-          "stage": "des1-compose-compose-49:cup1",
-          "cargoIds": [
-            "des1-compose-compose-49:p6",
-            "des1-compose-compose-49:p3"
-          ],
-          "time": 11.416666666666659
-        },
-        {
-          "type": "complete",
-          "stage": "des1-compose-compose-49:outlet",
-          "cargoIds": [
-            "des1-compose-compose-49:p6",
-            "des1-compose-compose-49:p3"
-          ],
-          "time": 12.58333333333326
-        }
-      ],
-      "probes": 22,
-      "holdout": {
-        "complete": true,
-        "route": [
-          {
-            "angle": 1.245293110411985,
-            "seconds": 1.791666666666698,
-            "orangeBefore": 1,
-            "orangeAfter": 0,
-            "cleared": 1,
-            "timeout": false,
-            "state": "idle",
-            "fallenTargets": 0,
-            "directTargets": 1,
-            "hitCount": 3
-          },
-          {
-            "angle": 1.7945797880581478,
-            "seconds": 21.999999999998785,
-            "orangeBefore": 0,
-            "orangeAfter": 0,
-            "cleared": 0,
-            "timeout": true,
-            "state": "playing",
-            "fallenTargets": 0,
-            "directTargets": 0,
-            "hitCount": 1
-          }
-        ],
-        "progress": {
-          "done": 7,
-          "total": 7,
-          "complete": true,
-          "failed": false,
-          "instruction": "Цепочка завершена",
-          "captures": 0,
-          "required": 0
-        },
-        "events": [
-          {
-            "type": "activate",
-            "stage": "des1-compose-compose-49:source0",
-            "pegId": "des1-compose-compose-49:p2",
-            "time": 2.1083333333333285
-          },
-          {
-            "type": "complete",
-            "stage": "des1-compose-compose-49:source0",
-            "cargoIds": [
-              "des1-compose-compose-49:p3",
-              "des1-compose-compose-49:p4"
-            ],
-            "time": 2.3333333333333277
-          },
-          {
-            "type": "transport",
-            "stage": "des1-compose-compose-49:portal0",
-            "cargoId": "des1-compose-compose-49:p3",
-            "time": 2.4083333333333274
-          },
-          {
-            "type": "transport",
-            "stage": "des1-compose-compose-49:portal0",
-            "cargoId": "des1-compose-compose-49:p4",
-            "time": 2.4083333333333274
-          },
-          {
-            "type": "complete",
-            "stage": "des1-compose-compose-49:portal0",
-            "cargoIds": [
-              "des1-compose-compose-49:p3",
-              "des1-compose-compose-49:p4"
-            ],
-            "time": 2.4083333333333274
-          },
-          {
-            "type": "transport",
-            "stage": "des1-compose-compose-49:portal0",
-            "cargoId": "des1-compose-compose-49:p6",
-            "time": 2.5416666666666603
-          },
-          {
-            "type": "transport",
-            "stage": "des1-compose-compose-49:portal0",
-            "cargoId": "des1-compose-compose-49:p5",
-            "time": 2.5749999999999935
-          },
-          {
-            "type": "transport",
-            "stage": "des1-compose-compose-49:portal0",
-            "cargoId": "des1-compose-compose-49:p7",
-            "time": 2.6083333333333267
-          },
-          {
-            "type": "capture",
-            "stage": "des1-compose-compose-49:cup0",
-            "cargoIds": [
-              "des1-compose-compose-49:p3",
-              "des1-compose-compose-49:p4"
-            ],
-            "time": 2.758333333333326
-          },
-          {
-            "type": "activate",
-            "stage": "des1-compose-compose-49:cup0",
-            "pegId": "des1-compose-compose-49:p17",
-            "time": 2.9083333333333257
-          },
-          {
-            "type": "complete",
-            "stage": "des1-compose-compose-49:cup0",
-            "cargoIds": [
-              "des1-compose-compose-49:p4",
-              "des1-compose-compose-49:p3"
-            ],
-            "time": 2.9916666666666587
-          },
-          {
-            "type": "capture",
-            "stage": "des1-compose-compose-49:cup1",
-            "cargoIds": [
-              "des1-compose-compose-49:p3",
-              "des1-compose-compose-49:p6"
-            ],
-            "time": 3.6166666666666565
-          },
-          {
-            "type": "activate",
-            "stage": "des1-compose-compose-49:cup1",
-            "pegId": "des1-compose-compose-49:p27",
-            "time": 6.733333333333458
-          },
-          {
-            "type": "complete",
-            "stage": "des1-compose-compose-49:cup1",
-            "cargoIds": [
-              "des1-compose-compose-49:p6",
-              "des1-compose-compose-49:p3"
-            ],
-            "time": 6.8750000000001315
-          },
-          {
-            "type": "complete",
-            "stage": "des1-compose-compose-49:outlet",
-            "cargoIds": [
-              "des1-compose-compose-49:p6",
-              "des1-compose-compose-49:p3"
-            ],
-            "time": 7.875000000000181
-          }
-        ],
-        "seed": "intent-holdout",
-        "idleSeconds": 2
-      },
-      "earlyReplay": {
-        "complete": true,
-        "progress": {
-          "done": 7,
-          "total": 7,
-          "complete": true,
-          "failed": false,
-          "instruction": "Цепочка завершена",
-          "captures": 0,
-          "required": 0
-        }
-      }
+      ]
     }
   ],
   "rejected": [
     {
-      "seed": "first",
-      "mode": "magnet",
-      "reason": "incomplete-native-chain",
-      "progress": {
-        "done": 5,
-        "total": 6,
-        "complete": false,
-        "failed": false,
-        "instruction": "Освободи собранный груз и доведи его до нижнего выхода.",
-        "current": "des1-magnet-first:outlet",
-        "captures": 0,
-        "required": 2
-      }
+      "seed": "des1-proof",
+      "mode": "compose",
+      "reason": "idle-instability",
+      "accepted": false,
+      "geometry": {
+        "valid": true,
+        "errors": [],
+        "pegCount": 50,
+        "targets": 14
+      },
+      "idle": {
+        "seconds": 4,
+        "orangeLeft": 14,
+        "lateDrift": 7.392466951772868
+      },
+      "shots": []
+    },
+    {
+      "seed": "des1-proof",
+      "mode": "compose",
+      "reason": "idle-instability",
+      "accepted": false,
+      "geometry": {
+        "valid": true,
+        "errors": [],
+        "pegCount": 76,
+        "targets": 20
+      },
+      "idle": {
+        "seconds": 4,
+        "orangeLeft": 20,
+        "lateDrift": 7.834492644180052
+      },
+      "shots": []
+    },
+    {
+      "seed": "des1-proof",
+      "mode": "compose",
+      "reason": "idle-instability",
+      "accepted": false,
+      "geometry": {
+        "valid": true,
+        "errors": [],
+        "pegCount": 55,
+        "targets": 15
+      },
+      "idle": {
+        "seconds": 4,
+        "orangeLeft": 15,
+        "lateDrift": 7.392466951772868
+      },
+      "shots": []
     }
   ]
 }

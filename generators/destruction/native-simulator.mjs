@@ -102,7 +102,6 @@ export class NativeSimulation {
       fallenTargets:g.simMetrics.fallen,directTargets:g.simMetrics.direct,shots:this.shots,
       crossAssemblyImpacts:[...g.destructionSystem.simContacts.entries()].map(([pair,speed])=>({assemblies:pair.split('|'),speed})),
       maxDrift:Math.max(0,...g.pegs.map(p=>Math.hypot(p.x-this.original.get(p.id).x,p.y-this.original.get(p.id).y))),
-      intent:g.intentObjectives?.snapshot()||null,intentEvents:g.intentObjectives?.events.map(e=>({...e}))||[],
       pose:g.pegs.map(p=>({...p})),bodies:[...g.destructionSystem.bodies.values()].map(b=>({id:b.id,x:b.x,y:b.y,angle:b.angle,sleeping:b.sleeping,hinge:!!b.hinge}))};
   }
 }

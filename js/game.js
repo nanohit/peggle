@@ -4,7 +4,6 @@ import { Ball, PhysicsEngine, PHYSICS_CONFIG, getBallRadius, getEffectiveBrickSi
 import { Renderer } from './renderer.js';
 import { Utils } from './utils.js';
 import { PegAnimator } from './animation.js';
-import { IntentObjectives } from './intent-objectives.js';
 import { SurvivalRuntime } from './survival-runtime.js';
 import { FLIPPER_DEFAULTS, createDefaultFlipperConfig, normalizeFlipperConfig } from './flipper-defaults.js';
 import { YoyoThreadSystem, normalizeYoyoSettings } from './yoyo-thread.js';
@@ -190,7 +189,6 @@ export class Game {
     this.state = 'idle'; // idle, aiming, confirmAim, playing, won, lost
     this.confirmShoot = false; // When true, release locks aim; second tap fires
     this.pegs = [];
-    this.intentObjectives = null;
     this.groups = [];
     this.balls = [];
     this.score = 0;
@@ -572,13 +570,12 @@ export class Game {
         : (survivalMode ? this.totalSurvivalTargets : this.initialOrangePegs),
       billiardPhase,
       billiardLauncherIndex: billiardPhase ? this.billiardLauncherIndex : null,
-      intentProgress: this.intentObjectives?.snapshot() || null,
     };
   }
 
   getUiStateSignature() {
     const snapshot = this.getUiStateSnapshot();
-    return `${snapshot.state}|${snapshot.ballsLeft}|${snapshot.initialBallCount}|${snapshot.gambleLuckBonus}|${snapshot.showFullTrajectory ? 1 : 0}|${snapshot.orangePegsLeft}|${snapshot.totalOrangePegs}|${snapshot.billiardPhase ? 1 : 0}|${snapshot.billiardLauncherIndex ?? ''}|${snapshot.intentProgress?.done ?? ''}|${snapshot.intentProgress?.failed ?? ''}|${snapshot.intentProgress?.current ?? ''}`;
+    return `${snapshot.state}|${snapshot.ballsLeft}|${snapshot.initialBallCount}|${snapshot.gambleLuckBonus}|${snapshot.showFullTrajectory ? 1 : 0}|${snapshot.orangePegsLeft}|${snapshot.totalOrangePegs}|${snapshot.billiardPhase ? 1 : 0}|${snapshot.billiardLauncherIndex ?? ''}`;
   }
 
   subscribeUiState(listener) {
@@ -708,7 +705,6 @@ export class Game {
 
   _queuePendingEndResult(result, options = null) {
     if (!result) return null;
-    if (result === 'won' && this.intentObjectives && !this.intentObjectives.complete) return null;
     if (this.state === result) return { result, readyToResolve: true };
 
     const readyToResolve = options?.readyToResolve !== false;
@@ -2380,8 +2376,6 @@ export class Game {
   }
 
   loadLevel(levelData) {
-    this.intentObjectives = levelData.metadata?.intentGraph?.required
-      ? new IntentObjectives(structuredClone(levelData.metadata.intentGraph)) : null;
     this.levelBucketEnabled = levelData.bucketEnabled !== false;
     // Per-level peg/ball/brick size. Absent ⇒ DEFAULT_PEG_RADIUS, so legacy
     // levels are untouched. Set BEFORE pegs are copied / physics.setPegs() /
@@ -2749,17 +2743,7 @@ export class Game {
   }
 
   isLevelObjectiveComplete() {
-    return this.getOrangePegsLeft() === 0 && (!this.intentObjectives || this.intentObjectives.complete);
-  }
-
-  stepIntentObjectives(dt) {
-    if (!this.intentObjectives || this.state === 'won' || this.state === 'lost') return;
-    this.intentObjectives.tick(this.pegs, dt);
-    if (this.intentObjectives.failed) this._finalizeEndState('lost');
-    else if (this.isLevelObjectiveComplete()) {
-      this._queuePendingEndResult('won', {readyToResolve: !this.hasActiveBalls()});
-      this._maybeFinalizePendingEndResult();
-    }
+    return this.getOrangePegsLeft() === 0;
   }
 
   getTotalOrangePegs() {
@@ -3077,7 +3061,6 @@ export class Game {
     const points = this.calculateScore(peg);
     this.score += points;
     this.turnHitPegIds.push(peg.id);
-    this.intentObjectives?.activate(peg.id);
     this.noteBallPegContact(sourceBall, peg);
     if (this.physics?.hitPegs && typeof this.physics.hitPegs.add === 'function') {
       this.physics.hitPegs.add(peg.id);
@@ -3658,7 +3641,6 @@ export class Game {
   }
 
   handleDestructionPortalHits(events = []) {
-    this.intentObjectives?.portal(events);
     if (!Array.isArray(events) || events.length === 0) return false;
     let pulsed = false;
     for (const event of events) {
@@ -3824,7 +3806,6 @@ export class Game {
       // Keep flippers at rest position when not playing
       this.physics.updateFlippers(dt);
       this.stepDestructionPegs(dt, worldHeight);
-      this.stepIntentObjectives(dt);
       // Refresh the trajectory during aiming so it reflects animated peg
       // positions in real-time — but only recompute when pegs or launch
       // parameters actually changed (static level + still cursor = no work).
@@ -3965,7 +3946,6 @@ export class Game {
       }
     }
     this.stepDestructionPegs(dt, worldHeight);
-    this.stepIntentObjectives(dt);
     this.syncDynamicYoyoAnchors();
     const yoyoReleaseEvents = this.yoyoThread.step(this.balls, this.pegs, dt, { retractStartY });
     this.applyYoyoReleaseEvents(yoyoReleaseEvents);

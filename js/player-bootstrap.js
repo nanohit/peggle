@@ -738,7 +738,7 @@ async function resolve() {
         let generated;
         if (INTENT_PLAYER) {
           const {generateIntentLevel} = await import('../generators/destruction1/grammar.js');
-          const saved = sessionStorage.getItem('alea_intent_generated');
+          const saved = sessionStorage.getItem('alea_des1_composition_v2');
           let cached = null; try {cached=JSON.parse(saved);} catch {}
           generated = cached?.metadata?.generator?.seed === seed && cached.metadata.generator.mode === getQueryParam('mode')
             ? normalizeLevelData(cached) : normalizeLevelData(generateIntentLevel(seed,getQueryParam('mode') || 'compose'));
@@ -928,7 +928,6 @@ async function bootPvpDuelRoom(roomCode) {
   function showPause() {
     if (paused || !game) return;
     paused = true;
-    const intentStatus=document.getElementById('intentStatus');if(intentStatus)intentStatus.hidden=true;
     game.pause();
     pauseOverlay.classList.add('visible');
     visualLayout.frame.classList.add('visual-frame--paused');
@@ -1703,7 +1702,6 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     const fromMap = !!options.fromMap;
     if (!paused) return;
     paused = false;
-    const intentStatus=document.getElementById('intentStatus');if(intentStatus)intentStatus.hidden=false;
     setHudLockedByMap(false);
     if (fromMap) pauseOverlay.classList.add('pause-overlay--instant');
     pauseOverlay.classList.remove('visible');
@@ -2134,7 +2132,7 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
       for (const family of families) { const option = document.createElement('option'); option.value=family.id;option.textContent=family.name;select.append(option); }
       select.value = options.intentGenerator ? 'compose' : (activeLevelData?.metadata?.generator?.family || 'counterweights');
       const input = document.createElement('input'); input.name='seed'; input.maxLength=40; input.setAttribute('aria-label','Seed');input.value='des-'+Math.random().toString(36).slice(2,9);
-      const hint = document.createElement('p');hint.textContent=options.intentGenerator ? 'Соберём новую цепочку и проверим её настоящими выстрелами. Проверка займёт некоторое время; её можно отменить.' : 'Одинаковый seed воспроизводит ту же конструкцию. Новые варианты не проходили автоматический отбор, как уровни в карте.';
+      const hint = document.createElement('p');hint.textContent=options.intentGenerator ? 'Соберём обычный destruction-уровень: несколько конструкций и связанный пересып. Одинаковый seed воспроизводит ту же композицию.' : 'Одинаковый seed воспроизводит ту же конструкцию. Новые варианты не проходили автоматический отбор, как уровни в карте.';
       const submit = document.createElement('button');submit.type='submit';submit.textContent='Собрать и играть';
       const cancel = document.createElement('button');cancel.type='button';cancel.textContent='Отмена';cancel.onclick=()=>dialog.close();
       form.append(heading,select,input,hint,submit,cancel);dialog.append(form);document.body.append(dialog);
@@ -2149,11 +2147,11 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
         worker=new Worker(workerUrl,{type:'module'});
         worker.onmessage=event=>{
           const data=event.data;
-          if(data.ready){worker.postMessage({seed:input.value.trim()||'intent-001',mode:select.value});return;}
+          if(data.ready){worker.postMessage({seed:input.value.trim()||'des1-001',mode:select.value});return;}
           if(data.progress){hint.textContent=data.progress;return;}
           stopWorker();
-          if(data.level){sessionStorage.setItem('alea_intent_generated',JSON.stringify(data.level));location.href=appUrl('/des1?'+new URLSearchParams({mode:data.level.metadata.generator.mode,seed:data.level.metadata.generator.seed}));}
-          else {hint.textContent=data.error || 'Не удалось подобрать цепочку. Попробуй другой seed.';submit.disabled=false;select.disabled=false;input.disabled=false;}
+          if(data.level){sessionStorage.setItem('alea_des1_composition_v2',JSON.stringify(data.level));location.href=appUrl('/des1?'+new URLSearchParams({mode:data.level.metadata.generator.mode,seed:data.level.metadata.generator.seed}));}
+          else {hint.textContent=data.error || 'Не удалось собрать уровень. Попробуй другой seed.';submit.disabled=false;select.disabled=false;input.disabled=false;}
         };
         worker.onerror=error=>{console.error('[intent worker]',error.message);stopWorker();hint.textContent='Не удалось проверить конструкцию. Попробуй снова.';submit.disabled=false;select.disabled=false;input.disabled=false;};
       };
@@ -2641,7 +2639,7 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     const visuals = resolveVisualsWithCharacter(levelData);
     visualLayout.setConfig(visuals);
     const objectiveCopy=visualLayout.frame.querySelector('.machine-objective-copy');
-    if(objectiveCopy)objectiveCopy.textContent=levelData.metadata?.intentGraph?.required ? 'STAGES' : 'TARGETS';
+    if(objectiveCopy)objectiveCopy.textContent='TARGETS';
     game.renderer.setBackground(visuals.background);
     game.renderer.setBallTrail(visuals.ballTrail);
     game.renderer.setShockwave(visuals.shockwave);
@@ -2710,15 +2708,8 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
         visualLayout.updateBallCounter(snapshot.ballsLeft, snapshot.initialBallCount);
       }
       if (Number.isFinite(snapshot.orangePegsLeft)) {
-        const intent=snapshot.intentProgress;
-        visualLayout.updateHealthBar(intent ? intent.total-intent.done : snapshot.orangePegsLeft, intent ? intent.total : snapshot.totalOrangePegs);
+        visualLayout.updateHealthBar(snapshot.orangePegsLeft, snapshot.totalOrangePegs);
       }
-      let status=document.getElementById('intentStatus');
-      if(snapshot.intentProgress){
-        if(!status){status=document.createElement('div');status.id='intentStatus';status.className='intent-status';document.body.append(status);}
-        const intent=snapshot.intentProgress;
-        status.replaceChildren();const progress=document.createElement('small');progress.textContent=`Цепочка ${intent.done}/${intent.total}`;status.append(progress,document.createTextNode(intent.instruction));status.hidden=paused || !!activeLevelMap;
-      } else status?.remove();
       visualLayout.setBilliardTopLauncherActive?.(
         !!snapshot.billiardPhase && snapshot.billiardLauncherIndex === 0
       );
