@@ -681,17 +681,100 @@ function testLowGripSlidesOnSlopeMoreThanHighGrip() {
         height: 12,
         angle: 0.32
       }),
-      circle('slider', 220, 198)
+      brick('slider', 220, 205, { width: 24, height: 10, angle: 0.32 })
     ];
     const system = makeSystem({ surfaceGrip, restitution: 0.08, sleepFrames: 12 });
     system.reset(pegs, []);
-    stepMany(system, pegs, [], 260, { ...BOUNDS, bucketEnabled: false });
+    stepMany(system, pegs, [], 60, { ...BOUNDS, bucketEnabled: false });
     return pegs[1].x;
   };
 
   const lowGripX = run(0);
   const highGripX = run(1);
   assert.ok(Math.abs(lowGripX - 220) > Math.abs(highGripX - 220) + 4);
+}
+
+function testCircleRollsDownSlopeFromRest() {
+  const angle = 0.3;
+  const radius = PHYSICS_CONFIG.pegRadius;
+  const pegs = [
+    brick('slope', 600, 500, { type: 'obstacle', destructionStatic: true, width: 1200, height: 12, angle }),
+    circle('roller', 600 + Math.sin(angle) * (radius + 6), 500 - Math.cos(angle) * (radius + 6))
+  ];
+  const system = makeSystem({ restitution: 0 });
+  system.reset(pegs, []);
+  const body = system.getBodyForPeg(pegs[1]);
+  const startX = pegs[1].x;
+  stepMany(system, pegs, [], 60, { width: 2000, height: 2000, lossY: 2200, bucketEnabled: false });
+  // Half a second down a 17° slope: it must accelerate and roll, rather than
+  // crawl at the old ~0.07 px/step. Disc inertia gives a = 2/3 g sin(angle).
+  assert.ok(pegs[1].x - startX > 30 && pegs[1].x - startX < 45);
+  const tangentSpeed = body.vx * Math.cos(angle) + body.vy * Math.sin(angle);
+  assert.ok(tangentSpeed > 1);
+  assert.ok(Math.abs(tangentSpeed - body.av * radius) < 0.05, 'rolling contact must not slip');
+  assert.equal(body.sleeping, false);
+}
+
+function testCircleRollsOffAnotherPeg() {
+  const radius = PHYSICS_CONFIG.pegRadius;
+  const angle = 0.12;
+  for (const staticSupport of [true, false]) {
+    const pegs = [
+      circle('support', 220, 220, { type: 'obstacle', destructionStatic: staticSupport,
+        destructionPhysicsOnHit: !staticSupport, destructionPhysicsOnHitBallOnly: !staticSupport }),
+      circle('roller', 220 + Math.sin(angle) * radius * 2, 220 - Math.cos(angle) * radius * 2)
+    ];
+    const system = makeSystem({ restitution: 0 });
+    system.reset(pegs, []);
+    stepMany(system, pegs, [], 90, { ...BOUNDS, bucketEnabled: false });
+    assert.ok(pegs[1].x > 220 + radius * 2, 'off-centre peg must roll past its support');
+    assert.ok(pegs[1].y > 240, 'peg must leave the rounded surface');
+    assert.equal(pegs[0].x, 220);
+    assert.equal(pegs[0].y, 220);
+  }
+}
+
+function testSeparatingContactDoesNotBrakeTangentialMotion() {
+  const radius = PHYSICS_CONFIG.pegRadius;
+  const pegs = [
+    brick('floor', 220, 220, { type: 'obstacle', destructionStatic: true, width: 300 }),
+    circle('grazing', 220, 220 - 5 - radius + 0.2)
+  ];
+  const system = makeSystem({ gravityY: 0, damping: 1, surfaceGrip: 1 });
+  system.reset(pegs, []);
+  const body = system.getBodyForPeg(pegs[1]);
+  body.vx = 3;
+  body.vy = -0.01;
+  stepMany(system, pegs, [], 1, { ...BOUNDS, bucketEnabled: false });
+  assert.equal(body.vx, 3, 'separating contact has no normal reaction and cannot apply friction');
+}
+
+function testCircleDoesNotSleepOnGentleSlope() {
+  const angle = 0.025;
+  const radius = PHYSICS_CONFIG.pegRadius;
+  const pegs = [
+    brick('gentle', 220, 220, { type: 'obstacle', destructionStatic: true, width: 300, height: 12, angle }),
+    circle('roller', 220 + Math.sin(angle) * (radius + 6), 220 - Math.cos(angle) * (radius + 6))
+  ];
+  const system = makeSystem({ restitution: 0 });
+  system.reset(pegs, []);
+  const startX = pegs[1].x;
+  stepMany(system, pegs, [], 120, { ...BOUNDS, bucketEnabled: false });
+  assert.ok(pegs[1].x - startX > 8, 'gravity must continue accelerating a peg on a gentle incline');
+  assert.equal(system.getBodyForPeg(pegs[1]).sleeping, false);
+}
+
+function testCircleRollsAcrossJoinedSurfaces() {
+  const angle = 0.3, radius = PHYSICS_CONFIG.pegRadius;
+  const pegs = [-1, 1].map((side, index) => brick(`slope-${index}`,
+    600 + side * 150 * Math.cos(angle), 500 + side * 150 * Math.sin(angle),
+    { type: 'obstacle', destructionStatic: true, width: 310, height: 12, angle }));
+  pegs.push(circle('roller', 600 + Math.sin(angle) * (radius + 6), 500 - Math.cos(angle) * (radius + 6)));
+  const system = makeSystem({ restitution: 0 });
+  system.reset(pegs, []);
+  const startX = pegs[2].x;
+  stepMany(system, pegs, [], 60, { width: 2000, height: 2000, lossY: 2200, bucketEnabled: false });
+  assert.ok(pegs[2].x - startX > 30, 'two aligned support contacts must not lock rolling at a seam');
 }
 
 function testDefaultGripRowSlidesOnStaticSlope() {
@@ -1306,6 +1389,11 @@ const tests = [
   testPhysicsOnHitBallOnlyIgnoresPegAndBomb,
   testWakeOnHitRefreshBecomesDynamic,
   testLowGripSlidesOnSlopeMoreThanHighGrip,
+  testCircleRollsDownSlopeFromRest,
+  testCircleRollsOffAnotherPeg,
+  testSeparatingContactDoesNotBrakeTangentialMotion,
+  testCircleDoesNotSleepOnGentleSlope,
+  testCircleRollsAcrossJoinedSurfaces,
   testDefaultGripRowSlidesOnStaticSlope,
   testSlopedSleeperRequestsFixedStepAndWakes,
   testSleeperOnDynamicSupportWakesWhenSupportMoves,

@@ -1,0 +1,520 @@
+{
+  "physics": "rolling-contact-v1",
+  "implementationFingerprint": "c4e232f3ab0e6c8bb4c1914e9e4db64928c6744abe8a70c62f1728136d190d16",
+  "selectionPhysicsFingerprint": "45cbd9a1b8cca8acb2f6ec83abd67ac12315fc3ebef0c35d1434e6b43eaf5ecc",
+  "scope": "10-second idle stability and two independent native launch probes; original selection routes are historical",
+  "levels": [
+    {
+      "id": "des-counterweights-v01-01r",
+      "idleTargets": 27,
+      "idleFallen": 0,
+      "lateDrift": 0.02743411951190876,
+      "shots": [
+        {
+          "angle": 2.4,
+          "seconds": 3.366666666666912,
+          "orangeBefore": 27,
+          "orangeAfter": 24,
+          "cleared": 3,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 0,
+          "directTargets": 3,
+          "hitCount": 8
+        },
+        {
+          "angle": 0.7415926535897932,
+          "seconds": 21.999999999998195,
+          "orangeBefore": 27,
+          "orangeAfter": 11,
+          "cleared": 16,
+          "timeout": true,
+          "state": "playing",
+          "fallenTargets": 7,
+          "directTargets": 10,
+          "hitCount": 16
+        }
+      ]
+    },
+    {
+      "id": "des-counterweights-v01-02r",
+      "idleTargets": 27,
+      "idleFallen": 0,
+      "lateDrift": 0.019726084611154906,
+      "shots": [
+        {
+          "angle": 2.4,
+          "seconds": 2.2250000000001617,
+          "orangeBefore": 27,
+          "orangeAfter": 24,
+          "cleared": 3,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 0,
+          "directTargets": 3,
+          "hitCount": 4
+        },
+        {
+          "angle": 0.7415926535897932,
+          "seconds": 21.999999999998195,
+          "orangeBefore": 27,
+          "orangeAfter": 11,
+          "cleared": 16,
+          "timeout": true,
+          "state": "playing",
+          "fallenTargets": 9,
+          "directTargets": 7,
+          "hitCount": 10
+        }
+      ]
+    },
+    {
+      "id": "des-courtyards-v01-01",
+      "idleTargets": 24,
+      "idleFallen": 0,
+      "lateDrift": 0.00006542592474605547,
+      "shots": [
+        {
+          "angle": 2.4,
+          "seconds": 2.575000000000187,
+          "orangeBefore": 24,
+          "orangeAfter": 21,
+          "cleared": 3,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 0,
+          "directTargets": 3,
+          "hitCount": 7
+        },
+        {
+          "angle": 0.7415926535897932,
+          "seconds": 2.3916666666668407,
+          "orangeBefore": 24,
+          "orangeAfter": 22,
+          "cleared": 2,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 0,
+          "directTargets": 2,
+          "hitCount": 3
+        }
+      ]
+    },
+    {
+      "id": "des-courtyards-v01-02rrrr",
+      "idleTargets": 24,
+      "idleFallen": 0,
+      "lateDrift": 0.00021011837235215494,
+      "shots": [
+        {
+          "angle": 2.4,
+          "seconds": 3.175000000000231,
+          "orangeBefore": 24,
+          "orangeAfter": 21,
+          "cleared": 3,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 1,
+          "directTargets": 2,
+          "hitCount": 5
+        },
+        {
+          "angle": 0.7415926535897932,
+          "seconds": 3.133333333333561,
+          "orangeBefore": 24,
+          "orangeAfter": 12,
+          "cleared": 12,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 10,
+          "directTargets": 2,
+          "hitCount": 4
+        }
+      ]
+    },
+    {
+      "id": "des-bridges-v01-01r",
+      "idleTargets": 25,
+      "idleFallen": 0,
+      "lateDrift": 0.02743411951190876,
+      "shots": [
+        {
+          "angle": 2.4,
+          "seconds": 1.9750000000001438,
+          "orangeBefore": 25,
+          "orangeAfter": 24,
+          "cleared": 1,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 0,
+          "directTargets": 1,
+          "hitCount": 3
+        },
+        {
+          "angle": 0.7415926535897932,
+          "seconds": 1.783333333333463,
+          "orangeBefore": 25,
+          "orangeAfter": 24,
+          "cleared": 1,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 0,
+          "directTargets": 1,
+          "hitCount": 2
+        }
+      ]
+    },
+    {
+      "id": "des-bridges-v01-02",
+      "idleTargets": 25,
+      "idleFallen": 0,
+      "lateDrift": 0.2879019739186471,
+      "shots": [
+        {
+          "angle": 2.4,
+          "seconds": 21.999999999998195,
+          "orangeBefore": 25,
+          "orangeAfter": 16,
+          "cleared": 9,
+          "timeout": true,
+          "state": "playing",
+          "fallenTargets": 0,
+          "directTargets": 9,
+          "hitCount": 16
+        },
+        {
+          "angle": 0.7415926535897932,
+          "seconds": 1.7583333333334612,
+          "orangeBefore": 25,
+          "orangeAfter": 24,
+          "cleared": 1,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 0,
+          "directTargets": 1,
+          "hitCount": 2
+        }
+      ]
+    },
+    {
+      "id": "des-cradles-v01-01rr",
+      "idleTargets": 26,
+      "idleFallen": 0,
+      "lateDrift": 0.000038862788292311996,
+      "shots": [
+        {
+          "angle": 2.4,
+          "seconds": 1.8166666666667988,
+          "orangeBefore": 26,
+          "orangeAfter": 25,
+          "cleared": 1,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 0,
+          "directTargets": 1,
+          "hitCount": 1
+        },
+        {
+          "angle": 0.7415926535897932,
+          "seconds": 2.3083333333335014,
+          "orangeBefore": 26,
+          "orangeAfter": 24,
+          "cleared": 2,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 1,
+          "directTargets": 2,
+          "hitCount": 2
+        }
+      ]
+    },
+    {
+      "id": "des-cradles-v01-02",
+      "idleTargets": 26,
+      "idleFallen": 0,
+      "lateDrift": 0.000040714342698917025,
+      "shots": [
+        {
+          "angle": 2.4,
+          "seconds": 1.233333333333423,
+          "orangeBefore": 26,
+          "orangeAfter": 26,
+          "cleared": 0,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 0,
+          "directTargets": 0,
+          "hitCount": 0
+        },
+        {
+          "angle": 0.7415926535897932,
+          "seconds": 2.0000000000001457,
+          "orangeBefore": 26,
+          "orangeAfter": 24,
+          "cleared": 2,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 0,
+          "directTargets": 2,
+          "hitCount": 2
+        }
+      ]
+    },
+    {
+      "id": "des-cages-v01-01",
+      "idleTargets": 24,
+      "idleFallen": 0,
+      "lateDrift": 0.0009739970805365739,
+      "shots": [
+        {
+          "angle": 2.4,
+          "seconds": 2.9833333333335506,
+          "orangeBefore": 24,
+          "orangeAfter": 22,
+          "cleared": 2,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 1,
+          "directTargets": 1,
+          "hitCount": 3
+        },
+        {
+          "angle": 0.7415926535897932,
+          "seconds": 4.608333333333668,
+          "orangeBefore": 24,
+          "orangeAfter": 21,
+          "cleared": 3,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 1,
+          "directTargets": 2,
+          "hitCount": 6
+        }
+      ]
+    },
+    {
+      "id": "des-cages-v01-02rrrr",
+      "idleTargets": 24,
+      "idleFallen": 0,
+      "lateDrift": 0.000147635438287334,
+      "shots": [
+        {
+          "angle": 2.4,
+          "seconds": 4.191666666666972,
+          "orangeBefore": 24,
+          "orangeAfter": 16,
+          "cleared": 8,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 7,
+          "directTargets": 1,
+          "hitCount": 3
+        },
+        {
+          "angle": 0.7415926535897932,
+          "seconds": 2.775000000000202,
+          "orangeBefore": 24,
+          "orangeAfter": 18,
+          "cleared": 6,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 5,
+          "directTargets": 1,
+          "hitCount": 3
+        }
+      ]
+    },
+    {
+      "id": "des-dominoes-v01-01r",
+      "idleTargets": 25,
+      "idleFallen": 0,
+      "lateDrift": 0.02743411951190876,
+      "shots": [
+        {
+          "angle": 2.4,
+          "seconds": 2.066666666666817,
+          "orangeBefore": 25,
+          "orangeAfter": 24,
+          "cleared": 1,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 0,
+          "directTargets": 1,
+          "hitCount": 3
+        },
+        {
+          "angle": 0.7415926535897932,
+          "seconds": 1.783333333333463,
+          "orangeBefore": 25,
+          "orangeAfter": 24,
+          "cleared": 1,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 0,
+          "directTargets": 1,
+          "hitCount": 2
+        }
+      ]
+    },
+    {
+      "id": "des-dominoes-v01-02r",
+      "idleTargets": 25,
+      "idleFallen": 0,
+      "lateDrift": 0.019726084611154906,
+      "shots": [
+        {
+          "angle": 2.4,
+          "seconds": 2.3000000000001672,
+          "orangeBefore": 25,
+          "orangeAfter": 24,
+          "cleared": 1,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 0,
+          "directTargets": 1,
+          "hitCount": 2
+        },
+        {
+          "angle": 0.7415926535897932,
+          "seconds": 4.366666666666984,
+          "orangeBefore": 25,
+          "orangeAfter": 23,
+          "cleared": 2,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 0,
+          "directTargets": 2,
+          "hitCount": 2
+        }
+      ]
+    },
+    {
+      "id": "des-spillways-v01-01r",
+      "idleTargets": 22,
+      "idleFallen": 0,
+      "lateDrift": 0.00021011808446908868,
+      "shots": [
+        {
+          "angle": 2.4,
+          "seconds": 4.9000000000003565,
+          "orangeBefore": 22,
+          "orangeAfter": 12,
+          "cleared": 10,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 6,
+          "directTargets": 4,
+          "hitCount": 11
+        },
+        {
+          "angle": 0.7415926535897932,
+          "seconds": 3.333333333333576,
+          "orangeBefore": 22,
+          "orangeAfter": 18,
+          "cleared": 4,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 1,
+          "directTargets": 4,
+          "hitCount": 7
+        }
+      ]
+    },
+    {
+      "id": "des-spillways-v01-02r",
+      "idleTargets": 22,
+      "idleFallen": 0,
+      "lateDrift": 0.00006457457989945508,
+      "shots": [
+        {
+          "angle": 2.4,
+          "seconds": 2.050000000000149,
+          "orangeBefore": 22,
+          "orangeAfter": 21,
+          "cleared": 1,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 0,
+          "directTargets": 1,
+          "hitCount": 2
+        },
+        {
+          "angle": 0.7415926535897932,
+          "seconds": 2.47500000000018,
+          "orangeBefore": 22,
+          "orangeAfter": 17,
+          "cleared": 5,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 4,
+          "directTargets": 2,
+          "hitCount": 3
+        }
+      ]
+    },
+    {
+      "id": "des-workshops-v01-01rr",
+      "idleTargets": 24,
+      "idleFallen": 0,
+      "lateDrift": 0.019726260106341525,
+      "shots": [
+        {
+          "angle": 2.4,
+          "seconds": 3.466666666666919,
+          "orangeBefore": 24,
+          "orangeAfter": 21,
+          "cleared": 3,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 0,
+          "directTargets": 3,
+          "hitCount": 10
+        },
+        {
+          "angle": 0.7415926535897932,
+          "seconds": 2.1583333333334904,
+          "orangeBefore": 24,
+          "orangeAfter": 24,
+          "cleared": 0,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 0,
+          "directTargets": 0,
+          "hitCount": 2
+        }
+      ]
+    },
+    {
+      "id": "des-workshops-v01-02",
+      "idleTargets": 24,
+      "idleFallen": 0,
+      "lateDrift": 0.2879019739186471,
+      "shots": [
+        {
+          "angle": 2.4,
+          "seconds": 1.233333333333423,
+          "orangeBefore": 24,
+          "orangeAfter": 24,
+          "cleared": 0,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 0,
+          "directTargets": 0,
+          "hitCount": 0
+        },
+        {
+          "angle": 0.7415926535897932,
+          "seconds": 2.741666666666866,
+          "orangeBefore": 24,
+          "orangeAfter": 23,
+          "cleared": 1,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 1,
+          "directTargets": 1,
+          "hitCount": 3
+        }
+      ]
+    }
+  ]
+}

@@ -44,11 +44,13 @@ const MAX_ANGULAR_SPEED = 0.22;
 // when a body is woken by an impact/explosion. 1 = textbook; tuned a touch hotter so
 // blasts visibly tumble bricks instead of just sliding them.
 const WAKE_ANGULAR_SCALE = 1.15;
-// Contacts only impart/resolve spin when the relative speed at the contact exceeds
+// Flat/compound contacts only impart/resolve spin when the relative speed exceeds
 // ANGULAR_REST_SPEED, ramping to full over ANGULAR_IMPACT_RANGE. Below it the contact
 // stays linear only while the body's mass centre is inside its support patch. Once the
 // centre crosses the support edge, slow contacts are allowed to generate the real
-// toppling torque instead of pinning the body in mid-air.
+// toppling torque instead of pinning the body in mid-air. A round peg on a single
+// surface always uses its full inertia, so friction turns it even at low speed.
+// A peg wedged between supports on both sides keeps the resting-stack stabilizer.
 const ANGULAR_REST_SPEED = 2.0;
 const ANGULAR_IMPACT_RANGE = 4.0;
 const SUPPORT_TORQUE_DOT = 0.45;
@@ -501,7 +503,8 @@ function surfaceGripValue(settings) {
   return Utils.clamp(Number.isFinite(settings?.surfaceGrip) ? settings.surfaceGrip : DEFAULTS.surfaceGrip, 0, 1);
 }
 
-function slopeSleepSupportDot(settings) {
+function slopeSleepSupportDot(settings, body = null) {
+  if (body?.singleCircle) return 0.99995;
   const grip = surfaceGripValue(settings);
   return 0.996 - grip * 0.06;
 }
@@ -510,11 +513,12 @@ function hasStaticSlopeSlideDemand(body, settings) {
   if (!body || body.static || body.wakeOnHit) return false;
   if ((body.staticSupportMemory || 0) <= 0) return false;
   const supportDot = Number.isFinite(body.staticSupportDot) ? body.staticSupportDot : 0;
-  if (supportDot <= 0 || supportDot >= slopeSleepSupportDot(settings)) return false;
+  if (supportDot <= 0 || supportDot >= slopeSleepSupportDot(settings, body)) return false;
   const grip = surfaceGripValue(settings);
   const tangent = Math.sqrt(Math.max(0, 1 - supportDot * supportDot));
   const gravityMag = getBodyGravityMagnitude(body, settings);
-  return gravityMag * tangent * (1 - grip) > (settings?.sleepSpeed || DEFAULTS.sleepSpeed) * 0.08;
+  return gravityMag * tangent * (body.singleCircle ? 1 : 1 - grip)
+    > (settings?.sleepSpeed || DEFAULTS.sleepSpeed) * 0.08;
 }
 
 function canSupportMotionWakeBody(body) {
@@ -526,7 +530,7 @@ function isBodySlowEnoughForSleep(body, settings, hasSupport) {
   if (hasStaticSlopeSlideDemand(body, settings)) return false;
   if (hasSupport) {
     const supportDot = Number.isFinite(body?.supportDot) ? body.supportDot : 0;
-    const sleepSupportDot = slopeSleepSupportDot(settings);
+    const sleepSupportDot = slopeSleepSupportDot(settings, body);
     if (supportDot < sleepSupportDot) return false;
   }
   const linearLimit = (settings?.sleepSpeed || DEFAULTS.sleepSpeed) * (hasSupport ? SUPPORT_SLEEP_MULTIPLIER : 1);
@@ -1226,6 +1230,8 @@ export class DestructionPegSystem {
       _supportSpanMin: Infinity,
       _supportSpanMax: -Infinity,
       _supportContactCount: 0,
+      _supportTangentMin: 0,
+      _supportTangentMax: 0,
       aabb: { minX: 0, maxX: 0, minY: 0, maxY: 0 }
     };
     this.refreshBody(body, members, { resetOffsets: true });
@@ -1269,6 +1275,7 @@ export class DestructionPegSystem {
     const wasStatic = body.static;
     const wasWakeOnHit = body.wakeOnHit;
     body.mass = Math.max(0.5, mass);
+    body.singleCircle = members.length === 1 && members[0].shape !== 'brick';
     body.invMass = 1 / body.mass;
     body.static = allStatic;
     body.wakeOnHit = !body.static && allWakeOnHit;
@@ -2210,18 +2217,8 @@ export class DestructionPegSystem {
       body.dynamicSupportBodyId = supportBody.id;
     }
 
-    const grip = surfaceGripValue(this.settings);
-    const slide = 1 - grip;
-    if (slide <= 0.001 || supportDot > 0.995) return;
-    const gravityNorm = getBodyGravityNorm(body, this.settings);
-    const tangentX = gravityNorm.x - normalX * supportDot;
-    const tangentY = gravityNorm.y - normalY * supportDot;
-    const tangentMag = Math.hypot(tangentX, tangentY);
-    if (tangentMag <= 0.0001) return;
-    const gravityMag = getBodyGravityMagnitude(body, this.settings);
-    const accel = gravityMag * slide * 0.74 * subScale;
-    body.vx += (tangentX / tangentMag) * accel;
-    body.vy += (tangentY / tangentMag) * accel;
+    // Gravity already supplies the downhill acceleration. Adding a separate kick
+    // here hid contact damping and multiplied the force at multi-peg supports.
   }
 
   updateGravityNormal() {
@@ -2893,10 +2890,12 @@ export class DestructionPegSystem {
       body._supportSpanMin = Infinity;
       body._supportSpanMax = -Infinity;
       body._supportContactCount = 0;
+      body._supportTangentMin = 0;
+      body._supportTangentMax = 0;
     }
   }
 
-  recordSupportTorqueSpan(body, minX, maxX, minY, maxY) {
+  recordSupportTorqueSpan(body, minX, maxX, minY, maxY, normalX, normalY) {
     if (!body || !Number.isFinite(minX) || !Number.isFinite(maxX) || !Number.isFinite(minY) || !Number.isFinite(maxY)) {
       return;
     }
@@ -2912,6 +2911,9 @@ export class DestructionPegSystem {
     body._supportSpanMin = Math.min(body._supportSpanMin, spanMin);
     body._supportSpanMax = Math.max(body._supportSpanMax, spanMax);
     body._supportContactCount = (body._supportContactCount || 0) + 1;
+    const tangent = normalX * gravityNorm.y - normalY * gravityNorm.x;
+    body._supportTangentMin = Math.min(body._supportTangentMin, tangent);
+    body._supportTangentMax = Math.max(body._supportTangentMax, tangent);
   }
 
   prepareSupportTorqueSpans(colliders, pairs, pairCount) {
@@ -2931,14 +2933,14 @@ export class DestructionPegSystem {
         const gravityA = getBodyGravityNorm(a.body, this.settings);
         const supportDotA = overlap.nx * gravityA.x + overlap.ny * gravityA.y;
         if (supportDotA > SUPPORT_TORQUE_DOT) {
-          this.recordSupportTorqueSpan(a.body, minX, maxX, minY, maxY);
+          this.recordSupportTorqueSpan(a.body, minX, maxX, minY, maxY, overlap.nx, overlap.ny);
         }
       }
       if (this.isActiveDynamic(b.body)) {
         const gravityB = getBodyGravityNorm(b.body, this.settings);
         const supportDotB = -overlap.nx * gravityB.x - overlap.ny * gravityB.y;
         if (supportDotB > SUPPORT_TORQUE_DOT) {
-          this.recordSupportTorqueSpan(b.body, minX, maxX, minY, maxY);
+          this.recordSupportTorqueSpan(b.body, minX, maxX, minY, maxY, -overlap.nx, -overlap.ny);
         }
       }
     }
@@ -2958,6 +2960,12 @@ export class DestructionPegSystem {
     if (excess <= 0) return 0;
     const ramp = Utils.clamp(excess / SUPPORT_EDGE_TORQUE_RANGE, 0, 1);
     return SUPPORT_EDGE_MIN_ANGULAR_SCALE + (1 - SUPPORT_EDGE_MIN_ANGULAR_SCALE) * ramp;
+  }
+
+  hasBalancedRoundSupport(body) {
+    // Opposed support normals can hold a peg in a pocket/pile. Multiple contacts
+    // on the same inclined line or curved ribbon must still allow free rolling.
+    return body._supportTangentMin < -0.025 && body._supportTangentMax > 0.025;
   }
 
   solveHinges(subScale = 1) {
@@ -3019,8 +3027,7 @@ export class DestructionPegSystem {
     // Relaxation: re-evaluate and resolve every contact several times so the support
     // reaction propagates through the whole stack within this substep. One-shot side
     // effects (waking, bumper/fracture events) run on the first iteration off the true
-    // impact velocity; slope-slide support marking runs on the last so its per-contact
-    // acceleration isn't multiplied by the iteration count.
+    // impact velocity; support marking runs on the last settled contact.
     const iterations = STACK_SOLVER_ITERATIONS;
     for (let iter = 0; iter < iterations; iter++) {
       const firstIter = iter === 0;
@@ -3216,8 +3223,17 @@ export class DestructionPegSystem {
     // for the angular terms so off-centre hits/blasts actually tumble bricks. For a flat
     // resting contact this sits under the body centre, so the normal torque is ~0 and
     // stacks stay put — the rotation only kicks in for genuinely off-centre contacts.
-    const cpx = (Math.max(a.aabb.minX, b.aabb.minX) + Math.min(a.aabb.maxX, b.aabb.maxX)) * 0.5;
-    const cpy = (Math.max(a.aabb.minY, b.aabb.minY) + Math.min(a.aabb.maxY, b.aabb.maxY)) * 0.5;
+    let cpx = (Math.max(a.aabb.minX, b.aabb.minX) + Math.min(a.aabb.maxX, b.aabb.maxX)) * 0.5;
+    let cpy = (Math.max(a.aabb.minY, b.aabb.minY) + Math.min(a.aabb.maxY, b.aabb.maxY)) * 0.5;
+    // A circle touches along the collision normal, not at the AABB intersection's
+    // centre. The latter creates a spurious normal torque on inclined surfaces.
+    if (a.shape === 'circle') {
+      cpx = a.x + nx * a.radius;
+      cpy = a.y + ny * a.radius;
+    } else if (b.shape === 'circle') {
+      cpx = b.x - nx * b.radius;
+      cpy = b.y - ny * b.radius;
+    }
     // Lever arms only for active dynamic bodies — inactive ones (static pegs, and the
     // bucket/flipper placeholder bodies that have no x/y) neither rotate nor get pushed,
     // and using their undefined centre would poison the contact velocity with NaN.
@@ -3251,11 +3267,11 @@ export class DestructionPegSystem {
     const supportDotA = gravityA ? (nx * gravityA.x + ny * gravityA.y) : 0;
     const supportDotB = gravityB ? (-nx * gravityB.x - ny * gravityB.y) : 0;
     invIA *= Math.max(
-      bodyA.hinge ? 1 : 0, contactSpeedAngularScale,
+      (bodyA.hinge || (bodyA.singleCircle && !this.hasBalancedRoundSupport(bodyA))) ? 1 : 0, contactSpeedAngularScale,
       this.getUnstableSupportAngularScale(bodyA, supportDotA)
     );
     invIB *= Math.max(
-      bodyB.hinge ? 1 : 0, contactSpeedAngularScale,
+      (bodyB.hinge || (bodyB.singleCircle && !this.hasBalancedRoundSupport(bodyB))) ? 1 : 0, contactSpeedAngularScale,
       this.getUnstableSupportAngularScale(bodyB, supportDotB)
     );
 
@@ -3276,12 +3292,14 @@ export class DestructionPegSystem {
       MAX_BIAS_VELOCITY
     );
     const target = Math.max(bounceTarget, biasTarget);
+    let normalImpulse = 0;
     if (relN < target) {
       const rnA = rAx * ny - rAy * nx;
       const rnB = rBx * ny - rBy * nx;
       const invMassN = invTotal + invIA * rnA * rnA + invIB * rnB * rnB;
       if (invMassN > 0) {
         const jn = (target - relN) / invMassN;
+        normalImpulse = jn;
         if (activeA) {
           bodyA.vx -= jn * invA * nx;
           bodyA.vy -= jn * invA * ny;
@@ -3299,12 +3317,23 @@ export class DestructionPegSystem {
     // sliding/scraping at the contact also picks up (or sheds) spin.
     const tx = -ny;
     const ty = nx;
-    const relT = rvx * tx + rvy * ty;
+    // Recompute after the normal impulse, which can change contact spin.
+    const tangentVx = ((bodyB.vx || 0) - (activeB ? bodyB.av : 0) * rBy)
+      - ((bodyA.vx || 0) - (activeA ? bodyA.av : 0) * rAy);
+    const tangentVy = ((bodyB.vy || 0) + (activeB ? bodyB.av : 0) * rBx)
+      - ((bodyA.vy || 0) + (activeA ? bodyA.av : 0) * rAx);
+    const relT = tangentVx * tx + tangentVy * ty;
     const rtA = rAx * ty - rAy * tx;
     const rtB = rBx * ty - rBy * tx;
     const invMassT = invTotal + invIA * rtA * rtA + invIB * rtB * rtB;
     if (invMassT > 0) {
-      const jt = (-relT * this.settings.friction) / invMassT;
+      // Coulomb friction is limited by the normal reaction. Damping a fixed
+      // fraction of tangent speed on all eight iterations acted like glue even
+      // at a separating contact. Round contacts retain the friction needed for
+      // rolling/piles; grip controls scraping/sliding between flat bricks.
+      const grip = (a.shape === 'circle' || b.shape === 'circle') ? 1 : surfaceGripValue(this.settings);
+      const limit = normalImpulse * this.settings.friction * grip;
+      const jt = Utils.clamp(-relT / invMassT, -limit, limit);
       if (activeA) {
         bodyA.vx -= jt * invA * tx;
         bodyA.vy -= jt * invA * ty;
@@ -3317,8 +3346,7 @@ export class DestructionPegSystem {
       }
     }
 
-    // Support classification (and its slope-slide acceleration) runs once, on the last
-    // iteration, so the contact has settled and the slide accel isn't applied N times.
+    // Support classification runs once on the last, settled iteration.
     if (lastIter) {
       if (activeA && supportDotA > 0.45) {
         this.markBodySupported(bodyA, nx, ny, supportDotA, subScale, bodyB);

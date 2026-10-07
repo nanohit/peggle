@@ -38,6 +38,14 @@ creates new reproducible seeds directly; these fresh seeds are explicitly marked
 as unfiltered. `/des/editor` stores local levels separately and does not autosync
 them into the main campaign.
 
-Deploy through the existing CDN-shell build. `/` remains pinned to the existing
-production release, `/gen` retains its three exact collections, and `/des` uses
-the same production materials/lighting with the new native mechanics.
+After the rolling-contact fix, the unchanged catalogue is checked with
+`node generators/destruction/check-rolling.mjs`: ten-second idle stability and
+two independent native launch probes per level. `physics-check.json` records the
+current implementation fingerprint. Original `quality.json`/`proof.json` routes
+remain historical evidence for their recorded physics fingerprint; they are not
+clearing witnesses for the new solver. The public report distinguishes these.
+
+Deploy through the existing CDN-shell build. `/`, `/gen` and `/des` now load the
+same current game bundle so physics fixes reach every player. The main CSS,
+visual assets and campaign snapshots remain on the pinned CDN release; `/gen`
+retains its three exact collections, and `/des` uses the production materials.
