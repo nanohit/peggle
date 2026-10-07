@@ -22,7 +22,7 @@
 // ray climbs (`uElevation`) and is occluded by `rayHeight < surfaceHeight`, so
 // shadow length is a function of real object height and real light elevation.
 
-import { PHYSICS_CONFIG, getEffectiveBrickSize } from './physics.js';
+import { PHYSICS_CONFIG, getEffectiveBrickSize, getPegRadius } from './physics.js';
 import { normalizePegType } from './peg-types.js';
 import { getPortalScale, isPortalType } from './portal-defaults.js';
 
@@ -2352,7 +2352,7 @@ export class GpuPlayfieldRenderer {
     if (normalizePegType(peg.type) === 'bombMagnet') {
       // The flash goes in as `charge`, not as `hit`: a magnet lights up from
       // the inside rather than flaring its own surface colour.
-      this._pushInstance(px, py, PHYSICS_CONFIG.pegRadius, PHYSICS_CONFIG.pegRadius, 0,
+      this._pushInstance(px, py, getPegRadius(peg), getPegRadius(peg), 0,
         SHAPE_BALL, 0, MAT_METAL, [0.80, 0.84, 0.90], 0,
         [1, this._emergenceFor(peg), 0, hit]);
       return;
@@ -2383,7 +2383,7 @@ export class GpuPlayfieldRenderer {
     // Match the physics radius exactly. The old 1.24 inflation made every peg
     // read a quarter larger than its hitbox, which is why dense layouts looked
     // like the pegs were stuck together.
-    const radius = PHYSICS_CONFIG.pegRadius * scale;
+    const radius = (isBumper ? PHYSICS_CONFIG.pegRadius : getPegRadius(peg)) * scale;
     const shape = isBumper ? SHAPE_BUMPER : SHAPE_DOME;
     // A bumper is a casting that stands off the board, and a bigger one stands
     // higher. Square-rooted so a wide bumper gets genuinely taller without

@@ -31,6 +31,13 @@ export function getBallRadius() {
   return PHYSICS_CONFIG.pegRadius;
 }
 
+// Imported scenes can have individually scaled circle colliders. The ball
+// keeps the level radius; visual and collision geometry share this accessor.
+export function getPegRadius(peg) {
+  const scale = Number.isFinite(peg?.radiusScale) && peg.radiusScale > 0 ? peg.radiusScale : 1;
+  return PHYSICS_CONFIG.pegRadius * scale;
+}
+
 function getGravityX(source) {
   const vector = source?.gravityVector;
   return vector && Number.isFinite(vector.x) ? vector.x : 0;
@@ -374,7 +381,7 @@ function circleRectOverlap(ball, brick) {
 }
 
 export class PhysicsEngine {
-  constructor(width, height) {
+  constructor(width, height, options = {}) {
     this.width = width;
     this.height = height;
     this.ballTopY = 0;
@@ -391,7 +398,7 @@ export class PhysicsEngine {
       height: 16,
       speed: 1.5,
       // Sine-based oscillation: _phase tracks position in cycle [0, 2*PI)
-      _phase: 0 // sin(0) keeps the first update at the centered position
+      _phase: Math.PI / 2 // start centered (sin(PI/2) = 1 → middle)
     };
     this.portalPegs = [];
     this._pegGrid = null;
@@ -401,6 +408,13 @@ export class PhysicsEngine {
     this._pegGridCandidates = [];
     this._maxPegCollisionRadius = PHYSICS_CONFIG.pegRadius;
     this.destructionContactSettings = null;
+    // Gameplay uses Math.random by default for backwards compatibility. Research
+    // and replay adapters inject a named seeded stream here.
+    this.random = typeof options.random === 'function' ? options.random : Math.random;
+  }
+
+  setRandomSource(random) {
+    this.random = typeof random === 'function' ? random : Math.random;
   }
 
   setBall(ball) {
@@ -476,7 +490,7 @@ export class PhysicsEngine {
     if (!peg) return PHYSICS_CONFIG.pegRadius;
     if (peg.type === 'bumper') return PHYSICS_CONFIG.pegRadius * (peg.bumperScale || 1);
     if (this.isPortalPeg(peg)) return PHYSICS_CONFIG.pegRadius * getPortalScale(peg);
-    return PHYSICS_CONFIG.pegRadius;
+    return getPegRadius(peg);
   }
 
   _getPegCollisionPoses(peg) {
@@ -933,7 +947,7 @@ export class PhysicsEngine {
         // Small tangent perturbation to break perfect ping-pong symmetry.
         // Grows slowly with repeats; never large enough to feel like a kick.
         const jitterMag = 0.3 + osc * 0.18;
-        outVt += (Math.random() - 0.5) * 2 * jitterMag;
+        outVt += (this.random() - 0.5) * 2 * jitterMag;
         // Only enforce a normal floor for genuinely slow exits, and only after
         // we've actually been bouncing repeatedly. Don't accelerate fast balls.
         if (osc >= 2) {
@@ -1216,8 +1230,8 @@ export class PhysicsEngine {
 
     // Add slight randomness to prevent perfect loops
     const jitter = gentleSurfaceSlide ? 0.035 : 0.3;
-    ball.vx += (Math.random() - 0.5) * jitter;
-    ball.vy += (Math.random() - 0.5) * jitter;
+    ball.vx += (this.random() - 0.5) * jitter;
+    ball.vy += (this.random() - 0.5) * jitter;
     if (surfaceSlide) {
       this.applyDestructionSurfaceSlide(ball, surfaceSlide);
     }
@@ -1322,10 +1336,10 @@ export class PhysicsEngine {
         // Small jitter to avoid sticking. PVP can opt out so replay keyframes
         // are sourced from a cleaner simulator state.
         if (!a.disableCollisionJitter && !b.disableCollisionJitter) {
-          a.vx += (Math.random() - 0.5) * 0.1;
-          a.vy += (Math.random() - 0.5) * 0.1;
-          b.vx += (Math.random() - 0.5) * 0.1;
-          b.vy += (Math.random() - 0.5) * 0.1;
+          a.vx += (this.random() - 0.5) * 0.1;
+          a.vy += (this.random() - 0.5) * 0.1;
+          b.vx += (this.random() - 0.5) * 0.1;
+          b.vy += (this.random() - 0.5) * 0.1;
         }
         this.clampBallSpeed(a);
         this.clampBallSpeed(b);

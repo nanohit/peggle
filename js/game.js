@@ -2376,6 +2376,7 @@ export class Game {
   }
 
   loadLevel(levelData) {
+    this.levelBucketEnabled = levelData.bucketEnabled !== false;
     // Per-level peg/ball/brick size. Absent ⇒ DEFAULT_PEG_RADIUS, so legacy
     // levels are untouched. Set BEFORE pegs are copied / physics.setPegs() /
     // destruction bodies are built, since all of those read the global live
@@ -2477,7 +2478,7 @@ export class Game {
     this.temporaryFlipperActive = false;
     this.refreshFlipperState();
 
-    this.physics.setBucketEnabled(!this.isSurvivalMode() && !this.isBilliardPhase());
+    this.physics.setBucketEnabled(this.levelBucketEnabled && !this.isSurvivalMode() && !this.isBilliardPhase());
     this.syncPhysicsViewportBounds();
 
     this.score = 0;
@@ -2494,7 +2495,8 @@ export class Game {
     this.gambleBalls = 0;
     this.initialGambleBallCount = 0;
     this.pendingGambleLuckBonus = 0;
-    this.ballsLeft = this.isSurvivalMode() ? Number.POSITIVE_INFINITY : 10;
+    this.ballsLeft = this.isSurvivalMode() ? Number.POSITIVE_INFINITY
+      : (Number.isFinite(levelData.ballCount) ? Math.max(1, Math.min(99, Math.round(levelData.ballCount))) : 10);
     this.initialBallCount = Number.isFinite(this.ballsLeft) ? this.ballsLeft : 10;
     this.hitPegIds = [];
     this.turnHitPegIds = [];
@@ -3290,7 +3292,7 @@ export class Game {
     this.billiardPhase = false;
     this.billiardLauncherIndex = 0;
     this.refreshFlipperState();
-    this.physics.setBucketEnabled(!this.isSurvivalMode());
+    this.physics.setBucketEnabled(this.levelBucketEnabled !== false && !this.isSurvivalMode());
 
     this.score = 0;
     this.ballsLeft = mainPhaseBalls;
@@ -4257,7 +4259,7 @@ export class Game {
       hitPegIds: allHitIds,
       wrapCopyPegIds: this.animator.getAnimatedPegIds(),
       balls: this.balls,
-      bucket: (survivalMode || billiardPhase) ? null : this.physics.bucket,
+      bucket: (survivalMode || billiardPhase || this.levelBucketEnabled === false) ? null : this.physics.bucket,
       flippers: this.flippers,
       cameraY,
       showLauncher: this.state === 'idle' || this.isAimingState(),

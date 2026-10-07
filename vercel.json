@@ -8,6 +8,14 @@
   },
   "rewrites": [
     {
+      "source": "/gen",
+      "destination": "/gen/index.html"
+    },
+    {
+      "source": "/gen/",
+      "destination": "/gen/index.html"
+    },
+    {
       "source": "/",
       "destination": "/index.html"
     },

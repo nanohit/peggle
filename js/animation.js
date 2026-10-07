@@ -1,4 +1,5 @@
 // Peg Animation System - cyclic peg/group animations during gameplay
+import { BlastRigAnimator } from './blast-rig.js';
 
 import { PHYSICS_CONFIG, getEffectiveBrickSize } from './physics.js';
 import { getPortalScale, isPortalType } from './portal-defaults.js';
@@ -362,6 +363,10 @@ export class PegAnimator {
   }
 
   loadFromLevel(pegs, groups = [], options = {}) {
+    const sourceRig = groups.find(group => group.blastRig)?.blastRig;
+    if (!options.preserveGroupOrigins || !this.blastRig || !sourceRig) {
+      this.blastRig = sourceRig ? new BlastRigAnimator(sourceRig) : null;
+    }
     // When a group loses members mid-play (destruction knocks pegs off), reloading must
     // NOT re-derive the rotation center from the *remaining* pegs — that drifts the origin
     // (and any explicit Set Origin pivot, which is an offset from it) toward the new local
@@ -394,6 +399,7 @@ export class PegAnimator {
     this.originalPositions = new Map();
     this.animations = [];
     this.animatedPegIds.clear();
+    for (const id of this.blastRig?.movingIds || []) this.animatedPegIds.add(id);
     if (!preserveTimeline) {
       this.suspendedPegIds.clear();
       this.elapsed = 0;
@@ -539,9 +545,10 @@ export class PegAnimator {
   // callers can avoid re-dirtying the physics peg grid when nothing moved
   // (e.g. static levels, or hit-trigger animations that haven't fired yet).
   tick(pegs, dtSeconds, bounds = null) {
-    if (this.animations.length === 0) return false;
+    const rigMoved = this.blastRig?.tick(pegs, dtSeconds, this.suspendedPegIds) || false;
+    if (this.animations.length === 0) return rigMoved;
     this.elapsed += dtSeconds;
-    let movedAny = false;
+    let movedAny = rigMoved;
 
     // Build peg lookup for fast access
     const pegMap = new Map();
@@ -904,7 +911,7 @@ export class PegAnimator {
   }
 
   hasAnimations() {
-    return this.animations.length > 0;
+    return this.animations.length > 0 || !!this.blastRig?.movingIds.size;
   }
 
   suspendPeg(pegId) {

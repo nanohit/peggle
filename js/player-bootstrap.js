@@ -42,6 +42,7 @@ import {
 
 const ASPECT_RATIO = 3 / 4.5;
 const FRAME_RATIO = 9 / 17;
+const GENERATED_PLAYER = window.__PEGGLE_GENERATED_PLAYER__ === true;
 const WORLD_W = 400;
 const WORLD_H = Math.round(WORLD_W / ASPECT_RATIO); // 600
 const PVP_DUEL_LEVELS_STORAGE_KEY = 'pvp:duel:levels';
@@ -618,6 +619,10 @@ function mirrorLevel(levelData, canvasWidth = WORLD_W) {
   // Mirror group animations
   if (Array.isArray(m.groups)) {
     for (const group of m.groups) {
+      if (group.blastRig?.transform) {
+        group.blastRig.transform.mirrorX = !group.blastRig.transform.mirrorX;
+        group.blastRig.transform.width = canvasWidth;
+      }
       if (group.animation) {
         mirrorAnimationData(group.animation);
       }
@@ -628,6 +633,16 @@ function mirrorLevel(levelData, canvasWidth = WORLD_W) {
   if (m.bezierCurves && typeof m.bezierCurves === 'object') {
     for (const key of Object.keys(m.bezierCurves)) {
       const curve = m.bezierCurves[key];
+      // Preserve cubic and compound strokes when replaying a mirrored level.
+      const mirrorCurve = value => {
+        for (const key of ['start', 'end', 'h1', 'h2', 'cp1', 'cp2']) {
+          if (value[key]) value[key].x = canvasWidth - value[key].x;
+        }
+        if (Number.isFinite(value.rotationOffset)) value.rotationOffset = -value.rotationOffset;
+        for (const part of value.segments || []) mirrorCurve(part);
+        for (const point of value.refPoints || []) point.x = canvasWidth - point.x;
+      };
+      mirrorCurve(curve);
       if (Array.isArray(curve.points)) {
         for (const pt of curve.points) {
           if (typeof pt.x === 'number') pt.x = canvasWidth - pt.x;
@@ -701,6 +716,27 @@ function loadDeferredImages(root) {
 resolve();
 
 async function resolve() {
+  if (GENERATED_PLAYER) {
+    try {
+      const catalog = await staticJson('/data/gen/catalog.json');
+      const requested = getQueryParam('set') || catalog?.default;
+      const collection = catalog?.collections?.find(item => item.id === requested);
+      if (!collection) throw new Error('Unknown generated collection');
+      const campaign = await staticJson(collection.file);
+      if (!hasCampaignLevels(campaign)) throw new Error('Generated levels unavailable');
+      const levels = campaign.levels.map(normalizeLevelData);
+      await bootWithLevels(levels, campaign.name, campaign, {
+        unlockAll: true,
+        initialLevelId: getQueryParam('id'),
+        generatedCatalog: catalog,
+        generatedCollection: collection.id
+      });
+    } catch (error) {
+      console.error('[gen]', error);
+      showError('Не удалось загрузить уровни. Обновите страницу.');
+    }
+    return;
+  }
   // Priority 1: hash contains full compressed level data
   const hashLevel = await loadFromHash();
   if (hashLevel) {
@@ -1453,6 +1489,11 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
   }
   savedProgress = readSavedProgress();
   applySavedProgress(savedProgress);
+  if (options.initialLevelId) {
+    const index = levels.findIndex(level => level.id === options.initialLevelId);
+    const entry = [...nodeIdToLevelIndex].find(([, levelIndex]) => levelIndex === index);
+    if (entry) currentNodeId = entry[0];
+  }
 
   let unsubUiState = null;
   let mirrorState = false; // alternates on defeat
@@ -1482,7 +1523,7 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
   // Set to false (or pass ?progression=1) to re-gate the campaign.
   const UNLOCK_ALL_LEVELS = (() => {
     try {
-      return new URLSearchParams(location.search).get('progression') !== '1';
+      return options.unlockAll === true || new URLSearchParams(location.search).get('progression') !== '1';
     } catch { return true; }
   })();
 
@@ -2007,6 +2048,19 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
   pauseLevelBtn.addEventListener('pointerenter', () => scheduleLevelMapPrewarm({ immediate: true, includePortraits: true }));
   pauseLevelBtn.addEventListener('touchstart', () => scheduleLevelMapPrewarm({ immediate: true, includePortraits: true }), { passive: true });
   pauseLevelBtn.addEventListener('click', () => showLevelMap());
+  if (options.generatedCatalog) {
+    const picker = document.createElement('nav');
+    picker.className = 'gen-collections';
+    picker.setAttribute('aria-label', 'Наборы уровней');
+    for (const collection of options.generatedCatalog.collections) {
+      const link = document.createElement('a');
+      link.href = '/gen?set=' + encodeURIComponent(collection.id);
+      link.textContent = collection.title;
+      if (collection.id === options.generatedCollection) link.setAttribute('aria-current', 'page');
+      picker.appendChild(link);
+    }
+    pauseLevelBtn.after(picker);
+  }
   const pausePvpDuelBtn = pauseOverlay.querySelector('#pausePvpDuelBtn');
   pausePvpDuelBtn?.addEventListener('click', (event) => {
     event.preventDefault();

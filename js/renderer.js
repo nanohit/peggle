@@ -1,6 +1,6 @@
 // Peggle Renderer - Canvas rendering for game and editor
 
-import { PHYSICS_CONFIG, getBallRadius, getEffectiveBrickSize } from './physics.js';
+import { PHYSICS_CONFIG, getBallRadius, getEffectiveBrickSize, getPegRadius } from './physics.js';
 import { LiquidBackground } from './liquid-background.js';
 import {
   BallTrailRenderer,
@@ -1871,7 +1871,7 @@ export class Renderer {
     const ctx = this.ctx;
     const pegType = normalizePegType(peg.type);
     const colors = PEG_COLORS[pegType] || PEG_COLORS.blue;
-    const radius = PHYSICS_CONFIG.pegRadius;
+    const radius = getPegRadius(peg);
 
     if (!peg.curveSlices && !isPortalType(peg.type)) {
       const size = peg.shape === 'brick' ? getEffectiveBrickSize(peg) : null;
