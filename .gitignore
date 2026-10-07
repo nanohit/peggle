@@ -8,3 +8,6 @@ public/
 backups/
 mirror/
 vercel-shell/
+
+__pycache__/
+*.py[cod]
