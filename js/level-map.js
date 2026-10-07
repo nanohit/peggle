@@ -282,7 +282,13 @@ export class LevelMap {
     this._contentEl.style.paddingTop = (10 + this.contentInsetTop) + 'px';
 
     // Canvas
-    const dpr = window.devicePixelRatio || 1;
+    const requestedDpr = window.devicePixelRatio || 1;
+    // Large imported catalogs must stay within Safari's canvas dimension and
+    // pixel budget. CSS size and hit testing keep the original map geometry.
+    const dpr = window.__PEGGLE_GENERATED_PLAYER__ === true
+      ? Math.min(requestedDpr, 16384 / this.canvasW, 16384 / this.canvasH,
+        Math.sqrt(16_000_000 / (this.canvasW * this.canvasH)))
+      : requestedDpr;
     this._canvas = document.createElement('canvas');
     this._canvas.className = 'level-map-canvas';
     this._canvas.width = this.canvasW * dpr;
