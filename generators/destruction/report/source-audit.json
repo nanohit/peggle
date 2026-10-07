@@ -10,7 +10,10 @@
       "gravityFromStart": 0,
       "releaseOnContact": 50,
       "ballOnly": 0,
-      "rigidGroups": 0
+      "rigidGroups": 0,
+      "declaredRigidGroups": 0,
+      "scriptedPegAnimations": 0,
+      "scriptedGroupAnimations": 3
     },
     {
       "name": "MAGNETS_BABYY",
@@ -20,7 +23,10 @@
       "gravityFromStart": 0,
       "releaseOnContact": 55,
       "ballOnly": 63,
-      "rigidGroups": 0
+      "rigidGroups": 0,
+      "declaredRigidGroups": 0,
+      "scriptedPegAnimations": 0,
+      "scriptedGroupAnimations": 8
     },
     {
       "name": "Spin_me_right",
@@ -30,7 +36,10 @@
       "gravityFromStart": 0,
       "releaseOnContact": 77,
       "ballOnly": 0,
-      "rigidGroups": 0
+      "rigidGroups": 0,
+      "declaredRigidGroups": 0,
+      "scriptedPegAnimations": 0,
+      "scriptedGroupAnimations": 2
     },
     {
       "name": "Physic_Test",
@@ -40,7 +49,10 @@
       "gravityFromStart": 0,
       "releaseOnContact": 68,
       "ballOnly": 0,
-      "rigidGroups": 8
+      "rigidGroups": 3,
+      "declaredRigidGroups": 8,
+      "scriptedPegAnimations": 0,
+      "scriptedGroupAnimations": 0
     },
     {
       "name": "PhBonus Level",
@@ -50,7 +62,10 @@
       "gravityFromStart": 42,
       "releaseOnContact": 9,
       "ballOnly": 30,
-      "rigidGroups": 1
+      "rigidGroups": 1,
+      "declaredRigidGroups": 1,
+      "scriptedPegAnimations": 0,
+      "scriptedGroupAnimations": 0
     }
   ]
 }
