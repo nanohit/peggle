@@ -4,7 +4,7 @@ if (typeof window === 'undefined') {
 }
 const {Game}=await import('../../js/game.js');
 const {normalizeLevelData}=await import('../../js/levels.js');
-const {PHYSICS_CONFIG}=await import('../../js/physics.js');
+const {PHYSICS_CONFIG,PhysicsEngine}=await import('../../js/physics.js');
 const {DestructionPegSystem}=await import('../../js/destruction-mode.js');
 const {setMuted}=await import('../../js/haptics.js');
 // Headless evaluation has no audio hardware; muting also removes its idle timer.
@@ -20,6 +20,10 @@ DestructionPegSystem.prototype.resolveBodyCollision=function(a,b,overlap,...args
   }
   return nativeContact.call(this,a,b,overlap,...args);
 };
+const nativeTeleport=PhysicsEngine.prototype.tryPortalTeleport;
+PhysicsEngine.prototype.tryPortalTeleport=function(...args){const r=nativeTeleport.apply(this,args);if(this.simPortals!==undefined&&r?.entry&&!args[3]?.previewOnly)this.simPortals++;return r;};
+const nativeMagnet=DestructionPegSystem.prototype.applyMagnetForces;
+DestructionPegSystem.prototype.applyMagnetForces=function(...args){const n=nativeMagnet.apply(this,args);if(this.simMagnetTicks!==undefined)this.simMagnetTicks+=n;return n;};
 export const STEP_MS=1000/120;
 export function seededRandom(seed,initialState=null){
   let state=2166136261;for(const c of String(seed))state=Math.imul(state^c.charCodeAt(0),16777619);
@@ -40,6 +44,10 @@ function cloneRuntime(value,seen=new Map()){
   if(!value||typeof value!=='object'||value===canvas||value===renderer)return value;
   if(seen.has(value))return seen.get(value);
   if(value instanceof AbortController)return new AbortController();
+  // BlastRig's WeakSet is a derived geometry cache, not replay state. Weak
+  // collections cannot be prototype-cloned; cloned pegs refill a fresh cache.
+  if(value instanceof WeakSet)return new WeakSet();
+  if(value instanceof WeakMap)return new WeakMap();
   if(ArrayBuffer.isView(value))return value.slice();
   if(value instanceof Map){const copy=new Map();seen.set(value,copy);for(const [k,v] of value)copy.set(cloneRuntime(k,seen),cloneRuntime(v,seen));return copy;}
   if(value instanceof Set){const copy=new Set();seen.set(value,copy);for(const v of value)copy.add(cloneRuntime(v,seen));return copy;}
@@ -55,7 +63,7 @@ export class NativeSimulation {
   constructor(level,{seed='native'}={}){
     this.clock=0;this.timers=new Map();this.nextTimer=0;this.samples=[];this.shots=[];
     this.levelRadius=level.pegRadius||8.5;this.original=new Map(level.pegs.map(p=>[p.id,{x:p.x,y:p.y,type:p.type}]));
-    this.scope(()=>{this.game=new HeadlessGame();this.game.physics.setRandomSource(seededRandom(seed));this.game.loadLevel(normalizeLevelData(structuredClone(level)));this.game.destructionSystem.simContacts=new Map();});
+    this.scope(()=>{this.game=new HeadlessGame();this.game.physics.setRandomSource(seededRandom(seed));this.game.loadLevel(normalizeLevelData(structuredClone(level)));this.game.destructionSystem.simContacts=new Map();this.game.physics.simPortals=0;this.game.destructionSystem.simMagnetTicks=0;});
   }
   scope(action){
     const realPerformance=globalThis.performance,setTimer=globalThis.setTimeout,clearTimer=globalThis.clearTimeout,config={...PHYSICS_CONFIG};
@@ -68,7 +76,14 @@ export class NativeSimulation {
   step(n,{trace=false}={}){
     for(let i=0;i<n;i++){
       this.clock+=STEP_MS;for(const [id,t] of this.timers)if(t.at<=this.clock){this.timers.delete(id);t.fn();}
-      this.game.update(STEP_MS);
+      // Mirror Game.loop's frame driver too: final-peg slow motion is advanced
+      // there, not in update(). Omitting it leaves successful shots "playing".
+      const g=this.game,scaled=STEP_MS*g._resolveTimeScale(STEP_MS);
+      g._maybeFinalizePendingEndResult();
+      if(g.state==='playing'||(g.isDestructionMode()&&g.destructionSystem.needsFixedStep())){
+        g.accumulatorMs=Math.min(g.accumulatorMs+scaled,g.fixedStepMs*g.maxFrameSteps);
+        let count=0;while(g.accumulatorMs>=g.fixedStepMs&&count++<g.maxFrameSteps){g.update(g.fixedStepMs);g.accumulatorMs-=g.fixedStepMs;}
+      }else{g.accumulatorMs=0;g.update(scaled);}
       if(this.game.pegs.some(p=>!Number.isFinite(p.x+p.y+(p.angle||0))))throw Error('Nonfinite body state');
       if(trace&&i%12===0)this.samples.push({time:this.clock,pegs:this.game.pegs.map(p=>({id:p.id,x:p.x,y:p.y,angle:p.angle})),balls:this.game.balls.filter(b=>b.active).map(b=>({x:b.x,y:b.y}))});
     }
@@ -84,11 +99,12 @@ export class NativeSimulation {
     return this.scope(()=>{
       const g=this.game;if(g.state==='won'||g.state==='lost')return null;
       const before=g.getOrangePegsLeft(),start=this.clock,direct=g.simMetrics.direct,fallen=g.simMetrics.fallen,fired=g.shotsFired,hits=g.simMetrics.hits;
+      const portals=g.physics.simPortals,magnetTicks=g.destructionSystem.simMagnetTicks;
       g.aimAngle=angle;g.state='aiming';g.launch();if(g.shotsFired===fired)throw Error('Native launch did not fire');
       let steps=0;for(;steps<maxShotSeconds*120;steps++){this.step(1,{trace});if(['idle','won','lost'].includes(g.state))break;}
       const shot={angle,seconds:(this.clock-start)/1000,orangeBefore:before,orangeAfter:g.getOrangePegsLeft(),
         cleared:before-g.getOrangePegsLeft(),timeout:steps>=maxShotSeconds*120,state:g.state,
-        fallenTargets:g.simMetrics.fallen-fallen,directTargets:g.simMetrics.direct-direct,hitCount:g.simMetrics.hits-hits};
+        portalTeleports:g.physics.simPortals-portals,magnetBodyTicks:g.destructionSystem.simMagnetTicks-magnetTicks,fallenTargets:g.simMetrics.fallen-fallen,directTargets:g.simMetrics.direct-direct,hitCount:g.simMetrics.hits-hits};
       this.shots.push(shot);
       if(g.state==='idle'){
         this.step(72,{trace});

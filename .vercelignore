@@ -20,3 +20,5 @@ js/**
 !js/graph/**
 research/**
 test/**
+data/des2/**
+data/quality/**

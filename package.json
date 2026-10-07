@@ -20,7 +20,9 @@
     "generate:des1": "node generators/destruction1/build-catalog.mjs && node generators/destruction1/build-report.mjs",
     "test:des1": "node scripts/destruction-intents-smoke.mjs",
     "test:player-regression": "node scripts/player-regression-smoke.mjs",
-    "test:cdn-shell": "node scripts/cdn-shell-smoke.mjs"
+    "test:cdn-shell": "node scripts/cdn-shell-smoke.mjs",
+    "generate:des2": "node generators/destruction2/build-catalog.mjs && node generators/destruction2/robustness.mjs && node generators/destruction2/build-report.mjs",
+    "test:des2": "node scripts/des2-smoke.mjs"
   },
   "dependencies": {
     "ioredis": "^5.10.0",

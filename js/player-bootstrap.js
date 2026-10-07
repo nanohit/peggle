@@ -46,6 +46,7 @@ const ASPECT_RATIO = 3 / 4.5;
 const FRAME_RATIO = 9 / 17;
 const GENERATED_PLAYER = window.__PEGGLE_GENERATED_PLAYER__ === true;
 const DESTRUCTION_PLAYER = window.__PEGGLE_DESTRUCTION_PLAYER__ === true;
+const SPECTACLE_PLAYER = window.__PEGGLE_SPECTACLE_PLAYER__ === true;
 const INTENT_PLAYER = window.__PEGGLE_INTENT_PLAYER__ === true;
 const WORLD_W = 400;
 const WORLD_H = Math.round(WORLD_W / ASPECT_RATIO); // 600
@@ -727,16 +728,19 @@ resolve();
 async function resolve() {
   if (DESTRUCTION_PLAYER) {
     try {
-      const campaign = await staticJson(INTENT_PLAYER ? '/data/des1/campaign.json' : '/data/des/campaign.json');
+      const campaign = await staticJson(SPECTACLE_PLAYER ? '/data/des2/campaign.json' : INTENT_PLAYER ? '/data/des1/campaign.json' : '/data/des/campaign.json');
       const seed = getQueryParam('seed');
       let levels = curateGeneratedPlaylist(campaign.levels.map(normalizeLevelData), {
         variants: getQueryParam('variants') === '1', selectedId: getQueryParam('id')
       });
       if (seed) {
-        const validateGeometry = INTENT_PLAYER ? (await import('../generators/destruction1/geometry.js')).validateIntentGeometry
+        const validateGeometry = SPECTACLE_PLAYER ? (await import('../generators/destruction2/geometry.js')).validateGeometry : INTENT_PLAYER ? (await import('../generators/destruction1/geometry.js')).validateIntentGeometry
           : (await import('../generators/destruction/geometry.js')).validateGeometry;
         let generated;
-        if (INTENT_PLAYER) {
+        if (SPECTACLE_PLAYER) {
+          const {generateLevel} = await import('../generators/destruction2/grammar.js');
+          generated = normalizeLevelData(generateLevel({seed,layout:getQueryParam('layout'),hero:getQueryParam('hero'),density:getQueryParam('density')||.55,destruction:getQueryParam('destruction')??.35}));
+        } else if (INTENT_PLAYER) {
           const {generateIntentLevel} = await import('../generators/destruction1/grammar.js');
           const saved = sessionStorage.getItem('alea_des1_composition_v2');
           let cached = null; try {cached=JSON.parse(saved);} catch {}
@@ -747,10 +751,10 @@ async function resolve() {
           generated = normalizeLevelData(generateLevel(seed, getQueryParam('family') || 'counterweights'));
         }
         if (!validateGeometry(generated).valid) throw new Error('Invalid construction geometry');
-        levels = [generated, ...levels.filter(l => INTENT_PLAYER ? l.id !== generated.id : l.metadata?.generator?.family !== generated.metadata.generator.family)];
+        levels = [generated, ...levels.filter(l => (INTENT_PLAYER || SPECTACLE_PLAYER) ? l.id !== generated.id : l.metadata?.generator?.family !== generated.metadata.generator.family)];
       }
       await bootWithLevels(levels, seed ? 'Destruction · '+seed : campaign.name, {...campaign, levels, graph: graphFromLevels(levels)}, {
-        unlockAll: true, initialLevelId: getQueryParam('id'), destructionGenerator: true, intentGenerator: INTENT_PLAYER
+        unlockAll: true, initialLevelId: getQueryParam('id'), destructionGenerator: true, intentGenerator: INTENT_PLAYER, spectacleGenerator: SPECTACLE_PLAYER
       });
     } catch (error) {
       console.error('[des]', error);
@@ -2105,7 +2109,7 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     }
     pauseLevelBtn.after(picker);
   }
-  if (GENERATED_PLAYER && !INTENT_PLAYER && !getQueryParam('seed')) {
+  if (GENERATED_PLAYER && !INTENT_PLAYER && !SPECTACLE_PLAYER && !getQueryParam('seed')) {
     const variantsLink = document.createElement('a');
     const query = new URLSearchParams(location.search);
     const showingVariants = query.get('variants') === '1';
@@ -2119,41 +2123,51 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     const tools = document.createElement('div');
     tools.className = 'des-tools';
     const create = document.createElement('button');
-    create.textContent = 'Новая конструкция';
+    create.textContent = options.spectacleGenerator ? 'Новый уровень' : 'Новая конструкция';
     create.addEventListener('click', async () => {
-      const families = options.intentGenerator
+      const families = options.spectacleGenerator ? (await import('../generators/destruction2/grammar.js')).LAYOUTS : options.intentGenerator
         ? (await import('../generators/destruction1/grammar.js')).MODES
         : (await import('../generators/destruction/grammar.js')).FAMILIES;
       const dialog = document.createElement('dialog');
       dialog.className = 'des-generator-dialog';
       const form = document.createElement('form');
-      const heading = document.createElement('h2'); heading.textContent = 'Собрать конструкцию';
+      const heading = document.createElement('h2'); heading.textContent = options.spectacleGenerator ? 'Собрать уровень' : 'Собрать конструкцию';
       const select = document.createElement('select'); select.name = 'family'; select.setAttribute('aria-label','Семейство');
       for (const family of families) { const option = document.createElement('option'); option.value=family.id;option.textContent=family.name;select.append(option); }
-      select.value = options.intentGenerator ? 'compose' : (activeLevelData?.metadata?.generator?.family || 'counterweights');
+      select.value = options.spectacleGenerator ? 'auto' : options.intentGenerator ? 'compose' : (activeLevelData?.metadata?.generator?.family || 'counterweights');
       const input = document.createElement('input'); input.name='seed'; input.maxLength=40; input.setAttribute('aria-label','Seed');input.value='des-'+Math.random().toString(36).slice(2,9);
-      const hint = document.createElement('p');hint.textContent=options.intentGenerator ? 'Соберём обычный destruction-уровень: несколько конструкций и связанный пересып. Одинаковый seed воспроизводит ту же композицию.' : 'Одинаковый seed воспроизводит ту же конструкцию. Новые варианты не проходили автоматический отбор, как уровни в карте.';
+      const hint = document.createElement('p');hint.textContent=options.spectacleGenerator ? 'Композиция и ведущая механика задают характер уровня. Одинаковые параметры и seed воспроизводят его. Свежие варианты ещё не проходили полный машинный отбор.' : options.intentGenerator ? 'Соберём обычный destruction-уровень: несколько конструкций и связанный пересып. Одинаковый seed воспроизводит ту же композицию.' : 'Одинаковый seed воспроизводит ту же конструкцию. Новые варианты не проходили автоматический отбор, как уровни в карте.';
       const submit = document.createElement('button');submit.type='submit';submit.textContent='Собрать и играть';
       const cancel = document.createElement('button');cancel.type='button';cancel.textContent='Отмена';cancel.onclick=()=>dialog.close();
-      form.append(heading,select,input,hint,submit,cancel);dialog.append(form);document.body.append(dialog);
+      const extra = document.createElement('div'),controls=[];
+      let heroSelect,densityInput,destructionInput;
+      if(options.spectacleGenerator){
+        heroSelect=document.createElement('select');heroSelect.setAttribute('aria-label','Ведущая механика');
+        for(const h of (await import('../generators/destruction2/grammar.js')).HEROES){const o=document.createElement('option');o.value=h.id;o.textContent=h.name;heroSelect.append(o);}
+        extra.append(heroSelect);controls.push(heroSelect);
+        const slider=(name,value,min,max)=>{const label=document.createElement('label'),r=document.createElement('input');r.type='range';r.min=min;r.max=max;r.step='.05';r.value=value;r.setAttribute('aria-label',name);label.textContent=name;label.append(r);extra.append(label);controls.push(r);return r;};
+        densityInput=slider('Плотность',.55,.25,.85);destructionInput=slider('Разрушение',.35,0,1);
+      }
+      form.append(heading,select,extra,input,hint,submit,cancel);dialog.append(form);document.body.append(dialog);
       let worker=null,workerUrl=null;
       const stopWorker=()=>{worker?.terminate();worker=null;if(workerUrl)URL.revokeObjectURL(workerUrl);workerUrl=null;};
       form.onsubmit=async event=>{
         event.preventDefault();
-        if (!options.intentGenerator) {location.href=appUrl('/des?'+new URLSearchParams({family:select.value,seed:input.value.trim()||'des-001'}));return;}
-        submit.disabled=true;select.disabled=true;input.disabled=true;
+        if (!options.intentGenerator && !options.spectacleGenerator) {location.href=appUrl('/des?'+new URLSearchParams({family:select.value,seed:input.value.trim()||'des-001'}));return;}
+        submit.disabled=true;select.disabled=true;input.disabled=true;controls.forEach(c=>c.disabled=true);
         hint.textContent='Загружаем проверку физики…';
-        workerUrl=URL.createObjectURL(new Blob(['import '+JSON.stringify(staticUrl('dist/intent-worker.js'))+';'],{type:'text/javascript'}));
+        workerUrl=URL.createObjectURL(new Blob(['import '+JSON.stringify(staticUrl(options.spectacleGenerator ? 'dist/des2-worker.js' : 'dist/intent-worker.js'))+';'],{type:'text/javascript'}));
         worker=new Worker(workerUrl,{type:'module'});
         worker.onmessage=event=>{
           const data=event.data;
-          if(data.ready){worker.postMessage({seed:input.value.trim()||'des1-001',mode:select.value});return;}
+          if(data.ready){worker.postMessage(options.spectacleGenerator ? {seed:input.value.trim()||'des2-001',layout:select.value,hero:heroSelect.value,density:Number(densityInput.value),destruction:Number(destructionInput.value)} : {seed:input.value.trim()||'des1-001',mode:select.value});return;}
           if(data.progress){hint.textContent=data.progress;return;}
           stopWorker();
-          if(data.level){sessionStorage.setItem('alea_des1_composition_v2',JSON.stringify(data.level));location.href=appUrl('/des1?'+new URLSearchParams({mode:data.level.metadata.generator.mode,seed:data.level.metadata.generator.seed}));}
-          else {hint.textContent=data.error || 'Не удалось собрать уровень. Попробуй другой seed.';submit.disabled=false;select.disabled=false;input.disabled=false;}
+          if(data.level && options.spectacleGenerator){const g=data.level.metadata.generator;location.href=appUrl('/des2?'+new URLSearchParams({seed:g.seed,layout:g.layout,hero:g.hero,density:g.density,destruction:g.destruction}));}
+          else if(data.level){sessionStorage.setItem('alea_des1_composition_v2',JSON.stringify(data.level));location.href=appUrl('/des1?'+new URLSearchParams({mode:data.level.metadata.generator.mode,seed:data.level.metadata.generator.seed}));}
+          else {hint.textContent=data.error || 'Не удалось собрать уровень. Попробуй другой seed.';submit.disabled=false;select.disabled=false;input.disabled=false;controls.forEach(c=>c.disabled=false);}
         };
-        worker.onerror=error=>{console.error('[intent worker]',error.message);stopWorker();hint.textContent='Не удалось проверить конструкцию. Попробуй снова.';submit.disabled=false;select.disabled=false;input.disabled=false;};
+        worker.onerror=error=>{console.error('[intent worker]',error.message);stopWorker();hint.textContent='Не удалось проверить конструкцию. Попробуй снова.';submit.disabled=false;select.disabled=false;input.disabled=false;controls.forEach(c=>c.disabled=false);};
       };
       dialog.onclose=()=>{stopWorker();dialog.remove();};dialog.showModal();
     });
@@ -2163,9 +2177,9 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     });editorLink.href=appUrl('/des/editor');
     tools.append(create,editorLink);pauseLevelBtn.after(tools);
     const hint=document.createElement('p');hint.className='des-hint';
-    hint.textContent=activeLevelData?.metadata?.authorNotes || 'Разрушайте опоры, меняйте нагрузку и запускайте цепные падения.';
+    hint.textContent=options.spectacleGenerator ? 'Сбивай оранжевые пеги. Используй кривые и механизмы, чтобы цеплять несколько целей за выстрел.' : activeLevelData?.metadata?.authorNotes || 'Разрушайте опоры, меняйте нагрузку и запускайте цепные падения.';
     tools.after(hint);
-    const report=document.createElement('a');report.className='des-report-link';report.href=appUrl(options.intentGenerator ? '/des1/report/' : '/des/report/');report.textContent='Устройство генератора и результаты отбора';hint.after(report);
+    const report=document.createElement('a');report.className='des-report-link';report.href=appUrl(options.spectacleGenerator ? '/des2/report/' : options.intentGenerator ? '/des1/report/' : '/des/report/');report.textContent='Устройство генератора и результаты отбора';hint.after(report);
   }
   const pausePvpDuelBtn = pauseOverlay.querySelector('#pausePvpDuelBtn');
   pausePvpDuelBtn?.addEventListener('click', (event) => {
