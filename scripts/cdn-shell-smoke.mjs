@@ -23,8 +23,8 @@ const expectedBase = `https://cdn.jsdelivr.net/gh/${refConfig.repository}@${refC
 assert(shellBytes < 7 * 1024, `HTML shell is too large: ${shellBytes}`);
 assert(html.includes(`<base href="${expectedBase}">`), 'HTML shell is not pinned to cdn-ref.json');
 assert(html.includes('window.__PEGGLE_CDN_SNAPSHOT_FIRST__ = true'), 'CDN snapshot mode is not enabled');
-assert(html.includes('src="/gen-static/dist/player-bootstrap.js"'), 'main player must use the current physics bundle');
-assert(!/(?:src|href)="\/(?!api\/|gen-static\/dist\/player-bootstrap\.js")/.test(html), 'unexpected same-origin static reference');
+assert(html.includes("import(new URL('/gen-static/dist/player-bootstrap.js', location.origin).href)"), 'main player must resolve current physics against the page origin, not the CDN base');
+assert(!/(?:src|href)="\/(?!api\/)/.test(html), 'unexpected static reference resolved against the CDN base');
 assert(vercelConfig.outputDirectory === 'vercel-shell', 'Vercel must publish only vercel-shell');
 assert(vercelConfig.buildCommand === 'node scripts/build-cdn-shell.mjs', 'Vercel build must only generate the shell');
 assert(Array.isArray(primary.levels) && primary.levels.length === manifest.levelCount, 'primary snapshot level count mismatch');
