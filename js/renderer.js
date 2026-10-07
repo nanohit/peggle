@@ -1,3 +1,4 @@
+import { getSeesawPivot } from './destruction-hinge.js';
 // Peggle Renderer - Canvas rendering for game and editor
 
 import { PHYSICS_CONFIG, getBallRadius, getEffectiveBrickSize, getPegRadius } from './physics.js';
@@ -1868,6 +1869,21 @@ export class Renderer {
   }
 
   drawPeg(peg, isHit = false, isSelected = false) {
+    this.drawPegBody(peg, isHit, isSelected);
+    const pin = !peg._destructionHingeBroken && getSeesawPivot(peg);
+    if (!pin) return;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.beginPath(); ctx.arc(pin.x, pin.y, 9.2, 0, Math.PI * 2);
+    const metal = ctx.createRadialGradient(pin.x - 3, pin.y - 4, 1, pin.x, pin.y, 10);
+    metal.addColorStop(0, '#d5e6ed'); metal.addColorStop(1, '#314a5c');
+    ctx.fillStyle = metal; ctx.fill(); ctx.strokeStyle = '#122b3b'; ctx.lineWidth = 1.4; ctx.stroke();
+    ctx.beginPath(); ctx.arc(pin.x, pin.y, 4.8, 0, Math.PI * 2);
+    ctx.fillStyle = '#244251'; ctx.fill(); ctx.strokeStyle = '#8cb8c5'; ctx.lineWidth = 1; ctx.stroke();
+    ctx.restore();
+  }
+
+  drawPegBody(peg, isHit = false, isSelected = false) {
     const ctx = this.ctx;
     const pegType = normalizePegType(peg.type);
     const colors = PEG_COLORS[pegType] || PEG_COLORS.blue;

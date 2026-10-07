@@ -180,9 +180,9 @@ function isPerfLogEnabled() {
 const PERF_LOG_ENABLED = isPerfLogEnabled();
 
 export class Game {
-  constructor(canvas) {
+  constructor(canvas, options = {}) {
     this.canvas = canvas;
-    this.renderer = new Renderer(canvas);
+    this.renderer = options.renderer || new Renderer(canvas);
     this.physics = new PhysicsEngine(canvas.width, canvas.height);
     
     // Game state
@@ -322,7 +322,7 @@ export class Game {
     this.abortController = new AbortController();
 
     // Input handling
-    this.setupInput();
+    if (options.bindInput !== false) this.setupInput();
   }
 
   setupInput() {

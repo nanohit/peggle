@@ -196,6 +196,19 @@
           </label>
           <div id="destructionControls" class="survival-controls hidden">
             <div class="survival-control">
+              <label>Качели — физический шарнир</label>
+              <div class="survival-control-row">
+                <label for="seesawWidthInput">Длина</label>
+                <input id="seesawWidthInput" type="number" min="60" max="180" step="2" value="122">
+              </div>
+              <div class="survival-control-row">
+                <label for="seesawLimitInput">Ход, °</label>
+                <input id="seesawLimitInput" type="number" min="20" max="75" step="1" value="37">
+              </div>
+              <button id="addSeesawBtn" type="button" class="tool-btn">Добавить качели</button>
+              <div class="survival-hint">Балка реагирует на удары и вес пегов. После добавления перемещайте всю выбранную конструкцию.</div>
+            </div>
+            <div class="survival-control">
               <div class="survival-control-header">
                 <label for="destructionGravityYSlider">Peg Gravity Y</label>
                 <button type="button" class="destruction-default-btn" data-destruction-default="gravityY">Default</button>

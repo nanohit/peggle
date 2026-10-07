@@ -568,6 +568,7 @@ class PeggleApp {
   }
 
   _debouncedRemoteSync() {
+    if (window.__PEGGLE_LOCAL_EDITOR__ === true) return;
     if (this._syncTimer) clearTimeout(this._syncTimer);
     this._syncTimer = setTimeout(async () => {
       this._syncTimer = null;
@@ -2213,6 +2214,15 @@ class PeggleApp {
   }
 
   setupDestructionPegPanel() {
+    document.getElementById('addSeesawBtn')?.addEventListener('click', () => {
+      if (!this.editor) return;
+      const width = Number(document.getElementById('seesawWidthInput')?.value) || 122;
+      const limit = (Number(document.getElementById('seesawLimitInput')?.value) || 37) * Math.PI / 180;
+      this.editor.addSeesaw({ width, minAngle: -limit, maxAngle: limit });
+      document.getElementById('selectBtn')?.classList.add('active');
+      document.getElementById('drawBtn')?.classList.remove('active');
+      this.showDestructionPegPanel();
+    });
     const panel = document.getElementById('destructionPegPanel');
     const closeBtn = document.getElementById('closeDestructionPegPanel');
     const staticToggle = document.getElementById('destructionStaticToggle');
@@ -3561,7 +3571,7 @@ class PeggleApp {
     this.startEditor();
 
     // Async: pull remote levels into local cache
-    this._pullRemoteLevels();
+    if (window.__PEGGLE_LOCAL_EDITOR__ !== true) this._pullRemoteLevels();
     // Compact the existing cache once on boot so a pre-bloated localStorage
     // (raw uploads from before compaction) shrinks under quota right away.
     this._scheduleLocalCacheCompaction();
@@ -4490,6 +4500,7 @@ class PeggleApp {
   }
 
   _scheduleCharacterRegistryRemoteSync() {
+    if (window.__PEGGLE_LOCAL_EDITOR__ === true) return;
     if (this._characterRegistrySyncTimer) clearTimeout(this._characterRegistrySyncTimer);
     this._characterRegistrySyncTimer = setTimeout(() => {
       this._characterRegistrySyncTimer = null;

@@ -1,0 +1,1716 @@
+{
+  "level": {
+    "version": 1,
+    "id": "des-courtyards-v01-02rrrr",
+    "name": "Дворики · v01-02rrrr",
+    "pegRadius": 8.5,
+    "ballCount": 8,
+    "bucketEnabled": true,
+    "hitPegTimedClearEnabled": true,
+    "hitPegClearDelayMs": 1100,
+    "pegs": [
+      {
+        "id": "des-courtyards-v01-02rrrr:p1",
+        "shape": "brick",
+        "type": "obstacle",
+        "x": 58.419759,
+        "y": 239.065691,
+        "width": 26,
+        "height": 8,
+        "angle": 0,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": true,
+        "destructionPhysicsOnHit": false,
+        "constructionRole": "foundation",
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly0"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p2",
+        "shape": "brick",
+        "type": "blue",
+        "x": 58.419759,
+        "y": 212.065691,
+        "width": 46,
+        "height": 10.2,
+        "angle": 1.570796,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionRole": "key-support",
+        "destructionPhysicsOnHitBallOnly": false,
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly0"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p3",
+        "shape": "brick",
+        "type": "obstacle",
+        "x": 134.019759,
+        "y": 239.065691,
+        "width": 26,
+        "height": 8,
+        "angle": 0,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": true,
+        "destructionPhysicsOnHit": false,
+        "constructionRole": "foundation",
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly0"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p4",
+        "shape": "brick",
+        "type": "blue",
+        "x": 134.019759,
+        "y": 212.065691,
+        "width": 46,
+        "height": 10.2,
+        "angle": 1.570796,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionRole": "key-support",
+        "destructionPhysicsOnHitBallOnly": false,
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly0"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p5",
+        "shape": "brick",
+        "type": "obstacle",
+        "x": 96.219759,
+        "y": 183.965691,
+        "width": 103.6,
+        "height": 10.2,
+        "angle": 0,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionRole": "roof",
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly0"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p6",
+        "shape": "circle",
+        "type": "blue",
+        "x": 69.819759,
+        "y": 170.165691,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly0",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p7",
+        "shape": "circle",
+        "type": "orange",
+        "x": 87.419759,
+        "y": 170.165691,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly0",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p8",
+        "shape": "circle",
+        "type": "orange",
+        "x": 105.019759,
+        "y": 170.165691,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly0",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p9",
+        "shape": "circle",
+        "type": "blue",
+        "x": 122.619759,
+        "y": 170.165691,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly0",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p10",
+        "shape": "circle",
+        "type": "orange",
+        "x": 78.619759,
+        "y": 154.915691,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly0",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p11",
+        "shape": "circle",
+        "type": "orange",
+        "x": 96.219759,
+        "y": 154.915691,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly0",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p12",
+        "shape": "circle",
+        "type": "blue",
+        "x": 113.819759,
+        "y": 154.915691,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly0",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p13",
+        "shape": "circle",
+        "type": "orange",
+        "x": 87.419759,
+        "y": 139.665691,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly0",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p14",
+        "shape": "circle",
+        "type": "blue",
+        "x": 105.019759,
+        "y": 139.665691,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly0",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p15",
+        "shape": "brick",
+        "type": "obstacle",
+        "x": 261.437828,
+        "y": 242.065691,
+        "width": 26,
+        "height": 8,
+        "angle": 0,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": true,
+        "destructionPhysicsOnHit": false,
+        "constructionRole": "foundation",
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly1"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p16",
+        "shape": "brick",
+        "type": "blue",
+        "x": 261.437828,
+        "y": 216.065691,
+        "width": 44,
+        "height": 10.2,
+        "angle": 1.570796,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": true,
+        "constructionRole": "key-support",
+        "destructionPhysicsOnHitBallOnly": true,
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly1"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p17",
+        "shape": "brick",
+        "type": "obstacle",
+        "x": 337.037828,
+        "y": 242.065691,
+        "width": 26,
+        "height": 8,
+        "angle": 0,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": true,
+        "destructionPhysicsOnHit": false,
+        "constructionRole": "foundation",
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly1"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p18",
+        "shape": "brick",
+        "type": "blue",
+        "x": 337.037828,
+        "y": 216.065691,
+        "width": 44,
+        "height": 10.2,
+        "angle": 1.570796,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": true,
+        "constructionRole": "key-support",
+        "destructionPhysicsOnHitBallOnly": true,
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly1"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p19",
+        "shape": "brick",
+        "type": "obstacle",
+        "x": 299.237828,
+        "y": 188.965691,
+        "width": 103.6,
+        "height": 10.2,
+        "angle": 0,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionRole": "roof",
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly1"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p20",
+        "shape": "circle",
+        "type": "orange",
+        "x": 272.837828,
+        "y": 175.165691,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly1",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p21",
+        "shape": "circle",
+        "type": "orange",
+        "x": 290.437828,
+        "y": 175.165691,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly1",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p22",
+        "shape": "circle",
+        "type": "blue",
+        "x": 308.037828,
+        "y": 175.165691,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly1",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p23",
+        "shape": "circle",
+        "type": "orange",
+        "x": 325.637828,
+        "y": 175.165691,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly1",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p24",
+        "shape": "circle",
+        "type": "orange",
+        "x": 281.637828,
+        "y": 159.915691,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly1",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p25",
+        "shape": "circle",
+        "type": "blue",
+        "x": 299.237828,
+        "y": 159.915691,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly1",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p26",
+        "shape": "circle",
+        "type": "orange",
+        "x": 316.837828,
+        "y": 159.915691,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly1",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:assembly2:beam",
+        "groupId": "des-courtyards-v01-02rrrr:assembly2",
+        "type": "obstacle",
+        "shape": "brick",
+        "x": 101.21975865820423,
+        "y": 479.3787095528096,
+        "angle": 0,
+        "width": 124,
+        "height": 10.2,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "destructionHinge": {
+          "pivotFraction": 0.5,
+          "minAngle": -0.7,
+          "maxAngle": 0.7,
+          "damping": 0.999,
+          "stopBounce": 0.04,
+          "breakImpulse": 0
+        },
+        "constructionPart": "beam",
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly2"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:assembly2:base",
+        "groupId": "des-courtyards-v01-02rrrr:assembly2",
+        "type": "obstacle",
+        "shape": "brick",
+        "x": 101.21975865820423,
+        "y": 501.3787095528096,
+        "angle": 0,
+        "width": 14,
+        "height": 20,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": true,
+        "constructionPart": "bearing",
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly2"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p27",
+        "shape": "circle",
+        "type": "orange",
+        "x": 74.819759,
+        "y": 465.57871,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly2",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p28",
+        "shape": "circle",
+        "type": "blue",
+        "x": 92.419759,
+        "y": 465.57871,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly2",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p29",
+        "shape": "circle",
+        "type": "orange",
+        "x": 110.019759,
+        "y": 465.57871,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly2",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p30",
+        "shape": "circle",
+        "type": "orange",
+        "x": 127.619759,
+        "y": 465.57871,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly2",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p31",
+        "shape": "circle",
+        "type": "blue",
+        "x": 83.619759,
+        "y": 450.32871,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly2",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p32",
+        "shape": "circle",
+        "type": "orange",
+        "x": 101.219759,
+        "y": 450.32871,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly2",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p33",
+        "shape": "circle",
+        "type": "orange",
+        "x": 118.819759,
+        "y": 450.32871,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly2",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p34",
+        "shape": "circle",
+        "type": "orange",
+        "x": 92.419759,
+        "y": 435.07871,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly2",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p35",
+        "shape": "circle",
+        "type": "orange",
+        "x": 110.019759,
+        "y": 435.07871,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly2",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:assembly3:beam",
+        "groupId": "des-courtyards-v01-02rrrr:assembly3",
+        "type": "obstacle",
+        "shape": "brick",
+        "x": 295.2378279250115,
+        "y": 471.3787095528096,
+        "angle": 0,
+        "width": 124,
+        "height": 10.2,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "destructionHinge": {
+          "pivotFraction": 0.5,
+          "minAngle": -0.7,
+          "maxAngle": 0.7,
+          "damping": 0.999,
+          "stopBounce": 0.04,
+          "breakImpulse": 0
+        },
+        "constructionPart": "beam",
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly3"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:assembly3:base",
+        "groupId": "des-courtyards-v01-02rrrr:assembly3",
+        "type": "obstacle",
+        "shape": "brick",
+        "x": 295.2378279250115,
+        "y": 493.3787095528096,
+        "angle": 0,
+        "width": 14,
+        "height": 20,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": true,
+        "constructionPart": "bearing",
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly3"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p36",
+        "shape": "circle",
+        "type": "blue",
+        "x": 268.837828,
+        "y": 457.57871,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly3",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p37",
+        "shape": "circle",
+        "type": "orange",
+        "x": 286.437828,
+        "y": 457.57871,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly3",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p38",
+        "shape": "circle",
+        "type": "orange",
+        "x": 304.037828,
+        "y": 457.57871,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly3",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p39",
+        "shape": "circle",
+        "type": "blue",
+        "x": 321.637828,
+        "y": 457.57871,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly3",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p40",
+        "shape": "circle",
+        "type": "orange",
+        "x": 277.637828,
+        "y": 442.32871,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly3",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p41",
+        "shape": "circle",
+        "type": "orange",
+        "x": 295.237828,
+        "y": 442.32871,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly3",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p42",
+        "shape": "circle",
+        "type": "blue",
+        "x": 312.837828,
+        "y": 442.32871,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly3",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p43",
+        "shape": "brick",
+        "type": "blue",
+        "x": 229.82987,
+        "y": 333,
+        "width": 26.703538,
+        "height": 8,
+        "angle": 1.570796,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "groupId": "des-courtyards-v01-02rrrr:assembly4:ring",
+        "curveSlices": [
+          {
+            "x": 227.24177416733264,
+            "y": 319.98876329958694,
+            "nx": 0.9238795325112867,
+            "ny": -0.3826834323650898
+          },
+          {
+            "x": 228.8904473554699,
+            "y": 325.0628576288992,
+            "nx": 0.9723699203976766,
+            "ny": -0.2334453638559054
+          },
+          {
+            "x": 229.72505940887524,
+            "y": 330.3323907452533,
+            "nx": 0.996917333733128,
+            "ny": -0.07845909572784494
+          },
+          {
+            "x": 229.72505940887524,
+            "y": 335.6676092547467,
+            "nx": 0.996917333733128,
+            "ny": 0.07845909572784494
+          },
+          {
+            "x": 228.8904473554699,
+            "y": 340.9371423711008,
+            "nx": 0.9723699203976766,
+            "ny": 0.2334453638559054
+          },
+          {
+            "x": 227.24177416733264,
+            "y": 346.01123670041306,
+            "nx": 0.9238795325112867,
+            "ny": 0.3826834323650898
+          }
+        ],
+        "constructionRole": "breakable-shell",
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly4"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p44",
+        "shape": "brick",
+        "type": "blue",
+        "x": 219.871501,
+        "y": 357.041631,
+        "width": 26.703538,
+        "height": 8,
+        "angle": 2.356194,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "groupId": "des-courtyards-v01-02rrrr:assembly4:ring",
+        "curveSlices": [
+          {
+            "x": 227.24177416733264,
+            "y": 346.01123670041306,
+            "nx": 0.9238795325112867,
+            "ny": 0.3826834323650898
+          },
+          {
+            "x": 224.81963564998804,
+            "y": 350.76495120034224,
+            "nx": 0.8526401643540923,
+            "ny": 0.5224985647159488
+          },
+          {
+            "x": 221.68367289234993,
+            "y": 355.08123364322626,
+            "nx": 0.7604059656000309,
+            "ny": 0.6494480483301837
+          },
+          {
+            "x": 217.91110370517515,
+            "y": 358.85380283040104,
+            "nx": 0.6494480483301837,
+            "ny": 0.7604059656000309
+          },
+          {
+            "x": 213.59482126229116,
+            "y": 361.9897655880391,
+            "nx": 0.5224985647159489,
+            "ny": 0.8526401643540922
+          },
+          {
+            "x": 208.84110676236196,
+            "y": 364.41190410538377,
+            "nx": 0.38268343236508984,
+            "ny": 0.9238795325112867
+          }
+        ],
+        "constructionRole": "breakable-shell",
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly4"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p45",
+        "shape": "brick",
+        "type": "blue",
+        "x": 195.82987,
+        "y": 367,
+        "width": 26.703538,
+        "height": 8,
+        "angle": 3.141593,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "groupId": "des-courtyards-v01-02rrrr:assembly4:ring",
+        "curveSlices": [
+          {
+            "x": 208.84110676236196,
+            "y": 364.41190410538377,
+            "nx": 0.38268343236508984,
+            "ny": 0.9238795325112867
+          },
+          {
+            "x": 203.76701243304967,
+            "y": 366.060577293521,
+            "nx": 0.23344536385590547,
+            "ny": 0.9723699203976766
+          },
+          {
+            "x": 198.49747931669563,
+            "y": 366.8951893469264,
+            "nx": 0.078459095727845,
+            "ny": 0.996917333733128
+          },
+          {
+            "x": 193.16226080720216,
+            "y": 366.8951893469264,
+            "nx": -0.07845909572784487,
+            "ny": 0.996917333733128
+          },
+          {
+            "x": 187.89272769084812,
+            "y": 366.060577293521,
+            "nx": -0.23344536385590534,
+            "ny": 0.9723699203976767
+          },
+          {
+            "x": 182.81863336153583,
+            "y": 364.41190410538377,
+            "nx": -0.3826834323650897,
+            "ny": 0.9238795325112867
+          }
+        ],
+        "constructionRole": "breakable-shell",
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly4"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p46",
+        "shape": "brick",
+        "type": "blue",
+        "x": 171.78824,
+        "y": 357.041631,
+        "width": 26.703538,
+        "height": 8,
+        "angle": 3.926991,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "groupId": "des-courtyards-v01-02rrrr:assembly4:ring",
+        "curveSlices": [
+          {
+            "x": 182.81863336153583,
+            "y": 364.41190410538377,
+            "nx": -0.3826834323650897,
+            "ny": 0.9238795325112867
+          },
+          {
+            "x": 178.06491886160663,
+            "y": 361.9897655880391,
+            "nx": -0.5224985647159488,
+            "ny": 0.8526401643540923
+          },
+          {
+            "x": 173.74863641872264,
+            "y": 358.85380283040104,
+            "nx": -0.6494480483301835,
+            "ny": 0.760405965600031
+          },
+          {
+            "x": 169.97606723154786,
+            "y": 355.08123364322626,
+            "nx": -0.7604059656000309,
+            "ny": 0.6494480483301838
+          },
+          {
+            "x": 166.84010447390978,
+            "y": 350.76495120034224,
+            "nx": -0.8526401643540922,
+            "ny": 0.5224985647159489
+          },
+          {
+            "x": 164.41796595656515,
+            "y": 346.01123670041306,
+            "nx": -0.9238795325112867,
+            "ny": 0.3826834323650899
+          }
+        ],
+        "constructionRole": "breakable-shell",
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly4"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p47",
+        "shape": "brick",
+        "type": "blue",
+        "x": 161.82987,
+        "y": 333,
+        "width": 26.703538,
+        "height": 8,
+        "angle": 4.712389,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "groupId": "des-courtyards-v01-02rrrr:assembly4:ring",
+        "curveSlices": [
+          {
+            "x": 164.41796595656515,
+            "y": 346.01123670041306,
+            "nx": -0.9238795325112867,
+            "ny": 0.3826834323650899
+          },
+          {
+            "x": 162.7692927684279,
+            "y": 340.9371423711008,
+            "nx": -0.9723699203976766,
+            "ny": 0.23344536385590553
+          },
+          {
+            "x": 161.93468071502255,
+            "y": 335.6676092547467,
+            "nx": -0.996917333733128,
+            "ny": 0.07845909572784507
+          },
+          {
+            "x": 161.93468071502255,
+            "y": 330.3323907452533,
+            "nx": -0.996917333733128,
+            "ny": -0.07845909572784482
+          },
+          {
+            "x": 162.76929276842787,
+            "y": 325.0628576288992,
+            "nx": -0.9723699203976767,
+            "ny": -0.23344536385590528
+          },
+          {
+            "x": 164.41796595656515,
+            "y": 319.98876329958694,
+            "nx": -0.9238795325112868,
+            "ny": -0.3826834323650896
+          }
+        ],
+        "constructionRole": "breakable-shell",
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly4"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p48",
+        "shape": "brick",
+        "type": "blue",
+        "x": 171.78824,
+        "y": 308.958369,
+        "width": 26.703538,
+        "height": 8,
+        "angle": 5.497787,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "groupId": "des-courtyards-v01-02rrrr:assembly4:ring",
+        "curveSlices": [
+          {
+            "x": 164.41796595656515,
+            "y": 319.98876329958694,
+            "nx": -0.9238795325112868,
+            "ny": -0.3826834323650896
+          },
+          {
+            "x": 166.84010447390975,
+            "y": 315.23504879965776,
+            "nx": -0.8526401643540923,
+            "ny": -0.5224985647159487
+          },
+          {
+            "x": 169.97606723154783,
+            "y": 310.91876635677374,
+            "nx": -0.760405965600031,
+            "ny": -0.6494480483301835
+          },
+          {
+            "x": 173.74863641872264,
+            "y": 307.14619716959896,
+            "nx": -0.6494480483301841,
+            "ny": -0.7604059656000306
+          },
+          {
+            "x": 178.06491886160666,
+            "y": 304.0102344119609,
+            "nx": -0.5224985647159486,
+            "ny": -0.8526401643540924
+          },
+          {
+            "x": 182.81863336153583,
+            "y": 301.58809589461623,
+            "nx": -0.38268343236509034,
+            "ny": -0.9238795325112865
+          }
+        ],
+        "constructionRole": "breakable-shell",
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly4"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p49",
+        "shape": "brick",
+        "type": "blue",
+        "x": 195.82987,
+        "y": 299,
+        "width": 26.703538,
+        "height": 8,
+        "angle": 6.283185,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "groupId": "des-courtyards-v01-02rrrr:assembly4:ring",
+        "curveSlices": [
+          {
+            "x": 182.81863336153583,
+            "y": 301.58809589461623,
+            "nx": -0.38268343236509034,
+            "ny": -0.9238795325112865
+          },
+          {
+            "x": 187.8927276908481,
+            "y": 299.939422706479,
+            "nx": -0.233445363855906,
+            "ny": -0.9723699203976764
+          },
+          {
+            "x": 193.16226080720216,
+            "y": 299.1048106530736,
+            "nx": -0.07845909572784557,
+            "ny": -0.996917333733128
+          },
+          {
+            "x": 198.4974793166956,
+            "y": 299.1048106530736,
+            "nx": 0.07845909572784432,
+            "ny": -0.9969173337331281
+          },
+          {
+            "x": 203.76701243304967,
+            "y": 299.939422706479,
+            "nx": 0.23344536385590478,
+            "ny": -0.9723699203976768
+          },
+          {
+            "x": 208.84110676236193,
+            "y": 301.58809589461623,
+            "nx": 0.38268343236508917,
+            "ny": -0.923879532511287
+          }
+        ],
+        "constructionRole": "breakable-shell",
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly4"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p50",
+        "shape": "brick",
+        "type": "blue",
+        "x": 219.871501,
+        "y": 308.958369,
+        "width": 26.703538,
+        "height": 8,
+        "angle": 7.068583,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "groupId": "des-courtyards-v01-02rrrr:assembly4:ring",
+        "curveSlices": [
+          {
+            "x": 208.84110676236196,
+            "y": 301.58809589461623,
+            "nx": 0.38268343236509,
+            "ny": -0.9238795325112866
+          },
+          {
+            "x": 213.59482126229116,
+            "y": 304.0102344119609,
+            "nx": 0.522498564715949,
+            "ny": -0.8526401643540921
+          },
+          {
+            "x": 217.91110370517515,
+            "y": 307.14619716959896,
+            "nx": 0.6494480483301839,
+            "ny": -0.7604059656000308
+          },
+          {
+            "x": 221.68367289234996,
+            "y": 310.91876635677374,
+            "nx": 0.760405965600031,
+            "ny": -0.6494480483301834
+          },
+          {
+            "x": 224.81963564998804,
+            "y": 315.23504879965776,
+            "nx": 0.8526401643540923,
+            "ny": -0.5224985647159487
+          },
+          {
+            "x": 227.24177416733264,
+            "y": 319.98876329958694,
+            "nx": 0.9238795325112868,
+            "ny": -0.38268343236508956
+          }
+        ],
+        "constructionRole": "breakable-shell",
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly4"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p51",
+        "shape": "brick",
+        "type": "obstacle",
+        "x": 195.82987,
+        "y": 375,
+        "width": 76,
+        "height": 8,
+        "angle": 0,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": true,
+        "destructionPhysicsOnHit": false,
+        "constructionRole": "foundation",
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly4"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p52",
+        "shape": "circle",
+        "type": "orange",
+        "x": 178.22987,
+        "y": 345,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly4",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p53",
+        "shape": "circle",
+        "type": "orange",
+        "x": 195.82987,
+        "y": 345,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly4",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p54",
+        "shape": "circle",
+        "type": "blue",
+        "x": 213.42987,
+        "y": 345,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly4",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p55",
+        "shape": "circle",
+        "type": "orange",
+        "x": 187.02987,
+        "y": 329.75,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly4",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p56",
+        "shape": "circle",
+        "type": "blue",
+        "x": 204.62987,
+        "y": 329.75,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly4",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:p57",
+        "shape": "circle",
+        "type": "blue",
+        "x": 195.82987,
+        "y": 314.5,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-courtyards-v01-02rrrr:assembly4",
+        "constructionRole": "cargo"
+      }
+    ],
+    "groups": [
+      {
+        "id": "des-courtyards-v01-02rrrr:assembly2",
+        "name": "Качели",
+        "pattern": "construction",
+        "construction": {
+          "type": "seesaw"
+        },
+        "destructionBody": false
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:assembly3",
+        "name": "Качели",
+        "pattern": "construction",
+        "construction": {
+          "type": "seesaw"
+        },
+        "destructionBody": false
+      },
+      {
+        "id": "des-courtyards-v01-02rrrr:assembly4:ring",
+        "name": "Разрушаемый обод",
+        "pattern": "construction",
+        "destructionBody": true
+      }
+    ],
+    "bezierCurves": {},
+    "flippers": null,
+    "destruction": {
+      "enabled": true,
+      "gravityX": 0,
+      "gravityY": 0.115,
+      "damping": 0.994,
+      "restitution": 0.34,
+      "friction": 0.72,
+      "surfaceGrip": 0.18,
+      "dynamicPegBallBounce": 0.45,
+      "maxSpeed": 14,
+      "sleepSpeed": 0.055,
+      "sleepFrames": 18,
+      "bombImpulse": 12,
+      "stuckPileClearDelayMs": 220
+    },
+    "metadata": {
+      "authorNotes": "Выбейте опору. Перекрытие и его груз упадут на нижний этаж.",
+      "generator": {
+        "name": "destruction_generator0.1",
+        "version": "0.1.0",
+        "seed": "v01-02rrrr",
+        "family": "courtyards",
+        "principles": [
+          "physical-supports",
+          "load-transfer",
+          "gravity",
+          "fracture",
+          "hinges",
+          "ball-only-latches"
+        ],
+        "plan": {
+          "assemblies": [
+            {
+              "id": "des-courtyards-v01-02rrrr:assembly0",
+              "index": 0,
+              "type": "tower",
+              "x": 96.21975865820423,
+              "y": 239.0656905984506,
+              "width": 120,
+              "pegs": [
+                "des-courtyards-v01-02rrrr:p1",
+                "des-courtyards-v01-02rrrr:p2",
+                "des-courtyards-v01-02rrrr:p3",
+                "des-courtyards-v01-02rrrr:p4",
+                "des-courtyards-v01-02rrrr:p5",
+                "des-courtyards-v01-02rrrr:p6",
+                "des-courtyards-v01-02rrrr:p7",
+                "des-courtyards-v01-02rrrr:p8",
+                "des-courtyards-v01-02rrrr:p9",
+                "des-courtyards-v01-02rrrr:p10",
+                "des-courtyards-v01-02rrrr:p11",
+                "des-courtyards-v01-02rrrr:p12",
+                "des-courtyards-v01-02rrrr:p13",
+                "des-courtyards-v01-02rrrr:p14"
+              ],
+              "supportContacts": [
+                [
+                  "foundation",
+                  "key-support"
+                ],
+                [
+                  "key-support",
+                  "roof"
+                ],
+                [
+                  "roof",
+                  "cargo"
+                ]
+              ],
+              "trigger": "remove-support"
+            },
+            {
+              "id": "des-courtyards-v01-02rrrr:assembly1",
+              "index": 1,
+              "type": "tower",
+              "x": 299.2378279250115,
+              "y": 242.0656905984506,
+              "width": 120,
+              "pegs": [
+                "des-courtyards-v01-02rrrr:p15",
+                "des-courtyards-v01-02rrrr:p16",
+                "des-courtyards-v01-02rrrr:p17",
+                "des-courtyards-v01-02rrrr:p18",
+                "des-courtyards-v01-02rrrr:p19",
+                "des-courtyards-v01-02rrrr:p20",
+                "des-courtyards-v01-02rrrr:p21",
+                "des-courtyards-v01-02rrrr:p22",
+                "des-courtyards-v01-02rrrr:p23",
+                "des-courtyards-v01-02rrrr:p24",
+                "des-courtyards-v01-02rrrr:p25",
+                "des-courtyards-v01-02rrrr:p26"
+              ],
+              "supportContacts": [
+                [
+                  "foundation",
+                  "key-support"
+                ],
+                [
+                  "key-support",
+                  "roof"
+                ],
+                [
+                  "roof",
+                  "cargo"
+                ]
+              ],
+              "trigger": "remove-support"
+            },
+            {
+              "id": "des-courtyards-v01-02rrrr:assembly2",
+              "index": 2,
+              "type": "seesaw",
+              "x": 101.21975865820423,
+              "y": 511.3787095528096,
+              "width": 124,
+              "pegs": [
+                "des-courtyards-v01-02rrrr:assembly2:beam",
+                "des-courtyards-v01-02rrrr:assembly2:base",
+                "des-courtyards-v01-02rrrr:p27",
+                "des-courtyards-v01-02rrrr:p28",
+                "des-courtyards-v01-02rrrr:p29",
+                "des-courtyards-v01-02rrrr:p30",
+                "des-courtyards-v01-02rrrr:p31",
+                "des-courtyards-v01-02rrrr:p32",
+                "des-courtyards-v01-02rrrr:p33",
+                "des-courtyards-v01-02rrrr:p34",
+                "des-courtyards-v01-02rrrr:p35"
+              ],
+              "supportContacts": [
+                [
+                  "bearing",
+                  "beam"
+                ],
+                [
+                  "beam",
+                  "cargo"
+                ]
+              ],
+              "trigger": "change-load-or-hit-edge"
+            },
+            {
+              "id": "des-courtyards-v01-02rrrr:assembly3",
+              "index": 3,
+              "type": "seesaw",
+              "x": 295.2378279250115,
+              "y": 503.3787095528096,
+              "width": 124,
+              "pegs": [
+                "des-courtyards-v01-02rrrr:assembly3:beam",
+                "des-courtyards-v01-02rrrr:assembly3:base",
+                "des-courtyards-v01-02rrrr:p36",
+                "des-courtyards-v01-02rrrr:p37",
+                "des-courtyards-v01-02rrrr:p38",
+                "des-courtyards-v01-02rrrr:p39",
+                "des-courtyards-v01-02rrrr:p40",
+                "des-courtyards-v01-02rrrr:p41",
+                "des-courtyards-v01-02rrrr:p42"
+              ],
+              "supportContacts": [
+                [
+                  "bearing",
+                  "beam"
+                ],
+                [
+                  "beam",
+                  "cargo"
+                ]
+              ],
+              "trigger": "change-load-or-hit-edge"
+            },
+            {
+              "id": "des-courtyards-v01-02rrrr:assembly4",
+              "index": 4,
+              "type": "cage",
+              "x": 195.8298700619489,
+              "y": 375,
+              "width": 122,
+              "pegs": [
+                "des-courtyards-v01-02rrrr:p43",
+                "des-courtyards-v01-02rrrr:p44",
+                "des-courtyards-v01-02rrrr:p45",
+                "des-courtyards-v01-02rrrr:p46",
+                "des-courtyards-v01-02rrrr:p47",
+                "des-courtyards-v01-02rrrr:p48",
+                "des-courtyards-v01-02rrrr:p49",
+                "des-courtyards-v01-02rrrr:p50",
+                "des-courtyards-v01-02rrrr:p51",
+                "des-courtyards-v01-02rrrr:p52",
+                "des-courtyards-v01-02rrrr:p53",
+                "des-courtyards-v01-02rrrr:p54",
+                "des-courtyards-v01-02rrrr:p55",
+                "des-courtyards-v01-02rrrr:p56",
+                "des-courtyards-v01-02rrrr:p57"
+              ],
+              "supportContacts": [
+                [
+                  "foundation",
+                  "breakable-shell"
+                ],
+                [
+                  "breakable-shell",
+                  "cargo"
+                ]
+              ],
+              "trigger": "fracture-shell"
+            }
+          ],
+          "flow": [
+            {
+              "from": 0,
+              "to": 4
+            },
+            {
+              "from": 1,
+              "to": 4
+            },
+            {
+              "from": 4,
+              "to": 2
+            },
+            {
+              "from": 4,
+              "to": 3
+            }
+          ],
+          "shooterClearance": 90,
+          "bucketClearance": 45,
+          "pegRadius": 8.5
+        }
+      }
+    }
+  },
+  "quality": {
+    "accepted": true,
+    "geometry": {
+      "valid": true,
+      "errors": [],
+      "pegCount": 61,
+      "targets": 24
+    },
+    "idle": {
+      "lateDrift": 0.000006837233813287772,
+      "maxDrift": 13.329546632831656,
+      "orangeLeft": 24
+    },
+    "firstShots": [
+      {
+        "angle": 0.16,
+        "cleared": 2,
+        "fallen": 0,
+        "timeout": false
+      },
+      {
+        "angle": 0.3363495408493621,
+        "cleared": 0,
+        "fallen": 0,
+        "timeout": false
+      },
+      {
+        "angle": 0.5126990816987241,
+        "cleared": 2,
+        "fallen": 0,
+        "timeout": false
+      },
+      {
+        "angle": 0.6890486225480863,
+        "cleared": 5,
+        "fallen": 2,
+        "timeout": false
+      },
+      {
+        "angle": 0.8653981633974484,
+        "cleared": 4,
+        "fallen": 2,
+        "timeout": false
+      },
+      {
+        "angle": 1.0417477042468104,
+        "cleared": 5,
+        "fallen": 4,
+        "timeout": false
+      },
+      {
+        "angle": 1.2180972450961725,
+        "cleared": 0,
+        "fallen": 0,
+        "timeout": false
+      },
+      {
+        "angle": 1.3944467859455345,
+        "cleared": 2,
+        "fallen": 0,
+        "timeout": false
+      },
+      {
+        "angle": 1.5707963267948966,
+        "cleared": 7,
+        "fallen": 5,
+        "timeout": false
+      },
+      {
+        "angle": 1.7471458676442586,
+        "cleared": 0,
+        "fallen": 0,
+        "timeout": false
+      },
+      {
+        "angle": 1.9234954084936207,
+        "cleared": 11,
+        "fallen": 7,
+        "timeout": false
+      },
+      {
+        "angle": 2.099844949342983,
+        "cleared": 1,
+        "fallen": 1,
+        "timeout": false
+      },
+      {
+        "angle": 2.276194490192345,
+        "cleared": 3,
+        "fallen": 0,
+        "timeout": false
+      },
+      {
+        "angle": 2.452544031041707,
+        "cleared": 7,
+        "fallen": 6,
+        "timeout": false
+      },
+      {
+        "angle": 2.6288935718910693,
+        "cleared": 3,
+        "fallen": 0,
+        "timeout": false
+      },
+      {
+        "angle": 2.805243112740431,
+        "cleared": 6,
+        "fallen": 5,
+        "timeout": false
+      },
+      {
+        "angle": 2.9815926535897934,
+        "cleared": 7,
+        "fallen": 6,
+        "timeout": false
+      }
+    ],
+    "firstShotCoverage": 0.8235294117647058,
+    "route": [
+      {
+        "angle": 1.9234954084936207,
+        "seconds": 3.3250000000002418,
+        "orangeBefore": 24,
+        "orangeAfter": 13,
+        "cleared": 11,
+        "timeout": false,
+        "state": "idle",
+        "fallenTargets": 7,
+        "directTargets": 4,
+        "hitCount": 12
+      },
+      {
+        "angle": 1.9234954084936207,
+        "seconds": 2.666666666666817,
+        "orangeBefore": 13,
+        "orangeAfter": 9,
+        "cleared": 4,
+        "timeout": false,
+        "state": "idle",
+        "fallenTargets": 2,
+        "directTargets": 2,
+        "hitCount": 3
+      },
+      {
+        "angle": 0.8653981633974484,
+        "seconds": 4.258333333332714,
+        "orangeBefore": 4,
+        "orangeAfter": 1,
+        "cleared": 3,
+        "timeout": false,
+        "state": "idle",
+        "fallenTargets": 2,
+        "directTargets": 1,
+        "hitCount": 3
+      },
+      {
+        "angle": 2.9815926535897934,
+        "seconds": 0.833333333333212,
+        "orangeBefore": 1,
+        "orangeAfter": 1,
+        "cleared": 0,
+        "timeout": false,
+        "state": "idle",
+        "fallenTargets": 0,
+        "directTargets": 0,
+        "hitCount": 1
+      },
+      {
+        "angle": 1.2180972450961725,
+        "seconds": 3.108333333332881,
+        "orangeBefore": 1,
+        "orangeAfter": 1,
+        "cleared": 0,
+        "timeout": false,
+        "state": "idle",
+        "fallenTargets": 0,
+        "directTargets": 0,
+        "hitCount": 0
+      }
+    ],
+    "routeSeed": "native",
+    "complete": true,
+    "fallenTargets": 17,
+    "directTargets": 7,
+    "crossAssemblyImpacts": [
+      {
+        "assemblies": [
+          "des-courtyards-v01-02rrrr:assembly2",
+          "des-courtyards-v01-02rrrr:assembly4"
+        ],
+        "speed": 5.47686426971173
+      },
+      {
+        "assemblies": [
+          "des-courtyards-v01-02rrrr:assembly1",
+          "des-courtyards-v01-02rrrr:assembly4"
+        ],
+        "speed": 8.776843338831485
+      },
+      {
+        "assemblies": [
+          "des-courtyards-v01-02rrrr:assembly1",
+          "des-courtyards-v01-02rrrr:assembly3"
+        ],
+        "speed": 6.775918053889227
+      },
+      {
+        "assemblies": [
+          "des-courtyards-v01-02rrrr:assembly1",
+          "des-courtyards-v01-02rrrr:assembly2"
+        ],
+        "speed": 6.150367265061761
+      },
+      {
+        "assemblies": [
+          "des-courtyards-v01-02rrrr:assembly3",
+          "des-courtyards-v01-02rrrr:assembly4"
+        ],
+        "speed": 3.906664460860676
+      },
+      {
+        "assemblies": [
+          "des-courtyards-v01-02rrrr:assembly0",
+          "des-courtyards-v01-02rrrr:assembly4"
+        ],
+        "speed": 5.722889243906167
+      },
+      {
+        "assemblies": [
+          "des-courtyards-v01-02rrrr:assembly0",
+          "des-courtyards-v01-02rrrr:assembly2"
+        ],
+        "speed": 6.516998933703977
+      },
+      {
+        "assemblies": [
+          "des-courtyards-v01-02rrrr:assembly0",
+          "des-courtyards-v01-02rrrr:assembly1"
+        ],
+        "speed": 3.370673591575666
+      },
+      {
+        "assemblies": [
+          "des-courtyards-v01-02rrrr:assembly0",
+          "des-courtyards-v01-02rrrr:assembly3"
+        ],
+        "speed": 4.10548413190919
+      }
+    ],
+    "probes": 108,
+    "holdout": {
+      "complete": true,
+      "shots": [
+        {
+          "angle": 2.9815926535897934,
+          "seconds": 4.4416666666666185,
+          "orangeBefore": 24,
+          "orangeAfter": 12,
+          "cleared": 12,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 9,
+          "directTargets": 4,
+          "hitCount": 8
+        },
+        {
+          "angle": 0.24707963267948962,
+          "seconds": 4.700000000000217,
+          "orangeBefore": 12,
+          "orangeAfter": 3,
+          "cleared": 9,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 4,
+          "directTargets": 5,
+          "hitCount": 7
+        },
+        {
+          "angle": 1.5707963267948966,
+          "seconds": 3.016666666666886,
+          "orangeBefore": 3,
+          "orangeAfter": 3,
+          "cleared": 0,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 0,
+          "directTargets": 0,
+          "hitCount": 4
+        },
+        {
+          "angle": 3.106592653589793,
+          "seconds": 1.0833333333332702,
+          "orangeBefore": 2,
+          "orangeAfter": 1,
+          "cleared": 1,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 1,
+          "directTargets": 0,
+          "hitCount": 1
+        }
+      ],
+      "fallenTargets": 16,
+      "probes": 79
+    }
+  },
+  "ms": 112268,
+  "fingerprint": "8764bad04b878e26261ff6884889835f64d268b82718875dc8552640c4962981"
+}

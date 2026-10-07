@@ -1,3 +1,4 @@
+import { createSeesaw } from './destruction-hinge.js';
 // Peggle Editor - Level editor logic
 
 import { Renderer } from './renderer.js';
@@ -37,7 +38,8 @@ import {
   normalizeMagnetPegProperties
 } from './magnet-defaults.js';
 import {
-  isDestructionStaticPeg
+  isDestructionStaticPeg,
+  ensureLevelDestruction
 } from './destruction-mode.js';
 import {
   PegAnimator,
@@ -2514,6 +2516,8 @@ export class Editor {
     if (Object.prototype.hasOwnProperty.call(peg, 'destructionPhysicsOnHitBallOnly')) {
       pegData.destructionPhysicsOnHitBallOnly = peg.destructionPhysicsOnHitBallOnly;
     }
+    if (peg.destructionHinge) pegData.destructionHinge = { ...peg.destructionHinge };
+    if (peg.constructionPart) pegData.constructionPart = peg.constructionPart;
     return pegData;
   }
 
@@ -2524,6 +2528,7 @@ export class Editor {
     this.saveUndoState();
     const newPegIds = new Set();
     const newPegs = [];
+    const constructionGroups = new Map();
 
     for (const pegId of this.selectedPegIds) {
       const peg = level.pegs.find(p => p.id === pegId);
@@ -2531,6 +2536,7 @@ export class Editor {
         const pegData = this.buildDuplicatePegData(peg, offsetX, offsetY);
         const newPeg = this.levelManager.addPeg(pegData);
         if (newPeg) {
+          this.copyConstructionGroup(peg, newPeg, constructionGroups);
           newPegIds.add(newPeg.id);
           newPegs.push(newPeg);
         }
@@ -2538,6 +2544,7 @@ export class Editor {
     }
 
     this.createPvpMirroredCopies(newPegs);
+    if (constructionGroups.size) this.levelManager.save();
 
     this.selectedPegIds = newPegIds;
     this.notifySelectionChange();
@@ -2554,6 +2561,7 @@ export class Editor {
 
     const newPegIds = new Set();
     const newPegs = [];
+    const constructionGroups = new Map();
 
     for (const pegId of this.selectedPegIds) {
       const peg = level.pegs.find(p => p.id === pegId);
@@ -2561,12 +2569,14 @@ export class Editor {
         const pegData = this.buildDuplicatePegData(peg);
         const newPeg = this.levelManager.addPeg(pegData);
         if (newPeg) {
+          this.copyConstructionGroup(peg, newPeg, constructionGroups);
           newPegIds.add(newPeg.id);
           newPegs.push(newPeg);
         }
       }
     }
 
+    if (constructionGroups.size) this.levelManager.save();
     if (options.deferPvpMirror) {
       this._pendingPvpMirrorAfterDragIds = new Set(newPegs.map(peg => peg.id));
     } else {
@@ -2580,6 +2590,17 @@ export class Editor {
     if (this.onPegCountChange) {
       this.onPegCountChange(level.pegs.length);
     }
+  }
+
+  copyConstructionGroup(source, copy, mapping) {
+    const level = this.levelManager.getCurrentLevel();
+    const group = level.groups.find(g => g.id === source.groupId && (g.construction?.type === 'seesaw' || g.pattern === 'construction'));
+    if (!group) return;
+    if (!mapping.has(group.id)) {
+      const next = { ...structuredClone(group), id: Utils.generateId() };
+      level.groups.push(next); mapping.set(group.id, next.id);
+    }
+    copy.groupId = mapping.get(group.id);
   }
 
   groupSelectedPegs() {
@@ -2612,7 +2633,7 @@ export class Editor {
     const level = this.levelManager.getCurrentLevel();
     if (!level) return;
     
-    this.undoStack.push(Utils.deepClone(level.pegs));
+    this.undoStack.push(Utils.deepClone({pegs:level.pegs,groups:level.groups}));
     if (this.undoStack.length > this.maxUndoSteps) {
       this.undoStack.shift();
     }
@@ -2625,8 +2646,8 @@ export class Editor {
     const level = this.levelManager.getCurrentLevel();
     if (!level) return;
     
-    this.redoStack.push(Utils.deepClone(level.pegs));
-    level.pegs = this.undoStack.pop();
+    this.redoStack.push(Utils.deepClone({pegs:level.pegs,groups:level.groups}));
+    Object.assign(level,this.undoStack.pop());
     this.levelManager.save();
     
     this.selectedPegIds.clear();
@@ -2643,8 +2664,8 @@ export class Editor {
     const level = this.levelManager.getCurrentLevel();
     if (!level) return;
     
-    this.undoStack.push(Utils.deepClone(level.pegs));
-    level.pegs = this.redoStack.pop();
+    this.undoStack.push(Utils.deepClone({pegs:level.pegs,groups:level.groups}));
+    Object.assign(level,this.redoStack.pop());
     this.levelManager.save();
     
     this.selectedPegIds.clear();
@@ -3325,6 +3346,23 @@ export class Editor {
       groupedMixed: !allSame(groupValues),
       canGroup: selected.length >= 2
     };
+  }
+
+  addSeesaw(options = {}) {
+    const level = this.levelManager.getCurrentLevel();
+    if (!level) return null;
+    this.saveUndoState();
+    const object = createSeesaw({ id: 'seesaw:' + Utils.generateId(),
+      x: this.canvas.width / 2, y: 250 + this.getCameraY(), ...options });
+    level.destruction = { ...ensureLevelDestruction(level), enabled: true };
+    level.pegs.push(...object.pegs);
+    level.groups.push(...object.groups);
+    this.selectedPegIds = new Set(object.pegs.map(peg => peg.id));
+    this.setMode('select');
+    this.levelManager.save();
+    this.notifySelectionChange();
+    this.onPegCountChange?.(level.pegs.length);
+    return object;
   }
 
   setSelectedDestructionStatic(enabled) {

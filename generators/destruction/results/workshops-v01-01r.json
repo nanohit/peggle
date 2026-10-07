@@ -1,0 +1,2138 @@
+{
+  "level": {
+    "version": 1,
+    "id": "des-workshops-v01-01r",
+    "name": "Механические мастерские · v01-01r",
+    "pegRadius": 8.5,
+    "ballCount": 8,
+    "bucketEnabled": true,
+    "hitPegTimedClearEnabled": true,
+    "hitPegClearDelayMs": 1100,
+    "pegs": [
+      {
+        "id": "des-workshops-v01-01r:p1",
+        "shape": "brick",
+        "type": "obstacle",
+        "x": 95.373858,
+        "y": 179.009019,
+        "width": 92,
+        "height": 8,
+        "angle": 0,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "groupId": "des-workshops-v01-01r:assembly0:frame",
+        "constructionRole": "breakable-anchor",
+        "destructionHinge": {
+          "pivotFraction": 0.5,
+          "minAngle": -0.7,
+          "maxAngle": 0.7,
+          "damping": 0.997,
+          "stopBounce": 0.05,
+          "breakImpulse": 7
+        },
+        "constructionAssembly": "des-workshops-v01-01r:assembly0"
+      },
+      {
+        "id": "des-workshops-v01-01r:p2",
+        "shape": "brick",
+        "type": "obstacle",
+        "x": 53.373858,
+        "y": 208.009019,
+        "width": 58,
+        "height": 8,
+        "angle": 1.570796,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "groupId": "des-workshops-v01-01r:assembly0:frame",
+        "constructionRole": "hanging-wall",
+        "constructionAssembly": "des-workshops-v01-01r:assembly0"
+      },
+      {
+        "id": "des-workshops-v01-01r:p3",
+        "shape": "brick",
+        "type": "obstacle",
+        "x": 137.373858,
+        "y": 208.009019,
+        "width": 58,
+        "height": 8,
+        "angle": 1.570796,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "groupId": "des-workshops-v01-01r:assembly0:frame",
+        "constructionRole": "hanging-wall",
+        "constructionAssembly": "des-workshops-v01-01r:assembly0"
+      },
+      {
+        "id": "des-workshops-v01-01r:p4",
+        "shape": "brick",
+        "type": "obstacle",
+        "x": 95.373858,
+        "y": 237.009019,
+        "width": 92,
+        "height": 8,
+        "angle": 0,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "groupId": "des-workshops-v01-01r:assembly0:frame",
+        "constructionRole": "tray",
+        "constructionAssembly": "des-workshops-v01-01r:assembly0"
+      },
+      {
+        "id": "des-workshops-v01-01r:p5",
+        "shape": "brick",
+        "type": "obstacle",
+        "x": 95.373858,
+        "y": 162.009019,
+        "width": 8,
+        "height": 14,
+        "angle": 0,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": true,
+        "destructionPhysicsOnHit": false,
+        "constructionRole": "wall-hook",
+        "constructionAssembly": "des-workshops-v01-01r:assembly0"
+      },
+      {
+        "id": "des-workshops-v01-01r:p6",
+        "shape": "circle",
+        "type": "blue",
+        "x": 68.973858,
+        "y": 224.209019,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-workshops-v01-01r:assembly0",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-workshops-v01-01r:p7",
+        "shape": "circle",
+        "type": "orange",
+        "x": 86.573858,
+        "y": 224.209019,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-workshops-v01-01r:assembly0",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-workshops-v01-01r:p8",
+        "shape": "circle",
+        "type": "orange",
+        "x": 104.173858,
+        "y": 224.209019,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-workshops-v01-01r:assembly0",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-workshops-v01-01r:p9",
+        "shape": "circle",
+        "type": "blue",
+        "x": 121.773858,
+        "y": 224.209019,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-workshops-v01-01r:assembly0",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-workshops-v01-01r:p10",
+        "shape": "circle",
+        "type": "orange",
+        "x": 77.773858,
+        "y": 208.959019,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-workshops-v01-01r:assembly0",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-workshops-v01-01r:p11",
+        "shape": "circle",
+        "type": "orange",
+        "x": 95.373858,
+        "y": 208.959019,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-workshops-v01-01r:assembly0",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-workshops-v01-01r:p12",
+        "shape": "circle",
+        "type": "blue",
+        "x": 112.973858,
+        "y": 208.959019,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-workshops-v01-01r:assembly0",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-workshops-v01-01r:p13",
+        "shape": "brick",
+        "type": "obstacle",
+        "x": 303.252105,
+        "y": 184.009019,
+        "width": 92,
+        "height": 8,
+        "angle": 0,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "groupId": "des-workshops-v01-01r:assembly1:frame",
+        "constructionRole": "breakable-anchor",
+        "destructionHinge": {
+          "pivotFraction": 0.5,
+          "minAngle": -0.7,
+          "maxAngle": 0.7,
+          "damping": 0.997,
+          "stopBounce": 0.05,
+          "breakImpulse": 7
+        },
+        "constructionAssembly": "des-workshops-v01-01r:assembly1"
+      },
+      {
+        "id": "des-workshops-v01-01r:p14",
+        "shape": "brick",
+        "type": "obstacle",
+        "x": 261.252105,
+        "y": 213.009019,
+        "width": 58,
+        "height": 8,
+        "angle": 1.570796,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "groupId": "des-workshops-v01-01r:assembly1:frame",
+        "constructionRole": "hanging-wall",
+        "constructionAssembly": "des-workshops-v01-01r:assembly1"
+      },
+      {
+        "id": "des-workshops-v01-01r:p15",
+        "shape": "brick",
+        "type": "obstacle",
+        "x": 345.252105,
+        "y": 213.009019,
+        "width": 58,
+        "height": 8,
+        "angle": 1.570796,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "groupId": "des-workshops-v01-01r:assembly1:frame",
+        "constructionRole": "hanging-wall",
+        "constructionAssembly": "des-workshops-v01-01r:assembly1"
+      },
+      {
+        "id": "des-workshops-v01-01r:p16",
+        "shape": "brick",
+        "type": "obstacle",
+        "x": 303.252105,
+        "y": 242.009019,
+        "width": 92,
+        "height": 8,
+        "angle": 0,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "groupId": "des-workshops-v01-01r:assembly1:frame",
+        "constructionRole": "tray",
+        "constructionAssembly": "des-workshops-v01-01r:assembly1"
+      },
+      {
+        "id": "des-workshops-v01-01r:p17",
+        "shape": "brick",
+        "type": "obstacle",
+        "x": 303.252105,
+        "y": 167.009019,
+        "width": 8,
+        "height": 14,
+        "angle": 0,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": true,
+        "destructionPhysicsOnHit": false,
+        "constructionRole": "wall-hook",
+        "constructionAssembly": "des-workshops-v01-01r:assembly1"
+      },
+      {
+        "id": "des-workshops-v01-01r:p18",
+        "shape": "circle",
+        "type": "orange",
+        "x": 276.852105,
+        "y": 229.209019,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-workshops-v01-01r:assembly1",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-workshops-v01-01r:p19",
+        "shape": "circle",
+        "type": "orange",
+        "x": 294.452105,
+        "y": 229.209019,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-workshops-v01-01r:assembly1",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-workshops-v01-01r:p20",
+        "shape": "circle",
+        "type": "blue",
+        "x": 312.052105,
+        "y": 229.209019,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-workshops-v01-01r:assembly1",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-workshops-v01-01r:p21",
+        "shape": "circle",
+        "type": "orange",
+        "x": 329.652105,
+        "y": 229.209019,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-workshops-v01-01r:assembly1",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-workshops-v01-01r:p22",
+        "shape": "circle",
+        "type": "orange",
+        "x": 285.652105,
+        "y": 213.959019,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-workshops-v01-01r:assembly1",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-workshops-v01-01r:p23",
+        "shape": "circle",
+        "type": "blue",
+        "x": 303.252105,
+        "y": 213.959019,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-workshops-v01-01r:assembly1",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-workshops-v01-01r:p24",
+        "shape": "circle",
+        "type": "orange",
+        "x": 320.852105,
+        "y": 213.959019,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-workshops-v01-01r:assembly1",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-workshops-v01-01r:p25",
+        "shape": "brick",
+        "type": "blue",
+        "x": 129.373858,
+        "y": 473.372467,
+        "width": 26.703538,
+        "height": 8,
+        "angle": 1.570796,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "groupId": "des-workshops-v01-01r:assembly2:ring",
+        "curveSlices": [
+          {
+            "x": 126.78576192439331,
+            "y": 460.3612305240731,
+            "nx": 0.9238795325112867,
+            "ny": -0.3826834323650898
+          },
+          {
+            "x": 128.43443511253056,
+            "y": 465.4353248533854,
+            "nx": 0.9723699203976766,
+            "ny": -0.2334453638559054
+          },
+          {
+            "x": 129.26904716593592,
+            "y": 470.70485796973946,
+            "nx": 0.996917333733128,
+            "ny": -0.07845909572784494
+          },
+          {
+            "x": 129.26904716593592,
+            "y": 476.0400764792329,
+            "nx": 0.996917333733128,
+            "ny": 0.07845909572784494
+          },
+          {
+            "x": 128.43443511253056,
+            "y": 481.30960959558695,
+            "nx": 0.9723699203976766,
+            "ny": 0.2334453638559054
+          },
+          {
+            "x": 126.78576192439331,
+            "y": 486.38370392489924,
+            "nx": 0.9238795325112867,
+            "ny": 0.3826834323650898
+          }
+        ],
+        "constructionRole": "breakable-shell",
+        "constructionAssembly": "des-workshops-v01-01r:assembly2"
+      },
+      {
+        "id": "des-workshops-v01-01r:p26",
+        "shape": "brick",
+        "type": "blue",
+        "x": 119.415488,
+        "y": 497.414098,
+        "width": 26.703538,
+        "height": 8,
+        "angle": 2.356194,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "groupId": "des-workshops-v01-01r:assembly2:ring",
+        "curveSlices": [
+          {
+            "x": 126.78576192439331,
+            "y": 486.38370392489924,
+            "nx": 0.9238795325112867,
+            "ny": 0.3826834323650898
+          },
+          {
+            "x": 124.3636234070487,
+            "y": 491.1374184248284,
+            "nx": 0.8526401643540923,
+            "ny": 0.5224985647159488
+          },
+          {
+            "x": 121.22766064941062,
+            "y": 495.4537008677124,
+            "nx": 0.7604059656000309,
+            "ny": 0.6494480483301837
+          },
+          {
+            "x": 117.45509146223581,
+            "y": 499.2262700548872,
+            "nx": 0.6494480483301837,
+            "ny": 0.7604059656000309
+          },
+          {
+            "x": 113.13880901935184,
+            "y": 502.3622328125253,
+            "nx": 0.5224985647159489,
+            "ny": 0.8526401643540922
+          },
+          {
+            "x": 108.38509451942262,
+            "y": 504.78437132986994,
+            "nx": 0.38268343236508984,
+            "ny": 0.9238795325112867
+          }
+        ],
+        "constructionRole": "breakable-shell",
+        "constructionAssembly": "des-workshops-v01-01r:assembly2"
+      },
+      {
+        "id": "des-workshops-v01-01r:p27",
+        "shape": "brick",
+        "type": "blue",
+        "x": 95.373858,
+        "y": 507.372467,
+        "width": 26.703538,
+        "height": 8,
+        "angle": 3.141593,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "groupId": "des-workshops-v01-01r:assembly2:ring",
+        "curveSlices": [
+          {
+            "x": 108.38509451942262,
+            "y": 504.78437132986994,
+            "nx": 0.38268343236508984,
+            "ny": 0.9238795325112867
+          },
+          {
+            "x": 103.31100019011036,
+            "y": 506.4330445180072,
+            "nx": 0.23344536385590547,
+            "ny": 0.9723699203976766
+          },
+          {
+            "x": 98.04146707375631,
+            "y": 507.26765657141254,
+            "nx": 0.078459095727845,
+            "ny": 0.996917333733128
+          },
+          {
+            "x": 92.70624856426285,
+            "y": 507.26765657141254,
+            "nx": -0.07845909572784487,
+            "ny": 0.996917333733128
+          },
+          {
+            "x": 87.4367154479088,
+            "y": 506.4330445180072,
+            "nx": -0.23344536385590534,
+            "ny": 0.9723699203976767
+          },
+          {
+            "x": 82.36262111859652,
+            "y": 504.78437132986994,
+            "nx": -0.3826834323650897,
+            "ny": 0.9238795325112867
+          }
+        ],
+        "constructionRole": "breakable-shell",
+        "constructionAssembly": "des-workshops-v01-01r:assembly2"
+      },
+      {
+        "id": "des-workshops-v01-01r:p28",
+        "shape": "brick",
+        "type": "blue",
+        "x": 71.332227,
+        "y": 497.414098,
+        "width": 26.703538,
+        "height": 8,
+        "angle": 3.926991,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "groupId": "des-workshops-v01-01r:assembly2:ring",
+        "curveSlices": [
+          {
+            "x": 82.36262111859652,
+            "y": 504.78437132986994,
+            "nx": -0.3826834323650897,
+            "ny": 0.9238795325112867
+          },
+          {
+            "x": 77.6089066186673,
+            "y": 502.3622328125253,
+            "nx": -0.5224985647159488,
+            "ny": 0.8526401643540923
+          },
+          {
+            "x": 73.29262417578333,
+            "y": 499.2262700548872,
+            "nx": -0.6494480483301835,
+            "ny": 0.760405965600031
+          },
+          {
+            "x": 69.52005498860852,
+            "y": 495.4537008677124,
+            "nx": -0.7604059656000309,
+            "ny": 0.6494480483301838
+          },
+          {
+            "x": 66.38409223097044,
+            "y": 491.1374184248284,
+            "nx": -0.8526401643540922,
+            "ny": 0.5224985647159489
+          },
+          {
+            "x": 63.961953713625824,
+            "y": 486.38370392489924,
+            "nx": -0.9238795325112867,
+            "ny": 0.3826834323650899
+          }
+        ],
+        "constructionRole": "breakable-shell",
+        "constructionAssembly": "des-workshops-v01-01r:assembly2"
+      },
+      {
+        "id": "des-workshops-v01-01r:p29",
+        "shape": "brick",
+        "type": "blue",
+        "x": 61.373858,
+        "y": 473.372467,
+        "width": 26.703538,
+        "height": 8,
+        "angle": 4.712389,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "groupId": "des-workshops-v01-01r:assembly2:ring",
+        "curveSlices": [
+          {
+            "x": 63.961953713625824,
+            "y": 486.38370392489924,
+            "nx": -0.9238795325112867,
+            "ny": 0.3826834323650899
+          },
+          {
+            "x": 62.31328052548857,
+            "y": 481.30960959558695,
+            "nx": -0.9723699203976766,
+            "ny": 0.23344536385590553
+          },
+          {
+            "x": 61.47866847208322,
+            "y": 476.0400764792329,
+            "nx": -0.996917333733128,
+            "ny": 0.07845909572784507
+          },
+          {
+            "x": 61.47866847208322,
+            "y": 470.70485796973946,
+            "nx": -0.996917333733128,
+            "ny": -0.07845909572784482
+          },
+          {
+            "x": 62.313280525488565,
+            "y": 465.4353248533854,
+            "nx": -0.9723699203976767,
+            "ny": -0.23344536385590528
+          },
+          {
+            "x": 63.96195371362582,
+            "y": 460.3612305240731,
+            "nx": -0.9238795325112868,
+            "ny": -0.3826834323650896
+          }
+        ],
+        "constructionRole": "breakable-shell",
+        "constructionAssembly": "des-workshops-v01-01r:assembly2"
+      },
+      {
+        "id": "des-workshops-v01-01r:p30",
+        "shape": "brick",
+        "type": "blue",
+        "x": 71.332227,
+        "y": 449.330837,
+        "width": 26.703538,
+        "height": 8,
+        "angle": 5.497787,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "groupId": "des-workshops-v01-01r:assembly2:ring",
+        "curveSlices": [
+          {
+            "x": 63.96195371362582,
+            "y": 460.3612305240731,
+            "nx": -0.9238795325112868,
+            "ny": -0.3826834323650896
+          },
+          {
+            "x": 66.38409223097044,
+            "y": 455.60751602414393,
+            "nx": -0.8526401643540923,
+            "ny": -0.5224985647159487
+          },
+          {
+            "x": 69.52005498860852,
+            "y": 451.2912335812599,
+            "nx": -0.760405965600031,
+            "ny": -0.6494480483301835
+          },
+          {
+            "x": 73.29262417578332,
+            "y": 447.51866439408514,
+            "nx": -0.6494480483301841,
+            "ny": -0.7604059656000306
+          },
+          {
+            "x": 77.60890661866732,
+            "y": 444.38270163644705,
+            "nx": -0.5224985647159486,
+            "ny": -0.8526401643540924
+          },
+          {
+            "x": 82.36262111859651,
+            "y": 441.9605631191024,
+            "nx": -0.38268343236509034,
+            "ny": -0.9238795325112865
+          }
+        ],
+        "constructionRole": "breakable-shell",
+        "constructionAssembly": "des-workshops-v01-01r:assembly2"
+      },
+      {
+        "id": "des-workshops-v01-01r:p31",
+        "shape": "brick",
+        "type": "blue",
+        "x": 95.373858,
+        "y": 439.372467,
+        "width": 26.703538,
+        "height": 8,
+        "angle": 6.283185,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "groupId": "des-workshops-v01-01r:assembly2:ring",
+        "curveSlices": [
+          {
+            "x": 82.36262111859651,
+            "y": 441.9605631191024,
+            "nx": -0.38268343236509034,
+            "ny": -0.9238795325112865
+          },
+          {
+            "x": 87.43671544790877,
+            "y": 440.31188993096515,
+            "nx": -0.233445363855906,
+            "ny": -0.9723699203976764
+          },
+          {
+            "x": 92.70624856426282,
+            "y": 439.4772778775598,
+            "nx": -0.07845909572784557,
+            "ny": -0.996917333733128
+          },
+          {
+            "x": 98.04146707375628,
+            "y": 439.4772778775598,
+            "nx": 0.07845909572784432,
+            "ny": -0.9969173337331281
+          },
+          {
+            "x": 103.31100019011033,
+            "y": 440.31188993096515,
+            "nx": 0.23344536385590478,
+            "ny": -0.9723699203976768
+          },
+          {
+            "x": 108.38509451942261,
+            "y": 441.9605631191024,
+            "nx": 0.38268343236508917,
+            "ny": -0.923879532511287
+          }
+        ],
+        "constructionRole": "breakable-shell",
+        "constructionAssembly": "des-workshops-v01-01r:assembly2"
+      },
+      {
+        "id": "des-workshops-v01-01r:p32",
+        "shape": "brick",
+        "type": "blue",
+        "x": 119.415488,
+        "y": 449.330837,
+        "width": 26.703538,
+        "height": 8,
+        "angle": 7.068583,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "groupId": "des-workshops-v01-01r:assembly2:ring",
+        "curveSlices": [
+          {
+            "x": 108.38509451942264,
+            "y": 441.9605631191024,
+            "nx": 0.38268343236509,
+            "ny": -0.9238795325112866
+          },
+          {
+            "x": 113.13880901935184,
+            "y": 444.38270163644705,
+            "nx": 0.522498564715949,
+            "ny": -0.8526401643540921
+          },
+          {
+            "x": 117.45509146223583,
+            "y": 447.51866439408514,
+            "nx": 0.6494480483301839,
+            "ny": -0.7604059656000308
+          },
+          {
+            "x": 121.22766064941062,
+            "y": 451.2912335812599,
+            "nx": 0.760405965600031,
+            "ny": -0.6494480483301834
+          },
+          {
+            "x": 124.3636234070487,
+            "y": 455.60751602414393,
+            "nx": 0.8526401643540923,
+            "ny": -0.5224985647159487
+          },
+          {
+            "x": 126.78576192439333,
+            "y": 460.3612305240731,
+            "nx": 0.9238795325112868,
+            "ny": -0.38268343236508956
+          }
+        ],
+        "constructionRole": "breakable-shell",
+        "constructionAssembly": "des-workshops-v01-01r:assembly2"
+      },
+      {
+        "id": "des-workshops-v01-01r:p33",
+        "shape": "brick",
+        "type": "obstacle",
+        "x": 95.373858,
+        "y": 515.372467,
+        "width": 76,
+        "height": 8,
+        "angle": 0,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": true,
+        "destructionPhysicsOnHit": false,
+        "constructionRole": "foundation",
+        "constructionAssembly": "des-workshops-v01-01r:assembly2"
+      },
+      {
+        "id": "des-workshops-v01-01r:p34",
+        "shape": "circle",
+        "type": "orange",
+        "x": 77.773858,
+        "y": 485.372467,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-workshops-v01-01r:assembly2",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-workshops-v01-01r:p35",
+        "shape": "circle",
+        "type": "blue",
+        "x": 95.373858,
+        "y": 485.372467,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-workshops-v01-01r:assembly2",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-workshops-v01-01r:p36",
+        "shape": "circle",
+        "type": "orange",
+        "x": 112.973858,
+        "y": 485.372467,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-workshops-v01-01r:assembly2",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-workshops-v01-01r:p37",
+        "shape": "circle",
+        "type": "blue",
+        "x": 86.573858,
+        "y": 470.122467,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-workshops-v01-01r:assembly2",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-workshops-v01-01r:p38",
+        "shape": "circle",
+        "type": "orange",
+        "x": 104.173858,
+        "y": 470.122467,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-workshops-v01-01r:assembly2",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-workshops-v01-01r:p39",
+        "shape": "circle",
+        "type": "orange",
+        "x": 95.373858,
+        "y": 454.872467,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-workshops-v01-01r:assembly2",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-workshops-v01-01r:p40",
+        "shape": "brick",
+        "type": "blue",
+        "x": 346.252105,
+        "y": 462.372467,
+        "width": 29.059732,
+        "height": 8,
+        "angle": 1.570796,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "groupId": "des-workshops-v01-01r:assembly3:ring",
+        "curveSlices": [
+          {
+            "x": 343.4356478789008,
+            "y": 448.21318022697784,
+            "nx": 0.9238795325112867,
+            "ny": -0.3826834323650898
+          },
+          {
+            "x": 345.22979223069717,
+            "y": 453.73498876181765,
+            "nx": 0.9723699203976766,
+            "ny": -0.2334453638559054
+          },
+          {
+            "x": 346.1380465241089,
+            "y": 459.4694806825559,
+            "nx": 0.996917333733128,
+            "ny": -0.07845909572784494
+          },
+          {
+            "x": 346.1380465241089,
+            "y": 465.27545376641643,
+            "nx": 0.996917333733128,
+            "ny": 0.07845909572784494
+          },
+          {
+            "x": 345.22979223069717,
+            "y": 471.0099456871547,
+            "nx": 0.9723699203976766,
+            "ny": 0.2334453638559054
+          },
+          {
+            "x": 343.4356478789008,
+            "y": 476.5317542219945,
+            "nx": 0.9238795325112867,
+            "ny": 0.3826834323650898
+          }
+        ],
+        "constructionRole": "breakable-shell",
+        "constructionAssembly": "des-workshops-v01-01r:assembly3"
+      },
+      {
+        "id": "des-workshops-v01-01r:p41",
+        "shape": "brick",
+        "type": "blue",
+        "x": 335.415056,
+        "y": 488.535418,
+        "width": 29.059732,
+        "height": 8,
+        "angle": 2.356194,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "groupId": "des-workshops-v01-01r:assembly3:ring",
+        "curveSlices": [
+          {
+            "x": 343.4356478789008,
+            "y": 476.5317542219945,
+            "nx": 0.9238795325112867,
+            "ny": 0.3826834323650898
+          },
+          {
+            "x": 340.79979125708456,
+            "y": 481.70491411897626,
+            "nx": 0.8526401643540923,
+            "ny": 0.5224985647159488
+          },
+          {
+            "x": 337.3871259031843,
+            "y": 486.40204501270296,
+            "nx": 0.7604059656000309,
+            "ny": 0.6494480483301837
+          },
+          {
+            "x": 333.28168296419994,
+            "y": 490.5074879516873,
+            "nx": 0.6494480483301837,
+            "ny": 0.7604059656000309
+          },
+          {
+            "x": 328.58455207047325,
+            "y": 493.9201533055876,
+            "nx": 0.5224985647159489,
+            "ny": 0.8526401643540922
+          },
+          {
+            "x": 323.4113921734915,
+            "y": 496.5560099274038,
+            "nx": 0.38268343236508984,
+            "ny": 0.9238795325112867
+          }
+        ],
+        "constructionRole": "breakable-shell",
+        "constructionAssembly": "des-workshops-v01-01r:assembly3"
+      },
+      {
+        "id": "des-workshops-v01-01r:p42",
+        "shape": "brick",
+        "type": "blue",
+        "x": 309.252105,
+        "y": 499.372467,
+        "width": 29.059732,
+        "height": 8,
+        "angle": 3.141593,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "groupId": "des-workshops-v01-01r:assembly3:ring",
+        "curveSlices": [
+          {
+            "x": 323.4113921734915,
+            "y": 496.5560099274038,
+            "nx": 0.38268343236508984,
+            "ny": 0.9238795325112867
+          },
+          {
+            "x": 317.8895836386517,
+            "y": 498.3501542792002,
+            "nx": 0.23344536385590547,
+            "ny": 0.9723699203976766
+          },
+          {
+            "x": 312.1550917179134,
+            "y": 499.2584085726119,
+            "nx": 0.078459095727845,
+            "ny": 0.996917333733128
+          },
+          {
+            "x": 306.3491186340529,
+            "y": 499.2584085726119,
+            "nx": -0.07845909572784487,
+            "ny": 0.996917333733128
+          },
+          {
+            "x": 300.6146267133147,
+            "y": 498.3501542792002,
+            "nx": -0.23344536385590534,
+            "ny": 0.9723699203976767
+          },
+          {
+            "x": 295.09281817847483,
+            "y": 496.5560099274038,
+            "nx": -0.3826834323650897,
+            "ny": 0.9238795325112867
+          }
+        ],
+        "constructionRole": "breakable-shell",
+        "constructionAssembly": "des-workshops-v01-01r:assembly3"
+      },
+      {
+        "id": "des-workshops-v01-01r:p43",
+        "shape": "brick",
+        "type": "blue",
+        "x": 283.089154,
+        "y": 488.535418,
+        "width": 29.059732,
+        "height": 8,
+        "angle": 3.926991,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "groupId": "des-workshops-v01-01r:assembly3:ring",
+        "curveSlices": [
+          {
+            "x": 295.09281817847483,
+            "y": 496.5560099274038,
+            "nx": -0.3826834323650897,
+            "ny": 0.9238795325112867
+          },
+          {
+            "x": 289.91965828149307,
+            "y": 493.9201533055876,
+            "nx": -0.5224985647159488,
+            "ny": 0.8526401643540923
+          },
+          {
+            "x": 285.2225273877664,
+            "y": 490.5074879516873,
+            "nx": -0.6494480483301835,
+            "ny": 0.760405965600031
+          },
+          {
+            "x": 281.117084448782,
+            "y": 486.40204501270296,
+            "nx": -0.7604059656000309,
+            "ny": 0.6494480483301838
+          },
+          {
+            "x": 277.70441909488176,
+            "y": 481.70491411897626,
+            "nx": -0.8526401643540922,
+            "ny": 0.5224985647159489
+          },
+          {
+            "x": 275.0685624730655,
+            "y": 476.5317542219945,
+            "nx": -0.9238795325112867,
+            "ny": 0.3826834323650899
+          }
+        ],
+        "constructionRole": "breakable-shell",
+        "constructionAssembly": "des-workshops-v01-01r:assembly3"
+      },
+      {
+        "id": "des-workshops-v01-01r:p44",
+        "shape": "brick",
+        "type": "blue",
+        "x": 272.252105,
+        "y": 462.372467,
+        "width": 29.059732,
+        "height": 8,
+        "angle": 4.712389,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "groupId": "des-workshops-v01-01r:assembly3:ring",
+        "curveSlices": [
+          {
+            "x": 275.0685624730655,
+            "y": 476.5317542219945,
+            "nx": -0.9238795325112867,
+            "ny": 0.3826834323650899
+          },
+          {
+            "x": 273.27441812126915,
+            "y": 471.0099456871547,
+            "nx": -0.9723699203976766,
+            "ny": 0.23344536385590553
+          },
+          {
+            "x": 272.3661638278574,
+            "y": 465.27545376641643,
+            "nx": -0.996917333733128,
+            "ny": 0.07845909572784507
+          },
+          {
+            "x": 272.3661638278574,
+            "y": 459.4694806825559,
+            "nx": -0.996917333733128,
+            "ny": -0.07845909572784482
+          },
+          {
+            "x": 273.27441812126915,
+            "y": 453.7349887618177,
+            "nx": -0.9723699203976767,
+            "ny": -0.23344536385590528
+          },
+          {
+            "x": 275.0685624730655,
+            "y": 448.21318022697784,
+            "nx": -0.9238795325112868,
+            "ny": -0.3826834323650896
+          }
+        ],
+        "constructionRole": "breakable-shell",
+        "constructionAssembly": "des-workshops-v01-01r:assembly3"
+      },
+      {
+        "id": "des-workshops-v01-01r:p45",
+        "shape": "brick",
+        "type": "blue",
+        "x": 283.089154,
+        "y": 436.209516,
+        "width": 29.059732,
+        "height": 8,
+        "angle": 5.497787,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "groupId": "des-workshops-v01-01r:assembly3:ring",
+        "curveSlices": [
+          {
+            "x": 275.0685624730655,
+            "y": 448.21318022697784,
+            "nx": -0.9238795325112868,
+            "ny": -0.3826834323650896
+          },
+          {
+            "x": 277.70441909488176,
+            "y": 443.0400203299961,
+            "nx": -0.8526401643540923,
+            "ny": -0.5224985647159487
+          },
+          {
+            "x": 281.117084448782,
+            "y": 438.3428894362694,
+            "nx": -0.760405965600031,
+            "ny": -0.6494480483301835
+          },
+          {
+            "x": 285.2225273877664,
+            "y": 434.237446497285,
+            "nx": -0.6494480483301841,
+            "ny": -0.7604059656000306
+          },
+          {
+            "x": 289.91965828149307,
+            "y": 430.82478114338477,
+            "nx": -0.5224985647159486,
+            "ny": -0.8526401643540924
+          },
+          {
+            "x": 295.09281817847483,
+            "y": 428.1889245215686,
+            "nx": -0.38268343236509034,
+            "ny": -0.9238795325112865
+          }
+        ],
+        "constructionRole": "breakable-shell",
+        "constructionAssembly": "des-workshops-v01-01r:assembly3"
+      },
+      {
+        "id": "des-workshops-v01-01r:p46",
+        "shape": "brick",
+        "type": "blue",
+        "x": 309.252105,
+        "y": 425.372467,
+        "width": 29.059732,
+        "height": 8,
+        "angle": 6.283185,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "groupId": "des-workshops-v01-01r:assembly3:ring",
+        "curveSlices": [
+          {
+            "x": 295.09281817847483,
+            "y": 428.1889245215686,
+            "nx": -0.38268343236509034,
+            "ny": -0.9238795325112865
+          },
+          {
+            "x": 300.61462671331464,
+            "y": 426.39478016977216,
+            "nx": -0.233445363855906,
+            "ny": -0.9723699203976764
+          },
+          {
+            "x": 306.3491186340529,
+            "y": 425.4865258763604,
+            "nx": -0.07845909572784557,
+            "ny": -0.996917333733128
+          },
+          {
+            "x": 312.1550917179134,
+            "y": 425.4865258763604,
+            "nx": 0.07845909572784432,
+            "ny": -0.9969173337331281
+          },
+          {
+            "x": 317.88958363865163,
+            "y": 426.39478016977216,
+            "nx": 0.23344536385590478,
+            "ny": -0.9723699203976768
+          },
+          {
+            "x": 323.41139217349144,
+            "y": 428.18892452156854,
+            "nx": 0.38268343236508917,
+            "ny": -0.923879532511287
+          }
+        ],
+        "constructionRole": "breakable-shell",
+        "constructionAssembly": "des-workshops-v01-01r:assembly3"
+      },
+      {
+        "id": "des-workshops-v01-01r:p47",
+        "shape": "brick",
+        "type": "blue",
+        "x": 335.415056,
+        "y": 436.209516,
+        "width": 29.059732,
+        "height": 8,
+        "angle": 7.068583,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "groupId": "des-workshops-v01-01r:assembly3:ring",
+        "curveSlices": [
+          {
+            "x": 323.4113921734915,
+            "y": 428.18892452156854,
+            "nx": 0.38268343236509,
+            "ny": -0.9238795325112866
+          },
+          {
+            "x": 328.58455207047325,
+            "y": 430.82478114338477,
+            "nx": 0.522498564715949,
+            "ny": -0.8526401643540921
+          },
+          {
+            "x": 333.28168296419994,
+            "y": 434.237446497285,
+            "nx": 0.6494480483301839,
+            "ny": -0.7604059656000308
+          },
+          {
+            "x": 337.3871259031843,
+            "y": 438.3428894362694,
+            "nx": 0.760405965600031,
+            "ny": -0.6494480483301834
+          },
+          {
+            "x": 340.79979125708456,
+            "y": 443.0400203299961,
+            "nx": 0.8526401643540923,
+            "ny": -0.5224985647159487
+          },
+          {
+            "x": 343.4356478789008,
+            "y": 448.21318022697784,
+            "nx": 0.9238795325112868,
+            "ny": -0.38268343236508956
+          }
+        ],
+        "constructionRole": "breakable-shell",
+        "constructionAssembly": "des-workshops-v01-01r:assembly3"
+      },
+      {
+        "id": "des-workshops-v01-01r:p48",
+        "shape": "brick",
+        "type": "obstacle",
+        "x": 309.252105,
+        "y": 507.372467,
+        "width": 76,
+        "height": 8,
+        "angle": 0,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": true,
+        "destructionPhysicsOnHit": false,
+        "constructionRole": "foundation",
+        "constructionAssembly": "des-workshops-v01-01r:assembly3"
+      },
+      {
+        "id": "des-workshops-v01-01r:p49",
+        "shape": "circle",
+        "type": "blue",
+        "x": 291.652105,
+        "y": 474.372467,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-workshops-v01-01r:assembly3",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-workshops-v01-01r:p50",
+        "shape": "circle",
+        "type": "orange",
+        "x": 309.252105,
+        "y": 474.372467,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-workshops-v01-01r:assembly3",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-workshops-v01-01r:p51",
+        "shape": "circle",
+        "type": "orange",
+        "x": 326.852105,
+        "y": 474.372467,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-workshops-v01-01r:assembly3",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-workshops-v01-01r:p52",
+        "shape": "circle",
+        "type": "orange",
+        "x": 300.452105,
+        "y": 459.122467,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-workshops-v01-01r:assembly3",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-workshops-v01-01r:p53",
+        "shape": "circle",
+        "type": "orange",
+        "x": 318.052105,
+        "y": 459.122467,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-workshops-v01-01r:assembly3",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-workshops-v01-01r:p54",
+        "shape": "circle",
+        "type": "orange",
+        "x": 309.252105,
+        "y": 443.872467,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-workshops-v01-01r:assembly3",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-workshops-v01-01r:assembly4:left:beam",
+        "groupId": "des-workshops-v01-01r:assembly4:left",
+        "type": "obstacle",
+        "shape": "brick",
+        "x": 144.30457800719887,
+        "y": 347,
+        "angle": 0,
+        "width": 96,
+        "height": 10.2,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "destructionHinge": {
+          "pivotFraction": 0.2,
+          "minAngle": -0.65,
+          "maxAngle": 0.65,
+          "damping": 0.999,
+          "stopBounce": 0.04,
+          "breakImpulse": 0
+        },
+        "constructionPart": "beam",
+        "constructionAssembly": "des-workshops-v01-01r:assembly4"
+      },
+      {
+        "id": "des-workshops-v01-01r:assembly4:left:base",
+        "groupId": "des-workshops-v01-01r:assembly4:left",
+        "type": "obstacle",
+        "shape": "brick",
+        "x": 115.50457800719887,
+        "y": 369,
+        "angle": 0,
+        "width": 14,
+        "height": 20,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": true,
+        "constructionPart": "bearing",
+        "constructionAssembly": "des-workshops-v01-01r:assembly4"
+      },
+      {
+        "id": "des-workshops-v01-01r:p55",
+        "shape": "circle",
+        "type": "orange",
+        "x": 130.704578,
+        "y": 333.2,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-workshops-v01-01r:assembly4",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-workshops-v01-01r:p56",
+        "shape": "circle",
+        "type": "orange",
+        "x": 148.304578,
+        "y": 333.2,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-workshops-v01-01r:assembly4",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-workshops-v01-01r:p57",
+        "shape": "circle",
+        "type": "blue",
+        "x": 165.904578,
+        "y": 333.2,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-workshops-v01-01r:assembly4",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-workshops-v01-01r:p58",
+        "shape": "circle",
+        "type": "orange",
+        "x": 139.504578,
+        "y": 317.95,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-workshops-v01-01r:assembly4",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-workshops-v01-01r:p59",
+        "shape": "circle",
+        "type": "blue",
+        "x": 157.104578,
+        "y": 317.95,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-workshops-v01-01r:assembly4",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-workshops-v01-01r:assembly4:right:beam",
+        "groupId": "des-workshops-v01-01r:assembly4:right",
+        "type": "obstacle",
+        "shape": "brick",
+        "x": 244.30457800719887,
+        "y": 347,
+        "angle": 0,
+        "width": 96,
+        "height": 10.2,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "destructionHinge": {
+          "pivotFraction": 0.8,
+          "minAngle": -0.65,
+          "maxAngle": 0.65,
+          "damping": 0.999,
+          "stopBounce": 0.04,
+          "breakImpulse": 0
+        },
+        "constructionPart": "beam",
+        "constructionAssembly": "des-workshops-v01-01r:assembly4"
+      },
+      {
+        "id": "des-workshops-v01-01r:assembly4:right:base",
+        "groupId": "des-workshops-v01-01r:assembly4:right",
+        "type": "obstacle",
+        "shape": "brick",
+        "x": 273.1045780071989,
+        "y": 369,
+        "angle": 0,
+        "width": 14,
+        "height": 20,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": true,
+        "constructionPart": "bearing",
+        "constructionAssembly": "des-workshops-v01-01r:assembly4"
+      },
+      {
+        "id": "des-workshops-v01-01r:p60",
+        "shape": "circle",
+        "type": "orange",
+        "x": 222.704578,
+        "y": 333.2,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-workshops-v01-01r:assembly4",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-workshops-v01-01r:p61",
+        "shape": "circle",
+        "type": "orange",
+        "x": 240.304578,
+        "y": 333.2,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-workshops-v01-01r:assembly4",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-workshops-v01-01r:p62",
+        "shape": "circle",
+        "type": "blue",
+        "x": 257.904578,
+        "y": 333.2,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-workshops-v01-01r:assembly4",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-workshops-v01-01r:p63",
+        "shape": "circle",
+        "type": "orange",
+        "x": 231.504578,
+        "y": 317.95,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-workshops-v01-01r:assembly4",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-workshops-v01-01r:p64",
+        "shape": "circle",
+        "type": "blue",
+        "x": 249.104578,
+        "y": 317.95,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-workshops-v01-01r:assembly4",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-workshops-v01-01r:p65",
+        "shape": "circle",
+        "type": "blue",
+        "x": 194.304578,
+        "y": 360.8,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": true,
+        "destructionPhysicsOnHitBallOnly": true,
+        "constructionRole": "bridge-lock",
+        "constructionAssembly": "des-workshops-v01-01r:assembly4"
+      }
+    ],
+    "groups": [
+      {
+        "id": "des-workshops-v01-01r:assembly0:frame",
+        "name": "Подвесная рама",
+        "pattern": "construction",
+        "destructionBody": true
+      },
+      {
+        "id": "des-workshops-v01-01r:assembly1:frame",
+        "name": "Подвесная рама",
+        "pattern": "construction",
+        "destructionBody": true
+      },
+      {
+        "id": "des-workshops-v01-01r:assembly2:ring",
+        "name": "Разрушаемый обод",
+        "pattern": "construction",
+        "destructionBody": true
+      },
+      {
+        "id": "des-workshops-v01-01r:assembly3:ring",
+        "name": "Разрушаемый обод",
+        "pattern": "construction",
+        "destructionBody": true
+      },
+      {
+        "id": "des-workshops-v01-01r:assembly4:left",
+        "name": "Качели",
+        "pattern": "construction",
+        "construction": {
+          "type": "seesaw"
+        },
+        "destructionBody": false
+      },
+      {
+        "id": "des-workshops-v01-01r:assembly4:right",
+        "name": "Качели",
+        "pattern": "construction",
+        "construction": {
+          "type": "seesaw"
+        },
+        "destructionBody": false
+      }
+    ],
+    "bezierCurves": {},
+    "flippers": null,
+    "destruction": {
+      "enabled": true,
+      "gravityX": 0,
+      "gravityY": 0.115,
+      "damping": 0.994,
+      "restitution": 0.34,
+      "friction": 0.72,
+      "surfaceGrip": 0.18,
+      "dynamicPegBallBounce": 0.45,
+      "maxSpeed": 14,
+      "sleepSpeed": 0.055,
+      "sleepFrames": 18,
+      "bombImpulse": 12,
+      "stuckPileClearDelayMs": 220
+    },
+    "metadata": {
+      "authorNotes": "Сочетайте удар по замку, разрушение опоры и перевес качелей.",
+      "generator": {
+        "name": "destruction_generator0.1",
+        "version": "0.1.0",
+        "seed": "v01-01r",
+        "family": "workshops",
+        "principles": [
+          "physical-supports",
+          "load-transfer",
+          "gravity",
+          "fracture",
+          "hinges",
+          "ball-only-latches"
+        ],
+        "plan": {
+          "assemblies": [
+            {
+              "id": "des-workshops-v01-01r:assembly0",
+              "index": 0,
+              "type": "cradle",
+              "x": 95.37385781900957,
+              "y": 249.00901938974857,
+              "width": 120,
+              "pegs": [
+                "des-workshops-v01-01r:p1",
+                "des-workshops-v01-01r:p2",
+                "des-workshops-v01-01r:p3",
+                "des-workshops-v01-01r:p4",
+                "des-workshops-v01-01r:p5",
+                "des-workshops-v01-01r:p6",
+                "des-workshops-v01-01r:p7",
+                "des-workshops-v01-01r:p8",
+                "des-workshops-v01-01r:p9",
+                "des-workshops-v01-01r:p10",
+                "des-workshops-v01-01r:p11",
+                "des-workshops-v01-01r:p12"
+              ],
+              "supportContacts": [
+                [
+                  "wall-hook",
+                  "breakable-anchor"
+                ],
+                [
+                  "breakable-anchor",
+                  "tray"
+                ],
+                [
+                  "tray",
+                  "cargo"
+                ]
+              ],
+              "trigger": "break-anchor"
+            },
+            {
+              "id": "des-workshops-v01-01r:assembly1",
+              "index": 1,
+              "type": "cradle",
+              "x": 303.25210517598316,
+              "y": 254.00901938974857,
+              "width": 120,
+              "pegs": [
+                "des-workshops-v01-01r:p13",
+                "des-workshops-v01-01r:p14",
+                "des-workshops-v01-01r:p15",
+                "des-workshops-v01-01r:p16",
+                "des-workshops-v01-01r:p17",
+                "des-workshops-v01-01r:p18",
+                "des-workshops-v01-01r:p19",
+                "des-workshops-v01-01r:p20",
+                "des-workshops-v01-01r:p21",
+                "des-workshops-v01-01r:p22",
+                "des-workshops-v01-01r:p23",
+                "des-workshops-v01-01r:p24"
+              ],
+              "supportContacts": [
+                [
+                  "wall-hook",
+                  "breakable-anchor"
+                ],
+                [
+                  "breakable-anchor",
+                  "tray"
+                ],
+                [
+                  "tray",
+                  "cargo"
+                ]
+              ],
+              "trigger": "break-anchor"
+            },
+            {
+              "id": "des-workshops-v01-01r:assembly2",
+              "index": 2,
+              "type": "cage",
+              "x": 95.37385781900957,
+              "y": 515.3724672244862,
+              "width": 124,
+              "pegs": [
+                "des-workshops-v01-01r:p25",
+                "des-workshops-v01-01r:p26",
+                "des-workshops-v01-01r:p27",
+                "des-workshops-v01-01r:p28",
+                "des-workshops-v01-01r:p29",
+                "des-workshops-v01-01r:p30",
+                "des-workshops-v01-01r:p31",
+                "des-workshops-v01-01r:p32",
+                "des-workshops-v01-01r:p33",
+                "des-workshops-v01-01r:p34",
+                "des-workshops-v01-01r:p35",
+                "des-workshops-v01-01r:p36",
+                "des-workshops-v01-01r:p37",
+                "des-workshops-v01-01r:p38",
+                "des-workshops-v01-01r:p39"
+              ],
+              "supportContacts": [
+                [
+                  "foundation",
+                  "breakable-shell"
+                ],
+                [
+                  "breakable-shell",
+                  "cargo"
+                ]
+              ],
+              "trigger": "fracture-shell"
+            },
+            {
+              "id": "des-workshops-v01-01r:assembly3",
+              "index": 3,
+              "type": "cage",
+              "x": 309.25210517598316,
+              "y": 507.3724672244862,
+              "width": 124,
+              "pegs": [
+                "des-workshops-v01-01r:p40",
+                "des-workshops-v01-01r:p41",
+                "des-workshops-v01-01r:p42",
+                "des-workshops-v01-01r:p43",
+                "des-workshops-v01-01r:p44",
+                "des-workshops-v01-01r:p45",
+                "des-workshops-v01-01r:p46",
+                "des-workshops-v01-01r:p47",
+                "des-workshops-v01-01r:p48",
+                "des-workshops-v01-01r:p49",
+                "des-workshops-v01-01r:p50",
+                "des-workshops-v01-01r:p51",
+                "des-workshops-v01-01r:p52",
+                "des-workshops-v01-01r:p53",
+                "des-workshops-v01-01r:p54"
+              ],
+              "supportContacts": [
+                [
+                  "foundation",
+                  "breakable-shell"
+                ],
+                [
+                  "breakable-shell",
+                  "cargo"
+                ]
+              ],
+              "trigger": "fracture-shell"
+            },
+            {
+              "id": "des-workshops-v01-01r:assembly4",
+              "index": 4,
+              "type": "bridge",
+              "x": 194.30457800719887,
+              "y": 375,
+              "width": 122,
+              "pegs": [
+                "des-workshops-v01-01r:assembly4:left:beam",
+                "des-workshops-v01-01r:assembly4:left:base",
+                "des-workshops-v01-01r:p55",
+                "des-workshops-v01-01r:p56",
+                "des-workshops-v01-01r:p57",
+                "des-workshops-v01-01r:p58",
+                "des-workshops-v01-01r:p59",
+                "des-workshops-v01-01r:assembly4:right:beam",
+                "des-workshops-v01-01r:assembly4:right:base",
+                "des-workshops-v01-01r:p60",
+                "des-workshops-v01-01r:p61",
+                "des-workshops-v01-01r:p62",
+                "des-workshops-v01-01r:p63",
+                "des-workshops-v01-01r:p64",
+                "des-workshops-v01-01r:p65"
+              ],
+              "supportContacts": [
+                [
+                  "bridge-lock",
+                  "beam"
+                ],
+                [
+                  "bearing",
+                  "beam"
+                ],
+                [
+                  "beam",
+                  "cargo"
+                ]
+              ],
+              "trigger": "remove-central-lock"
+            }
+          ],
+          "flow": [
+            {
+              "from": 0,
+              "to": 4
+            },
+            {
+              "from": 1,
+              "to": 4
+            },
+            {
+              "from": 4,
+              "to": 2
+            },
+            {
+              "from": 4,
+              "to": 3
+            }
+          ],
+          "shooterClearance": 90,
+          "bucketClearance": 45,
+          "pegRadius": 8.5
+        }
+      }
+    }
+  },
+  "quality": {
+    "accepted": false,
+    "geometry": {
+      "valid": true,
+      "errors": [],
+      "pegCount": 69,
+      "targets": 24
+    },
+    "idle": {
+      "lateDrift": 0.02486649668960652,
+      "maxDrift": 13.423058949234179,
+      "orangeLeft": 24
+    },
+    "firstShots": [
+      {
+        "angle": 0.16,
+        "cleared": 3,
+        "fallen": 0,
+        "timeout": false
+      },
+      {
+        "angle": 0.3363495408493621,
+        "cleared": 0,
+        "fallen": 0,
+        "timeout": false
+      },
+      {
+        "angle": 0.5126990816987241,
+        "cleared": 0,
+        "fallen": 0,
+        "timeout": false
+      },
+      {
+        "angle": 0.6890486225480863,
+        "cleared": 0,
+        "fallen": 0,
+        "timeout": false
+      },
+      {
+        "angle": 0.8653981633974484,
+        "cleared": 4,
+        "fallen": 4,
+        "timeout": false
+      },
+      {
+        "angle": 1.0417477042468104,
+        "cleared": 5,
+        "fallen": 5,
+        "timeout": false
+      },
+      {
+        "angle": 1.2180972450961725,
+        "cleared": 6,
+        "fallen": 1,
+        "timeout": false
+      },
+      {
+        "angle": 1.3944467859455345,
+        "cleared": 1,
+        "fallen": 0,
+        "timeout": false
+      },
+      {
+        "angle": 1.5707963267948966,
+        "cleared": 2,
+        "fallen": 0,
+        "timeout": false
+      },
+      {
+        "angle": 1.7471458676442586,
+        "cleared": 3,
+        "fallen": 1,
+        "timeout": false
+      },
+      {
+        "angle": 1.9234954084936207,
+        "cleared": 3,
+        "fallen": 0,
+        "timeout": false
+      },
+      {
+        "angle": 2.099844949342983,
+        "cleared": 8,
+        "fallen": 6,
+        "timeout": false
+      },
+      {
+        "angle": 2.276194490192345,
+        "cleared": 2,
+        "fallen": 2,
+        "timeout": false
+      },
+      {
+        "angle": 2.452544031041707,
+        "cleared": 1,
+        "fallen": 0,
+        "timeout": false
+      },
+      {
+        "angle": 2.6288935718910693,
+        "cleared": 0,
+        "fallen": 0,
+        "timeout": false
+      },
+      {
+        "angle": 2.805243112740431,
+        "cleared": 0,
+        "fallen": 0,
+        "timeout": false
+      },
+      {
+        "angle": 2.9815926535897934,
+        "cleared": 3,
+        "fallen": 0,
+        "timeout": false
+      }
+    ],
+    "firstShotCoverage": 0.7058823529411765,
+    "route": [
+      {
+        "angle": 1.963008680606869,
+        "seconds": 13.058333333332829,
+        "orangeBefore": 24,
+        "orangeAfter": 13,
+        "cleared": 11,
+        "timeout": false,
+        "state": "idle",
+        "fallenTargets": 9,
+        "directTargets": 2,
+        "hitCount": 5
+      },
+      {
+        "angle": 1.252123789322669,
+        "seconds": 7.166666666665623,
+        "orangeBefore": 13,
+        "orangeAfter": 7,
+        "cleared": 6,
+        "timeout": false,
+        "state": "idle",
+        "fallenTargets": 6,
+        "directTargets": 1,
+        "hitCount": 1
+      },
+      {
+        "angle": 1.1785839729829242,
+        "seconds": 4.2000000000006334,
+        "orangeBefore": 7,
+        "orangeAfter": 2,
+        "cleared": 5,
+        "timeout": false,
+        "state": "idle",
+        "fallenTargets": 1,
+        "directTargets": 4,
+        "hitCount": 9
+      }
+    ],
+    "routeSeed": "native",
+    "complete": false,
+    "fallenTargets": 17,
+    "directTargets": 7,
+    "crossAssemblyImpacts": [
+      {
+        "assemblies": [
+          "des-workshops-v01-01r:assembly0",
+          "des-workshops-v01-01r:assembly4"
+        ],
+        "speed": 8.200469584359347
+      },
+      {
+        "assemblies": [
+          "des-workshops-v01-01r:assembly0",
+          "des-workshops-v01-01r:assembly2"
+        ],
+        "speed": 6.982438698282176
+      },
+      {
+        "assemblies": [
+          "des-workshops-v01-01r:assembly3",
+          "des-workshops-v01-01r:assembly4"
+        ],
+        "speed": 4.52733645073518
+      },
+      {
+        "assemblies": [
+          "des-workshops-v01-01r:assembly1",
+          "des-workshops-v01-01r:assembly4"
+        ],
+        "speed": 4.663351033604401
+      },
+      {
+        "assemblies": [
+          "des-workshops-v01-01r:assembly1",
+          "des-workshops-v01-01r:assembly3"
+        ],
+        "speed": 4.474842037689887
+      }
+    ],
+    "probes": 100,
+    "holdout": {
+      "complete": true,
+      "shots": [
+        {
+          "angle": 1.2180972450961725,
+          "seconds": 10.70833333333355,
+          "orangeBefore": 24,
+          "orangeAfter": 11,
+          "cleared": 13,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 10,
+          "directTargets": 3,
+          "hitCount": 6
+        },
+        {
+          "angle": 2.2081414017393515,
+          "seconds": 3.06666666666689,
+          "orangeBefore": 11,
+          "orangeAfter": 4,
+          "cleared": 7,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 6,
+          "directTargets": 1,
+          "hitCount": 1
+        },
+        {
+          "angle": 2.9435395651368,
+          "seconds": 3.649999999999469,
+          "orangeBefore": 4,
+          "orangeAfter": 4,
+          "cleared": 0,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 0,
+          "directTargets": 0,
+          "hitCount": 1
+        }
+      ],
+      "fallenTargets": 20,
+      "probes": 65
+    }
+  },
+  "ms": 181092,
+  "fingerprint": "8764bad04b878e26261ff6884889835f64d268b82718875dc8552640c4962981"
+}

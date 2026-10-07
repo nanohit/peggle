@@ -1,3 +1,4 @@
+import { getSeesawPivot } from './destruction-hinge.js';
 // Playfield renderer: deferred shading lit by height-field radiance cascades.
 //
 // Nothing here paints a highlight or a shadow. The pipeline builds real surface
@@ -2368,6 +2369,13 @@ export class GpuPlayfieldRenderer {
       if (emerge <= 0.001) return;
       this._pushInstance(px, py, size.width * 0.5 * grow, size.height * 0.5 * grow,
         Number(peg.angle) || 0, SHAPE_BOX, hit, mat, color, 0, [emerge, 1, 0, 0]);
+      const pin = !peg._destructionHingeBroken && getSeesawPivot(peg);
+      if (pin) {
+        this._pushInstance(pin.x + offsetX, pin.y + offsetY - cameraY, 9.2, 9.2, 0,
+          SHAPE_DOME, 0, MAT_METAL, [0.43, 0.60, 0.68], 0, [1.15, emerge, 0, 0]);
+        this._pushInstance(pin.x + offsetX, pin.y + offsetY - cameraY, 4.8, 4.8, 0,
+          SHAPE_DOME, 0, MAT_METAL, [0.10, 0.22, 0.27], 0, [1.3, emerge, 0, 0]);
+      }
       return;
     }
 

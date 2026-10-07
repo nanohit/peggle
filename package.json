@@ -14,6 +14,9 @@
     "mirror:assets": "node scripts/mirror-assets-to-github.mjs",
     "test:assets": "node scripts/asset-store-smoke.mjs",
     "test:destruction": "node scripts/destruction-smoke.mjs",
+    "test:hinges": "node scripts/destruction-hinge-smoke.mjs",
+    "test:des-generator": "node scripts/destruction-generator-smoke.mjs",
+    "generate:des": "node generators/destruction/build-catalog.mjs && node generators/destruction/build-report.mjs",
     "test:player-regression": "node scripts/player-regression-smoke.mjs",
     "test:cdn-shell": "node scripts/cdn-shell-smoke.mjs"
   },

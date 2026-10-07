@@ -1,0 +1,1427 @@
+{
+  "level": {
+    "version": 1,
+    "id": "des-counterweights-v01-02r",
+    "name": "Противовесы · v01-02r",
+    "pegRadius": 8.5,
+    "ballCount": 8,
+    "bucketEnabled": true,
+    "hitPegTimedClearEnabled": true,
+    "hitPegClearDelayMs": 1100,
+    "pegs": [
+      {
+        "id": "des-counterweights-v01-02r:assembly0:beam",
+        "groupId": "des-counterweights-v01-02r:assembly0",
+        "type": "obstacle",
+        "shape": "brick",
+        "x": 100.0529463486746,
+        "y": 217.05462613375857,
+        "angle": 0,
+        "width": 120,
+        "height": 10.2,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "destructionHinge": {
+          "pivotFraction": 0.5,
+          "minAngle": -0.7,
+          "maxAngle": 0.7,
+          "damping": 0.999,
+          "stopBounce": 0.04,
+          "breakImpulse": 0
+        },
+        "constructionPart": "beam",
+        "constructionAssembly": "des-counterweights-v01-02r:assembly0"
+      },
+      {
+        "id": "des-counterweights-v01-02r:assembly0:base",
+        "groupId": "des-counterweights-v01-02r:assembly0",
+        "type": "obstacle",
+        "shape": "brick",
+        "x": 100.0529463486746,
+        "y": 239.05462613375857,
+        "angle": 0,
+        "width": 14,
+        "height": 20,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": true,
+        "constructionPart": "bearing",
+        "constructionAssembly": "des-counterweights-v01-02r:assembly0"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p1",
+        "shape": "circle",
+        "type": "blue",
+        "x": 73.652946,
+        "y": 203.254626,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-counterweights-v01-02r:assembly0",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p2",
+        "shape": "circle",
+        "type": "orange",
+        "x": 91.252946,
+        "y": 203.254626,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-counterweights-v01-02r:assembly0",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p3",
+        "shape": "circle",
+        "type": "orange",
+        "x": 108.852946,
+        "y": 203.254626,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-counterweights-v01-02r:assembly0",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p4",
+        "shape": "circle",
+        "type": "blue",
+        "x": 126.452946,
+        "y": 203.254626,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-counterweights-v01-02r:assembly0",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p5",
+        "shape": "circle",
+        "type": "orange",
+        "x": 82.452946,
+        "y": 188.004626,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-counterweights-v01-02r:assembly0",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p6",
+        "shape": "circle",
+        "type": "orange",
+        "x": 100.052946,
+        "y": 188.004626,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-counterweights-v01-02r:assembly0",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p7",
+        "shape": "circle",
+        "type": "blue",
+        "x": 117.652946,
+        "y": 188.004626,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-counterweights-v01-02r:assembly0",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p8",
+        "shape": "circle",
+        "type": "orange",
+        "x": 91.252946,
+        "y": 172.754626,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-counterweights-v01-02r:assembly0",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p9",
+        "shape": "circle",
+        "type": "blue",
+        "x": 108.852946,
+        "y": 172.754626,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-counterweights-v01-02r:assembly0",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-counterweights-v01-02r:assembly1:beam",
+        "groupId": "des-counterweights-v01-02r:assembly1",
+        "type": "obstacle",
+        "shape": "brick",
+        "x": 305.7882615281269,
+        "y": 216.05462613375857,
+        "angle": 0,
+        "width": 120,
+        "height": 10.2,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "destructionHinge": {
+          "pivotFraction": 0.5,
+          "minAngle": -0.7,
+          "maxAngle": 0.7,
+          "damping": 0.999,
+          "stopBounce": 0.04,
+          "breakImpulse": 0
+        },
+        "constructionPart": "beam",
+        "constructionAssembly": "des-counterweights-v01-02r:assembly1"
+      },
+      {
+        "id": "des-counterweights-v01-02r:assembly1:base",
+        "groupId": "des-counterweights-v01-02r:assembly1",
+        "type": "obstacle",
+        "shape": "brick",
+        "x": 305.7882615281269,
+        "y": 238.05462613375857,
+        "angle": 0,
+        "width": 14,
+        "height": 20,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": true,
+        "constructionPart": "bearing",
+        "constructionAssembly": "des-counterweights-v01-02r:assembly1"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p10",
+        "shape": "circle",
+        "type": "orange",
+        "x": 279.388262,
+        "y": 202.254626,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-counterweights-v01-02r:assembly1",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p11",
+        "shape": "circle",
+        "type": "orange",
+        "x": 296.988262,
+        "y": 202.254626,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-counterweights-v01-02r:assembly1",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p12",
+        "shape": "circle",
+        "type": "blue",
+        "x": 314.588262,
+        "y": 202.254626,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-counterweights-v01-02r:assembly1",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p13",
+        "shape": "circle",
+        "type": "orange",
+        "x": 332.188262,
+        "y": 202.254626,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-counterweights-v01-02r:assembly1",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p14",
+        "shape": "circle",
+        "type": "orange",
+        "x": 288.188262,
+        "y": 187.004626,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-counterweights-v01-02r:assembly1",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p15",
+        "shape": "circle",
+        "type": "blue",
+        "x": 305.788262,
+        "y": 187.004626,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-counterweights-v01-02r:assembly1",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p16",
+        "shape": "circle",
+        "type": "orange",
+        "x": 323.388262,
+        "y": 187.004626,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-counterweights-v01-02r:assembly1",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p17",
+        "shape": "brick",
+        "type": "obstacle",
+        "x": 61.052946,
+        "y": 511.487869,
+        "width": 26,
+        "height": 8,
+        "angle": 0,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": true,
+        "destructionPhysicsOnHit": false,
+        "constructionRole": "foundation",
+        "constructionAssembly": "des-counterweights-v01-02r:assembly2"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p18",
+        "shape": "brick",
+        "type": "blue",
+        "x": 61.052946,
+        "y": 482.987869,
+        "width": 49,
+        "height": 10.2,
+        "angle": 1.570796,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionRole": "key-support",
+        "destructionPhysicsOnHitBallOnly": false,
+        "constructionAssembly": "des-counterweights-v01-02r:assembly2"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p19",
+        "shape": "brick",
+        "type": "obstacle",
+        "x": 139.052946,
+        "y": 511.487869,
+        "width": 26,
+        "height": 8,
+        "angle": 0,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": true,
+        "destructionPhysicsOnHit": false,
+        "constructionRole": "foundation",
+        "constructionAssembly": "des-counterweights-v01-02r:assembly2"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p20",
+        "shape": "brick",
+        "type": "blue",
+        "x": 139.052946,
+        "y": 482.987869,
+        "width": 49,
+        "height": 10.2,
+        "angle": 1.570796,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionRole": "key-support",
+        "destructionPhysicsOnHitBallOnly": false,
+        "constructionAssembly": "des-counterweights-v01-02r:assembly2"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p21",
+        "shape": "brick",
+        "type": "obstacle",
+        "x": 100.052946,
+        "y": 453.387869,
+        "width": 106,
+        "height": 10.2,
+        "angle": 0,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionRole": "roof",
+        "constructionAssembly": "des-counterweights-v01-02r:assembly2"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p22",
+        "shape": "circle",
+        "type": "orange",
+        "x": 73.652946,
+        "y": 439.587869,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-counterweights-v01-02r:assembly2",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p23",
+        "shape": "circle",
+        "type": "blue",
+        "x": 91.252946,
+        "y": 439.587869,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-counterweights-v01-02r:assembly2",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p24",
+        "shape": "circle",
+        "type": "orange",
+        "x": 108.852946,
+        "y": 439.587869,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-counterweights-v01-02r:assembly2",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p25",
+        "shape": "circle",
+        "type": "orange",
+        "x": 126.452946,
+        "y": 439.587869,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-counterweights-v01-02r:assembly2",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p26",
+        "shape": "circle",
+        "type": "blue",
+        "x": 82.452946,
+        "y": 424.337869,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-counterweights-v01-02r:assembly2",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p27",
+        "shape": "circle",
+        "type": "orange",
+        "x": 100.052946,
+        "y": 424.337869,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-counterweights-v01-02r:assembly2",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p28",
+        "shape": "circle",
+        "type": "orange",
+        "x": 117.652946,
+        "y": 424.337869,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-counterweights-v01-02r:assembly2",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p29",
+        "shape": "circle",
+        "type": "orange",
+        "x": 91.252946,
+        "y": 409.087869,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-counterweights-v01-02r:assembly2",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p30",
+        "shape": "circle",
+        "type": "orange",
+        "x": 108.852946,
+        "y": 409.087869,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-counterweights-v01-02r:assembly2",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p31",
+        "shape": "brick",
+        "type": "obstacle",
+        "x": 270.788262,
+        "y": 503.487869,
+        "width": 26,
+        "height": 8,
+        "angle": 0,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": true,
+        "destructionPhysicsOnHit": false,
+        "constructionRole": "foundation",
+        "constructionAssembly": "des-counterweights-v01-02r:assembly3"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p32",
+        "shape": "brick",
+        "type": "blue",
+        "x": 270.788262,
+        "y": 472.987869,
+        "width": 53,
+        "height": 10.2,
+        "angle": 1.570796,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionRole": "key-support",
+        "destructionPhysicsOnHitBallOnly": false,
+        "constructionAssembly": "des-counterweights-v01-02r:assembly3"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p33",
+        "shape": "brick",
+        "type": "obstacle",
+        "x": 348.788262,
+        "y": 503.487869,
+        "width": 26,
+        "height": 8,
+        "angle": 0,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": true,
+        "destructionPhysicsOnHit": false,
+        "constructionRole": "foundation",
+        "constructionAssembly": "des-counterweights-v01-02r:assembly3"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p34",
+        "shape": "brick",
+        "type": "blue",
+        "x": 348.788262,
+        "y": 472.987869,
+        "width": 53,
+        "height": 10.2,
+        "angle": 1.570796,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionRole": "key-support",
+        "destructionPhysicsOnHitBallOnly": false,
+        "constructionAssembly": "des-counterweights-v01-02r:assembly3"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p35",
+        "shape": "brick",
+        "type": "obstacle",
+        "x": 309.788262,
+        "y": 441.387869,
+        "width": 106,
+        "height": 10.2,
+        "angle": 0,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionRole": "roof",
+        "constructionAssembly": "des-counterweights-v01-02r:assembly3"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p36",
+        "shape": "circle",
+        "type": "blue",
+        "x": 283.388262,
+        "y": 427.587869,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-counterweights-v01-02r:assembly3",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p37",
+        "shape": "circle",
+        "type": "orange",
+        "x": 300.988262,
+        "y": 427.587869,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-counterweights-v01-02r:assembly3",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p38",
+        "shape": "circle",
+        "type": "orange",
+        "x": 318.588262,
+        "y": 427.587869,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-counterweights-v01-02r:assembly3",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p39",
+        "shape": "circle",
+        "type": "blue",
+        "x": 336.188262,
+        "y": 427.587869,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-counterweights-v01-02r:assembly3",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p40",
+        "shape": "circle",
+        "type": "orange",
+        "x": 292.188262,
+        "y": 412.337869,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-counterweights-v01-02r:assembly3",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p41",
+        "shape": "circle",
+        "type": "orange",
+        "x": 309.788262,
+        "y": 412.337869,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-counterweights-v01-02r:assembly3",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p42",
+        "shape": "circle",
+        "type": "blue",
+        "x": 327.388262,
+        "y": 412.337869,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-counterweights-v01-02r:assembly3",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-counterweights-v01-02r:assembly4:left:beam",
+        "groupId": "des-counterweights-v01-02r:assembly4:left",
+        "type": "obstacle",
+        "shape": "brick",
+        "x": 152.74547121394426,
+        "y": 347,
+        "angle": 0,
+        "width": 96,
+        "height": 10.2,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "destructionHinge": {
+          "pivotFraction": 0.2,
+          "minAngle": -0.65,
+          "maxAngle": 0.65,
+          "damping": 0.999,
+          "stopBounce": 0.04,
+          "breakImpulse": 0
+        },
+        "constructionPart": "beam",
+        "constructionAssembly": "des-counterweights-v01-02r:assembly4"
+      },
+      {
+        "id": "des-counterweights-v01-02r:assembly4:left:base",
+        "groupId": "des-counterweights-v01-02r:assembly4:left",
+        "type": "obstacle",
+        "shape": "brick",
+        "x": 123.94547121394426,
+        "y": 369,
+        "angle": 0,
+        "width": 14,
+        "height": 20,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": true,
+        "constructionPart": "bearing",
+        "constructionAssembly": "des-counterweights-v01-02r:assembly4"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p43",
+        "shape": "circle",
+        "type": "orange",
+        "x": 139.145471,
+        "y": 333.2,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-counterweights-v01-02r:assembly4",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p44",
+        "shape": "circle",
+        "type": "orange",
+        "x": 156.745471,
+        "y": 333.2,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-counterweights-v01-02r:assembly4",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p45",
+        "shape": "circle",
+        "type": "blue",
+        "x": 174.345471,
+        "y": 333.2,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-counterweights-v01-02r:assembly4",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p46",
+        "shape": "circle",
+        "type": "orange",
+        "x": 147.945471,
+        "y": 317.95,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-counterweights-v01-02r:assembly4",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p47",
+        "shape": "circle",
+        "type": "blue",
+        "x": 165.545471,
+        "y": 317.95,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-counterweights-v01-02r:assembly4",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-counterweights-v01-02r:assembly4:right:beam",
+        "groupId": "des-counterweights-v01-02r:assembly4:right",
+        "type": "obstacle",
+        "shape": "brick",
+        "x": 252.74547121394426,
+        "y": 347,
+        "angle": 0,
+        "width": 96,
+        "height": 10.2,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "destructionHinge": {
+          "pivotFraction": 0.8,
+          "minAngle": -0.65,
+          "maxAngle": 0.65,
+          "damping": 0.999,
+          "stopBounce": 0.04,
+          "breakImpulse": 0
+        },
+        "constructionPart": "beam",
+        "constructionAssembly": "des-counterweights-v01-02r:assembly4"
+      },
+      {
+        "id": "des-counterweights-v01-02r:assembly4:right:base",
+        "groupId": "des-counterweights-v01-02r:assembly4:right",
+        "type": "obstacle",
+        "shape": "brick",
+        "x": 281.54547121394427,
+        "y": 369,
+        "angle": 0,
+        "width": 14,
+        "height": 20,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": true,
+        "constructionPart": "bearing",
+        "constructionAssembly": "des-counterweights-v01-02r:assembly4"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p48",
+        "shape": "circle",
+        "type": "orange",
+        "x": 231.145471,
+        "y": 333.2,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-counterweights-v01-02r:assembly4",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p49",
+        "shape": "circle",
+        "type": "orange",
+        "x": 248.745471,
+        "y": 333.2,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-counterweights-v01-02r:assembly4",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p50",
+        "shape": "circle",
+        "type": "blue",
+        "x": 266.345471,
+        "y": 333.2,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-counterweights-v01-02r:assembly4",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p51",
+        "shape": "circle",
+        "type": "orange",
+        "x": 239.945471,
+        "y": 317.95,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-counterweights-v01-02r:assembly4",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p52",
+        "shape": "circle",
+        "type": "blue",
+        "x": 257.545471,
+        "y": 317.95,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-counterweights-v01-02r:assembly4",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-counterweights-v01-02r:p53",
+        "shape": "circle",
+        "type": "blue",
+        "x": 202.745471,
+        "y": 360.8,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": true,
+        "destructionPhysicsOnHitBallOnly": true,
+        "constructionRole": "bridge-lock",
+        "constructionAssembly": "des-counterweights-v01-02r:assembly4"
+      }
+    ],
+    "groups": [
+      {
+        "id": "des-counterweights-v01-02r:assembly0",
+        "name": "Качели",
+        "pattern": "construction",
+        "construction": {
+          "type": "seesaw"
+        },
+        "destructionBody": false
+      },
+      {
+        "id": "des-counterweights-v01-02r:assembly1",
+        "name": "Качели",
+        "pattern": "construction",
+        "construction": {
+          "type": "seesaw"
+        },
+        "destructionBody": false
+      },
+      {
+        "id": "des-counterweights-v01-02r:assembly4:left",
+        "name": "Качели",
+        "pattern": "construction",
+        "construction": {
+          "type": "seesaw"
+        },
+        "destructionBody": false
+      },
+      {
+        "id": "des-counterweights-v01-02r:assembly4:right",
+        "name": "Качели",
+        "pattern": "construction",
+        "construction": {
+          "type": "seesaw"
+        },
+        "destructionBody": false
+      }
+    ],
+    "bezierCurves": {},
+    "flippers": null,
+    "destruction": {
+      "enabled": true,
+      "gravityX": 0,
+      "gravityY": 0.115,
+      "damping": 0.994,
+      "restitution": 0.34,
+      "friction": 0.72,
+      "surfaceGrip": 0.18,
+      "dynamicPegBallBounce": 0.45,
+      "maxSpeed": 14,
+      "sleepSpeed": 0.055,
+      "sleepFrames": 18,
+      "bombImpulse": 12,
+      "stuckPileClearDelayMs": 220
+    },
+    "metadata": {
+      "authorNotes": "Освободите груз на одном конце качелей: второй конец изменит наклон.",
+      "generator": {
+        "name": "destruction_generator0.1",
+        "version": "0.1.0",
+        "seed": "v01-02r",
+        "family": "counterweights",
+        "principles": [
+          "physical-supports",
+          "load-transfer",
+          "gravity",
+          "fracture",
+          "hinges",
+          "ball-only-latches"
+        ],
+        "plan": {
+          "assemblies": [
+            {
+              "id": "des-counterweights-v01-02r:assembly0",
+              "index": 0,
+              "type": "seesaw",
+              "x": 100.0529463486746,
+              "y": 249.05462613375857,
+              "width": 120,
+              "pegs": [
+                "des-counterweights-v01-02r:assembly0:beam",
+                "des-counterweights-v01-02r:assembly0:base",
+                "des-counterweights-v01-02r:p1",
+                "des-counterweights-v01-02r:p2",
+                "des-counterweights-v01-02r:p3",
+                "des-counterweights-v01-02r:p4",
+                "des-counterweights-v01-02r:p5",
+                "des-counterweights-v01-02r:p6",
+                "des-counterweights-v01-02r:p7",
+                "des-counterweights-v01-02r:p8",
+                "des-counterweights-v01-02r:p9"
+              ],
+              "supportContacts": [
+                [
+                  "bearing",
+                  "beam"
+                ],
+                [
+                  "beam",
+                  "cargo"
+                ]
+              ],
+              "trigger": "change-load-or-hit-edge"
+            },
+            {
+              "id": "des-counterweights-v01-02r:assembly1",
+              "index": 1,
+              "type": "seesaw",
+              "x": 305.7882615281269,
+              "y": 248.05462613375857,
+              "width": 120,
+              "pegs": [
+                "des-counterweights-v01-02r:assembly1:beam",
+                "des-counterweights-v01-02r:assembly1:base",
+                "des-counterweights-v01-02r:p10",
+                "des-counterweights-v01-02r:p11",
+                "des-counterweights-v01-02r:p12",
+                "des-counterweights-v01-02r:p13",
+                "des-counterweights-v01-02r:p14",
+                "des-counterweights-v01-02r:p15",
+                "des-counterweights-v01-02r:p16"
+              ],
+              "supportContacts": [
+                [
+                  "bearing",
+                  "beam"
+                ],
+                [
+                  "beam",
+                  "cargo"
+                ]
+              ],
+              "trigger": "change-load-or-hit-edge"
+            },
+            {
+              "id": "des-counterweights-v01-02r:assembly2",
+              "index": 2,
+              "type": "tower",
+              "x": 100.0529463486746,
+              "y": 511.48786898329854,
+              "width": 124,
+              "pegs": [
+                "des-counterweights-v01-02r:p17",
+                "des-counterweights-v01-02r:p18",
+                "des-counterweights-v01-02r:p19",
+                "des-counterweights-v01-02r:p20",
+                "des-counterweights-v01-02r:p21",
+                "des-counterweights-v01-02r:p22",
+                "des-counterweights-v01-02r:p23",
+                "des-counterweights-v01-02r:p24",
+                "des-counterweights-v01-02r:p25",
+                "des-counterweights-v01-02r:p26",
+                "des-counterweights-v01-02r:p27",
+                "des-counterweights-v01-02r:p28",
+                "des-counterweights-v01-02r:p29",
+                "des-counterweights-v01-02r:p30"
+              ],
+              "supportContacts": [
+                [
+                  "foundation",
+                  "key-support"
+                ],
+                [
+                  "key-support",
+                  "roof"
+                ],
+                [
+                  "roof",
+                  "cargo"
+                ]
+              ],
+              "trigger": "remove-support"
+            },
+            {
+              "id": "des-counterweights-v01-02r:assembly3",
+              "index": 3,
+              "type": "tower",
+              "x": 309.7882615281269,
+              "y": 503.48786898329854,
+              "width": 124,
+              "pegs": [
+                "des-counterweights-v01-02r:p31",
+                "des-counterweights-v01-02r:p32",
+                "des-counterweights-v01-02r:p33",
+                "des-counterweights-v01-02r:p34",
+                "des-counterweights-v01-02r:p35",
+                "des-counterweights-v01-02r:p36",
+                "des-counterweights-v01-02r:p37",
+                "des-counterweights-v01-02r:p38",
+                "des-counterweights-v01-02r:p39",
+                "des-counterweights-v01-02r:p40",
+                "des-counterweights-v01-02r:p41",
+                "des-counterweights-v01-02r:p42"
+              ],
+              "supportContacts": [
+                [
+                  "foundation",
+                  "key-support"
+                ],
+                [
+                  "key-support",
+                  "roof"
+                ],
+                [
+                  "roof",
+                  "cargo"
+                ]
+              ],
+              "trigger": "remove-support"
+            },
+            {
+              "id": "des-counterweights-v01-02r:assembly4",
+              "index": 4,
+              "type": "bridge",
+              "x": 202.74547121394426,
+              "y": 375,
+              "width": 122,
+              "pegs": [
+                "des-counterweights-v01-02r:assembly4:left:beam",
+                "des-counterweights-v01-02r:assembly4:left:base",
+                "des-counterweights-v01-02r:p43",
+                "des-counterweights-v01-02r:p44",
+                "des-counterweights-v01-02r:p45",
+                "des-counterweights-v01-02r:p46",
+                "des-counterweights-v01-02r:p47",
+                "des-counterweights-v01-02r:assembly4:right:beam",
+                "des-counterweights-v01-02r:assembly4:right:base",
+                "des-counterweights-v01-02r:p48",
+                "des-counterweights-v01-02r:p49",
+                "des-counterweights-v01-02r:p50",
+                "des-counterweights-v01-02r:p51",
+                "des-counterweights-v01-02r:p52",
+                "des-counterweights-v01-02r:p53"
+              ],
+              "supportContacts": [
+                [
+                  "bridge-lock",
+                  "beam"
+                ],
+                [
+                  "bearing",
+                  "beam"
+                ],
+                [
+                  "beam",
+                  "cargo"
+                ]
+              ],
+              "trigger": "remove-central-lock"
+            }
+          ],
+          "flow": [
+            {
+              "from": 0,
+              "to": 4
+            },
+            {
+              "from": 1,
+              "to": 4
+            },
+            {
+              "from": 4,
+              "to": 2
+            },
+            {
+              "from": 4,
+              "to": 3
+            }
+          ],
+          "shooterClearance": 90,
+          "bucketClearance": 45,
+          "pegRadius": 8.5
+        }
+      }
+    }
+  },
+  "quality": {
+    "accepted": true,
+    "geometry": {
+      "valid": true,
+      "errors": [],
+      "pegCount": 61,
+      "targets": 27
+    },
+    "idle": {
+      "lateDrift": 0,
+      "maxDrift": 3.8870255469034465,
+      "orangeLeft": 27
+    },
+    "firstShots": [
+      {
+        "angle": 0.16,
+        "cleared": 4,
+        "fallen": 1,
+        "timeout": false
+      },
+      {
+        "angle": 0.3363495408493621,
+        "cleared": 8,
+        "fallen": 5,
+        "timeout": false
+      },
+      {
+        "angle": 0.5126990816987241,
+        "cleared": 1,
+        "fallen": 0,
+        "timeout": false
+      },
+      {
+        "angle": 0.6890486225480863,
+        "cleared": 3,
+        "fallen": 1,
+        "timeout": false
+      },
+      {
+        "angle": 0.8653981633974484,
+        "cleared": 2,
+        "fallen": 0,
+        "timeout": false
+      },
+      {
+        "angle": 1.0417477042468104,
+        "cleared": 2,
+        "fallen": 0,
+        "timeout": false
+      },
+      {
+        "angle": 1.2180972450961725,
+        "cleared": 2,
+        "fallen": 0,
+        "timeout": false
+      },
+      {
+        "angle": 1.3944467859455345,
+        "cleared": 3,
+        "fallen": 1,
+        "timeout": false
+      },
+      {
+        "angle": 1.5707963267948966,
+        "cleared": 2,
+        "fallen": 0,
+        "timeout": false
+      },
+      {
+        "angle": 1.7471458676442586,
+        "cleared": 0,
+        "fallen": 0,
+        "timeout": false
+      },
+      {
+        "angle": 1.9234954084936207,
+        "cleared": 2,
+        "fallen": 0,
+        "timeout": false
+      },
+      {
+        "angle": 2.099844949342983,
+        "cleared": 0,
+        "fallen": 0,
+        "timeout": false
+      },
+      {
+        "angle": 2.276194490192345,
+        "cleared": 3,
+        "fallen": 1,
+        "timeout": false
+      },
+      {
+        "angle": 2.452544031041707,
+        "cleared": 4,
+        "fallen": 1,
+        "timeout": false
+      },
+      {
+        "angle": 2.6288935718910693,
+        "cleared": 4,
+        "fallen": 3,
+        "timeout": false
+      },
+      {
+        "angle": 2.805243112740431,
+        "cleared": 3,
+        "fallen": 3,
+        "timeout": false
+      },
+      {
+        "angle": 2.9815926535897934,
+        "cleared": 2,
+        "fallen": 0,
+        "timeout": false
+      }
+    ],
+    "firstShotCoverage": 0.8823529411764706,
+    "route": [
+      {
+        "angle": 0.12451327211324828,
+        "seconds": 14.424999999999295,
+        "orangeBefore": 27,
+        "orangeAfter": 19,
+        "cleared": 8,
+        "timeout": false,
+        "state": "idle",
+        "fallenTargets": 2,
+        "directTargets": 6,
+        "hitCount": 11
+      },
+      {
+        "angle": 2.8209732045705582,
+        "seconds": 5.0166666666659365,
+        "orangeBefore": 19,
+        "orangeAfter": 9,
+        "cleared": 10,
+        "timeout": false,
+        "state": "idle",
+        "fallenTargets": 6,
+        "directTargets": 7,
+        "hitCount": 10
+      },
+      {
+        "angle": 0.16,
+        "seconds": 3.758333333333496,
+        "orangeBefore": 9,
+        "orangeAfter": 7,
+        "cleared": 2,
+        "timeout": false,
+        "state": "idle",
+        "fallenTargets": 0,
+        "directTargets": 2,
+        "hitCount": 4
+      },
+      {
+        "angle": 0.5126990816987241,
+        "seconds": 2.4000000000006985,
+        "orangeBefore": 2,
+        "orangeAfter": 1,
+        "cleared": 1,
+        "timeout": false,
+        "state": "idle",
+        "fallenTargets": 1,
+        "directTargets": 1,
+        "hitCount": 2
+      },
+      {
+        "angle": 2.6288935718910693,
+        "seconds": 0.7416666666668825,
+        "orangeBefore": 1,
+        "orangeAfter": 1,
+        "cleared": 0,
+        "timeout": false,
+        "state": "idle",
+        "fallenTargets": 0,
+        "directTargets": 0,
+        "hitCount": 0
+      }
+    ],
+    "routeSeed": "native",
+    "complete": true,
+    "fallenTargets": 15,
+    "directTargets": 16,
+    "crossAssemblyImpacts": [
+      {
+        "assemblies": [
+          "des-counterweights-v01-02r:assembly1",
+          "des-counterweights-v01-02r:assembly4"
+        ],
+        "speed": 4.1960191142250505
+      },
+      {
+        "assemblies": [
+          "des-counterweights-v01-02r:assembly3",
+          "des-counterweights-v01-02r:assembly4"
+        ],
+        "speed": 4.338677963113452
+      },
+      {
+        "assemblies": [
+          "des-counterweights-v01-02r:assembly2",
+          "des-counterweights-v01-02r:assembly4"
+        ],
+        "speed": 3.9080230687963886
+      },
+      {
+        "assemblies": [
+          "des-counterweights-v01-02r:assembly0",
+          "des-counterweights-v01-02r:assembly2"
+        ],
+        "speed": 3.989884089679388
+      },
+      {
+        "assemblies": [
+          "des-counterweights-v01-02r:assembly0",
+          "des-counterweights-v01-02r:assembly4"
+        ],
+        "speed": 5.110389128028499
+      },
+      {
+        "assemblies": [
+          "des-counterweights-v01-02r:assembly2",
+          "des-counterweights-v01-02r:assembly3"
+        ],
+        "speed": 4.294209324395471
+      }
+    ],
+    "probes": 108,
+    "holdout": {
+      "complete": true,
+      "shots": [
+        {
+          "angle": 1.9234954084936207,
+          "seconds": 13.90000000000045,
+          "orangeBefore": 27,
+          "orangeAfter": 16,
+          "cleared": 11,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 2,
+          "directTargets": 9,
+          "hitCount": 14
+        },
+        {
+          "angle": 0.8653981633974484,
+          "seconds": 3.049999999999556,
+          "orangeBefore": 16,
+          "orangeAfter": 10,
+          "cleared": 6,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 6,
+          "directTargets": 1,
+          "hitCount": 3
+        },
+        {
+          "angle": 0.12451327211324828,
+          "seconds": 4.383333333332695,
+          "orangeBefore": 9,
+          "orangeAfter": 3,
+          "cleared": 6,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 2,
+          "directTargets": 4,
+          "hitCount": 5
+        },
+        {
+          "angle": 2.845486476683807,
+          "seconds": 3.2749999999995234,
+          "orangeBefore": 2,
+          "orangeAfter": 1,
+          "cleared": 1,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 1,
+          "directTargets": 1,
+          "hitCount": 4
+        },
+        {
+          "angle": 1.3256636056624138,
+          "seconds": 5.675000000000007,
+          "orangeBefore": 1,
+          "orangeAfter": 1,
+          "cleared": 0,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 0,
+          "directTargets": 0,
+          "hitCount": 3
+        },
+        {
+          "angle": 1.1295574287564276,
+          "seconds": 3.3750000000009823,
+          "orangeBefore": 1,
+          "orangeAfter": 1,
+          "cleared": 0,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 0,
+          "directTargets": 0,
+          "hitCount": 0
+        }
+      ],
+      "fallenTargets": 14,
+      "probes": 142
+    }
+  },
+  "ms": 112355,
+  "fingerprint": "8764bad04b878e26261ff6884889835f64d268b82718875dc8552640c4962981"
+}

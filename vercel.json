@@ -7,6 +7,12 @@
     }
   },
   "rewrites": [
+    {"source":"/des","destination":"/des/index.html"},
+    {"source":"/des/","destination":"/des/index.html"},
+    {"source":"/des/editor","destination":"/des/editor/index.html"},
+    {"source":"/des/editor/","destination":"/des/editor/index.html"},
+    {"source":"/des/report","destination":"/des/report/index.html"},
+    {"source":"/des/report/","destination":"/des/report/index.html"},
     {
       "source": "/gen",
       "destination": "/gen/index.html"

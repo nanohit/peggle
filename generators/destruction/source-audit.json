@@ -1,0 +1,56 @@
+{
+  "source": "https://alea.sh/api/campaigns?name=Alea_Main&resolve=true&player=1",
+  "sha256": "51e75ddaadfc4d14731d8f9eeed95681262491b0427d65d33d0c92dc9e422a42",
+  "levels": [
+    {
+      "name": "Gravity Rush",
+      "id": "id-2rnk72yg8",
+      "pegs": 59,
+      "static": 9,
+      "gravityFromStart": 0,
+      "releaseOnContact": 50,
+      "ballOnly": 0,
+      "rigidGroups": 0
+    },
+    {
+      "name": "MAGNETS_BABYY",
+      "id": "id-6mswod2k3",
+      "pegs": 124,
+      "static": 6,
+      "gravityFromStart": 0,
+      "releaseOnContact": 55,
+      "ballOnly": 63,
+      "rigidGroups": 0
+    },
+    {
+      "name": "Spin_me_right",
+      "id": "id-g7ydq0tql",
+      "pegs": 109,
+      "static": 32,
+      "gravityFromStart": 0,
+      "releaseOnContact": 77,
+      "ballOnly": 0,
+      "rigidGroups": 0
+    },
+    {
+      "name": "Physic_Test",
+      "id": "id-m6hadhf0m",
+      "pegs": 88,
+      "static": 20,
+      "gravityFromStart": 0,
+      "releaseOnContact": 68,
+      "ballOnly": 0,
+      "rigidGroups": 8
+    },
+    {
+      "name": "PhBonus Level",
+      "id": "id-81ljjyfi8",
+      "pegs": 89,
+      "static": 8,
+      "gravityFromStart": 42,
+      "releaseOnContact": 9,
+      "ballOnly": 30,
+      "rigidGroups": 1
+    }
+  ]
+}

@@ -24,9 +24,10 @@ import {
   normalizeDestructionPegProperties
 } from './destruction-mode.js';
 
-const STORAGE_KEY = 'peggle_levels';
-const TRAINING_KEY = 'peggle_training_data';
-const STORAGE_OVERFLOW_KEY = 'peggle_levels_local_overflow';
+const LOCAL_DESTRUCTION_EDITOR = typeof window !== 'undefined' && window.__PEGGLE_LOCAL_EDITOR__ === true;
+const STORAGE_KEY = LOCAL_DESTRUCTION_EDITOR ? 'peggle_des_levels' : 'peggle_levels';
+const TRAINING_KEY = LOCAL_DESTRUCTION_EDITOR ? 'peggle_des_training_data' : 'peggle_training_data';
+const STORAGE_OVERFLOW_KEY = STORAGE_KEY + '_local_overflow';
 const STORAGE_QUOTA_RETRY_MS = 30000;
 
 function isStorageQuotaError(error) {
@@ -372,6 +373,8 @@ export class LevelManager {
     if (Object.prototype.hasOwnProperty.call(peg, 'destructionPhysicsOnHitBallOnly')) {
       newPeg.destructionPhysicsOnHitBallOnly = peg.destructionPhysicsOnHitBallOnly;
     }
+    if (peg.destructionHinge) newPeg.destructionHinge = { ...peg.destructionHinge };
+    if (peg.constructionPart) newPeg.constructionPart = peg.constructionPart;
     if (newPeg.type === 'blue') {
       if (!Object.prototype.hasOwnProperty.call(newPeg, 'destructionPhysicsOnHit')) {
         newPeg.destructionPhysicsOnHit = true;

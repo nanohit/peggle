@@ -1,0 +1,1503 @@
+{
+  "level": {
+    "version": 1,
+    "id": "des-dominoes-v01-01r",
+    "name": "Домино из перекрытий · v01-01r",
+    "pegRadius": 8.5,
+    "ballCount": 8,
+    "bucketEnabled": true,
+    "hitPegTimedClearEnabled": true,
+    "hitPegClearDelayMs": 1100,
+    "pegs": [
+      {
+        "id": "des-dominoes-v01-01r:p1",
+        "shape": "brick",
+        "type": "obstacle",
+        "x": 57.573858,
+        "y": 249.009019,
+        "width": 26,
+        "height": 8,
+        "angle": 0,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": true,
+        "destructionPhysicsOnHit": false,
+        "constructionRole": "foundation",
+        "constructionAssembly": "des-dominoes-v01-01r:assembly0"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p2",
+        "shape": "brick",
+        "type": "blue",
+        "x": 57.573858,
+        "y": 218.509019,
+        "width": 53,
+        "height": 10.2,
+        "angle": 1.570796,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionRole": "key-support",
+        "destructionPhysicsOnHitBallOnly": false,
+        "constructionAssembly": "des-dominoes-v01-01r:assembly0"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p3",
+        "shape": "brick",
+        "type": "obstacle",
+        "x": 133.173858,
+        "y": 249.009019,
+        "width": 26,
+        "height": 8,
+        "angle": 0,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": true,
+        "destructionPhysicsOnHit": false,
+        "constructionRole": "foundation",
+        "constructionAssembly": "des-dominoes-v01-01r:assembly0"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p4",
+        "shape": "brick",
+        "type": "blue",
+        "x": 133.173858,
+        "y": 218.509019,
+        "width": 53,
+        "height": 10.2,
+        "angle": 1.570796,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionRole": "key-support",
+        "destructionPhysicsOnHitBallOnly": false,
+        "constructionAssembly": "des-dominoes-v01-01r:assembly0"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p5",
+        "shape": "brick",
+        "type": "obstacle",
+        "x": 95.373858,
+        "y": 186.909019,
+        "width": 103.6,
+        "height": 10.2,
+        "angle": 0,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionRole": "roof",
+        "constructionAssembly": "des-dominoes-v01-01r:assembly0"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p6",
+        "shape": "circle",
+        "type": "blue",
+        "x": 68.973858,
+        "y": 173.109019,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-dominoes-v01-01r:assembly0",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p7",
+        "shape": "circle",
+        "type": "orange",
+        "x": 86.573858,
+        "y": 173.109019,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-dominoes-v01-01r:assembly0",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p8",
+        "shape": "circle",
+        "type": "orange",
+        "x": 104.173858,
+        "y": 173.109019,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-dominoes-v01-01r:assembly0",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p9",
+        "shape": "circle",
+        "type": "blue",
+        "x": 121.773858,
+        "y": 173.109019,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-dominoes-v01-01r:assembly0",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p10",
+        "shape": "circle",
+        "type": "orange",
+        "x": 77.773858,
+        "y": 157.859019,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-dominoes-v01-01r:assembly0",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p11",
+        "shape": "circle",
+        "type": "orange",
+        "x": 95.373858,
+        "y": 157.859019,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-dominoes-v01-01r:assembly0",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p12",
+        "shape": "circle",
+        "type": "blue",
+        "x": 112.973858,
+        "y": 157.859019,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-dominoes-v01-01r:assembly0",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p13",
+        "shape": "circle",
+        "type": "orange",
+        "x": 86.573858,
+        "y": 142.609019,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-dominoes-v01-01r:assembly0",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p14",
+        "shape": "circle",
+        "type": "blue",
+        "x": 104.173858,
+        "y": 142.609019,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-dominoes-v01-01r:assembly0",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p15",
+        "shape": "brick",
+        "type": "obstacle",
+        "x": 265.452105,
+        "y": 254.009019,
+        "width": 26,
+        "height": 8,
+        "angle": 0,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": true,
+        "destructionPhysicsOnHit": false,
+        "constructionRole": "foundation",
+        "constructionAssembly": "des-dominoes-v01-01r:assembly1"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p16",
+        "shape": "brick",
+        "type": "blue",
+        "x": 265.452105,
+        "y": 223.009019,
+        "width": 54,
+        "height": 10.2,
+        "angle": 1.570796,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": true,
+        "constructionRole": "key-support",
+        "destructionPhysicsOnHitBallOnly": true,
+        "constructionAssembly": "des-dominoes-v01-01r:assembly1"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p17",
+        "shape": "brick",
+        "type": "obstacle",
+        "x": 341.052105,
+        "y": 254.009019,
+        "width": 26,
+        "height": 8,
+        "angle": 0,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": true,
+        "destructionPhysicsOnHit": false,
+        "constructionRole": "foundation",
+        "constructionAssembly": "des-dominoes-v01-01r:assembly1"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p18",
+        "shape": "brick",
+        "type": "blue",
+        "x": 341.052105,
+        "y": 223.009019,
+        "width": 54,
+        "height": 10.2,
+        "angle": 1.570796,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": true,
+        "constructionRole": "key-support",
+        "destructionPhysicsOnHitBallOnly": true,
+        "constructionAssembly": "des-dominoes-v01-01r:assembly1"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p19",
+        "shape": "brick",
+        "type": "obstacle",
+        "x": 303.252105,
+        "y": 190.909019,
+        "width": 103.6,
+        "height": 10.2,
+        "angle": 0,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionRole": "roof",
+        "constructionAssembly": "des-dominoes-v01-01r:assembly1"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p20",
+        "shape": "circle",
+        "type": "orange",
+        "x": 276.852105,
+        "y": 177.109019,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-dominoes-v01-01r:assembly1",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p21",
+        "shape": "circle",
+        "type": "orange",
+        "x": 294.452105,
+        "y": 177.109019,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-dominoes-v01-01r:assembly1",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p22",
+        "shape": "circle",
+        "type": "blue",
+        "x": 312.052105,
+        "y": 177.109019,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-dominoes-v01-01r:assembly1",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p23",
+        "shape": "circle",
+        "type": "orange",
+        "x": 329.652105,
+        "y": 177.109019,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-dominoes-v01-01r:assembly1",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p24",
+        "shape": "circle",
+        "type": "orange",
+        "x": 285.652105,
+        "y": 161.859019,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-dominoes-v01-01r:assembly1",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p25",
+        "shape": "circle",
+        "type": "blue",
+        "x": 303.252105,
+        "y": 161.859019,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-dominoes-v01-01r:assembly1",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p26",
+        "shape": "circle",
+        "type": "orange",
+        "x": 320.852105,
+        "y": 161.859019,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-dominoes-v01-01r:assembly1",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p27",
+        "shape": "brick",
+        "type": "obstacle",
+        "x": 95.373858,
+        "y": 445.372467,
+        "width": 92,
+        "height": 8,
+        "angle": 0,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "groupId": "des-dominoes-v01-01r:assembly2:frame",
+        "constructionRole": "breakable-anchor",
+        "destructionHinge": {
+          "pivotFraction": 0.5,
+          "minAngle": -0.7,
+          "maxAngle": 0.7,
+          "damping": 0.997,
+          "stopBounce": 0.05,
+          "breakImpulse": 7
+        },
+        "constructionAssembly": "des-dominoes-v01-01r:assembly2"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p28",
+        "shape": "brick",
+        "type": "obstacle",
+        "x": 53.373858,
+        "y": 474.372467,
+        "width": 58,
+        "height": 8,
+        "angle": 1.570796,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "groupId": "des-dominoes-v01-01r:assembly2:frame",
+        "constructionRole": "hanging-wall",
+        "constructionAssembly": "des-dominoes-v01-01r:assembly2"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p29",
+        "shape": "brick",
+        "type": "obstacle",
+        "x": 137.373858,
+        "y": 474.372467,
+        "width": 58,
+        "height": 8,
+        "angle": 1.570796,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "groupId": "des-dominoes-v01-01r:assembly2:frame",
+        "constructionRole": "hanging-wall",
+        "constructionAssembly": "des-dominoes-v01-01r:assembly2"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p30",
+        "shape": "brick",
+        "type": "obstacle",
+        "x": 95.373858,
+        "y": 503.372467,
+        "width": 92,
+        "height": 8,
+        "angle": 0,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "groupId": "des-dominoes-v01-01r:assembly2:frame",
+        "constructionRole": "tray",
+        "constructionAssembly": "des-dominoes-v01-01r:assembly2"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p31",
+        "shape": "brick",
+        "type": "obstacle",
+        "x": 95.373858,
+        "y": 428.372467,
+        "width": 8,
+        "height": 14,
+        "angle": 0,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": true,
+        "destructionPhysicsOnHit": false,
+        "constructionRole": "wall-hook",
+        "constructionAssembly": "des-dominoes-v01-01r:assembly2"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p32",
+        "shape": "circle",
+        "type": "orange",
+        "x": 68.973858,
+        "y": 490.572467,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-dominoes-v01-01r:assembly2",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p33",
+        "shape": "circle",
+        "type": "blue",
+        "x": 86.573858,
+        "y": 490.572467,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-dominoes-v01-01r:assembly2",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p34",
+        "shape": "circle",
+        "type": "orange",
+        "x": 104.173858,
+        "y": 490.572467,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-dominoes-v01-01r:assembly2",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p35",
+        "shape": "circle",
+        "type": "orange",
+        "x": 121.773858,
+        "y": 490.572467,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-dominoes-v01-01r:assembly2",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p36",
+        "shape": "circle",
+        "type": "blue",
+        "x": 77.773858,
+        "y": 475.322467,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-dominoes-v01-01r:assembly2",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p37",
+        "shape": "circle",
+        "type": "orange",
+        "x": 95.373858,
+        "y": 475.322467,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-dominoes-v01-01r:assembly2",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p38",
+        "shape": "circle",
+        "type": "orange",
+        "x": 112.973858,
+        "y": 475.322467,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-dominoes-v01-01r:assembly2",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p39",
+        "shape": "brick",
+        "type": "obstacle",
+        "x": 309.252105,
+        "y": 437.372467,
+        "width": 92,
+        "height": 8,
+        "angle": 0,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "groupId": "des-dominoes-v01-01r:assembly3:frame",
+        "constructionRole": "breakable-anchor",
+        "destructionHinge": {
+          "pivotFraction": 0.5,
+          "minAngle": -0.7,
+          "maxAngle": 0.7,
+          "damping": 0.997,
+          "stopBounce": 0.05,
+          "breakImpulse": 7
+        },
+        "constructionAssembly": "des-dominoes-v01-01r:assembly3"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p40",
+        "shape": "brick",
+        "type": "obstacle",
+        "x": 267.252105,
+        "y": 466.372467,
+        "width": 58,
+        "height": 8,
+        "angle": 1.570796,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "groupId": "des-dominoes-v01-01r:assembly3:frame",
+        "constructionRole": "hanging-wall",
+        "constructionAssembly": "des-dominoes-v01-01r:assembly3"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p41",
+        "shape": "brick",
+        "type": "obstacle",
+        "x": 351.252105,
+        "y": 466.372467,
+        "width": 58,
+        "height": 8,
+        "angle": 1.570796,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "groupId": "des-dominoes-v01-01r:assembly3:frame",
+        "constructionRole": "hanging-wall",
+        "constructionAssembly": "des-dominoes-v01-01r:assembly3"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p42",
+        "shape": "brick",
+        "type": "obstacle",
+        "x": 309.252105,
+        "y": 495.372467,
+        "width": 92,
+        "height": 8,
+        "angle": 0,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "groupId": "des-dominoes-v01-01r:assembly3:frame",
+        "constructionRole": "tray",
+        "constructionAssembly": "des-dominoes-v01-01r:assembly3"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p43",
+        "shape": "brick",
+        "type": "obstacle",
+        "x": 309.252105,
+        "y": 420.372467,
+        "width": 8,
+        "height": 14,
+        "angle": 0,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": true,
+        "destructionPhysicsOnHit": false,
+        "constructionRole": "wall-hook",
+        "constructionAssembly": "des-dominoes-v01-01r:assembly3"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p44",
+        "shape": "circle",
+        "type": "blue",
+        "x": 282.852105,
+        "y": 482.572467,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-dominoes-v01-01r:assembly3",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p45",
+        "shape": "circle",
+        "type": "orange",
+        "x": 300.452105,
+        "y": 482.572467,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-dominoes-v01-01r:assembly3",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p46",
+        "shape": "circle",
+        "type": "orange",
+        "x": 318.052105,
+        "y": 482.572467,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-dominoes-v01-01r:assembly3",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p47",
+        "shape": "circle",
+        "type": "blue",
+        "x": 335.652105,
+        "y": 482.572467,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-dominoes-v01-01r:assembly3",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p48",
+        "shape": "circle",
+        "type": "orange",
+        "x": 291.652105,
+        "y": 467.322467,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-dominoes-v01-01r:assembly3",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p49",
+        "shape": "circle",
+        "type": "orange",
+        "x": 309.252105,
+        "y": 467.322467,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-dominoes-v01-01r:assembly3",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p50",
+        "shape": "circle",
+        "type": "blue",
+        "x": 326.852105,
+        "y": 467.322467,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-dominoes-v01-01r:assembly3",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-dominoes-v01-01r:assembly4:left:beam",
+        "groupId": "des-dominoes-v01-01r:assembly4:left",
+        "type": "obstacle",
+        "shape": "brick",
+        "x": 144.30457800719887,
+        "y": 347,
+        "angle": 0,
+        "width": 96,
+        "height": 10.2,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "destructionHinge": {
+          "pivotFraction": 0.2,
+          "minAngle": -0.65,
+          "maxAngle": 0.65,
+          "damping": 0.999,
+          "stopBounce": 0.04,
+          "breakImpulse": 0
+        },
+        "constructionPart": "beam",
+        "constructionAssembly": "des-dominoes-v01-01r:assembly4"
+      },
+      {
+        "id": "des-dominoes-v01-01r:assembly4:left:base",
+        "groupId": "des-dominoes-v01-01r:assembly4:left",
+        "type": "obstacle",
+        "shape": "brick",
+        "x": 115.50457800719887,
+        "y": 369,
+        "angle": 0,
+        "width": 14,
+        "height": 20,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": true,
+        "constructionPart": "bearing",
+        "constructionAssembly": "des-dominoes-v01-01r:assembly4"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p51",
+        "shape": "circle",
+        "type": "orange",
+        "x": 130.704578,
+        "y": 333.2,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-dominoes-v01-01r:assembly4",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p52",
+        "shape": "circle",
+        "type": "orange",
+        "x": 148.304578,
+        "y": 333.2,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-dominoes-v01-01r:assembly4",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p53",
+        "shape": "circle",
+        "type": "blue",
+        "x": 165.904578,
+        "y": 333.2,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-dominoes-v01-01r:assembly4",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p54",
+        "shape": "circle",
+        "type": "orange",
+        "x": 139.504578,
+        "y": 317.95,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-dominoes-v01-01r:assembly4",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p55",
+        "shape": "circle",
+        "type": "blue",
+        "x": 157.104578,
+        "y": 317.95,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-dominoes-v01-01r:assembly4",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-dominoes-v01-01r:assembly4:right:beam",
+        "groupId": "des-dominoes-v01-01r:assembly4:right",
+        "type": "obstacle",
+        "shape": "brick",
+        "x": 244.30457800719887,
+        "y": 347,
+        "angle": 0,
+        "width": 96,
+        "height": 10.2,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "destructionHinge": {
+          "pivotFraction": 0.8,
+          "minAngle": -0.65,
+          "maxAngle": 0.65,
+          "damping": 0.999,
+          "stopBounce": 0.04,
+          "breakImpulse": 0
+        },
+        "constructionPart": "beam",
+        "constructionAssembly": "des-dominoes-v01-01r:assembly4"
+      },
+      {
+        "id": "des-dominoes-v01-01r:assembly4:right:base",
+        "groupId": "des-dominoes-v01-01r:assembly4:right",
+        "type": "obstacle",
+        "shape": "brick",
+        "x": 273.1045780071989,
+        "y": 369,
+        "angle": 0,
+        "width": 14,
+        "height": 20,
+        "brickBaseRadius": 8.5,
+        "destructionStatic": true,
+        "constructionPart": "bearing",
+        "constructionAssembly": "des-dominoes-v01-01r:assembly4"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p56",
+        "shape": "circle",
+        "type": "orange",
+        "x": 222.704578,
+        "y": 333.2,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-dominoes-v01-01r:assembly4",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p57",
+        "shape": "circle",
+        "type": "orange",
+        "x": 240.304578,
+        "y": 333.2,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-dominoes-v01-01r:assembly4",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p58",
+        "shape": "circle",
+        "type": "blue",
+        "x": 257.904578,
+        "y": 333.2,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-dominoes-v01-01r:assembly4",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p59",
+        "shape": "circle",
+        "type": "orange",
+        "x": 231.504578,
+        "y": 317.95,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-dominoes-v01-01r:assembly4",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p60",
+        "shape": "circle",
+        "type": "blue",
+        "x": 249.104578,
+        "y": 317.95,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": false,
+        "constructionAssembly": "des-dominoes-v01-01r:assembly4",
+        "constructionRole": "cargo"
+      },
+      {
+        "id": "des-dominoes-v01-01r:p61",
+        "shape": "circle",
+        "type": "blue",
+        "x": 194.304578,
+        "y": 360.8,
+        "angle": 0,
+        "destructionStatic": false,
+        "destructionPhysicsOnHit": true,
+        "destructionPhysicsOnHitBallOnly": true,
+        "constructionRole": "bridge-lock",
+        "constructionAssembly": "des-dominoes-v01-01r:assembly4"
+      }
+    ],
+    "groups": [
+      {
+        "id": "des-dominoes-v01-01r:assembly2:frame",
+        "name": "Подвесная рама",
+        "pattern": "construction",
+        "destructionBody": true
+      },
+      {
+        "id": "des-dominoes-v01-01r:assembly3:frame",
+        "name": "Подвесная рама",
+        "pattern": "construction",
+        "destructionBody": true
+      },
+      {
+        "id": "des-dominoes-v01-01r:assembly4:left",
+        "name": "Качели",
+        "pattern": "construction",
+        "construction": {
+          "type": "seesaw"
+        },
+        "destructionBody": false
+      },
+      {
+        "id": "des-dominoes-v01-01r:assembly4:right",
+        "name": "Качели",
+        "pattern": "construction",
+        "construction": {
+          "type": "seesaw"
+        },
+        "destructionBody": false
+      }
+    ],
+    "bezierCurves": {},
+    "flippers": null,
+    "destruction": {
+      "enabled": true,
+      "gravityX": 0,
+      "gravityY": 0.115,
+      "damping": 0.994,
+      "restitution": 0.34,
+      "friction": 0.72,
+      "surfaceGrip": 0.18,
+      "dynamicPegBallBounce": 0.45,
+      "maxSpeed": 14,
+      "sleepSpeed": 0.055,
+      "sleepFrames": 18,
+      "bombImpulse": 12,
+      "stuckPileClearDelayMs": 220
+    },
+    "metadata": {
+      "authorNotes": "Сначала верхняя опора: падающее перекрытие может запустить следующий механизм.",
+      "generator": {
+        "name": "destruction_generator0.1",
+        "version": "0.1.0",
+        "seed": "v01-01r",
+        "family": "dominoes",
+        "principles": [
+          "physical-supports",
+          "load-transfer",
+          "gravity",
+          "fracture",
+          "hinges",
+          "ball-only-latches"
+        ],
+        "plan": {
+          "assemblies": [
+            {
+              "id": "des-dominoes-v01-01r:assembly0",
+              "index": 0,
+              "type": "tower",
+              "x": 95.37385781900957,
+              "y": 249.00901938974857,
+              "width": 120,
+              "pegs": [
+                "des-dominoes-v01-01r:p1",
+                "des-dominoes-v01-01r:p2",
+                "des-dominoes-v01-01r:p3",
+                "des-dominoes-v01-01r:p4",
+                "des-dominoes-v01-01r:p5",
+                "des-dominoes-v01-01r:p6",
+                "des-dominoes-v01-01r:p7",
+                "des-dominoes-v01-01r:p8",
+                "des-dominoes-v01-01r:p9",
+                "des-dominoes-v01-01r:p10",
+                "des-dominoes-v01-01r:p11",
+                "des-dominoes-v01-01r:p12",
+                "des-dominoes-v01-01r:p13",
+                "des-dominoes-v01-01r:p14"
+              ],
+              "supportContacts": [
+                [
+                  "foundation",
+                  "key-support"
+                ],
+                [
+                  "key-support",
+                  "roof"
+                ],
+                [
+                  "roof",
+                  "cargo"
+                ]
+              ],
+              "trigger": "remove-support"
+            },
+            {
+              "id": "des-dominoes-v01-01r:assembly1",
+              "index": 1,
+              "type": "tower",
+              "x": 303.25210517598316,
+              "y": 254.00901938974857,
+              "width": 120,
+              "pegs": [
+                "des-dominoes-v01-01r:p15",
+                "des-dominoes-v01-01r:p16",
+                "des-dominoes-v01-01r:p17",
+                "des-dominoes-v01-01r:p18",
+                "des-dominoes-v01-01r:p19",
+                "des-dominoes-v01-01r:p20",
+                "des-dominoes-v01-01r:p21",
+                "des-dominoes-v01-01r:p22",
+                "des-dominoes-v01-01r:p23",
+                "des-dominoes-v01-01r:p24",
+                "des-dominoes-v01-01r:p25",
+                "des-dominoes-v01-01r:p26"
+              ],
+              "supportContacts": [
+                [
+                  "foundation",
+                  "key-support"
+                ],
+                [
+                  "key-support",
+                  "roof"
+                ],
+                [
+                  "roof",
+                  "cargo"
+                ]
+              ],
+              "trigger": "remove-support"
+            },
+            {
+              "id": "des-dominoes-v01-01r:assembly2",
+              "index": 2,
+              "type": "cradle",
+              "x": 95.37385781900957,
+              "y": 515.3724672244862,
+              "width": 124,
+              "pegs": [
+                "des-dominoes-v01-01r:p27",
+                "des-dominoes-v01-01r:p28",
+                "des-dominoes-v01-01r:p29",
+                "des-dominoes-v01-01r:p30",
+                "des-dominoes-v01-01r:p31",
+                "des-dominoes-v01-01r:p32",
+                "des-dominoes-v01-01r:p33",
+                "des-dominoes-v01-01r:p34",
+                "des-dominoes-v01-01r:p35",
+                "des-dominoes-v01-01r:p36",
+                "des-dominoes-v01-01r:p37",
+                "des-dominoes-v01-01r:p38"
+              ],
+              "supportContacts": [
+                [
+                  "wall-hook",
+                  "breakable-anchor"
+                ],
+                [
+                  "breakable-anchor",
+                  "tray"
+                ],
+                [
+                  "tray",
+                  "cargo"
+                ]
+              ],
+              "trigger": "break-anchor"
+            },
+            {
+              "id": "des-dominoes-v01-01r:assembly3",
+              "index": 3,
+              "type": "cradle",
+              "x": 309.25210517598316,
+              "y": 507.3724672244862,
+              "width": 124,
+              "pegs": [
+                "des-dominoes-v01-01r:p39",
+                "des-dominoes-v01-01r:p40",
+                "des-dominoes-v01-01r:p41",
+                "des-dominoes-v01-01r:p42",
+                "des-dominoes-v01-01r:p43",
+                "des-dominoes-v01-01r:p44",
+                "des-dominoes-v01-01r:p45",
+                "des-dominoes-v01-01r:p46",
+                "des-dominoes-v01-01r:p47",
+                "des-dominoes-v01-01r:p48",
+                "des-dominoes-v01-01r:p49",
+                "des-dominoes-v01-01r:p50"
+              ],
+              "supportContacts": [
+                [
+                  "wall-hook",
+                  "breakable-anchor"
+                ],
+                [
+                  "breakable-anchor",
+                  "tray"
+                ],
+                [
+                  "tray",
+                  "cargo"
+                ]
+              ],
+              "trigger": "break-anchor"
+            },
+            {
+              "id": "des-dominoes-v01-01r:assembly4",
+              "index": 4,
+              "type": "bridge",
+              "x": 194.30457800719887,
+              "y": 375,
+              "width": 122,
+              "pegs": [
+                "des-dominoes-v01-01r:assembly4:left:beam",
+                "des-dominoes-v01-01r:assembly4:left:base",
+                "des-dominoes-v01-01r:p51",
+                "des-dominoes-v01-01r:p52",
+                "des-dominoes-v01-01r:p53",
+                "des-dominoes-v01-01r:p54",
+                "des-dominoes-v01-01r:p55",
+                "des-dominoes-v01-01r:assembly4:right:beam",
+                "des-dominoes-v01-01r:assembly4:right:base",
+                "des-dominoes-v01-01r:p56",
+                "des-dominoes-v01-01r:p57",
+                "des-dominoes-v01-01r:p58",
+                "des-dominoes-v01-01r:p59",
+                "des-dominoes-v01-01r:p60",
+                "des-dominoes-v01-01r:p61"
+              ],
+              "supportContacts": [
+                [
+                  "bridge-lock",
+                  "beam"
+                ],
+                [
+                  "bearing",
+                  "beam"
+                ],
+                [
+                  "beam",
+                  "cargo"
+                ]
+              ],
+              "trigger": "remove-central-lock"
+            }
+          ],
+          "flow": [
+            {
+              "from": 0,
+              "to": 4
+            },
+            {
+              "from": 1,
+              "to": 4
+            },
+            {
+              "from": 4,
+              "to": 2
+            },
+            {
+              "from": 4,
+              "to": 3
+            }
+          ],
+          "shooterClearance": 90,
+          "bucketClearance": 45,
+          "pegRadius": 8.5
+        }
+      }
+    }
+  },
+  "quality": {
+    "accepted": true,
+    "geometry": {
+      "valid": true,
+      "errors": [],
+      "pegCount": 65,
+      "targets": 25
+    },
+    "idle": {
+      "lateDrift": 0,
+      "maxDrift": 3.8835335442981824,
+      "orangeLeft": 25
+    },
+    "firstShots": [
+      {
+        "angle": 0.16,
+        "cleared": 1,
+        "fallen": 0,
+        "timeout": false
+      },
+      {
+        "angle": 0.3363495408493621,
+        "cleared": 4,
+        "fallen": 4,
+        "timeout": false
+      },
+      {
+        "angle": 0.5126990816987241,
+        "cleared": 0,
+        "fallen": 0,
+        "timeout": false
+      },
+      {
+        "angle": 0.6890486225480863,
+        "cleared": 1,
+        "fallen": 0,
+        "timeout": false
+      },
+      {
+        "angle": 0.8653981633974484,
+        "cleared": 1,
+        "fallen": 0,
+        "timeout": false
+      },
+      {
+        "angle": 1.0417477042468104,
+        "cleared": 1,
+        "fallen": 0,
+        "timeout": false
+      },
+      {
+        "angle": 1.2180972450961725,
+        "cleared": 6,
+        "fallen": 1,
+        "timeout": false
+      },
+      {
+        "angle": 1.3944467859455345,
+        "cleared": 1,
+        "fallen": 0,
+        "timeout": false
+      },
+      {
+        "angle": 1.5707963267948966,
+        "cleared": 0,
+        "fallen": 0,
+        "timeout": false
+      },
+      {
+        "angle": 1.7471458676442586,
+        "cleared": 4,
+        "fallen": 2,
+        "timeout": false
+      },
+      {
+        "angle": 1.9234954084936207,
+        "cleared": 3,
+        "fallen": 1,
+        "timeout": false
+      },
+      {
+        "angle": 2.099844949342983,
+        "cleared": 0,
+        "fallen": 0,
+        "timeout": false
+      },
+      {
+        "angle": 2.276194490192345,
+        "cleared": 2,
+        "fallen": 0,
+        "timeout": false
+      },
+      {
+        "angle": 2.452544031041707,
+        "cleared": 2,
+        "fallen": 2,
+        "timeout": false
+      },
+      {
+        "angle": 2.6288935718910693,
+        "cleared": 1,
+        "fallen": 0,
+        "timeout": false
+      },
+      {
+        "angle": 2.805243112740431,
+        "cleared": 0,
+        "fallen": 0,
+        "timeout": false
+      },
+      {
+        "angle": 2.9815926535897934,
+        "cleared": 0,
+        "fallen": 0,
+        "timeout": false
+      }
+    ],
+    "firstShotCoverage": 0.7058823529411765,
+    "route": [
+      {
+        "angle": 1.1050441566431792,
+        "seconds": 9.325000000000038,
+        "orangeBefore": 25,
+        "orangeAfter": 18,
+        "cleared": 7,
+        "timeout": false,
+        "state": "idle",
+        "fallenTargets": 3,
+        "directTargets": 4,
+        "hitCount": 9
+      },
+      {
+        "angle": 2.37973430653209,
+        "seconds": 2.7166666666662715,
+        "orangeBefore": 17,
+        "orangeAfter": 9,
+        "cleared": 8,
+        "timeout": false,
+        "state": "idle",
+        "fallenTargets": 3,
+        "directTargets": 5,
+        "hitCount": 5
+      },
+      {
+        "angle": 0.39415926535897927,
+        "seconds": 1.591666666666435,
+        "orangeBefore": 9,
+        "orangeAfter": 5,
+        "cleared": 4,
+        "timeout": false,
+        "state": "idle",
+        "fallenTargets": 4,
+        "directTargets": 0,
+        "hitCount": 1
+      },
+      {
+        "angle": 2.6288935718910693,
+        "seconds": 1.0916666666665078,
+        "orangeBefore": 5,
+        "orangeAfter": 4,
+        "cleared": 1,
+        "timeout": false,
+        "state": "idle",
+        "fallenTargets": 1,
+        "directTargets": 0,
+        "hitCount": 0
+      },
+      {
+        "angle": 1.8404423200406277,
+        "seconds": 1.3416666666664714,
+        "orangeBefore": 4,
+        "orangeAfter": 1,
+        "cleared": 3,
+        "timeout": false,
+        "state": "idle",
+        "fallenTargets": 3,
+        "directTargets": 0,
+        "hitCount": 0
+      }
+    ],
+    "routeSeed": "native",
+    "complete": true,
+    "fallenTargets": 16,
+    "directTargets": 9,
+    "crossAssemblyImpacts": [
+      {
+        "assemblies": [
+          "des-dominoes-v01-01r:assembly1",
+          "des-dominoes-v01-01r:assembly4"
+        ],
+        "speed": 4.934773036867875
+      },
+      {
+        "assemblies": [
+          "des-dominoes-v01-01r:assembly0",
+          "des-dominoes-v01-01r:assembly1"
+        ],
+        "speed": 4.4818200861035296
+      },
+      {
+        "assemblies": [
+          "des-dominoes-v01-01r:assembly0",
+          "des-dominoes-v01-01r:assembly4"
+        ],
+        "speed": 3.6930585840555072
+      },
+      {
+        "assemblies": [
+          "des-dominoes-v01-01r:assembly3",
+          "des-dominoes-v01-01r:assembly4"
+        ],
+        "speed": 4.389386349766425
+      }
+    ],
+    "probes": 120,
+    "holdout": {
+      "complete": true,
+      "shots": [
+        {
+          "angle": 1.350176877775662,
+          "seconds": 9.625000000000139,
+          "orangeBefore": 25,
+          "orangeAfter": 20,
+          "cleared": 5,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 1,
+          "directTargets": 4,
+          "hitCount": 8
+        },
+        {
+          "angle": 2.5513272113248275,
+          "seconds": 1.3583333333334322,
+          "orangeBefore": 20,
+          "orangeAfter": 18,
+          "cleared": 2,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 0,
+          "directTargets": 2,
+          "hitCount": 3
+        },
+        {
+          "angle": 0.8653981633974484,
+          "seconds": 2.3833333333334688,
+          "orangeBefore": 13,
+          "orangeAfter": 10,
+          "cleared": 3,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 2,
+          "directTargets": 1,
+          "hitCount": 2
+        },
+        {
+          "angle": 2.061061769059862,
+          "seconds": 3.091666666666217,
+          "orangeBefore": 5,
+          "orangeAfter": 2,
+          "cleared": 3,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 1,
+          "directTargets": 2,
+          "hitCount": 5
+        },
+        {
+          "angle": 0.8653981633974484,
+          "seconds": 1.5333333333331103,
+          "orangeBefore": 1,
+          "orangeAfter": 1,
+          "cleared": 0,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 0,
+          "directTargets": 0,
+          "hitCount": 1
+        },
+        {
+          "angle": 3.106592653589793,
+          "seconds": 1.6833333333330884,
+          "orangeBefore": 1,
+          "orangeAfter": 1,
+          "cleared": 0,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 0,
+          "directTargets": 0,
+          "hitCount": 1
+        },
+        {
+          "angle": 2.600353755551324,
+          "seconds": 2.1833333333330156,
+          "orangeBefore": 1,
+          "orangeAfter": 1,
+          "cleared": 0,
+          "timeout": false,
+          "state": "idle",
+          "fallenTargets": 0,
+          "directTargets": 0,
+          "hitCount": 0
+        }
+      ],
+      "fallenTargets": 16,
+      "probes": 171
+    }
+  },
+  "ms": 121231,
+  "fingerprint": "8764bad04b878e26261ff6884889835f64d268b82718875dc8552640c4962981"
+}

@@ -1,3 +1,4 @@
+import { createBodyHinge, solveHingeConstraint, normalizeDestructionHinge } from './destruction-hinge.js';
 import { PHYSICS_CONFIG, getEffectiveBrickSize } from './physics.js';
 import { Utils } from './utils.js';
 import { getPortalScale, isPortalType } from './portal-defaults.js';
@@ -147,6 +148,13 @@ export function normalizeDestructionPegProperties(peg) {
   if (!peg || typeof peg !== 'object') return peg;
   if (isBombMagnetPeg(peg)) normalizeMagnetPegProperties(peg);
   coerceDestructionPegFlags(peg);
+  if (peg.destructionHinge) {
+    peg.destructionHinge = normalizeDestructionHinge(peg.destructionHinge);
+    peg.destructionStatic = false;
+    peg.destructionPhysicsOnHit = false;
+    peg.destructionPhysicsOnHitBallOnly = false;
+  }
+  delete peg._destructionHingeBroken;
   delete peg._destructionBodyId;
   delete peg._destructionFalling;
   delete peg._destructionAwake;
@@ -1221,6 +1229,9 @@ export class DestructionPegSystem {
       aabb: { minX: 0, maxX: 0, minY: 0, maxY: 0 }
     };
     this.refreshBody(body, members, { resetOffsets: true });
+    const hingePeg = members.find(peg => peg.destructionHinge && !peg._destructionHingeBroken);
+    body.hinge = hingePeg ? createBodyHinge(body, hingePeg) : null;
+    if (body.hinge) solveHingeConstraint(body);
     body.sleeping = body.static || body.wakeOnHit;
     body.animationDetached = !body.static && !body.wakeOnHit;
     return body;
@@ -1296,6 +1307,13 @@ export class DestructionPegSystem {
     // from a group, the remaining piece must rotate around the remaining mass, not
     // around the old authored centre.
     this.recomputeCenterOfMass(body);
+    if (body.hinge) {
+      const dx = body.hinge.anchorX - body.x, dy = body.hinge.anchorY - body.y;
+      const c = Math.cos(body.angle || 0), s = Math.sin(body.angle || 0);
+      body.hinge.localX = dx * c + dy * s;
+      body.hinge.localY = -dx * s + dy * c;
+      solveHingeConstraint(body);
+    }
   }
 
   getPhysicsOwnedPegIds() {
@@ -1759,12 +1777,20 @@ export class DestructionPegSystem {
   }
 
   isBreakableBody(body) {
-    if (!body || body.static) return false;
+    if (!body || body.static || body.hinge) return false;
     if (!Array.isArray(body.pegIds) || body.pegIds.length < GROUP_FRACTURE_MIN_PEGS) return false;
     return body.id?.startsWith('group:') || body.id?.startsWith('split:') || body.pegIds.length > 1;
   }
 
   queueBodyFracture(body, contactX = null, contactY = null, strength = 0, dirX = 0, dirY = 0) {
+    if (body?.hinge?.breakImpulse > 0 && Math.abs(strength) >= body.hinge.breakImpulse) {
+      const pinPeg = this._pegById.get(body.hinge.pegId);
+      if (pinPeg) pinPeg._destructionHingeBroken = true;
+      body.hinge = null;
+      body.sleeping = false;
+      body.animationDetached = true;
+      this.markRuntimeCountersDirty();
+    }
     if (!this.isBreakableBody(body)) return false;
     if ((body.fractureCooldown || 0) > 0) return false;
     const impactStrength = Number.isFinite(strength) ? Math.abs(strength) : 0;
@@ -2605,6 +2631,7 @@ export class DestructionPegSystem {
       body.staticSupportMemory = Math.max(0, (body.staticSupportMemory || 0) - 1);
       body.dynamicSupportMemory = Math.max(0, (body.dynamicSupportMemory || 0) - 1);
       if (body.dynamicSupportMemory <= 0) body.dynamicSupportBodyId = null;
+      if (body.hinge) solveHingeConstraint(body, stepScale, true);
     }
 
     const rawSubSteps = Math.max(1, Math.ceil(maxMove / MAX_SUBSTEP_PX));
@@ -2622,6 +2649,7 @@ export class DestructionPegSystem {
         body.x += body.vx * subScale;
         body.y += body.vy * subScale;
         body.angle = wrapAngle((body.angle || 0) + (body.av || 0) * subScale);
+        if (body.hinge) solveHingeConstraint(body, subScale);
         this.applyPortalTeleport(body, prevX, prevY, pegs);
         this.markBodyTransformDirty(body);
       }
@@ -2634,6 +2662,7 @@ export class DestructionPegSystem {
 
       this.refreshActiveDynamicColliders();
       this.resolveCollisions(subScale);
+      this.solveHinges(subScale);
       if (this.applyQueuedFractures(pegs, groups)) {
         this.buildColliders(pegs, bounds);
       }
@@ -2931,6 +2960,16 @@ export class DestructionPegSystem {
     return SUPPORT_EDGE_MIN_ANGULAR_SCALE + (1 - SUPPORT_EDGE_MIN_ANGULAR_SCALE) * ramp;
   }
 
+  solveHinges(subScale = 1) {
+    for (const body of this.bodies.values()) {
+      if (!body.hinge || body.static || body.sleeping) continue;
+      solveHingeConstraint(body, subScale);
+      this.markBodyTransformDirty(body);
+      this.applyBodyToPegs(body);
+      this.refreshColliderForBody(body);
+    }
+  }
+
   resolveCollisions(subScale) {
     const colliders = this._colliders;
     const colliderCount = this._colliderCount;
@@ -2994,6 +3033,7 @@ export class DestructionPegSystem {
         if (!overlap || overlap.depth <= 0) continue;
         this.resolveBodyCollision(a, b, overlap, collisionAngularDamping, subScale, firstIter, lastIter);
       }
+      this.solveHinges(subScale);
     }
   }
 
@@ -3211,11 +3251,11 @@ export class DestructionPegSystem {
     const supportDotA = gravityA ? (nx * gravityA.x + ny * gravityA.y) : 0;
     const supportDotB = gravityB ? (-nx * gravityB.x - ny * gravityB.y) : 0;
     invIA *= Math.max(
-      contactSpeedAngularScale,
+      bodyA.hinge ? 1 : 0, contactSpeedAngularScale,
       this.getUnstableSupportAngularScale(bodyA, supportDotA)
     );
     invIB *= Math.max(
-      contactSpeedAngularScale,
+      bodyB.hinge ? 1 : 0, contactSpeedAngularScale,
       this.getUnstableSupportAngularScale(bodyB, supportDotB)
     );
 

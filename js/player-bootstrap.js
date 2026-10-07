@@ -3,6 +3,7 @@
 // On defeat: level mirrors horizontally and replays. Second defeat restores original.
 
 import { Game } from './game.js';
+import { mirrorDestructionHinge } from './destruction-hinge.js';
 import { PvpRuntime } from './pvp-runtime.js';
 import { isMuted, setMuted } from './haptics.js';
 import { VisualLayout } from './visual-layout.js';
@@ -43,6 +44,7 @@ import {
 const ASPECT_RATIO = 3 / 4.5;
 const FRAME_RATIO = 9 / 17;
 const GENERATED_PLAYER = window.__PEGGLE_GENERATED_PLAYER__ === true;
+const DESTRUCTION_PLAYER = window.__PEGGLE_DESTRUCTION_PLAYER__ === true;
 const WORLD_W = 400;
 const WORLD_H = Math.round(WORLD_W / ASPECT_RATIO); // 600
 const PVP_DUEL_LEVELS_STORAGE_KEY = 'pvp:duel:levels';
@@ -610,6 +612,9 @@ function mirrorLevel(levelData, canvasWidth = WORLD_W) {
       }
       peg.curveSlices.reverse();
     }
+    if (peg.destructionHinge) {
+      peg.destructionHinge = mirrorDestructionHinge(peg.destructionHinge);
+    }
 
     if (peg.animation) {
       mirrorAnimationData(peg.animation);
@@ -716,6 +721,27 @@ function loadDeferredImages(root) {
 resolve();
 
 async function resolve() {
+  if (DESTRUCTION_PLAYER) {
+    try {
+      const campaign = await staticJson('/data/des/campaign.json');
+      const seed = getQueryParam('seed');
+      let levels = campaign.levels.map(normalizeLevelData);
+      if (seed) {
+        const {generateLevel} = await import('../generators/destruction/grammar.js');
+        const {validateGeometry} = await import('../generators/destruction/geometry.js');
+        const generated = normalizeLevelData(generateLevel(seed, getQueryParam('family') || 'counterweights'));
+        if (!validateGeometry(generated).valid) throw new Error('Invalid construction geometry');
+        levels = [generated, ...levels];
+      }
+      await bootWithLevels(levels, seed ? 'Destruction · '+seed : campaign.name, {...campaign, levels, graph: graphFromLevels(levels)}, {
+        unlockAll: true, initialLevelId: getQueryParam('id'), destructionGenerator: true
+      });
+    } catch (error) {
+      console.error('[des]', error);
+      showError('Не удалось загрузить конструкции. Обновите страницу.');
+    }
+    return;
+  }
   if (GENERATED_PLAYER) {
     try {
       const catalog = await staticJson('/data/gen/catalog.json');
@@ -1410,7 +1436,7 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
   let playableOrder = [];
 
   function applyCampaignGraphState(nextLevels, nextCampaignData) {
-    const nextGraph = (typeof nextCampaignData?.graph === 'object' && nextCampaignData.graph.nodes)
+    const nextGraph = (typeof nextCampaignData?.graph === 'object' && nextCampaignData.graph?.nodes)
       ? nextCampaignData.graph
       : graphFromLevels(nextLevels);
 
@@ -2061,6 +2087,38 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     }
     pauseLevelBtn.after(picker);
   }
+  if (options.destructionGenerator) {
+    const tools = document.createElement('div');
+    tools.className = 'des-tools';
+    const create = document.createElement('button');
+    create.textContent = 'Новая конструкция';
+    create.addEventListener('click', async () => {
+      const {FAMILIES} = await import('../generators/destruction/grammar.js');
+      const dialog = document.createElement('dialog');
+      dialog.className = 'des-generator-dialog';
+      const form = document.createElement('form');
+      const heading = document.createElement('h2'); heading.textContent = 'Собрать конструкцию';
+      const select = document.createElement('select'); select.name = 'family'; select.setAttribute('aria-label','Семейство');
+      for (const family of FAMILIES) { const option = document.createElement('option'); option.value=family.id;option.textContent=family.name;select.append(option); }
+      select.value = activeLevelData?.metadata?.generator?.family || 'counterweights';
+      const input = document.createElement('input'); input.name='seed'; input.maxLength=40; input.setAttribute('aria-label','Seed');input.value='des-'+Math.random().toString(36).slice(2,9);
+      const hint = document.createElement('p');hint.textContent='Одинаковый seed воспроизводит ту же конструкцию. Новые варианты не проходили автоматический отбор, как уровни в карте.';
+      const submit = document.createElement('button');submit.type='submit';submit.textContent='Собрать и играть';
+      const cancel = document.createElement('button');cancel.type='button';cancel.textContent='Отмена';cancel.onclick=()=>dialog.close();
+      form.append(heading,select,input,hint,submit,cancel);dialog.append(form);document.body.append(dialog);
+      form.onsubmit=event=>{event.preventDefault();location.href='/des?'+new URLSearchParams({family:select.value,seed:input.value.trim()||'des-001'});};
+      dialog.onclose=()=>dialog.remove();dialog.showModal();
+    });
+    const editorLink=document.createElement('a');editorLink.textContent='Редактор';
+    editorLink.addEventListener('click',()=>{
+      if(activeLevelData){sessionStorage.setItem('peggle_des_editor_import',JSON.stringify(activeLevelData));}
+    });editorLink.href='/des/editor';
+    tools.append(create,editorLink);pauseLevelBtn.after(tools);
+    const hint=document.createElement('p');hint.className='des-hint';
+    hint.textContent=activeLevelData?.metadata?.authorNotes || 'Разрушайте опоры, меняйте нагрузку и запускайте цепные падения.';
+    tools.after(hint);
+    const report=document.createElement('a');report.className='des-report-link';report.href='/des/report/';report.textContent='Устройство генератора и результаты отбора';hint.after(report);
+  }
   const pausePvpDuelBtn = pauseOverlay.querySelector('#pausePvpDuelBtn');
   pausePvpDuelBtn?.addEventListener('click', (event) => {
     event.preventDefault();
@@ -2477,6 +2535,10 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
       applyRuntimeCharacterAssignment(levelData, nodeId);
     }
     activeLevelData = levelData;
+    if (DESTRUCTION_PLAYER) {
+      const hint = pauseOverlay.querySelector('.des-hint');
+      if (hint) hint.textContent = levelData.metadata?.authorNotes || '';
+    }
     syncPauseCharacterPicker();
 
     // Cleanup previous
@@ -2515,6 +2577,7 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
         }
       })
       : new Game(canvas);
+    if (DESTRUCTION_PLAYER) window.__aleaDes = { getGame: () => game, getLevel: () => activeLevelData };
     if (Number.isFinite(options.suppressInputMs) && options.suppressInputMs > 0) {
       game.suppressInputFor?.(options.suppressInputMs);
     }
