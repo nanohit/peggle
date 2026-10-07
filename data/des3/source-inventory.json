@@ -1,0 +1,140 @@
+{
+  "inventory": {
+    "blast": {
+      "file": "data/gen/blast.json",
+      "sha256": "f38d9b54c6d5e6f0b4f5eccd30cbea36938e9dd4423e99cb9edb2d74f1b733dd",
+      "levels": 292,
+      "counts": {
+        "peg:blue": 18946,
+        "peg:orange": 8354,
+        "peg:obstacle": 2760,
+        "curves:0": 292,
+        "peg:green": 523,
+        "peg:purple": 261,
+        "peg:bumper": 160,
+        "moving-assembly": 142,
+        "peg:bomb": 52
+      }
+    },
+    "main": {
+      "file": "cdn-data/primary.json",
+      "sha256": "e98c419072ccac2d73b15479d4aca15a1cee80d9800fc7f9131782f0b9fad154",
+      "levels": 20,
+      "counts": {
+        "peg:orange": 584,
+        "peg:blue": 427,
+        "peg:obstacle": 34,
+        "curves:0": 9,
+        "peg:bombMagnet": 13,
+        "peg:portalBlue": 4,
+        "peg:portalOrange": 3,
+        "peg:bumper": 116,
+        "moving-assembly": 75,
+        "curves:1": 2,
+        "peg:bomb": 1,
+        "curves:3": 3,
+        "peg:billiardRed": 5,
+        "peg:billiardYellow": 5,
+        "peg:multi": 20,
+        "peg:gamble": 1,
+        "curves:8": 2,
+        "curves:6": 1,
+        "curves:5": 2,
+        "curves:2": 1
+      }
+    },
+    "des": {
+      "file": "data/des/campaign.json",
+      "sha256": "a92ce47f75e337ea85c768481cb48c46a8ae59801d0a9392c26c259e70461184",
+      "levels": 16,
+      "counts": {
+        "peg:obstacle": 234,
+        "peg:blue": 390,
+        "peg:orange": 394,
+        "curves:0": 16,
+        "assembly:seesaw": 18,
+        "assembly:tower": 20,
+        "assembly:bridge": 8,
+        "assembly:cage": 16,
+        "assembly:cradle": 18
+      }
+    },
+    "des1": {
+      "file": "data/des1/campaign.json",
+      "sha256": "139714c60c9be203f6bdbf8efcc0e5c3d2b6ea348524087ed506b128a3e65471",
+      "levels": 11,
+      "counts": {
+        "peg:obstacle": 110,
+        "peg:orange": 242,
+        "peg:blue": 304,
+        "curves:0": 11,
+        "assembly:hopper": 10,
+        "assembly:cup": 17,
+        "assembly:tower": 13,
+        "assembly:seesaw": 11,
+        "assembly:cradle": 6,
+        "assembly:ramp": 5,
+        "peg:portalBlue": 4,
+        "peg:portalOrange": 4,
+        "assembly:portal": 4,
+        "peg:bombMagnet": 1,
+        "assembly:magnet": 1,
+        "assembly:cage": 4
+      }
+    },
+    "des2": {
+      "file": "data/des2/campaign.json",
+      "sha256": "f78c956649f867b4d2bdfa95645e75b6961cef4e4c8f9752b2a2ec39234f8303",
+      "levels": 12,
+      "counts": {
+        "peg:orange": 286,
+        "peg:blue": 382,
+        "peg:bumper": 4,
+        "curves:3": 7,
+        "peg:portalBlue": 3,
+        "peg:portalOrange": 3,
+        "curves:2": 2,
+        "curves:1": 2,
+        "moving-assembly": 2,
+        "curves:4": 1,
+        "peg:bombMagnet": 1
+      }
+    }
+  },
+  "transfer": {
+    "blast": [
+      "arc/ring openings",
+      "compound Bezier ribbons",
+      "radial symmetry",
+      "branching silhouettes",
+      "whole-assembly movement"
+    ],
+    "des": [
+      "native hinged platforms",
+      "counterweighted cargo",
+      "paired bridge leaves with open sides"
+    ],
+    "des1": [
+      "receiving cups",
+      "clearable shelves",
+      "release-transfer-catch graph"
+    ],
+    "des2": [
+      "native scale",
+      "true warped brick ribbons",
+      "free transfer corridors",
+      "native portal/magnet eligibility"
+    ],
+    "main": [
+      "functional paired portals",
+      "magnet fields on movable cargo",
+      "bounce deflectors",
+      "moving motifs"
+    ]
+  },
+  "boundaries": [
+    "No new native peg types, objectives, stages or defeat rules.",
+    "No arbitrary Blast drawings reconstructed by a model. Shapes come from numerical profiles.",
+    "Default generation expands a bounded DAG; calibration forms remain optional regression cases."
+  ]
+}

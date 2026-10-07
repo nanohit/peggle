@@ -1,0 +1,241 @@
+import {randomFrom} from '../destruction/grammar.js';
+import {createSeesaw} from '../../js/destruction-hinge.js';
+import {sampleCubicBezier,bakePegsFromSamples} from '../destruction2/bezier-geometry.js';
+import {overlapDepth,objectBounds} from '../destruction2/ribbon-geometry.js';
+
+export const FORMS=Object.freeze(['grown','cascade','confluence','distributor','crossfeed','drawbridge','orbit']);
+export const VOCABULARY=Object.freeze(['shelf','ramp','cup','tilting-cup','seesaw','bridge','fan','open-ring','wave','fern','magnet','portal','bumper','moving-ribbon']);
+const choose=(r,a)=>a[Math.floor(r()*a.length)],between=(r,a,b)=>a+(b-a)*r(),point=([x,y])=>({x,y});
+export const cubic=p=>({start:point(p[0]),h1:point(p[1]),h2:point(p[2]),end:point(p[3])});
+export function arc(cx,cy,rx,ry,start,end){
+ const n=Math.ceil(Math.abs(end-start)/(Math.PI/2)),step=(end-start)/n,segments=[];
+ for(let i=0;i<n;i++){const a=start+i*step,b=a+step,k=4/3*Math.tan(step/4);segments.push(cubic([
+  [cx+rx*Math.cos(a),cy+ry*Math.sin(a)],[cx+rx*(Math.cos(a)-k*Math.sin(a)),cy+ry*(Math.sin(a)+k*Math.cos(a))],
+  [cx+rx*(Math.cos(b)+k*Math.sin(b)),cy+ry*(Math.sin(b)-k*Math.cos(b))],[cx+rx*Math.cos(b),cy+ry*Math.sin(b)]]));}
+ return {...segments[0],segments};
+}
+// Spatial embeddings follow the transfer graph. A node chooses a compatible
+// component, then its inlet/outlet constrains the next one. Slots are envelopes,
+// not copied levels; paths, sizes, hinges, load counts and branching all vary.
+export function planComposition({seed='system-001',form='auto',transport='auto'}={}){
+ seed=String(seed).slice(0,60);const r=randomFrom(seed+':des3-plan');
+ if(form==='auto')form='grown';if(!FORMS.includes(form))throw Error('Unknown form');
+ const mirror=r()<.5?-1:1,xx=x=>mirror===1?x:400-x,shift=()=>between(r,-8,8),nodes=[],edges=[];
+ const node=(role,x,y,kinds,w=106)=>{const n={id:'n'+nodes.length,role,kind:choose(r,kinds),x:xx(x)+shift(),y:y+shift(),width:w,direction:mirror};nodes.push(n);return n;};
+ const edge=(a,b,kind='fall')=>edges.push({from:a.id,to:b.id,kind});
+ const feed=['shelf','ramp'],receive=['cup','tilting-cup','seesaw'],finish=['cup','fan','open-ring','seesaw'];
+ const derivation=[];
+ if(form==='grown'){
+  // Grow a layered DAG by bounded rewrite rules. Width can split, merge or
+  // continue at every band; rank, not a named scene, drives the embedding.
+  const depth=choose(r,[3,3,4]),counts=[choose(r,[1,1,2])];
+  for(let band=1;band<depth;band++){
+   const before=counts.at(-1),rule=choose(r,['continue','split','merge']);
+   const next=rule==='split'?2:rule==='merge'?1:before;
+   counts.push(next);derivation.push({rule,band,before,after:next});
+  }
+  const layers=[];const lane=between(r,85,116),bias=between(r,-36,36);
+  for(let band=0;band<depth;band++){
+   const count=counts[band],isLast=band===depth-1,y=150+band*(318/(depth-1));
+   const layer=[];
+   for(let i=0;i<count;i++){
+    const x=count===2?200+(i?1:-1)*lane:200+bias*Math.sin(band*1.7+1);
+    const branching=!isLast&&counts[band+1]===2&&count===1;
+    const kinds=band===0?feed:isLast?finish:branching?['seesaw','bridge']:receive;
+    const width=count===2?between(r,84,105):branching?between(r,150,186):between(r,108,150);
+    layer.push(node(band===0?'source':isLast?'catcher':'receiver',x,y,kinds,width));
+   }
+   layers.push(layer);
+  }
+  for(let band=1;band<depth;band++){
+   const prev=layers[band-1],next=layers[band],cross=prev.length===2&&next.length===2&&r()<.3;
+   if(prev.length===next.length)prev.forEach((a,i)=>edge(a,next[cross?next.length-1-i:i],cross?'portal':'fall'));
+   else for(const a of prev)for(const b of next)edge(a,b,prev.length===1?'spill':'guide');
+   if(cross)derivation.push({rule:'cross-transfer',band});
+  }
+  // Spare side-space can grow a secondary branching or radial motif. It is
+  // omitted when the main graph already occupies both sides of every band.
+  const gap=layers.findIndex((layer,i)=>i>0&&i<depth-1&&layer.length===1);
+  if(gap>=0&&nodes.length<6){const core=layers[gap][0];node('flank',core.x<200?310:90,core.y,['wave','fern','open-ring'],between(r,84,104));derivation.push({rule:'grow-side-motif',band:gap});}
+ }
+ if(form==='cascade'){
+  const x=between(r,110,145),a=node('source',x,154,feed),b=node('receiver',x+between(r,8,32),297,receive),c=node('catcher',x+between(r,-18,30),455,finish);
+  edge(a,b);edge(b,c);node('flank',300,between(r,265,335),['wave','fern','open-ring'],100);
+ }
+ if(form==='confluence'){
+  const a=node('source',92,155,feed,90),b=node('source',308,157,feed,90),c=node('receiver',200,315,['cup','seesaw'],146),d=node('catcher',200,472,finish,122);
+  edge(a,c,'guide');edge(b,c,'guide');edge(c,d);
+ }
+ if(form==='distributor'){
+  const a=node('source',200,155,feed,98),b=node('receiver',200,292,['seesaw'],168),c=node('catcher',104,462,finish,110),d=node('catcher',296,462,finish,110);
+  edge(a,b);edge(b,c,'spill');edge(b,d,'spill');
+ }
+ if(form==='crossfeed'){
+  const a=node('source',90,155,feed,88),b=node('receiver',294,314,receive,108),c=node('catcher',280,470,finish,106);
+  edge(a,b,'portal');edge(b,c);node('flank',100,375,['wave','fern','open-ring'],102);
+ }
+ if(form==='drawbridge'){
+  const a=node('source',200,145,feed,88),b=node('receiver',200,310,['bridge'],210),c=node('catcher',104,463,finish,102),d=node('catcher',296,463,finish,102);
+  edge(a,b);edge(b,c,'spill');edge(b,d,'spill');
+ }
+ if(form==='orbit'){
+  const a=node('source',103,151,feed,90),b=node('receiver',116,306,receive,94),c=node('catcher',268,465,finish,104);
+  edge(a,b);edge(b,c,'guide');node('flank',299,249,['open-ring','fan'],114);
+ }
+ const defaultTransport=form==='crossfeed'||edges.some(e=>e.kind==='portal')?'portal':choose(r,['none','magnet','none']);
+ transport=transport==='auto'?defaultTransport:transport;
+ if(!['none','magnet','portal'].includes(transport))throw Error('Unknown transport');
+ // A remote connection needs a portal; a portal is installed on an existing
+ // source-to-receiver edge, never scattered into a random empty spot.
+ if(form==='crossfeed')transport='portal';
+ if(transport==='portal'&&!edges.some(e=>e.kind==='portal'))edges.find(e=>nodes.find(n=>n.id===e.from).role==='source').kind='portal';
+ // Inlets are sized to their incoming fan; geometry parameters remain coupled
+ // to this demand. Off-axis gravity transfers grow a guide edge.
+ for(const e of edges){const a=nodes.find(n=>n.id===e.from),b=nodes.find(n=>n.id===e.to);
+  if(e.kind==='fall'&&Math.abs(a.x-b.x)>b.width*.34)e.kind='guide';}
+ const motion=nodes.some(n=>n.role==='flank')&&r()<.55;
+ return {seed,form,transport,mirror,nodes,edges,motion,derivation,ornament:choose(r,['echo','branches','ripple']),density:between(r,.35,.65)};
+}
+
+export function generateLevel(options={}){
+ const plan=planComposition(options),r=randomFrom(plan.seed+':des3-shapes'),id='des3-'+plan.form+'-'+plan.seed.replace(/[^a-zA-Z0-9_-]/g,'').slice(0,45);
+ const pegs=[],groups=[],bezierCurves={},assemblies=[],links=[],reservations=[];let serial=0;
+ const fixed={destructionStatic:true,destructionPhysicsOnHit:false},asleep={destructionStatic:false,destructionPhysicsOnHit:true,destructionPhysicsOnHitBallOnly:true};
+ const peg=(x,y,type='blue',extra={})=>{const p={id:id+':p'+(++serial),x,y,type,shape:'circle',angle:0,radiusScale:1,...fixed,...extra};pegs.push(p);return p;};
+ const brick=(x,y,w,h=10.2,a=0,type='blue',extra={})=>peg(x,y,type,{shape:'brick',width:w,height:h,angle:a,brickBaseRadius:8.5,...extra});
+ const label=(p,a,role)=>{p.constructionAssembly=a.id;p.constructionRole=role;a.pegs.push(p.id);return p;};
+ const assembly=(n,kind=n.kind)=>{const a={...n,id:id+':'+n.id,type:kind,pegs:[],cargoIds:[],ports:{},triggers:[]};assemblies.push(a);return a;};
+ function sized(p){return {...p,radius:8.5*(p.bumperScale||1),...(p.type.startsWith('portal')?{shape:'brick',width:34*p.portalScale,height:10.2}: {})};}
+ function clear(p,gap=3){const q=sized(p),b=objectBounds(q);return b.minX>=20&&b.maxX<=380&&b.minY>=109&&b.maxY<=533&&pegs.every(o=>overlapDepth({...q,radius:q.radius+gap,width:(q.width||0)+2*gap,height:(q.height||0)+2*gap},sized(o))<=0);}
+ function stroke(curve,a,role,{material='brick',spacing=34,extra={}}={}){
+  const bid=a.id+':curve'+Object.keys(bezierCurves).length,ms=bakePegsFromSamples(sampleCubicBezier(curve),{shape:material,spacingPx:spacing,brickWidth:34,pegRadius:8.5,sliceCount:7});
+  if(material==='brick')bezierCurves[bid]={...curve,pegShape:'brick',pegType:'blue',spacingPx:34,brickWidth:34,brickHeight:10.2,pegRadius:8.5,bakeVersion:1,rotationOffset:0,refPoints:ms.map((p,index)=>({index,x:p.x,y:p.y}))};
+  return ms.flatMap((m,i)=>material==='circle'&&!clear({x:m.x,y:m.y,type:'blue',shape:'circle'},6)?[]:[label(peg(m.x,m.y,'blue',{...(material==='brick'?{shape:'brick',width:34,height:10.2,angle:m.angle,brickBaseRadius:8.5,bezierGroupId:bid,bezierIndex:i,curveSlices:m.slices}:{}),...extra}),a,role)]);
+ }
+ function cargo(a,x,y,count,angle=0){
+  const c=Math.cos(angle),s=Math.sin(angle);
+  for(let k=0;k<count;k++){const off=(k-(count-1)/2)*20;const p=label(peg(x+off*c+13.8*s,y+off*s-13.8*c,k%3===0?'blue':'orange',{destructionStatic:false,destructionPhysicsOnHit:false}),a,'cargo');a.cargoIds.push(p.id);}
+ }
+ function seesaw(a,x,y,width,count=4){
+  const native=createSeesaw({id:a.id+':lever'+groups.length,x,y,width,pivotFraction:.5,minAngle:-.58,maxAngle:.58});
+  groups.push(...native.groups);for(const old of native.pegs){const p=peg(old.x,old.y,old.type,{...old,id:id+':p'+(++serial)});label(p,a,old.constructionPart);}
+  cargo(a,x,y,count);a.ports.in={x,y:y-28,halfWidth:width*.45};a.ports.out={x,y:y+width*.3,halfWidth:width*.5};
+ }
+ function make(n){
+  const a=assembly(n),{x,y,width:w,direction:d}=n;
+  if(n.kind==='shelf'||n.kind==='ramp'){
+   const angle=n.kind==='ramp'?d*between(r,.08,.14):0;
+   const floor=label(brick(x,y,w,10.2,angle,'blue'),a,'release-floor');a.triggers.push(floor.id);cargo(a,x,y,w>100?5:4,angle);
+   if(n.kind==='ramp'){
+    const gate=label(peg(x+d*(w/2+9)*Math.cos(angle)+13.8*Math.sin(angle),y+d*(w/2+9)*Math.sin(angle)-13.8*Math.cos(angle),'orange',asleep),a,'release-gate');a.triggers.push(gate.id);
+   }
+   a.ports.in={x,y:y-30,halfWidth:w/2};a.ports.out={x,y:y+24,halfWidth:w*.45};
+  }
+  if(n.kind==='seesaw')seesaw(a,x,y,w,w>140?6:4);
+  if(n.kind==='bridge'){
+   seesaw(a,x-53,y,80,3);seesaw(a,x+53,y,80,3);
+   const lock=label(brick(x,y+18,40,10.2,0,'blue'),a,'bridge-lock');a.triggers.push(lock.id);
+   a.ports.in={x,y:y-32,halfWidth:94};a.ports.out={x,y:y+30,halfWidth:98};
+  }
+  if(n.kind==='cup'||n.kind==='tilting-cup'){
+   const radius=w/2,cy=y-radius*.35,groupId=a.id+':vessel';
+   const extra=n.kind==='tilting-cup'?{...asleep,groupId}:{};
+   if(n.kind==='tilting-cup')groups.push({id:groupId,name:'Открытая чаша',pattern:'construction',destructionBody:true});
+   const depth=between(r,.62,.9)*radius,bias=between(r,-.18,.18)*radius,lip=cy+8;
+   // A vessel is synthesized from its mouth, depth, asymmetry and discharge
+   // side. Both cubics share a horizontal bottom tangent; no fixed cup mesh.
+   const curve={segments:[cubic([[x+radius,lip],[x+radius*.91,lip+depth*.64],[x+bias+radius*.38,cy+depth],[x+bias,cy+depth]]),cubic([[x+bias,cy+depth],[x+bias-radius*.38,cy+depth],[x-radius*.91,lip+depth*.64],[x-radius,lip]])]};
+   a.profile={mouth:radius*2,depth,bias,curve};
+   const walls=stroke(curve,a,'cup-wall',{extra});
+   a.triggers.push(...walls.map(p=>p.id));
+   if(n.kind==='tilting-cup'){
+    const hinge=label(brick(x-d*radius*.92,cy+radius*.85*.16,23,10.2,0,'blue',{...asleep,groupId,destructionHinge:{pivotFraction:.5,minAngle:d>0?0:-1.15,maxAngle:d>0?1.15:.03,damping:.997}}),a,'pour-handle');a.triggers.push(hinge.id);
+   }
+   // A few loose targets sit in the bottom, with room for incoming source cargo.
+   if(n.role==='catcher')for(const dx of [-20,0,20]){const p={x:x+bias+dx,y:cy+depth-24,type:'orange',shape:'circle'};if(clear(p,2))label(peg(p.x,p.y,'orange'),a,'cup-target');}
+   a.ports.in={x,y:lip-16,halfWidth:radius*.83};a.ports.out={x:x+bias,y:cy+depth+15,halfWidth:radius*.5};
+  }
+  if(n.kind==='fan'){
+   const radius=w*.48,cy=y-26;
+   stroke(arc(x,cy,radius,46,.1,Math.PI-.1),a,'catcher-ribbon');
+   for(const side of [-1,1])stroke(cubic([[x+side*(radius+28),y-38],[x+side*(radius+26),y-7],[x+side*50,y+37],[x+side*35,y+53]]),a,'fan-echo',{material:'circle',spacing:31});
+   a.ports.in={x,y:y-40,halfWidth:radius*.8};a.ports.out={x,y:y+35,halfWidth:radius};
+  }
+  if(n.kind==='open-ring'){
+   const rad=w*.49,opening=between(r,1.3,1.8),cy=y-6;
+   stroke(arc(x,cy,rad,rad,-Math.PI/2+opening/2,Math.PI*1.5-opening/2),a,'open-ring');
+   for(const dx of [-19,19])label(peg(x+dx,cy+2,'blue'),a,'island-core');
+   a.ports.in={x,y:cy-rad+12,halfWidth:rad*.65};a.ports.out={x,y:cy+rad+12,halfWidth:rad*.5};
+  }
+  if(n.kind==='wave'||n.kind==='fern'){
+   const bend=between(r,28,49)*d;
+   const members=stroke(cubic([[x-35,y-82],[x+60,y-50],[x-60,y+45],[x+35,y+87]]),a,'wave-spine');
+   if(n.kind==='fern')for(let k=0;k<4;k++){
+    const yy=y-64+k*42;for(const side of [-1,1])stroke(cubic([[x+side*15,yy],[x+side*35,yy-12],[x+side*45,yy-23],[x+side*49,yy-29]]),a,'fern-leaf',{material:'circle',spacing:30});
+   }
+   a.ports.in={x,y:y-82,halfWidth:32};a.ports.out={x,y:y+87,halfWidth:32};
+  }
+  return a;
+ }
+ const map=new Map(plan.nodes.map(n=>[n.id,make(n)]));
+ const source=assemblies.find(a=>a.role==='source');
+ for(const e of plan.edges){
+  const from=map.get(e.from),to=map.get(e.to),out=from.ports.out,into=to.ports.in;
+  const edge={from:from.id,to:to.id,kind:e.kind,out:{...out},in:{...into},helpers:[]};links.push(edge);
+  // Cargo needs a free descending cone. Accents and motion envelopes may not
+  // fill it. A transport edge reserves its two local openings separately.
+  const x0=e.kind==='portal'?into.x:out.x;
+  reservations.push({from:{x:x0,y:e.kind==='portal'?into.y-54:out.y},to:{x:into.x,y:into.y},width:30});
+  if(e.kind==='portal'){
+   const a=assembly({id:'portal'+links.length,role:'transport',x:0,y:0,kind:'portal'});
+   const entry=label(peg(out.x,out.y+23,'portalBlue',{portalScale:2.7,portalOneWay:true,portalOneWayFlip:false}),a,'feed-entry');
+   const exit=label(peg(into.x,into.y-45,'portalOrange',{portalScale:2.7,portalOneWay:true,portalOneWayFlip:true}),a,'receiver-exit');
+   entry.portalTargetId=exit.id;exit.portalTargetId=entry.id;edge.helpers.push(a.id);a.ports={entry:{x:entry.x,y:entry.y},exit:{x:exit.x,y:exit.y}};
+  } else if(e.kind==='guide'){
+   // Two sloped banks converge onto the receiver. Their lower mouths keep a
+   // full ball diameter plus clearance; neither seals the receiver's inlet.
+   const a=assembly({id:'guide'+links.length,role:'guide',kind:'wave',x:0,y:0});
+   const side=Math.sign(out.x-into.x)||plan.mirror,topY=out.y+36,endY=into.y-44;
+   if(endY>topY+25)stroke(cubic([[out.x+side*28,topY],[out.x+side*24,topY+24],[into.x+side*55,endY-27],[into.x+side*39,endY]]),a,'transfer-bank');
+   edge.helpers.push(a.id);
+  }
+ }
+ if(plan.transport==='magnet'){
+  const d=plan.mirror,m=assembly({id:'field',kind:'magnet',role:'transport',x:source.x+d*51,y:source.y+69});
+  const p=label(peg(m.x,m.y,'bombMagnet',{magnetRadius:between(r,88,105),magnetStrength:between(r,.27,.43),magnetMode:'attract',magnetBlast:false,magnetHittable:true,magnetKnockout:true}),m,'cargo-field');
+  const e=links.find(e=>e.from===source.id);e.helpers.push(m.id);m.influences={source:source.id,receiver:e.to,cargo:source.cargoIds,radius:p.magnetRadius};
+ }
+ // The moving assembly is a whole clearable ribbon. Translation is restricted
+ // to its envelope and is validated over a complete native animation cycle.
+ const flank=assemblies.find(a=>a.role==='flank');
+ if(flank&&plan.motion){
+  const gid=flank.id+':motion',members=pegs.filter(p=>flank.pegs.includes(p.id));members.forEach(p=>p.groupId=gid);
+  groups.push({id:gid,name:'Живая кривая',pattern:'custom',animation:{dx:0,dy:between(r,8,15),rotation:0,duration:between(r,5,7),cycle:false,wrap:false,hitTrigger:false,easing:'easeInOut'}});
+ }
+ function nearReservation(x,y,extra=0){return reservations.some(v=>{const dx=v.to.x-v.from.x,dy=v.to.y-v.from.y,t=Math.max(0,Math.min(1,((x-v.from.x)*dx+(y-v.from.y)*dy)/(dx*dx+dy*dy||1)));return Math.hypot(x-v.from.x-t*dx,y-v.from.y-t*dy)<v.width/2+extra;});}
+ // Echo pegs continue the same graph's silhouette, rather than random fill.
+ const accents=assembly({id:'echo',kind:plan.ornament,role:'echo',x:200,y:320});
+ for(const n of plan.nodes)for(let k=0;k<5;k++){
+  const side=n.x<200?1:-1,x=n.x+side*(n.width/2+29+Math.sin(k*1.5)*13),y=n.y-53+k*30;
+  const p={x,y,type:'blue',shape:'circle'};
+  if(!nearReservation(x,y,14)&&clear(p,8)&&(!flank||!plan.motion||Math.abs(x-flank.x)>flank.width*.65||Math.abs(y-flank.y)>115))label(peg(x,y),accents,'echo');
+ }
+ // A bumper may mediate an actual guide path, provided it does not choke it.
+ if(plan.transport==='none'&&r()<.65){
+  const edge=links.find(e=>e.kind==='guide')||links[0],x=(edge.out.x+edge.in.x)/2+plan.mirror*42,y=(edge.out.y+edge.in.y)/2;
+  const p={x,y,type:'bumper',shape:'circle',bumperScale:1.8};
+  if(clear(p,9)){const a=assembly({id:'bounce',kind:'bumper',role:'deflector',x,y});label(peg(x,y,'bumper',{bumperScale:1.8,bumperBounce:1.5,bumperOrange:false}),a,'deflector');edge.helpers.push(a.id);}
+ }
+ const ordinary=pegs.filter(p=>['blue','orange'].includes(p.type)&&p.constructionRole!=='cargo'&&p.constructionRole!=='release-gate'),targetR=randomFrom(plan.seed+':targets');
+ const used=new Map(),bands=[0,0,0],wanted=Math.min(21,Math.max(15,Math.round(pegs.filter(p=>['blue','orange'].includes(p.type)).length*.42)));
+ for(const p of pegs.filter(p=>p.type==='orange')){const band=Math.max(0,Math.min(2,Math.floor((p.y-100)/145)));bands[band]++;used.set(p.constructionAssembly,(used.get(p.constructionAssembly)||0)+1);}
+ const pool=ordinary.map(p=>({p,tie:targetR()}));
+ while(pegs.filter(p=>p.type==='orange').length<wanted&&pool.length){
+  pool.sort((a,b)=>{const score=o=>bands[Math.max(0,Math.min(2,Math.floor((o.p.y-100)/145)))]*2+(used.get(o.p.constructionAssembly)||0)*.7+o.tie;return score(a)-score(b);});
+  const {p}=pool.shift();if(p.type==='orange')continue;p.type='orange';const band=Math.max(0,Math.min(2,Math.floor((p.y-100)/145)));bands[band]++;used.set(p.constructionAssembly,(used.get(p.constructionAssembly)||0)+1);
+ }
+ return {version:1,id,name:({grown:'Мастерская',cascade:'Каскад',confluence:'Слияние',distributor:'Распределитель',crossfeed:'Переброс',drawbridge:'Разводной мост',orbit:'Орбитальная мастерская'})[plan.form]+' · '+plan.seed,
+  pegRadius:8.5,ballCount:12,bucketEnabled:true,hitPegTimedClearEnabled:true,hitPegClearDelayMs:1100,pegs,groups,bezierCurves,flippers:null,
+  destruction:{enabled:true,gravityX:0,gravityY:.115,damping:.994,restitution:.34,friction:.72,surfaceGrip:.18,dynamicPegBallBounce:.45,maxSpeed:14,sleepSpeed:.055,sleepFrames:18,stuckPileClearDelayMs:220},
+  metadata:{authorNotes:'Обычные правила Alea. Связанные конструкции и направляющие построены одним процедурным планом; порядок разрушения свободный.',generator:{name:'destruction_systems',version:'0.1.0',seed:plan.seed,form:plan.form,transport:plan.transport,plan:{...plan,assemblies,links,reservations}}}};
+}

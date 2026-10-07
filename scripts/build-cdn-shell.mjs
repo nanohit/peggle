@@ -16,6 +16,7 @@ for(const [file,title,flags] of [
  ['gen/index.html','Alea · Generated','window.__PEGGLE_GENERATED_PLAYER__=true;'],
  ['des/index.html','Alea · Destruction','window.__PEGGLE_GENERATED_PLAYER__=true;window.__PEGGLE_DESTRUCTION_PLAYER__=true;'],
  ['des2/index.html','Alea · Free roam','window.__PEGGLE_GENERATED_PLAYER__=true;window.__PEGGLE_DESTRUCTION_PLAYER__=true;window.__PEGGLE_SPECTACLE_PLAYER__=true;'],
+ ['des3/index.html','Alea · Связанные системы','window.__PEGGLE_GENERATED_PLAYER__=true;window.__PEGGLE_DESTRUCTION_PLAYER__=true;window.__PEGGLE_SYSTEMS_PLAYER__=true;'],
  ['des1/index.html','Alea · Destruction compositions','window.__PEGGLE_GENERATED_PLAYER__=true;window.__PEGGLE_DESTRUCTION_PLAYER__=true;window.__PEGGLE_INTENT_PLAYER__=true;']
 ]) await save(file,template.replaceAll('__PEGGLE_CDN_BASE__',base).replace('__PEGGLE_TITLE__',title).replace('__PEGGLE_FLAGS__',flags));
 // The editor and reports live on the CDN too. document.write creates a parser
@@ -31,4 +32,5 @@ await documentLauncher('editor.html','editor.html',{editor:true});
 await documentLauncher('des/report/index.html','generators/destruction/report/index.html');
 await documentLauncher('des1/report/index.html','generators/destruction1/report/index.html');
 await documentLauncher('des2/report/index.html','generators/destruction2/report/index.html');
+await documentLauncher('des3/report/index.html','generators/destruction3/report/index.html');
 console.log('CDN:',base,'— Vercel contains only HTML launchers');

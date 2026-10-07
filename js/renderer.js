@@ -4644,6 +4644,11 @@ export class Renderer {
         this.drawGrid(cameraY);
         this.drawMagnetRadii(state.pegs, cameraY);
       }
+      // Transfer magnets expose their actual gameplay radius in the player,
+      // including the GPU path. Other campaigns retain their usual field art.
+      if (!state.showGrid && state.pegs.some(peg => peg.constructionRole === 'cargo-field')) {
+        this.drawMagnetRadii(state.pegs.filter(peg => peg.constructionRole === 'cargo-field'), cameraY);
+      }
       if (liteFieldFallback && !state.showGrid) {
         this.drawLiteMagnetFields(magnetFieldRings, cameraY, this._renderTimeSeconds);
       }

@@ -8,6 +8,22 @@
   },
   "rewrites": [
     {
+      "source": "/des3",
+      "destination": "/des3/index.html"
+    },
+    {
+      "source": "/des3/",
+      "destination": "/des3/index.html"
+    },
+    {
+      "source": "/des3/report",
+      "destination": "/des3/report/index.html"
+    },
+    {
+      "source": "/des3/report/",
+      "destination": "/des3/report/index.html"
+    },
+    {
       "source": "/des2",
       "destination": "/des2/index.html"
     },
