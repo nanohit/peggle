@@ -96,6 +96,9 @@ for(const type of ['blue','multi','gamble','bumper','obstacle','portalBlue']){
 }
 {
  const s=make('real-knockback'),g=s.game,k=g.pegs.find(p=>p.type==='gamble');assert(k);
+ // A real run clears earlier oranges before reaching this camera position.
+ // Flow drawings can begin higher than the former centre-header fixture.
+ s.scope(()=>{for(const p of g.pegs)if(p.type==='orange'&&p.y<245)g.activatePeg(p,null);});
  g.survivalRuntime.setCameraY(200);g.survivalStream.maintain(g);const n=g.survivalStream.generated;
  s.scope(()=>g.activatePeg(k,null));s.settle(.2);
  assert(g.getCameraY()<105,'native gamble hit actually pushes the field down by its configured distance');

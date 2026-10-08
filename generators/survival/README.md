@@ -1,4 +1,4 @@
-# Survival stream 0.1 — /surv
+# Survival stream 0.2 — /surv
 
 One continuous native Game and a browser-side deterministic geometry compiler.
 No bank of complete boards, server, model, level transitions or chunk objectives.
@@ -17,13 +17,23 @@ Increasing distance introduces hit-triggered radial objects, source/receiver
 episodes, native compound balances, portal returns and magnetic cargo. These
 mechanical actions are parts of a picture, not prescribed player stages or the
 universal basis of every formation. Components reuse numerical constructors
-from Des2/3/4/5; intervals share entry/exit direction and derive their extent
-from the actual drawing. Collision filtering and native runs verify realization.
+from Des2/3/4/5. `flow.js` plans a persistent winding gesture with two independent
+voices and longer visual phrases. Foreground drawings alternate sides, sometimes
+expand across the field, and overlap in vertical extent. A page's advance is
+independent of the drawing's bounding box: there is no extra inter-page gap,
+entry/exit marker or enclosing frame. Curves share position and tangent across
+compiler boundaries; their rests and material changes have a different metre.
+Closed drawings reserve their inner negative space. Future foreground forms may
+retire only blue voice material generated ahead of the visible viewport, so an
+earlier background stroke cannot cut a new silhouette. A bounded rest-pose tail
+checks neighbours and moves with world rebasing. Native runs verify realization.
 They do not choose the design or establish its quality. See DESIGN_REVIEW.md.
 
-Targets form short phrases and runs. Relief intervals interrupt concentrated
-mechanical scenes. An accessible native `gamble` peg offers 100–130px of smooth
-pushback before another pressure phrase. It is consumed once, does not reset
+Targets form short phrases and runs within foreground drawings. A native
+`gamble` replaces an ordinary peg inside a drawing, opening or counter-phrase;
+it keeps that peg's shape and belongs to the composition. Reward spacing varies
+by distance, independent of compiler pages. There is no centre-first header
+search. It offers 100–130px of smooth pushback and is consumed once, does not reset
 generation, and does not change ammunition. Multiball is occasional additional
 relief. Existing native portal and magnetic functions remain intact.
 
@@ -45,7 +55,10 @@ reconstructs consumed pegs. Construction is synchronous and small; a dedicated
 worker is unnecessary for this first version.
 
 `npm run test:surv` tests native loss, clearing, reload, relief and a 225,000px
-transport run. `npm run study:surv` compares 1250/1600/2000ms reload with one
+transport run. `npm run test:surv-flow` checks continuous curve joins, cross-page
+contacts, integrated rewards, safe background retirement and deterministic
+rebasing. `npm run study:surv-flow` renders long strips and moving viewport crops
+from six seeds, with no manual play. `npm run study:surv` compares 1250/1600/2000ms reload with one
 trajectory-based native shooting policy and renders actual states. The results
 calibrate a first playable cadence; they do not establish a human optimum or fun
 score. Study pictures remain in full Git source, without computer use.

@@ -737,7 +737,7 @@ async function resolve() {
       const seed=getQueryParam('seed')||'surv-'+crypto.getRandomValues(new Uint32Array(1))[0].toString(36);
       if(!getQueryParam('seed')){const u=new URL(location.href);u.searchParams.set('seed',seed);history.replaceState(null,'',u);}
       const level=normalizeLevelData(createSurvivalLevel(seed));
-      await bootWithLevels([level],'Survival 0.1',{name:'Survival 0.1',levels:[level],graph:graphFromLevels([level])},{unlockAll:true,survivalStream:true});
+      await bootWithLevels([level],'Survival 0.2',{name:'Survival 0.2',levels:[level],graph:graphFromLevels([level])},{unlockAll:true,survivalStream:true});
     } catch(error) {console.error('[surv]',error);showError('Не удалось запустить Survival. Обновите страницу.');}
     return;
   }

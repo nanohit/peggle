@@ -4,6 +4,7 @@ import {arc, cubic, spline, transform, polarContour, between, choose, TAU} from 
 import {overlapDepth, objectBounds} from '../destruction2/ribbon-geometry.js';
 import {HIT_PEG_CLEAR_DELAY_DEFAULT_MS} from '../../js/hit-peg-clear-settings.js';
 import {planDrawing,drawComposition} from './drawing.js';
+import {FlowComposer,drawFlow,appendToTail,drawingVoids,insideDrawingVoid} from './flow.js';
 
 export const RECHARGE_MS = 1600;
 export const BASE_SCROLL_SPEED = 25;
@@ -11,13 +12,13 @@ export const FAMILIES = ['river','islands','orchard','slalom','orbits','petals',
 export const STREAM_ACTIONS = ['drawing','release','balance','portal','field'];
 const startAt = {river:0,islands:0,orchard:0,slalom:0,orbits:3,petals:5,branch:7,release:4,balance:8,portal:6,field:10};
 
-// Construction intervals are an implementation detail of the infinite strip.
-// They share an entry/exit direction and run in one Game, with no level reset,
-// copied campaign boards, local win condition or compulsory action order.
+// Pages compile an overlapping window of one drawing. The persistent voices
+// and episode placement have their own metre, independent of page boundaries.
 export class SurvivalGenerator {
   constructor(seed='survival-01') {
     this.seed=String(seed).slice(0,80); this.index=0; this.cursorY=190;
     this.exitX=200; this.recent=[]; this.drawings=[]; this.sinceRelief=0;
+    this.flow=new FlowComposer(randomFrom(this.seed+':flow'));this.tail=[];this.voids=[];this.nextReliefAt=0;
   }
 
   next({family: forced}={}) {
@@ -31,12 +32,22 @@ export class SurvivalGenerator {
     this.sinceRelief=relief?0:this.sinceRelief+1;
     const b=new SystemBuilder(this.seed.replace(/[^\w-]/g,'').slice(0,24)+'-stream-'+i,{brickWidth:34,direction:r()<.5?-1:1,focus:progress});
     b.id='surv:'+this.seed+':'+i;
+    const flow=forced?null:this.flow.plan(r,{family,progress});
+    if(flow) {
+      // This compiler window is taller than one page's advance. Existing
+      // numerical constructors still author ordinary native-sized objects.
+      b.clear=(p,gap=2,ignore=[])=>{
+        const q=b.sized({type:'blue',shape:'circle',angle:0,radiusScale:1,...p},gap),box=objectBounds(q);
+        return box.minX>=15&&box.maxX<=385&&box.minY>=90&&box.maxY<=680&&
+          b.pegs.every(o=>ignore.includes(o.id)||overlapDepth(q,b.sized(o))<.1);
+      };
+    }
     const entry=this.exitX, exit=between(r,100,300), direction=r()<.5?-1:1;
     const parts=()=>b.part(family), stroke=(a,c)=>b.stroke(a,c,{width:34,spacing:34});
     const dot=(a,x,y,extra={})=>b.addIfClear(a,x,y,extra,5);
     const centers=[];let drawing=null;
     if(family==='drawing') {
-      drawing=planDrawing(r,{progress,relief,previous:this.drawings});drawComposition(b,drawing);
+      drawing=planDrawing(r,{progress,relief,previous:this.drawings,box:flow?.box,theme:flow?.theme});drawComposition(b,drawing);
       this.drawings.push(drawing.operation);if(this.drawings.length>3)this.drawings.shift();
     } else if(family==='river') {
       const a=parts(), bend=direction*between(r,70,115), y=between(r,240,290);
@@ -118,47 +129,21 @@ export class SurvivalGenerator {
       for(let row=0;row<3;row++)for(let k=0;k<6;k++)dot(a2,75+k*50,135+row*118+Math.sin(k*.8)*17);
     }
 
-    // Connect direction across construction boundaries with sparse notes. The
-    // field is never sealed by a full horizontal seam or a per-interval border.
-    const connective=b.part('continuation');
-    const low=Math.min(...b.pegs.map(p=>p.y)),high=Math.max(...b.pegs.map(p=>p.y));
-    for(const [x,y] of [[entry,Math.max(112,low-23)],[exit,Math.min(491,high+23)]])dot(connective,x,y);
     this.exitX=exit;
     // Limited accents follow the gesture, not a common grid pasted behind it.
     if(!['drawing','orchard','river','petals','slalom','portal'].includes(family)) {
       const accents=b.part('open-space-notes');
-      if(!forced&&['release','balance','field'].includes(family)) {
-        // A mechanical episode occupies a coherent enclosing gesture. Its
-        // load/release/receiver remains part of the picture, not the whole strip.
-        b.dots(accents,arc(200,299,157,143,.05,Math.PI-.05),{spacing:29});
-        b.dots(accents,arc(200,286,157,137,Math.PI+.05,TAU-.05),{spacing:29});
-      } else for(let k=0;k<8;k++)dot(accents,between(r,45,355),between(r,133,450));
+      if(forced)for(let k=0;k<8;k++)dot(accents,between(r,45,355),between(r,133,450));
     }
 
-    const support=b.pegs.filter(p=>p.type==='blue'&&p.constructionRole!=='cargo');
-    const wanted=Math.min(support.length,Math.round((relief?9:12)+progress*7)), order=support.map(p=>({p,t:r()}));
-    // Targets form short readable phrases on curves and clusters. Loose cargo
-    // stays blue: a stream must not punish a legitimate downward release.
-    const runs=new Map();for(const {p} of order){const key=p.constructionAssembly;const rows=runs.get(key)||[];rows.push(p);runs.set(key,rows);}
-    let assigned=0;for(const row of runs.values()) {
-      const n=Math.max(1,Math.round(wanted*row.length/Math.max(1,support.length))), start=Math.floor(r()*Math.max(1,row.length-n));
-      for(const p of row.slice(start,start+n)){if(assigned>=wanted)break;p.type='orange';assigned++;}
+    if(flow) {
+      if(family!=='drawing') {
+        const dy=flow.box.y-299;
+        for(const p of b.pegs){p.y+=dy;for(const s of p.curveSlices||[])s.y+=dy;}
+      }
+      const offset=this.cursorY-140;
+      drawFlow(b,flow,[...drawingVoids(drawing),...this.voids.map(v=>({...v,y:v.y-offset}))]);
     }
-    order.sort((a,b)=>a.t-b.t);for(const {p} of order)if(assigned<wanted&&p.type==='blue'){p.type='orange';assigned++;}
-
-    // A relief peg is offered in an accessible open pocket before the next
-    // pressure phrase, rather than sprinkled without knowing its function.
-    const offerRelief=i===0||i%3===2||family==='balance'||family==='field';
-    let rescue=null;
-    if(offerRelief) {
-      const a=b.part('pressure-relief');
-      const xs=[200,80,320,130,270];
-      for(const y of [130,153,192,221])for(const x of xs)if(!rescue)rescue=dot(a,x,y,{
-        type:'gamble',gambleBallCount:0,gambleLuckBonus:0,gambleKnockbackEnabled:true,
-        gambleKnockbackDistance:Math.round(100+progress*30),gambleKnockbackSmoothMs:180
-      });
-    }
-    if(i>2&&r()<.20){const a=b.part('multi-relief');dot(a,exit,432,{type:'multi',multiballSpawnCount:2});}
 
     // A fast local safety filter protects the shape, rather than designing it.
     // The gesture and response above are chosen before collision constraints.
@@ -166,7 +151,7 @@ export class SurvivalGenerator {
     for(const p of b.pegs)p.radiusScale=1;
     for(let j=0;j<b.pegs.length;j++){
       const p=b.pegs[j], box=objectBounds(b.sized(p));
-      if(box.minX<15||box.maxX>385||box.minY<100||box.maxY>510){reject.add(p.id);continue;}
+      if(box.minX<15||box.maxX>385||box.minY<(flow?90:100)||box.maxY>(flow?680:510)){reject.add(p.id);continue;}
       for(let k=0;k<j;k++) {
         const q=b.pegs[k];if(reject.has(q.id)||p.bezierGroupId&&p.bezierGroupId===q.bezierGroupId)continue;
         if(overlapDepth(b.sized(p),b.sized(q))>.6){reject.add(p.id);break;}
@@ -177,19 +162,80 @@ export class SurvivalGenerator {
     b.pegs=b.pegs.filter(p=>!reject.has(p.id)&&!badBodies.has(p.groupId));
     b.groups=b.groups.filter(g=>b.pegs.some(p=>p.groupId===g.id));
     const firstY=Math.min(...b.pegs.map(p=>objectBounds(b.sized(p)).minY)),lastY=Math.max(...b.pegs.map(p=>objectBounds(b.sized(p)).maxY));
-    const offset=this.cursorY-firstY;
+    const offset=this.cursorY-(flow?140:firstY);
     for(const p of b.pegs){p.y+=offset;p.streamIndex=i;for(const s of p.curveSlices||[])s.y+=offset;}
-    const height=Math.round(lastY-firstY+between(r,26,45));this.cursorY+=height;
-    return {index:i,family,drawing,relief,entryX:entry,exitX:exit,progress,height,pegs:b.pegs,groups:b.groups,
+    const retiredPegIds=[];
+    if(flow) {
+      const voids=drawingVoids(drawing).map(v=>({...v,y:v.y+offset}));
+      retiredPegIds.push(...this.tail.filter(p=>p.flowVoice!==undefined&&insideDrawingVoid(p,voids)).map(p=>p.id));
+      this.voids=[...this.voids,...voids].filter(v=>v.y+v.ry>this.cursorY-500);
+      const tail=this.tail.map(p=>({p,q:b.sized(p)}));for(const o of tail)o.q._ribbonBounds=objectBounds(o.q);
+      const crossed=new Set();
+      for(const p of b.pegs){
+        const q=b.sized(p,1),box=objectBounds(q);q._ribbonBounds=box;
+        let conflicts=false;
+        for(const {p:o,q:oq} of tail){
+          const ob=oq._ribbonBounds;
+          if(ob.maxY<box.minY||ob.minY>box.maxY||overlapDepth(q,oq)<=.6)continue;
+          // Future foreground drawings own their silhouette. A blue running
+          // voice can rest around one, even when compiled by the earlier page.
+          if(p.flowVoice===undefined&&o.flowVoice!==undefined)retiredPegIds.push(o.id);
+          else conflicts=true;
+        }
+        if(conflicts)crossed.add(p.id);
+      }
+      const bodies=new Set(b.pegs.filter(p=>crossed.has(p.id)&&p.groupId).map(p=>p.groupId));
+      b.pegs=b.pegs.filter(p=>!crossed.has(p.id)&&!bodies.has(p.groupId));
+      b.groups=b.groups.filter(g=>b.pegs.some(p=>p.groupId===g.id));
+      const retired=new Set(retiredPegIds);this.tail=this.tail.filter(p=>!retired.has(p.id));
+    }
+
+    const support=b.pegs.filter(p=>p.type==='blue'&&p.constructionRole!=='cargo'&&p.flowVoice===undefined);
+    const wanted=Math.min(support.length,Math.max(7,Math.round(((relief?9:12)+progress*7)*(flow?flow.advance/350:1))));
+    const order=support.map(p=>({p,t:r()}));
+    // Targets are runs inside drawn objects, never an orange divider row.
+    // Loose cargo stays blue, so its legitimate release cannot cause a loss.
+    const runs=new Map();for(const {p} of order){const key=p.constructionAssembly;const rows=runs.get(key)||[];rows.push(p);runs.set(key,rows);}
+    let assigned=0;for(const row of runs.values()) {
+      const n=Math.max(1,Math.round(wanted*row.length/Math.max(1,support.length))), start=Math.floor(r()*Math.max(1,row.length-n));
+      for(const p of row.slice(start,start+n)){if(assigned>=wanted)break;p.type='orange';assigned++;}
+    }
+    order.sort((a,b)=>a.t-b.t);for(const {p} of order)if(assigned<wanted&&p.type==='blue'){p.type='orange';assigned++;}
+
+    // Reward an existing contour/opening. No extra peg, centre-first search,
+    // header space or index cadence can reveal where compiler pages begin.
+    let rescue=null;
+    const distance=flow?.distance||i*350;
+    if(distance>=this.nextReliefAt) {
+      const target={x:flow?flow.box.x+flow.side*flow.box.w*between(r,-.25,.25):between(r,70,330),
+        y:(flow?flow.box.y:between(r,220,400))+offset+between(r,-60,75)};
+      const eligible=b.pegs.filter(p=>p.type==='blue'&&!p.groupId&&p.destructionStatic&&p.flowVoice===undefined&&
+        !['cargo','release-floor','receiver-wall','bearing','bearing-arm','carrier-wall'].includes(p.constructionRole));
+      const score=p=>Math.hypot(p.x-target.x,p.y-target.y)+(p.shape==='brick'?25:0);
+      eligible.sort((a,b)=>score(a)-score(b));rescue=eligible[0]||null;
+      if(rescue){Object.assign(rescue,{type:'gamble',gambleBallCount:0,gambleLuckBonus:0,gambleKnockbackEnabled:true,
+        gambleKnockbackDistance:Math.round(100+progress*30),gambleKnockbackSmoothMs:180});
+        this.nextReliefAt=distance+between(r,370,670);}
+    }
+    if(i>2&&r()<.20){
+      const p=choose(r,b.pegs.filter(p=>p.type==='blue'&&p.shape==='circle'&&p.destructionStatic&&!p.groupId&&p.flowVoice===undefined));
+      if(p)Object.assign(p,{type:'multi',multiballSpawnCount:2});
+    }
+    const height=flow?flow.advance:Math.round(lastY-firstY+between(r,26,45));this.cursorY+=height;
+    if(flow)this.tail=appendToTail(this.tail,b.pegs,this.cursorY,b);
+    return {index:i,family,drawing,flow,retiredPegIds:[...new Set(retiredPegIds)],relief,entryX:entry,exitX:exit,progress,height,pegs:b.pegs,groups:b.groups,
       targets:b.pegs.filter(p=>p.type==='orange').length,knockback:rescue&&b.pegs.includes(rescue)?rescue.id:null};
   }
 
-  rebase(distance){this.cursorY-=distance;}
+  rebase(distance){
+    this.cursorY-=distance;for(const v of this.voids)v.y-=distance;
+    for(const p of this.tail){p.y-=distance;for(const s of p.curveSlices||[])s.y-=distance;}
+  }
 }
 
 export function createSurvivalLevel(seed='survival-01') {
   return {version:1,id:'survival-'+seed,name:'Бесконечное течение',pegs:[],groups:[],pegRadius:8.5,
     bucketEnabled:false,ballCount:99,hitPegTimedClearEnabled:true,hitPegClearDelayMs:HIT_PEG_CLEAR_DELAY_DEFAULT_MS,
     destruction:{enabled:true},survival:{enabled:true,endless:true,seed,scrollSpeed:BASE_SCROLL_SPEED,antiCooldownMs:RECHARGE_MS,loseLineY:32},
-    metadata:{generator:{name:'survival-stream',version:'0.1',seed},authorNotes:'Сбивай оранжевые, пока они не поднялись к пушке. Золотые пеги отбрасывают поле вниз. Новый шар каждые 1,6 секунды.'}};
+    metadata:{generator:{name:'survival-stream',version:'0.2',seed},authorNotes:'Сбивай оранжевые, пока они не поднялись к пушке. Золотые пеги отбрасывают поле вниз. Новый шар каждые 1,6 секунды.'}};
 }

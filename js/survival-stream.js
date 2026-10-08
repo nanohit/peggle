@@ -14,6 +14,7 @@ export class SurvivalStream {
     let changed=false;
     while(this.generator.cursorY<camera+height*2.2) {
       const patch=this.generator.next();
+      if(patch.retiredPegIds.length){const retired=new Set(patch.retiredPegIds);game.pegs=game.pegs.filter(p=>!retired.has(p.id));}
       game.pegs.push(...patch.pegs);game.groups.push(...patch.groups);
       game.initialOrangePegs+=patch.targets;game.totalSurvivalTargets+=patch.targets;
       this.generated++;this.familyCounts[patch.family]=(this.familyCounts[patch.family]||0)+1;

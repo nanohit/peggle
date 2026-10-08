@@ -3,6 +3,8 @@
   "type": "module",
   "scripts": {
     "test:surv": "node scripts/survival-smoke.mjs",
+    "test:surv-flow": "node scripts/survival-flow-smoke.mjs",
+    "study:surv-flow": "node generators/survival/flow-study.mjs && python3 generators/survival/render-flow.py",
     "study:surv": "node generators/survival/study.mjs && python3 generators/survival/render.py",
     "build": "esbuild js/player-bootstrap.js --bundle --format=esm --splitting --outdir=dist",
     "build:cdn": "node scripts/build-cdn-bundle.mjs",

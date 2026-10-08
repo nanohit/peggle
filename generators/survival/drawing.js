@@ -5,11 +5,11 @@ import {arc, cubic, spline, transform, polarContour, between, choose, TAU} from 
 // Composition is sampled before any peg/collision/trajectory is calculated.
 export const DRAWING_OPERATIONS = ['repeat', 'reflect', 'nest', 'radial', 'branch'];
 
-export function planDrawing(r, {progress=0, relief=false, previous=[]}={}) {
+export function planDrawing(r, {progress=0, relief=false, previous=[],box:givenBox,theme:givenTheme}={}) {
   const operation=choose(r,DRAWING_OPERATIONS.filter(x=>x!==previous.at(-1)));
   const theme={path:choose(r,['bow','wave','loop']),material:choose(r,['brick','brick','dots']),
     bend:between(r,-.65,.65),phase:r()*TAU,opening:between(r,.7,2.3),lobes:choose(r,[0,2,3,4]),
-    amplitude:between(r,.04,.16),direction:r()<.5?-1:1};
+    amplitude:between(r,.04,.16),direction:r()<.5?-1:1,...givenTheme};
   const budget=relief?3:Math.round(4+progress*2), leaves=[];
   const leaf=(box,parameters={})=>{
     const n={op:'path',...box,path:theme.path,material:theme.material,bend:theme.bend,
@@ -67,13 +67,13 @@ export function planDrawing(r, {progress=0, relief=false, previous=[]}={}) {
     };
     fork(root,w*.24,h*.31,depths);return {op,depths,relation:'shared-stem-and-grown-heads',nodes};
   };
-  const box={x:200+theme.bend*13,y:310,w:between(r,292,324),h:between(r,285,337)};
+  const box=givenBox||{x:200+theme.bend*13,y:310,w:between(r,292,324),h:between(r,285,337)};
   const tree=grow(operation,box);
   // Timing is a response belonging to a drawn object, not a requirement to
   // put a mechanism into every patch. Only a circular envelope is rotated.
   const motion=operation==='radial'&&progress>.15?'hit-spin':
     operation==='nest'&&theme.lobes===0&&progress>.1&&r()<.65?'turn':null;
-  return {version:1,operation,theme,tree,leaves,motion,relief};
+  return {version:1,operation,theme,tree,leaves,motion,relief,box};
 }
 
 function curveFor(n) {
@@ -101,7 +101,7 @@ export function drawComposition(b,program) {
   }
   if(program.motion==='hit-spin'){
     const all=rows.filter(q=>q.n.material==='brick').flatMap(q=>q.ps),a=rows[0].a;
-    b.animate(a,all,{x:200+program.theme.bend*13,y:310},{rotation:program.theme.direction*TAU,
+    b.animate(a,all,{x:program.box.x,y:program.box.y},{rotation:program.theme.direction*TAU,
       duration:2.8,hitTrigger:true,hitMode:'spin',hitSteps:program.tree.count});
   } else if(program.motion==='turn') {
     // A circular outer shell can rotate without consuming its inner opening.

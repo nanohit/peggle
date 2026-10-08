@@ -50,3 +50,23 @@ physics. The mechanical release/return providers remain recognizable. More
 geometry novelty is not automatically better gameplay. Future improvements
 must be judged through actual drawings, evolving scenes and player feedback,
 with machine checks used as evidence of operation.
+
+## Flow revision 0.2
+
+The assembled strip exposed what isolated thumbnails missed: bounding-box
+normalization, explicit spacer height and centre-first power-up placement made
+every compiler page read as another board. Removed those conventions. Episodes
+now sit along a persistent winding drawing, with alternating lateral placement,
+occasional broad gestures, shared longer phrases and two independently resting
+voices. A page advances independently of the picture's extents. Existing native
+power-ups replace foreground pegs and keep their geometry; their spacing follows
+variable distance, rather than page number. Shooter, recharge, speed and loss
+conditions are unchanged.
+
+Directly inspected six assembled long strips and 24 overlapping viewport crops.
+An initial version put the voices against both side walls and looked like a
+repeated enclosure; changed them into an internal winding gesture. A second
+inspection exposed background fragments inside closed drawings; these drawings
+now reserve their inner negative space. Foreground contours take precedence over
+background material prepared ahead of the viewport. Cross-page collision checks
+and deterministic rebasing verify that realization. They do not establish fun.
