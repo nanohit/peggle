@@ -4309,6 +4309,7 @@ export class Game {
       flippers: this.flippers,
       cameraY,
       worldOriginY: this.isEndlessSurvival() ? this.survivalRuntime.originY : 0,
+      smoothBoardGrid: this.isEndlessSurvival(),
       showLauncher: this.state === 'idle' || this.isAimingState(),
       launchX: this.launchX,
       launchY: this.launchY,

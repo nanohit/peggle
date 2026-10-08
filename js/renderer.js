@@ -4465,7 +4465,7 @@ export class Renderer {
     const sig = fs.baseScratch;
     sig.length = 0;
     sig.push(
-      fs.epoch, this.width, this.height, cameraY, state.worldOriginY || 0,
+      fs.epoch, this.width, this.height, cameraY, state.worldOriginY || 0, !!state.smoothBoardGrid,
       state.playState,
       state.pegs, state.pegs ? state.pegs.length : 0
     );
@@ -4612,6 +4612,7 @@ export class Renderer {
           height: this.height,
           cameraY,
           gridCameraY,
+          smoothBoardGrid: !!state.smoothBoardGrid,
           timeSeconds: this._renderTimeSeconds,
           frameDeltaSeconds: state.frameDeltaSeconds,
           progress: state.levelProgress,

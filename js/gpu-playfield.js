@@ -244,6 +244,8 @@ uniform float uBoardTexture;
 uniform float uBoardGrid;
 uniform float uBoardGridDepth;
 uniform float uBoardGridOffsetY;
+uniform float uBoardGridFilter;
+
 
 void main() {
   vec2 p = vec2(gl_FragCoord.x, uRender.y - gl_FragCoord.y) * (uCanvas / uRender);
@@ -259,7 +261,8 @@ void main() {
 
   // Grid mode cuts real channels into the surface instead of drawing lines, so
   // each groove lights on the key side and shades on the other.
-  if (uBoardStyle > 0.5 && uBoardStyle < 1.5) {
+  bool filteredGrid = uBoardGridFilter > 0.5 && uBoardStyle > 0.5 && uBoardStyle < 1.5;
+  if (uBoardStyle > 0.5 && uBoardStyle < 1.5 && !filteredGrid) {
     vec2 cell = (p + vec2(0.0, uBoardGridOffsetY)) / max(uBoardGrid, 3.0);
     vec2 edge = abs(fract(cell) - 0.5);
     vec2 soft = fwidth(cell) * 1.2 + 0.015;
@@ -278,6 +281,9 @@ void main() {
   float edgeB = smoothstep(52.0, 2.0, uCanvas.y - p.y);
   h += (edgeL + edgeR) * 2.4 + (edgeT + edgeB) * 1.6;
 
+  // The moving groove's microgeometry is integrated against the actual light
+  // in SHADE_FS. Store the cabinet/grain normal here; averaging the groove's
+  // normals before evaluating its BRDF would erase the reflective bevel.
   vec3 N = normalize(vec3(-dFdx(h) * 1.9, -dFdy(h) * 1.9, 1.0));
 
   // Deliberately near-black. The board reads dark in the reference not because
@@ -1090,6 +1096,10 @@ uniform float uKeyElevation;
 uniform float uSkyRef;
 uniform float uSpecFloor;
 uniform float uDistanceScale;
+uniform float uBoardGridFilter;
+uniform float uBoardGrid;
+uniform float uBoardGridDepth;
+uniform float uBoardGridOffsetY;
 
 struct Field {
   vec3 irradiance;   // mean radiance over the probe's directions
@@ -1178,27 +1188,14 @@ float smithG(float nv, float rough) {
   return nv / max(nv * (1.0 - k) + k, 1e-4);
 }
 
-void main() {
-  vec2 p = vec2(gl_FragCoord.x, uRender.y - gl_FragCoord.y) * (uCanvas / uRender);
-  vec4 albedoTex = texture(uAlbedo, vUv);
-  vec4 normalTex = texture(uNormal, vUv);
-  vec4 materialTex = texture(uMaterial, vUv);
-  vec3 emission = texture(uEmission, vUv).rgb * uEmitScale;
-
-  vec3 albedo = albedoTex.rgb;
-  float height = materialTex.r;
-  // Fixtures marked hidden light the board but contribute no visible glow.
-  // The mask is coverage-weighted, so it has to be thresholded rather than
-  // multiplied — a partial edge would otherwise leave a bright outline.
-  if (materialTex.b > 0.002) emission = vec3(0.0);
-  vec2 nxy = normalTex.rg * 2.0 - 1.0;
-  float rough = clamp(normalTex.b, 0.05, 1.0);
-  vec3 N = normalize(vec3(nxy, sqrt(max(1e-3, 1.0 - dot(nxy, nxy)))));
+// Both native objects and the scrolling grooves use this same material solve.
+// Light transport, contact occlusion and cast shadows are sampled once; only
+// the unresolved groove's physical surface directions vary inside the pixel.
+vec3 surfaceColor(vec2 p, vec3 N, vec3 albedo, float height, float rough,
+                  bool metal, Field field, float contact, float openness,
+                  vec3 keyDir, vec3 dome, float shadow) {
   vec3 V = vec3(0.0, 0.0, 1.0);
 
-  // Sample the light field slightly along the surface normal so a peg's crown
-  // reads the field above its own footprint, not the shadow it is casting.
-  Field field = sampleField(p + N.xy * height * uHeightScale * 0.55);
 
   float aniso = length(field.vector);
   // Grazing when the field is directional (a nearby emitter in the plane),
@@ -1208,45 +1205,11 @@ void main() {
   float nv = max(dot(N, V), 1e-3);
   float nl = max(dot(N, L), 0.0);
 
-  bool metal = materialTex.g > 0.5;
   vec3 f0 = mix(vec3(0.045), albedo, metal ? 0.92 : 0.05);
 
-  // Contact occlusion from the real distance field: how much of the immediate
-  // neighbourhood is blocked, biased toward the incoming light.
-  vec2 sdfUv = canvasToUv(p, uCanvas);
-  float edgeDist = texture(uSdf, sdfUv).r * uDistanceScale;
-  float sceneH = texture(uScene, sdfUv).a * uHeightScale;
-  float contact = 1.0;
-  if (height * uHeightScale < 1.5) {
-    vec2 probe = canvasToUv(p - field.vector * 5.0, uCanvas);
-    float nearH = texture(uScene, probe).a * uHeightScale;
-    float occl = max(sceneH, nearH);
-    contact = mix(1.0, smoothstep(0.0, 11.0, edgeDist), clamp(occl / uHeightScale, 0.0, 1.0) * 0.85);
-  }
-
-  // How much of the world this point can see, read straight off the solved
-  // field: a peg boxed in by neighbours gets less of everything, including the
-  // overhead rig below. This is the only "shadow" term and it is measured.
-  float openness = clamp(luma(field.irradiance) / max(uSkyRef, 1e-4), 0.0, 1.0);
-  openness = mix(0.30, 1.0, openness) * contact;
-
-  // The cabinet's box light. In-plane rays cannot carry light from above the
-  // board, so the overhead rig is an explicit hemisphere term — without it an
-  // untouched peg is a silhouette instead of its own colour.
-  vec3 keyDir = normalize(vec3(uKeyDir, uKeyElevation));
   float keyNl = max(dot(N, keyDir), 0.0);
   vec3 keyH = normalize(keyDir + V);
-  // A finite overhead fixture, not an infinite sky: it falls off toward the
-  // ends of the cabinet, which is where the reference gets its depth.
-  vec2 domeUv = p / uCanvas;
-  float domeFalloff = 1.0 - 0.42 * smoothstep(0.12, 0.98,
-    length((domeUv - vec2(0.5, 0.44)) * vec2(1.0, 0.78)) * 1.6);
-  vec3 dome = uDomeColor * uDomeIntensity * domeFalloff;
   float diffuseMask = metal ? 0.12 : 1.0;
-  // Start the shadow ray just above this surface so a peg does not shade itself.
-  float shadow = keyShadow(p, height * uHeightScale + 0.8, keyDir);
-  // A shadow is the absence of the key, not the absence of all light: the rig
-  // is broad enough that a shadowed surface still catches a good part of it.
   float keyLit = keyNl * mix(0.18, 1.0, shadow);
 
   vec3 domeDiffuse = albedo * diffuseMask * dome * (0.15 + 0.85 * keyLit) * openness;
@@ -1314,9 +1277,102 @@ void main() {
     rimBounce = albedo * nearby * rim * rim * 1.35;
   }
 
-  vec3 color = domeDiffuse + domeSpec + diffuse + spec + env + sss + rimBounce + emission;
-  outColor = vec4(color * uExposure, 1.0);
-}`;
+  return domeDiffuse + domeSpec + diffuse + spec + env + sss + rimBounce;
+}
+
+// Smooth physical groove, with its derivative in logical world pixels. Unlike
+// dFdy(height), this does not share a slope between two adjacent raster rows.
+vec3 grooveNormal(vec2 p, vec3 baseSlope, float halfWidth) {
+  float stepSize = max(uBoardGrid, 3.0);
+  vec2 d = mod(p + vec2(0.0, uBoardGridOffsetY), stepSize) - stepSize * 0.5;
+  vec2 t = clamp(abs(d) / halfWidth, 0.0, 1.0);
+  vec2 g = 1.0 - t * t * (3.0 - 2.0 * t);
+  vec2 dg = -sign(d) * 6.0 * t * (1.0 - t) / halfWidth;
+  // The union of the two grooves has continuous slopes at grid crossings.
+  vec2 gradient = -uBoardGridDepth * 7.0 * dg * (1.0 - g.yx);
+  // Match the original cabinet's bump strength at its native 1.5x resolution,
+  // but keep that physical slope independent of device pixel ratio.
+  return normalize(baseSlope + vec3(-gradient.x, gradient.y, 0.0) * (1.9 / 1.5));
+}
+
+
+void main() {
+  vec2 p = vec2(gl_FragCoord.x, uRender.y - gl_FragCoord.y) * (uCanvas / uRender);
+  vec4 albedoTex = texture(uAlbedo, vUv);
+  vec4 normalTex = texture(uNormal, vUv);
+  vec4 materialTex = texture(uMaterial, vUv);
+  vec3 emission = texture(uEmission, vUv).rgb * uEmitScale;
+
+  vec3 albedo = albedoTex.rgb;
+  float height = materialTex.r;
+  // Fixtures marked hidden light the board but contribute no visible glow.
+  // The mask is coverage-weighted, so it has to be thresholded rather than
+  // multiplied — a partial edge would otherwise leave a bright outline.
+  if (materialTex.b > 0.002) emission = vec3(0.0);
+  vec2 nxy = normalTex.rg * 2.0 - 1.0;
+  float rough = clamp(normalTex.b, 0.05, 1.0);
+  vec3 N = normalize(vec3(nxy, sqrt(max(1e-3, 1.0 - dot(nxy, nxy)))));
+  Field field = sampleField(p + N.xy * height * uHeightScale * 0.55);
+
+  // Contact occlusion from the real distance field: how much of the immediate
+  // neighbourhood is blocked, biased toward the incoming light.
+  vec2 sdfUv = canvasToUv(p, uCanvas);
+  float edgeDist = texture(uSdf, sdfUv).r * uDistanceScale;
+  float sceneH = texture(uScene, sdfUv).a * uHeightScale;
+  float contact = 1.0;
+  if (height * uHeightScale < 1.5) {
+    vec2 probe = canvasToUv(p - field.vector * 5.0, uCanvas);
+    float nearH = texture(uScene, probe).a * uHeightScale;
+    float occl = max(sceneH, nearH);
+    contact = mix(1.0, smoothstep(0.0, 11.0, edgeDist), clamp(occl / uHeightScale, 0.0, 1.0) * 0.85);
+  }
+
+  // How much of the world this point can see, read straight off the solved
+  // field: a peg boxed in by neighbours gets less of everything, including the
+  // overhead rig below. This is the only "shadow" term and it is measured.
+  float openness = clamp(luma(field.irradiance) / max(uSkyRef, 1e-4), 0.0, 1.0);
+  openness = mix(0.30, 1.0, openness) * contact;
+
+  // The cabinet's box light. In-plane rays cannot carry light from above the
+  // board, so the overhead rig is an explicit hemisphere term — without it an
+  // untouched peg is a silhouette instead of its own colour.
+  vec3 keyDir = normalize(vec3(uKeyDir, uKeyElevation));
+  // A finite overhead fixture, not an infinite sky: it falls off toward the
+  // ends of the cabinet, which is where the reference gets its depth.
+  vec2 domeUv = p / uCanvas;
+  float domeFalloff = 1.0 - 0.42 * smoothstep(0.12, 0.98,
+    length((domeUv - vec2(0.5, 0.44)) * vec2(1.0, 0.78)) * 1.6);
+  vec3 dome = uDomeColor * uDomeIntensity * domeFalloff;
+  // Start the shadow ray just above this surface so a peg does not shade itself.
+  float shadow = keyShadow(p, height * uHeightScale + 0.8, keyDir);
+  vec3 color;
+  vec2 footprint = uCanvas / uRender;
+  float halfWidth = max(1.5, uBoardGrid * 0.04);
+  vec2 distance = abs(mod(p + vec2(0.0, uBoardGridOffsetY), max(uBoardGrid, 3.0)) - max(uBoardGrid, 3.0) * 0.5);
+  bvec2 touches = lessThan(distance, vec2(halfWidth) + footprint * 0.5);
+  if (uBoardGridFilter > 0.5 && height < 0.00001 && any(touches)) {
+    vec3 baseSlope = vec3(N.xy / max(N.z, 0.001), 1.0);
+    int nx = touches.x ? (touches.y ? 4 : 8) : 1;
+    int ny = touches.y ? (touches.x ? 4 : 8) : 1;
+    color = vec3(0.0);
+    for (int y = 0; y < 8; y++) {
+      if (y >= ny) break;
+      for (int x = 0; x < 8; x++) {
+        if (x >= nx) break;
+        vec2 offset = (vec2((float(x) + 0.5) / float(nx), (float(y) + 0.5) / float(ny)) - 0.5) * footprint;
+        vec3 microNormal = grooveNormal(p + offset, baseSlope, halfWidth);
+        color += surfaceColor(p, microNormal, albedo, 0.0, rough, false,
+                              field, contact, openness, keyDir, dome, shadow);
+      }
+    }
+    color /= float(nx * ny);
+  } else {
+    color = surfaceColor(p, N, albedo, height, rough, materialTex.g > 0.5,
+                         field, contact, openness, keyDir, dome, shadow);
+  }
+  outColor = vec4((color + emission) * uExposure, 1.0);
+}
+`;
 
 // ── 6. Bloom ────────────────────────────────────────────────────────────────
 
@@ -1670,6 +1726,7 @@ export class GpuPlayfieldRenderer {
     this.marchMinStep = null;
     this._lastTime = 0;
     this._boardGridOffsetY = 0;
+    this._boardGridFilter = 0;
     this._scaledSkyTop = [0, 0, 0];
     this._scaledSkyBottom = [0, 0, 0];
     this._resolvedKeyDir = [0, 0];
@@ -2710,7 +2767,8 @@ export class GpuPlayfieldRenderer {
       .f('uBoardTexture', board.boardTexture)
       .f('uBoardGrid', board.boardGrid)
       .f('uBoardGridDepth', board.boardGridDepth)
-      .f('uBoardGridOffsetY', this._boardGridOffsetY);
+      .f('uBoardGridOffsetY', this._boardGridOffsetY)
+      .f('uBoardGridFilter', this._boardGridFilter);
     this._blit();
 
     // Coverage-weighted blending is the antialiasing: an edge fragment mixes
@@ -2945,7 +3003,11 @@ export class GpuPlayfieldRenderer {
       .v2('uKeyDir', this._keyDir[0], this._keyDir[1])
       .f('uKeyElevation', this._keyElevation)
       .f('uSkyRef', this._skyRef)
-      .f('uSpecFloor', this._specFloor);
+      .f('uSpecFloor', this._specFloor)
+      .f('uBoardGridFilter', this._boardGridFilter)
+      .f('uBoardGrid', this.config.boardGrid)
+      .f('uBoardGridDepth', this.config.boardGridDepth)
+      .f('uBoardGridOffsetY', this._boardGridOffsetY);
     this._programs.shade.f('uDistanceScale', Math.max(this.width, this.height));
     this._blit();
   }
@@ -3077,6 +3139,7 @@ export class GpuPlayfieldRenderer {
     const gridStep = Math.max(3, cfg.boardGrid);
     const gridCameraY = pick('gridCameraY', Number(options.cameraY) || 0);
     this._boardGridOffsetY = ((gridCameraY % gridStep) + gridStep) % gridStep;
+    this._boardGridFilter = options.smoothBoardGrid === true && cfg.boardStyle > 0.5 && cfg.boardStyle < 1.5 ? 1 : 0;
     this._exposure = pick('exposure', cfg.exposure);
     this._bloomStrength = pick('bloom', cfg.bloom);
     this._bloomThreshold = pick('bloomThreshold', cfg.bloomThreshold);
