@@ -1377,10 +1377,10 @@ export class Renderer {
     return true;
   }
 
-  _drawBackgroundLayer(ctx, bg, image) {
+  _drawBackgroundLayer(ctx, bg, image, gridCameraY = 0) {
     ctx.clearRect(0, 0, this.width, this.height);
 
-    drawMachineBackdrop(ctx, this.width, this.height);
+    drawMachineBackdrop(ctx, this.width, this.height, gridCameraY);
     return;
 
     if (bg?.type === 'image' && image) {
@@ -1427,14 +1427,15 @@ export class Renderer {
     ctx.restore();
   }
 
-  _ensureBgBaseCache() {
+  _ensureBgBaseCache(gridCameraY = 0) {
     const bg = this.backgroundConfig;
-    const key = `${this.width}|${this.height}|neon-machine-v1`;
+    const phase = gridCameraY < 72 ? gridCameraY : 72 + ((gridCameraY % 36) + 36) % 36;
+    const key = `${this.width}|${this.height}|neon-machine-v1|${phase}`;
     if (!this._bgBaseDirty && this._bgBaseKey === key && this._bgBaseCanvas) return;
 
     const canvas = this._ensureBackgroundCanvas('_bgBaseCanvas');
     const ctx = canvas.getContext('2d');
-    this._drawBackgroundLayer(ctx, bg, this._bgImage);
+    this._drawBackgroundLayer(ctx, bg, this._bgImage, gridCameraY);
     this._bgBaseKey = key;
     this._bgBaseDirty = false;
   }
@@ -1533,7 +1534,8 @@ export class Renderer {
       this.ctx.clearRect(0, 0, this.width, this.height);
       return;
     }
-    this._ensureBgBaseCache();
+    const gridCameraY = (Number(reactiveState?.cameraY) || 0) + (Number(reactiveState?.worldOriginY) || 0);
+    this._ensureBgBaseCache(gridCameraY);
     this._ensureBgVignetteCache();
     this.ctx.drawImage(this._bgBaseCanvas, 0, 0);
     drawMachineAtmosphere(
@@ -4463,7 +4465,7 @@ export class Renderer {
     const sig = fs.baseScratch;
     sig.length = 0;
     sig.push(
-      fs.epoch, this.width, this.height, cameraY,
+      fs.epoch, this.width, this.height, cameraY, state.worldOriginY || 0,
       state.playState,
       state.pegs, state.pegs ? state.pegs.length : 0
     );
@@ -4573,6 +4575,7 @@ export class Renderer {
       : (typeof performance !== 'undefined' ? performance.now() / 1000 : 0);
 
     const cameraY = Number.isFinite(state.cameraY) ? state.cameraY : 0;
+    const gridCameraY = cameraY + (Number.isFinite(state.worldOriginY) ? state.worldOriginY : 0);
     const shockwaveTimeSeconds = this._renderTimeSeconds;
     const shockwaveActive = this._shockwaveEffect.syncEvents(state.backgroundEvents, {
       preview: !!state.shockwavePreview,
@@ -4608,6 +4611,7 @@ export class Renderer {
           width: this.width,
           height: this.height,
           cameraY,
+          gridCameraY,
           timeSeconds: this._renderTimeSeconds,
           frameDeltaSeconds: state.frameDeltaSeconds,
           progress: state.levelProgress,
@@ -4638,7 +4642,7 @@ export class Renderer {
 
       if (state.showGrid) {
         this.showGrid = true;
-        this.drawGrid(cameraY);
+        this.drawGrid(gridCameraY);
         this.drawMagnetRadii(state.pegs, cameraY);
       }
       // Transfer magnets expose their actual gameplay radius in the player,

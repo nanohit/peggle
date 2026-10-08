@@ -32,7 +32,7 @@ function roundedRect(ctx, x, y, width, height, radius) {
   ctx.closePath();
 }
 
-export function drawMachineBackdrop(ctx, width, height) {
+export function drawMachineBackdrop(ctx, width, height, gridCameraY = 0) {
   ctx.save();
 
   const base = ctx.createLinearGradient(0, 0, 0, height);
@@ -60,8 +60,8 @@ export function drawMachineBackdrop(ctx, width, height) {
   ctx.fillRect(0, height * 0.55, width, height * 0.45);
 
   // A sparse technical grid reads as a finished playfield surface, not a
-  // background illustration. Horizontal spacing tightens toward the top to
-  // suggest a shallow perspective well.
+  // background illustration. Its phase follows the field camera, while the
+  // cabinet lighting, bevels and rail emitters retain their screen positions.
   ctx.lineWidth = 0.65;
   ctx.strokeStyle = 'rgba(112, 214, 255, 0.035)';
   for (let x = 24; x < width; x += 32) {
@@ -70,7 +70,9 @@ export function drawMachineBackdrop(ctx, width, height) {
     ctx.lineTo(x, height);
     ctx.stroke();
   }
-  for (let y = 72; y < height; y += 36) {
+  let firstY = 72 - gridCameraY;
+  firstY += Math.max(0, Math.ceil(-firstY / 36)) * 36;
+  for (let y = firstY; y < height; y += 36) {
     ctx.beginPath();
     ctx.moveTo(0, y);
     ctx.lineTo(width, y);

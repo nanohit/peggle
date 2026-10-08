@@ -243,6 +243,7 @@ uniform vec3 uBoardColor;
 uniform float uBoardTexture;
 uniform float uBoardGrid;
 uniform float uBoardGridDepth;
+uniform float uBoardGridOffsetY;
 
 void main() {
   vec2 p = vec2(gl_FragCoord.x, uRender.y - gl_FragCoord.y) * (uCanvas / uRender);
@@ -259,7 +260,7 @@ void main() {
   // Grid mode cuts real channels into the surface instead of drawing lines, so
   // each groove lights on the key side and shades on the other.
   if (uBoardStyle > 0.5 && uBoardStyle < 1.5) {
-    vec2 cell = p / max(uBoardGrid, 3.0);
+    vec2 cell = (p + vec2(0.0, uBoardGridOffsetY)) / max(uBoardGrid, 3.0);
     vec2 edge = abs(fract(cell) - 0.5);
     vec2 soft = fwidth(cell) * 1.2 + 0.015;
     float groove = max(
@@ -1668,6 +1669,7 @@ export class GpuPlayfieldRenderer {
     this.marchSteps = null;
     this.marchMinStep = null;
     this._lastTime = 0;
+    this._boardGridOffsetY = 0;
     this._scaledSkyTop = [0, 0, 0];
     this._scaledSkyBottom = [0, 0, 0];
     this._resolvedKeyDir = [0, 0];
@@ -2707,7 +2709,8 @@ export class GpuPlayfieldRenderer {
       .v3('uBoardColor', board.boardColor[0], board.boardColor[1], board.boardColor[2])
       .f('uBoardTexture', board.boardTexture)
       .f('uBoardGrid', board.boardGrid)
-      .f('uBoardGridDepth', board.boardGridDepth);
+      .f('uBoardGridDepth', board.boardGridDepth)
+      .f('uBoardGridOffsetY', this._boardGridOffsetY);
     this._blit();
 
     // Coverage-weighted blending is the antialiasing: an edge fragment mixes
@@ -3069,6 +3072,11 @@ export class GpuPlayfieldRenderer {
     // one-off override without mutating what the tuner is editing.
     const cfg = this.config;
     const pick = (key, fallback) => (Number.isFinite(options[key]) ? options[key] : fallback);
+    // Grid detail travels with the world; the cabinet bevels stay on screen.
+    // Keep only one cell of phase so GLSL precision stays stable in long runs.
+    const gridStep = Math.max(3, cfg.boardGrid);
+    const gridCameraY = pick('gridCameraY', Number(options.cameraY) || 0);
+    this._boardGridOffsetY = ((gridCameraY % gridStep) + gridStep) % gridStep;
     this._exposure = pick('exposure', cfg.exposure);
     this._bloomStrength = pick('bloom', cfg.bloom);
     this._bloomThreshold = pick('bloomThreshold', cfg.bloomThreshold);

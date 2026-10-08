@@ -4308,6 +4308,7 @@ export class Game {
       bucket: (survivalMode || billiardPhase || this.levelBucketEnabled === false) ? null : this.physics.bucket,
       flippers: this.flippers,
       cameraY,
+      worldOriginY: this.isEndlessSurvival() ? this.survivalRuntime.originY : 0,
       showLauncher: this.state === 'idle' || this.isAimingState(),
       launchX: this.launchX,
       launchY: this.launchY,
