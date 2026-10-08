@@ -1,0 +1,1 @@
+import{c as s}from"./chunk-4UTRVCUF.js";import"./chunk-X4PIO42P.js";import"./chunk-QQUMMFTS.js";import"./chunk-46LTK3UL.js";import"./chunk-YVJL66ZD.js";import"./chunk-GHVBHUYJ.js";self.onmessage=({data:e})=>{try{self.postMessage({requestId:e.requestId,levels:s(e),validation:"initial-geometry-only"})}catch(r){self.postMessage({requestId:e.requestId,error:r.message})}};

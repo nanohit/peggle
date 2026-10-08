@@ -1,0 +1,28 @@
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import {createHash} from 'node:crypto';
+import {generateLevel} from '../generators/destruction5/grammar.js';
+import {generateCandidates} from '../dist/des5-generator.js';
+import {fingerprint,geometryKey} from '../generators/destruction5/cache.mjs';
+import {validateGeometry} from '../generators/destruction4/geometry.js';
+import {curateGeneratedPlaylist} from '../js/generated-playlist.js';
+const read=async p=>JSON.parse(await readFile(p,'utf8')),campaign=await read('data/des5/campaign.json'),proof=await read('data/des5/proof.json'),holdout=await read('data/des5/robustness.json'),inventory=await read('data/des5/source-inventory.json'),autonomy=await read('data/des5/autonomy.json');
+assert.equal(proof.fingerprint,await fingerprint());assert.equal(holdout.fingerprint,proof.fingerprint);assert.equal(campaign.levels.length,32);assert.equal(curateGeneratedPlaylist(campaign.levels).length,32);assert.equal(holdout.rows.length,32);
+const allowed=new Set(['blue','orange','portalBlue','portalOrange','bombMagnet','bumper']),graphs=new Set(),operators=new Set();
+for(const level of campaign.levels){
+ const g=level.metadata.generator,r=proof.accepted.find(r=>r.id===level.id),h=holdout.rows.find(r=>r.id===level.id),plan=g.plan;
+ assert.equal(geometryKey(generateLevel(r.options)),geometryKey(level),'Catalog must reproduce from synthesis');assert.equal(r.geometryKey,geometryKey(level));assert(validateGeometry(level).valid);
+ assert.equal(level.pegRadius,8.5);assert.equal(level.ballCount,12);assert(level.pegs.every(p=>allowed.has(p.type)));assert(!level.metadata.intentGraph);assert(level.bucketEnabled&&level.hitPegTimedClearEnabled);
+ assert(r.proof.complete&&r.proof.replayComplete&&r.evidence.complete&&r.envelope.valid);assert(h.adaptive.complete&&h.adaptive.replayComplete&&h.envelope.valid);
+ assert(r.metrics.coupledInk>=.5);assert(r.evidence.interaction.links.some(e=>e.observed&&(e.from===plan.nodes[0].id||e.to===plan.nodes[0].id)),'Focal form must participate');
+ if(level.pegs.some(p=>p.type.startsWith('portal')))assert(r.evidence.portalEvents.length+r.evidence.bodyPortalEvents.length>0);
+ if(level.pegs.some(p=>p.type==='bombMagnet'))assert(r.evidence.fieldDifference>=12||r.evidence.fieldExitDifference>0);
+ for(const p of level.pegs.filter(p=>p.bezierGroupId))assert(p.curveSlices.length>=5&&level.bezierCurves[p.bezierGroupId]);
+ const sum=Object.values(plan.contributions).reduce((s,n)=>s+n,0);assert(Math.abs(sum-1)<1e-8);assert(plan.activeResponses<=g.budget.active);assert(plan.nodes.length<=g.budget.nodes);assert(level.pegs.length<=g.budget.pegs);
+ graphs.add(JSON.stringify(plan.topology.degrees.map(n=>[n.inputs,n.outputs])));plan.nodes.forEach(n=>operators.add(n.recipe.program?.operator||n.recipe.law));
+}
+assert(graphs.size>=8);assert(operators.size>=6);assert(autonomy.pairedChanges>=8&&autonomy.highMeanBranches>autonomy.lowMeanBranches);
+for(const [file,row] of Object.entries(inventory.inventory))assert.equal(createHash('sha256').update(await readFile(file)).digest('hex'),row.sha256,'Old campaign changed');
+const browser=generateCandidates({seed:'browser-only-unseen',count:1,attempts:8,genome:{branching:.75}});assert.equal(browser.length,1);assert(validateGeometry(browser[0]).valid);
+const shell=await readFile('vercel-shell/des5/index.html','utf8'),bootstrap=await readFile('js/player-bootstrap.js','utf8');assert(shell.includes('__PEGGLE_ORCHESTRATED_PLAYER__=true'));assert(shell.includes('__PEGGLE_SYSTEMS_PLAYER__=true'));assert(bootstrap.includes("ORCHESTRATED_PLAYER ? '/data/des5/campaign.json'"));assert(bootstrap.includes('destructionGenerator: !SYSTEMS_PLAYER'));assert(bootstrap.includes("options.orchestratedCatalog ? '/des5/report/'"));
+console.log('ok: 32 reproducible native/independent systems; focal relationships, bounded contributions,',graphs.size,'graph topologies,',operators.size,'numeric/physical operators; unseen browser synthesis and legacy bytes preserved');
