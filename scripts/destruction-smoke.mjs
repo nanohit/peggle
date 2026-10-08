@@ -125,6 +125,20 @@ function testPhysicsOnHitSleepsUntilImpact() {
   assert.ok(pegs[0].x > startX + 0.2);
 }
 
+function testIndividualCircleScaleMatchesDynamicGeometry() {
+  const base = brick('scaled-base', 160, 170, { type: 'blue', width: 130, height: 12, destructionStatic: true });
+  const large = circle('scaled-round', 160, 120, { radiusScale: 1.8, destructionStatic: false, destructionPhysicsOnHit: false });
+  const pegs = [base, large], system = makeSystem();
+  system.reset(pegs, []);
+  const aabb = system.getBodyAabb(system.getBodyForPeg(large));
+  assert.ok(Math.abs(aabb.maxX - aabb.minX - PHYSICS_CONFIG.pegRadius * 3.6) < 1e-8);
+  stepMany(system, pegs, [], 300);
+  const colliders = system.buildColliders(pegs, BOUNDS);
+  const collider = colliders.find(c => c.peg?.id === large.id);
+  assert.equal(collider.radius, PHYSICS_CONFIG.pegRadius * 1.8);
+  assert.ok(Math.abs(large.y - (164 - collider.radius)) < 0.8, 'Scaled circle rests at its visible surface');
+}
+
 async function testLevelManagerPreservesMagnetBlastOnAdd() {
   const previousStorage = globalThis.localStorage;
   globalThis.localStorage = {
@@ -1384,6 +1398,7 @@ function benchStaticSkip() {
 const tests = [
   testStaticWorldSkipsBroadphase,
   testPhysicsOnHitSleepsUntilImpact,
+  testIndividualCircleScaleMatchesDynamicGeometry,
   testLevelManagerPreservesMagnetBlastOnAdd,
   testAttachedMagnetSleeperStaysAsleep,
   testLevelManagerDefaultsBlueAndPortalLimit,

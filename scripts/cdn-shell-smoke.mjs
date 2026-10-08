@@ -15,8 +15,9 @@ for(const file of await files('vercel-shell')){
 const html=await readFile('vercel-shell/des1/index.html','utf8');assert(html.includes('__PEGGLE_INTENT_PLAYER__=true'));
 const des2html=await readFile('vercel-shell/des2/index.html','utf8');assert(des2html.includes('__PEGGLE_SPECTACLE_PLAYER__=true'));
 const des3html=await readFile('vercel-shell/des3/index.html','utf8');assert(des3html.includes('__PEGGLE_SYSTEMS_PLAYER__=true'));
+const des4html=await readFile('vercel-shell/des4/index.html','utf8');assert(des4html.includes('__PEGGLE_FIELDS_PLAYER__=true'));assert(des4html.includes('__PEGGLE_SYSTEMS_PLAYER__=true'));
 const config=JSON.parse(await readFile('vercel.json','utf8'));assert.equal(config.outputDirectory,'vercel-shell');
-for(const route of ['/gen','/des','/des1','/des/editor','/des1/report','/des2','/des2/report','/des3','/des3/report'])assert(config.rewrites.some(r=>r.source===route));
+for(const route of ['/gen','/des','/des1','/des/editor','/des1/report','/des2','/des2/report','/des3','/des3/report','/des4','/des4/report'])assert(config.rewrites.some(r=>r.source===route));
 for(const file of ['player-bootstrap','des-editor','editor','intent-worker','des2-worker'])await stat('dist/'+file+'.js');
 const catalog=JSON.parse(await readFile('data/gen/catalog.json','utf8'));
 for(const collection of catalog.collections){const text=await readFile(collection.file,'utf8');assert.equal(createHash('sha256').update(text).digest('hex'),collection.sha256,'Source export changed');const levels=JSON.parse(text).levels;assert.equal(curateGeneratedPlaylist(levels).length,collection.playlistCount||collection.count);assert.equal(curateGeneratedPlaylist(levels,{variants:true}).length,collection.count);}

@@ -48,6 +48,7 @@ const GENERATED_PLAYER = window.__PEGGLE_GENERATED_PLAYER__ === true;
 const DESTRUCTION_PLAYER = window.__PEGGLE_DESTRUCTION_PLAYER__ === true;
 const SPECTACLE_PLAYER = window.__PEGGLE_SPECTACLE_PLAYER__ === true;
 const SYSTEMS_PLAYER = window.__PEGGLE_SYSTEMS_PLAYER__ === true;
+const FIELDS_PLAYER = window.__PEGGLE_FIELDS_PLAYER__ === true;
 const INTENT_PLAYER = window.__PEGGLE_INTENT_PLAYER__ === true;
 const WORLD_W = 400;
 const WORLD_H = Math.round(WORLD_W / ASPECT_RATIO); // 600
@@ -729,7 +730,7 @@ resolve();
 async function resolve() {
   if (DESTRUCTION_PLAYER) {
     try {
-      const campaign = await staticJson(SYSTEMS_PLAYER ? '/data/des3/campaign.json' : SPECTACLE_PLAYER ? '/data/des2/campaign.json' : INTENT_PLAYER ? '/data/des1/campaign.json' : '/data/des/campaign.json');
+      const campaign = await staticJson(FIELDS_PLAYER ? '/data/des4/campaign.json' : SYSTEMS_PLAYER ? '/data/des3/campaign.json' : SPECTACLE_PLAYER ? '/data/des2/campaign.json' : INTENT_PLAYER ? '/data/des1/campaign.json' : '/data/des/campaign.json');
       const seed = SYSTEMS_PLAYER ? null : getQueryParam('seed');
       let levels = curateGeneratedPlaylist(campaign.levels.map(normalizeLevelData), {
         variants: getQueryParam('variants') === '1', selectedId: getQueryParam('id')
@@ -755,7 +756,7 @@ async function resolve() {
         levels = [generated, ...levels.filter(l => (INTENT_PLAYER || SPECTACLE_PLAYER) ? l.id !== generated.id : l.metadata?.generator?.family !== generated.metadata.generator.family)];
       }
       await bootWithLevels(levels, seed ? 'Destruction · '+seed : campaign.name, {...campaign, levels, graph: graphFromLevels(levels)}, {
-        unlockAll: true, initialLevelId: getQueryParam('id'), destructionGenerator: !SYSTEMS_PLAYER, systemsCatalog: SYSTEMS_PLAYER, intentGenerator: INTENT_PLAYER, spectacleGenerator: SPECTACLE_PLAYER
+        unlockAll: true, initialLevelId: getQueryParam('id'), destructionGenerator: !SYSTEMS_PLAYER, systemsCatalog: SYSTEMS_PLAYER, fieldsCatalog: FIELDS_PLAYER, intentGenerator: INTENT_PLAYER, spectacleGenerator: SPECTACLE_PLAYER
       });
     } catch (error) {
       console.error('[des]', error);
@@ -2183,7 +2184,7 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     const report=document.createElement('a');report.className='des-report-link';report.href=appUrl(options.spectacleGenerator ? '/des2/report/' : options.intentGenerator ? '/des1/report/' : '/des/report/');report.textContent='Устройство генератора и результаты отбора';hint.after(report);
   }
   if (options.systemsCatalog) {
-    const report = document.createElement('a'); report.className='des-report-link';report.href=appUrl('/des3/report/');
+    const report = document.createElement('a'); report.className='des-report-link';report.href=appUrl(options.fieldsCatalog ? '/des4/report/' : '/des3/report/');
     report.textContent='Генератор и проверенные конструкции';pauseLevelBtn.after(report);
   }
   const pausePvpDuelBtn = pauseOverlay.querySelector('#pausePvpDuelBtn');

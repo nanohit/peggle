@@ -24,7 +24,9 @@
     "generate:des2": "node generators/destruction2/build-catalog.mjs && node generators/destruction2/robustness.mjs && node generators/destruction2/build-report.mjs",
     "test:des2": "node scripts/des2-smoke.mjs",
     "generate:des3": "node generators/destruction3/build-catalog.mjs && node generators/destruction3/robustness.mjs && node generators/destruction3/build-report.mjs",
-    "test:des3": "node scripts/des3-smoke.mjs"
+    "test:des3": "node scripts/des3-smoke.mjs",
+    "generate:des4": "node generators/destruction4/build-catalog.mjs && node generators/destruction4/robustness.mjs && python3 generators/destruction4/render.py 07 --catalog && node generators/destruction4/build-report.mjs",
+    "test:des4": "node scripts/des4-smoke.mjs"
   },
   "dependencies": {
     "ioredis": "^5.10.0",

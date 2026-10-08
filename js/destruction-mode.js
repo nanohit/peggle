@@ -1,5 +1,5 @@
 import { createBodyHinge, solveHingeConstraint, normalizeDestructionHinge } from './destruction-hinge.js';
-import { PHYSICS_CONFIG, getEffectiveBrickSize } from './physics.js';
+import { PHYSICS_CONFIG, getEffectiveBrickSize, getPegRadius as getCirclePegRadius } from './physics.js';
 import { Utils } from './utils.js';
 import { getPortalScale, isPortalType } from './portal-defaults.js';
 import {
@@ -197,7 +197,7 @@ function bumperReactsToPegs(peg) {
 function getPegRadius(peg) {
   if (!peg) return PHYSICS_CONFIG.pegRadius;
   if (peg.type === 'bumper') return PHYSICS_CONFIG.pegRadius * (peg.bumperScale || 1);
-  return PHYSICS_CONFIG.pegRadius;
+  return getCirclePegRadius(peg);
 }
 
 function getBrickSize(peg) {

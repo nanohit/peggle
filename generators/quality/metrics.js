@@ -1,5 +1,5 @@
 export function visualLevel(level,pose=level.pegs){return {id:level.id,name:level.name,radius:level.pegRadius||8.5,
- pegs:pose.map(p=>Object.fromEntries(['id','x','y','angle','type','shape','width','height','curveSlices','bumperScale','bumperOrange','magnetRadius','magnetMode','portalScale','constructionAssembly','constructionRole','destructionStatic','destructionPhysicsOnHit'].filter(k=>p[k]!==undefined).map(k=>[k,structuredClone(p[k])]))),groups:level.groups?.length||0};}
+ pegs:pose.map(p=>Object.fromEntries(['id','x','y','angle','type','shape','radiusScale','width','height','curveSlices','bumperScale','bumperOrange','magnetRadius','magnetMode','portalScale','portalOneWay','portalOneWayFlip','constructionAssembly','constructionRole','destructionStatic','destructionPhysicsOnHit'].filter(k=>p[k]!==undefined).map(k=>[k,structuredClone(p[k])]))),groups:level.groups?.length||0};}
 export function designMetrics(level,pose=level.pegs){
  const r=level.pegRadius||8.5,circles=pose.filter(p=>p.shape!=='brick'&&['blue','orange'].includes(p.type)),distance=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
  const nearest=circles.map(p=>Math.min(...circles.filter(q=>q!==p).map(q=>distance(p,q))));
