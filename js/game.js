@@ -650,6 +650,7 @@ export class Game {
   }
 
   _getFinalPegSlowmoStrength() {
+    if (this.isEndlessSurvival()) return 0;
     const value = this.endSequenceConfig?.finalPegSlowmoStrength;
     const baseStrength = Number.isFinite(value) ? value : 1;
     return clamp01(baseStrength * LAST_PEG_SLOWMO_STRENGTH_BOOST);
@@ -666,7 +667,7 @@ export class Game {
   }
 
   _isLastPegSlowmoActive() {
-    return this._lastPegSlowmoElapsedMs >= 0 && this._lastPegSlowmoElapsedMs < LAST_PEG_SLOWMO_TOTAL_MS;
+    return !this.isEndlessSurvival() && this._lastPegSlowmoElapsedMs >= 0 && this._lastPegSlowmoElapsedMs < LAST_PEG_SLOWMO_TOTAL_MS;
   }
 
   _resolveTimeScale(frameDeltaMs) {
@@ -3803,6 +3804,13 @@ export class Game {
     this.syncSurvivalFlipperAnchor();
     this.updateSurvivalShotCooldown(dt);
     this.updateLauncherBallAnimations(dt);
+    if (this.isSurvivalMode() && !this.debugDrag.enabled) {
+      const loadedBall = this.getLauncherBall();
+      if (loadedBall) {
+        loadedBall.x = this.launchX;
+        loadedBall.y = this.launchY;
+      }
+    }
     const retractStartY = this.physics.bucketEnabled && this.physics.bucket
       ? this.physics.bucket.y - this.physics.bucket.height / 2 - getBallRadius() - 24
       : this.physics.ballLossY - Math.max(60, this.canvas.height * 0.12);
@@ -4527,6 +4535,7 @@ export class Game {
     const _t0 = performance.now();
 
     const useFixedStep = this.state === 'playing'
+      || (this.isSurvivalMode() && this.hasActiveBalls())
       || (this.isDestructionMode() && this.destructionSystem.needsFixedStep());
     let physicsSteps = 0;
     if (useFixedStep) {

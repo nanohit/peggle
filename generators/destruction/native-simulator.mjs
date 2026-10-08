@@ -80,7 +80,7 @@ export class NativeSimulation {
       // there, not in update(). Omitting it leaves successful shots "playing".
       const g=this.game,scaled=STEP_MS*g._resolveTimeScale(STEP_MS);
       g._maybeFinalizePendingEndResult();
-      if(g.state==='playing'||(g.isDestructionMode()&&g.destructionSystem.needsFixedStep())){
+      if(g.state==='playing'||(g.isSurvivalMode()&&g.hasActiveBalls())||(g.isDestructionMode()&&g.destructionSystem.needsFixedStep())){
         g.accumulatorMs=Math.min(g.accumulatorMs+scaled,g.fixedStepMs*g.maxFrameSteps);
         let count=0;while(g.accumulatorMs>=g.fixedStepMs&&count++<g.maxFrameSteps){g.update(g.fixedStepMs);g.accumulatorMs-=g.fixedStepMs;}
       }else{g.accumulatorMs=0;g.update(scaled);}

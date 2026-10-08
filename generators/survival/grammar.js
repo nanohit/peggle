@@ -6,7 +6,7 @@ import {HIT_PEG_CLEAR_DELAY_DEFAULT_MS} from '../../js/hit-peg-clear-settings.js
 import {planDrawing,drawComposition} from './drawing.js';
 
 export const RECHARGE_MS = 1600;
-export const BASE_SCROLL_SPEED = 20;
+export const BASE_SCROLL_SPEED = 40;
 export const FAMILIES = ['river','islands','orchard','slalom','orbits','petals','branch','release','balance','portal','field'];
 export const STREAM_ACTIONS = ['drawing','release','balance','portal','field'];
 const startAt = {river:0,islands:0,orchard:0,slalom:0,orbits:3,petals:5,branch:7,release:4,balance:8,portal:6,field:10};

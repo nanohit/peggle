@@ -134,7 +134,7 @@ export class SurvivalRuntime {
   isEndless() { return this.isEnabled() && this.settings.endless === true; }
 
   getScrollSpeed() {
-    return this.settings.scrollSpeed * (this.isEndless() ? 1 + 0.85 * (1 - Math.exp(-this.distanceHighWater / 9500)) : 1);
+    return this.settings.scrollSpeed * (this.isEndless() ? 1 + 0.65 * (1 - Math.exp(-this.distanceHighWater / 6000)) : 1);
   }
 
   rebase(distance) {

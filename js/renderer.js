@@ -4403,9 +4403,9 @@ export class Renderer {
       }
     }
 
-    // Draw the cannon whenever a position is known, loaded or not. `lastLaunch`
-    // remembers where it sits through the shot, when showLauncher goes false.
-    if (state.showLauncher && Number.isFinite(state.launchX)) {
+    // The gun follows the live camera anchor even while reloading. Retain the
+    // last pose only when a render state supplies no launcher coordinates.
+    if (Number.isFinite(state.launchX) && Number.isFinite(state.launchY)) {
       this._lastLaunch = {
         x: state.launchX,
         y: state.launchY,
@@ -4413,10 +4413,7 @@ export class Renderer {
         options: state.launcherOptions || null
       };
     }
-    const launcher = state.showLauncher && Number.isFinite(state.launchX)
-      ? { x: state.launchX, y: state.launchY, angle: state.aimAngle,
-          options: state.launcherOptions || null, loaded: true }
-      : (this._lastLaunch ? { ...this._lastLaunch, loaded: false } : null);
+    const launcher = this._lastLaunch ? { ...this._lastLaunch, loaded: !!state.showLauncher } : null;
     if (launcher) {
       this._pushLauncherProps(props, launcher.x, launcher.y, launcher.angle,
         state.launcherBallScale, launcher.options, launcher.loaded);

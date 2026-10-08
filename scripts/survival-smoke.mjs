@@ -5,6 +5,7 @@ import {normalizeLevelData} from '../js/levels.js';
 import {getPegVerticalExtent} from '../js/survival-mode.js';
 import {HIT_PEG_CLEAR_DELAY_DEFAULT_MS} from '../js/hit-peg-clear-settings.js';
 import {Ball} from '../js/physics.js';
+import {Renderer} from '../js/renderer.js';
 
 const make=seed=>new NativeSimulation(createSurvivalLevel(seed));
 function install(sim,pegs){const g=sim.game;g.survivalStream=null;g.pegs=pegs;g.groups=[];g.physics.setPegs(pegs);g.animator.loadFromLevel(pegs,[]);g.destructionSystem.reset(pegs,[]);return g;}
@@ -14,6 +15,54 @@ assert(normalized.survival.enabled&&normalized.destruction.enabled&&normalized.s
 const sim=make('native-core');assert(sim.game.isSurvivalMode()&&sim.game.isDestructionMode());
 assert.equal(sim.game.hitPegClearDelayMs,HIT_PEG_CLEAR_DELAY_DEFAULT_MS);
 assert(sim.game.pegs.length>60);assert.equal(sim.game.getUiStateSnapshot().ballsLeft,Infinity);
+assert.equal(sim.game.survivalRuntime.getScrollSpeed(),40);
+
+// Drive actual browser frames at 60Hz. NativeSimulation normally supplies 120Hz
+// input, which previously hid the reload transition's halved physics cadence.
+{
+ const previousRaf=globalThis.requestAnimationFrame;
+ globalThis.requestAnimationFrame=()=>0;
+ const drive=state=>{
+  const s=make('browser-cadence'),g=install(s,[]),ball=new Ball(200,220);
+  ball.launch(0,1);ball.gravityVector={x:0,y:0};g.balls=[ball];g.physics.setBalls(g.balls);
+  g.state=state;g.setFrameRateCap(0);g._stopped=false;s.clock=1000;g.lastTime=s.clock;
+  let steps=0;const update=g.physics.update.bind(g.physics);
+  g.physics.update=(...args)=>{steps++;return update(...args);};
+  s.scope(()=>{for(let i=0;i<60;i++){s.clock+=1000/60;g.gameLoop(s.clock);}});
+  return {steps,x:ball.x,y:ball.y};
+ };
+ try{
+  const flying=drive('playing'),reloaded=drive('idle');
+  assert(flying.steps>=119);assert.deepEqual(reloaded,flying,'reload must preserve ball speed at 60Hz');
+ }finally{if(previousRaf===undefined)delete globalThis.requestAnimationFrame;else globalThis.requestAnimationFrame=previousRaf;}
+}
+{
+ const s=make('loaded-anchor'),g=install(s,[]),flight=new Ball(200,260);
+ flight.launch(0,.5);flight.gravityVector={x:0,y:0};g.balls=[flight];g.physics.setBalls(g.balls);
+ g.survivalRuntime.setCameraY(200);g.ensureSurvivalLauncherBall();g.state='aiming';
+ s.scope(()=>{
+  for(let i=0;i<60;i++){s.step(1);assert(Math.abs(g.getLauncherBall().y-g.getCameraY()-40)<1e-8);}
+  g.survivalRuntime.applyGambleKnockback(100,180);
+  for(let i=0;i<24;i++){s.step(1);assert(Math.abs(g.getLauncherBall().y-g.getCameraY()-40)<1e-8);}
+ });
+}
+{
+ const r=Object.create(Renderer.prototype);
+ for(const [camera,loaded] of [[0,true],[180,false],[4100,false],[1028,false],[1050,true]]){
+  const props=r._collectPlayfieldProps({balls:[],launchX:200,launchY:camera+40,aimAngle:Math.PI/2,showLauncher:loaded});
+  const gun=props.find(p=>p.shape==='ring');assert.equal(gun.y-camera,40,'GPU gun must follow scroll and rebasing during reload');
+ }
+}
+{
+ const s=make('no-final-slowmo'),g=install(s,[peg('last','orange',260)]);
+ s.scope(()=>g.activatePeg(g.pegs[0],null));assert.equal(g._isLastPegSlowmoActive(),false);
+ assert.equal(g._startLastPegSlowmo(),false);
+ g._lastPegSlowmoElapsedMs=100;assert.equal(g._resolveTimeScale(16.67),1);
+ const ordinary=new NativeSimulation({id:'ordinary-last',pegs:[peg('last','orange',260)],groups:[],ballCount:12});
+ ordinary.scope(()=>ordinary.game.activatePeg(ordinary.game.pegs[0],null));
+ assert(ordinary.game._isLastPegSlowmoActive());assert(ordinary.game._resolveTimeScale(150)<1,'ordinary final-peg effect remains');
+}
+console.log('ok browser 60Hz reload cadence, loaded ball and GPU gun camera anchors, survival slowmo disabled, ordinary effect retained');
 
 for(const type of ['blue','multi','gamble','bumper','obstacle','portalBlue']){
  const s=make('boundary-'+type),g=install(s,[peg('boundary',type,20)]);

@@ -32,8 +32,10 @@ obstacles and other non-targets can leave the top freely. Hit oranges awaiting
 their existing 1200ms clear are safe. There is no finite clear/win condition or
 laser line. Reload is fixed at 1600ms even after an early miss; balls are infinite
 and previous balls may stay active. Pause freezes normal Game stepping; loss
-freezes the stream. Speed starts at the existing 20px/s and rises smoothly toward
-37px/s using distance high-water, so a pushback cannot reset difficulty.
+freezes the stream. Speed starts at 40px/s and rises smoothly toward 66px/s
+using distance high-water, so a pushback cannot reset difficulty. Active balls
+keep the native 120Hz simulation during reload and aiming. The loaded ball and
+GPU cannon follow the live camera anchor, including pushback and rebasing.
 
 Runtime generates ~2.2 screens ahead, retains enough passed material for native
 knockback, prunes pegs/groups/hit IDs/animation and body storage, and rebases world
