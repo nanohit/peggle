@@ -14,6 +14,7 @@ async function save(file,html){
 const template=await readFile('player-cdn-shell.html','utf8');
 for(const [file,title,flags] of [
  ['index.html','Alea',''],
+ ['surv/index.html','Alea · Survival 0.1','window.__PEGGLE_GENERATED_PLAYER__=true;window.__PEGGLE_SURVIVAL_PLAYER__=true;'],
  ['gen/index.html','Alea · Generated','window.__PEGGLE_GENERATED_PLAYER__=true;'],
  ['des/index.html','Alea · Destruction','window.__PEGGLE_GENERATED_PLAYER__=true;window.__PEGGLE_DESTRUCTION_PLAYER__=true;'],
  ['des2/index.html','Alea · Free roam','window.__PEGGLE_GENERATED_PLAYER__=true;window.__PEGGLE_DESTRUCTION_PLAYER__=true;window.__PEGGLE_SPECTACLE_PLAYER__=true;'],

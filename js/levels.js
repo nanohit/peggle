@@ -85,7 +85,7 @@ export function normalizeLevelData(level) {
   const billiard = ensureLevelBilliard(level);
   const destruction = ensureLevelDestruction(level);
   if (destruction.enabled) {
-    survival.enabled = false;
+    if (!survival.endless) survival.enabled = false;
     pvp.enabled = false;
     billiard.enabled = false;
   } else if (billiard.enabled) {
@@ -261,7 +261,7 @@ export class LevelManager {
     ensureLevelBilliard(level);
     ensureLevelDestruction(level);
     if (level.destruction.enabled) {
-      level.survival.enabled = false;
+      if (!level.survival.endless) level.survival.enabled = false;
       level.pvp.enabled = false;
       level.billiard.enabled = false;
     } else if (level.billiard.enabled) {

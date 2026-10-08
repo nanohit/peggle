@@ -5,6 +5,7 @@ import { Renderer } from './renderer.js';
 import { Utils } from './utils.js';
 import { PegAnimator } from './animation.js';
 import { SurvivalRuntime } from './survival-runtime.js';
+import { SurvivalStream } from './survival-stream.js';
 import { FLIPPER_DEFAULTS, createDefaultFlipperConfig, normalizeFlipperConfig } from './flipper-defaults.js';
 import { YoyoThreadSystem, normalizeYoyoSettings } from './yoyo-thread.js';
 import { buildBombShockwave } from './perk-bomb.js';
@@ -545,7 +546,8 @@ export class Game {
       : survivalMode
       ? this.getSurvivalTargetsLeft(true)
       : Math.max(0, this.initialOrangePegs - this.removedOrangePegs - currentTurnOrangeHits);
-    const waitingForSurvivalSpinBalls = survivalMode && this.gambleBalls <= 0;
+    const endlessSurvival = this.isEndlessSurvival();
+    const waitingForSurvivalSpinBalls = survivalMode && (endlessSurvival || this.gambleBalls <= 0);
     const displayBallsLeft = survivalMode
       ? (waitingForSurvivalSpinBalls ? Number.POSITIVE_INFINITY : this.gambleBalls)
       : this.ballsLeft;
@@ -562,6 +564,8 @@ export class Game {
       ballsLeft: displayBallsLeft,
       initialBallCount: displayInitialBalls,
       gambleBalls: this.gambleBalls,
+      endlessSurvival,
+      survivalPressure: endlessSurvival ? Math.max(0, Math.min(1, 1 - (Math.min(this.canvas.height, ...this.pegs.filter(p=>this.isOrangePeg(p)&&!this.hasPegBeenActivated(p.id)).map(p=>p.y-this.getCameraY()))-32)/(this.canvas.height-32))) : 0,
       gambleLuckBonus: this.getPendingGambleLuckBonus(),
       showFullTrajectory: !!this.showFullTrajectory,
       orangePegsLeft: orangeLeft,
@@ -575,7 +579,7 @@ export class Game {
 
   getUiStateSignature() {
     const snapshot = this.getUiStateSnapshot();
-    return `${snapshot.state}|${snapshot.ballsLeft}|${snapshot.initialBallCount}|${snapshot.gambleLuckBonus}|${snapshot.showFullTrajectory ? 1 : 0}|${snapshot.orangePegsLeft}|${snapshot.totalOrangePegs}|${snapshot.billiardPhase ? 1 : 0}|${snapshot.billiardLauncherIndex ?? ''}`;
+    return `${snapshot.state}|${snapshot.ballsLeft}|${snapshot.initialBallCount}|${snapshot.gambleLuckBonus}|${snapshot.showFullTrajectory ? 1 : 0}|${snapshot.orangePegsLeft}|${snapshot.totalOrangePegs}|${snapshot.billiardPhase ? 1 : 0}|${snapshot.billiardLauncherIndex ?? ''}|${snapshot.endlessSurvival ? Math.round(snapshot.survivalPressure*100) : ''}`;
   }
 
   subscribeUiState(listener) {
@@ -1309,6 +1313,8 @@ export class Game {
     return this.survivalRuntime.isEnabled();
   }
 
+  isEndlessSurvival() { return this.survivalRuntime?.isEndless?.() === true; }
+
   isBilliardPhase() {
     return !!this.billiardPhase;
   }
@@ -1571,7 +1577,7 @@ export class Game {
   syncPhysicsViewportBounds(height = this.canvas.height) {
     const viewportHeight = Math.max(0, Number(height) || this.canvas.height || 0);
     const cameraY = this.isSurvivalMode() ? this.getCameraY() : 0;
-    this.physics.setBallTopY?.(Math.min(0, cameraY));
+    this.physics.setBallTopY?.(this.isEndlessSurvival() ? cameraY : Math.min(0, cameraY));
     this.physics.setBallLossY(cameraY + viewportHeight + 50);
   }
 
@@ -2279,7 +2285,9 @@ export class Game {
   getSurvivalTargetsLeft(includePendingHits = true) {
     if (!this.isSurvivalMode()) return this.getOrangePegsLeft();
     const excluded = this.getSurvivalTargetExclusionSet(includePendingHits);
-    return countSurvivalTargets(this.pegs, excluded);
+    return this.isEndlessSurvival()
+      ? this.pegs.filter(p=>this.isOrangePeg(p)&&!excluded.has(p.id)).length
+      : countSurvivalTargets(this.pegs, excluded);
   }
 
   checkSurvivalEndConditions() {
@@ -2312,7 +2320,7 @@ export class Game {
     }
     this.pruneEscapedSurvivalPegs();
 
-    if (this.getSurvivalTargetsLeft(true) === 0) {
+    if (!this.isEndlessSurvival() && this.getSurvivalTargetsLeft(true) === 0) {
       this._queuePendingEndResult('won', { readyToResolve: true });
       return this._maybeFinalizePendingEndResult();
     }
@@ -2397,7 +2405,7 @@ export class Game {
     const destructionSettings = ensureLevelDestruction(levelData);
     const billiardSettings = ensureLevelBilliard(levelData);
     if (destructionSettings.enabled) {
-      levelData.survival = { ...(levelData.survival || {}), enabled: false };
+      if (!levelData.survival?.endless) levelData.survival = { ...(levelData.survival || {}), enabled: false };
       levelData.billiard = { ...(levelData.billiard || {}), enabled: false };
       billiardSettings.enabled = false;
     } else if (billiardSettings.enabled) {
@@ -2408,6 +2416,7 @@ export class Game {
     this.survivalRuntime.resize(this.canvas.height);
     this.survivalRuntime.configure(survivalSettings);
     this.survivalRuntime.resetCamera(true);
+    this.survivalStream = survivalSettings.enabled && survivalSettings.endless ? new SurvivalStream(survivalSettings.seed) : null;
     this.billiardSettings = billiardSettings;
     this.billiardSystem.configure(billiardSettings);
     this.billiardSystem.clear(this.pegs);
@@ -2539,6 +2548,7 @@ export class Game {
     this.clearDynamicYoyoAnchors();
     this.yoyoThread.setLaunchAnchor(this.launchX, this.launchY);
     this.resetBall();
+    this.survivalStream?.maintain(this);
   }
 
   queuePegEntryAnimations(options = {}) {
@@ -2660,6 +2670,7 @@ export class Game {
   launch() {
     if (this.isEndSequenceActive()) return;
     if (this.state !== 'aiming' && this.state !== 'confirmAim') return;
+    if (this.isEndlessSurvival() && this.survivalShotCooldownRemainingMs > 0) return;
     if (Number.isFinite(this.ballsLeft) && this.ballsLeft <= 0) return;
     const survivalMode = this.isSurvivalMode();
     const billiardPhase = this.isBilliardPhase();
@@ -2706,7 +2717,7 @@ export class Game {
       }
     }
     if (!hadActiveSurvivalBalls) {
-      this.turnHitPegIds = [];
+      if (!this.isEndlessSurvival()) this.turnHitPegIds = [];
       this.resetStuckBallTracking();
       this._turnBucketCatchCount = 0;
     }
@@ -2743,7 +2754,7 @@ export class Game {
   }
 
   isLevelObjectiveComplete() {
-    return this.getOrangePegsLeft() === 0;
+    return !this.isEndlessSurvival() && this.getOrangePegsLeft() === 0;
   }
 
   getTotalOrangePegs() {
@@ -3070,7 +3081,7 @@ export class Game {
       const targetsLeft = this.isSurvivalMode()
         ? this.getSurvivalTargetsLeft(true)
         : this.getOrangePegsLeft();
-      if (targetsLeft === 0) {
+      if (targetsLeft === 0 && !this.isEndlessSurvival()) {
         this._lastPegSlowmoPegId = peg.id;
         this._startLastPegSlowmo();
         this._queuePendingEndResult('won', { readyToResolve: this.isSurvivalMode() });
@@ -3371,6 +3382,17 @@ export class Game {
   }
 
   endTurn() {
+    if (this.isEndlessSurvival()) {
+      // A ball leaving early must neither reload the gun early nor dissolve hit
+      // pegs before their existing timed-clear delay. Other balls can coexist.
+      this.balls=this.balls.filter(ball=>ball.active||ball.isLauncherBall);
+      this.physics.setBalls(this.balls);
+      if(this.survivalShotCooldownRemainingMs<=0) {
+        if(!this.isAimingState())this.state='idle';
+        if(!this.getLauncherBall())this.ensureSurvivalLauncherBall();
+      }
+      return;
+    }
     if (this.isBilliardPhase()) {
       this.endBilliardTurn();
       return;
@@ -3530,6 +3552,16 @@ export class Game {
 
   updateSurvivalShotCooldown(dt) {
     if (!this.isSurvivalMode()) return;
+    if (this.isEndlessSurvival()) {
+      if (this.state==='won'||this.state==='lost') return;
+      const before=this.survivalShotCooldownRemainingMs;
+      this.survivalShotCooldownRemainingMs=Math.max(0,before-dt*1000);
+      if(before>0&&this.survivalShotCooldownRemainingMs===0) {
+        if(this.state==='playing')this.state='idle';
+        this.ensureSurvivalLauncherBall();this.emitUiStateIfChanged(true,'survival-shot-ready');
+      }
+      return;
+    }
     if (this.state !== 'playing') return;
     if (this.survivalAntiCooldownMs <= 0) return;
     if (!this.hasActiveBalls()) return;
@@ -3734,6 +3766,7 @@ export class Game {
   }
 
   update(deltaTime) {
+    if(this.isEndlessSurvival()&&(this.state==='lost'||this.state==='won'))return;
     // Animate pegs continuously (idle, aiming, playing) so the level feels alive
     const dt = Math.min((deltaTime || 16.67) / 1000, 0.1);
     this.levelElapsedMs += dt * 1000;
@@ -3763,6 +3796,7 @@ export class Game {
 
     if (this.isSurvivalMode()) {
       this.survivalRuntime.update(this.survivalGambleOverlayOpen ? dt / 5 : dt);
+      this.survivalStream?.maintain(this);
     }
     this.updateLaunchPosition();
     this.syncPhysicsViewportBounds();
@@ -4253,7 +4287,7 @@ export class Game {
     const centerLabel = billiardPhase
       ? `MIX ${Math.max(0, totalTargets - targetsLeft)}/${totalTargets}`
       : survivalMode
-      ? `PEGS ${Math.max(0, totalTargets - targetsLeft)}/${totalTargets}`
+      ? this.isEndlessSurvival() ? `${Math.floor((trackerState?.elapsedSeconds||0)/60)}:${String(Math.floor((trackerState?.elapsedSeconds||0)%60)).padStart(2,'0')}` : `PEGS ${Math.max(0, totalTargets - targetsLeft)}/${totalTargets}`
       : null;
     const cameraY = this.getCameraY();
     this.syncSurvivalFlipperAnchor();
@@ -4304,7 +4338,7 @@ export class Game {
       renderDeltaSeconds: this.renderDeltaSeconds,
       frameDeltaSeconds: this.rawFrameDeltaSeconds,
       centerLabel,
-      survivalLoseLineY: survivalMode ? this.survivalRuntime.getLoseLineY() : null,
+      survivalLoseLineY: survivalMode && !this.isEndlessSurvival() ? this.survivalRuntime.getLoseLineY() : null,
       verticalProgress: trackerState,
       message: this.state === 'won' ? 'Уровень пройден' : (this.state === 'lost' ? 'Игра окончена' : null),
       subMessage: this.state === 'won' ? 'Продолжить' : (this.state === 'lost' ? 'Продолжить' : null)

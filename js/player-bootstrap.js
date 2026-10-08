@@ -51,6 +51,7 @@ const SYSTEMS_PLAYER = window.__PEGGLE_SYSTEMS_PLAYER__ === true;
 const FIELDS_PLAYER = window.__PEGGLE_FIELDS_PLAYER__ === true;
 const ORCHESTRATED_PLAYER = window.__PEGGLE_ORCHESTRATED_PLAYER__ === true;
 const JOURNEY_PLAYER = window.__PEGGLE_JOURNEY_PLAYER__ === true;
+const SURVIVAL_PLAYER = window.__PEGGLE_SURVIVAL_PLAYER__ === true;
 const INTENT_PLAYER = window.__PEGGLE_INTENT_PLAYER__ === true;
 const WORLD_W = 400;
 const WORLD_H = Math.round(WORLD_W / ASPECT_RATIO); // 600
@@ -730,6 +731,16 @@ function loadDeferredImages(root) {
 resolve();
 
 async function resolve() {
+  if (SURVIVAL_PLAYER) {
+    try {
+      const {createSurvivalLevel}=await import('../generators/survival/grammar.js');
+      const seed=getQueryParam('seed')||'surv-'+crypto.getRandomValues(new Uint32Array(1))[0].toString(36);
+      if(!getQueryParam('seed')){const u=new URL(location.href);u.searchParams.set('seed',seed);history.replaceState(null,'',u);}
+      const level=normalizeLevelData(createSurvivalLevel(seed));
+      await bootWithLevels([level],'Survival 0.1',{name:'Survival 0.1',levels:[level],graph:graphFromLevels([level])},{unlockAll:true,survivalStream:true});
+    } catch(error) {console.error('[surv]',error);showError('Не удалось запустить Survival. Обновите страницу.');}
+    return;
+  }
   if (JOURNEY_PLAYER) {
     try {
       const [manifest,bank,{resolveCampaign6}] = await Promise.all([
@@ -2134,7 +2145,7 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     }
     pauseLevelBtn.after(picker);
   }
-  if (GENERATED_PLAYER && !JOURNEY_PLAYER && !INTENT_PLAYER && !SPECTACLE_PLAYER && !SYSTEMS_PLAYER && !getQueryParam('seed')) {
+  if (GENERATED_PLAYER && !SURVIVAL_PLAYER && !JOURNEY_PLAYER && !INTENT_PLAYER && !SPECTACLE_PLAYER && !SYSTEMS_PLAYER && !getQueryParam('seed')) {
     const variantsLink = document.createElement('a');
     const query = new URLSearchParams(location.search);
     const showingVariants = query.get('variants') === '1';
@@ -2216,6 +2227,15 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     newJourney.onclick=()=>{const bytes=crypto.getRandomValues(new Uint32Array(2));location.href=appUrl('/des6?'+new URLSearchParams({seed:'journey-'+[...bytes].map(n=>n.toString(36)).join('-')}));};
     const report=document.createElement('a');report.className='des-report-link';report.href=appUrl('/des6/report/');report.textContent='Картинки и устройство кампании';
     tools.append(newJourney,report);pauseLevelBtn.after(tools);
+  }
+  if (options.survivalStream) {
+    pauseLevelBtn.hidden=true;
+    pauseOverlay.querySelector('#pausePvpDuelBtn')?.setAttribute('hidden','');
+    const hint=document.createElement('p');hint.className='des-hint';
+    hint.textContent='Сбивай оранжевые, пока они не поднялись к пушке. Золотые пеги отбрасывают поле вниз. Новый шар каждые 1,6 секунды.';
+    const fresh=document.createElement('button');fresh.className='pause-level-btn';fresh.textContent='Новое течение';
+    fresh.onclick=()=>location.href=appUrl('/surv?seed=surv-'+crypto.getRandomValues(new Uint32Array(1))[0].toString(36));
+    pauseLevelBtn.after(fresh,hint);
   }
   const pausePvpDuelBtn = pauseOverlay.querySelector('#pausePvpDuelBtn');
   pausePvpDuelBtn?.addEventListener('click', (event) => {
@@ -2689,7 +2709,7 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     const visuals = resolveVisualsWithCharacter(levelData);
     visualLayout.setConfig(visuals);
     const objectiveCopy=visualLayout.frame.querySelector('.machine-objective-copy');
-    if(objectiveCopy)objectiveCopy.textContent='TARGETS';
+    if(objectiveCopy)objectiveCopy.textContent=options.survivalStream?'SURVIVAL':'TARGETS';
     game.renderer.setBackground(visuals.background);
     game.renderer.setBallTrail(visuals.ballTrail);
     game.renderer.setShockwave(visuals.shockwave);
@@ -2758,7 +2778,7 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
         visualLayout.updateBallCounter(snapshot.ballsLeft, snapshot.initialBallCount);
       }
       if (Number.isFinite(snapshot.orangePegsLeft)) {
-        visualLayout.updateHealthBar(snapshot.orangePegsLeft, snapshot.totalOrangePegs);
+        visualLayout.updateHealthBar(snapshot.endlessSurvival ? Math.round((1-snapshot.survivalPressure)*100) : snapshot.orangePegsLeft, snapshot.endlessSurvival ? 100 : snapshot.totalOrangePegs);
       }
       visualLayout.setBilliardTopLauncherActive?.(
         !!snapshot.billiardPhase && snapshot.billiardLauncherIndex === 0
@@ -2908,7 +2928,7 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
   ensureGambleSystem();
   startLevel(currentNodeId, initialCpuDuelMode
     ? { pegIntro: false, skipPvpCountdown: true, suppressInputMs: 120 }
-    : (campaignName ? { pegIntro: createPegIntroOptions() } : {})
+    : (options.survivalStream ? {pegIntro:false} : campaignName ? { pegIntro: createPegIntroOptions() } : {})
   );
   requestAnimationFrame(() => schedulePauseAssetsWarmup());
   // Cold start: the initial campaign payload is partial (level 1 only), so the

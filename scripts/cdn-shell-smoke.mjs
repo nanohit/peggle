@@ -17,6 +17,7 @@ const des2html=await readFile('vercel-shell/des2/index.html','utf8');assert(des2
 const des3html=await readFile('vercel-shell/des3/index.html','utf8');assert(des3html.includes('__PEGGLE_SYSTEMS_PLAYER__=true'));
 const des4html=await readFile('vercel-shell/des4/index.html','utf8');assert(des4html.includes('__PEGGLE_FIELDS_PLAYER__=true'));assert(des4html.includes('__PEGGLE_SYSTEMS_PLAYER__=true'));
 const des6html=await readFile('vercel-shell/des6/index.html','utf8');assert(des6html.includes('__PEGGLE_JOURNEY_PLAYER__=true'));
+const survhtml=await readFile('vercel-shell/surv/index.html','utf8');assert(survhtml.includes('__PEGGLE_SURVIVAL_PLAYER__=true'));
 const config=JSON.parse(await readFile('vercel.json','utf8'));assert.equal(config.outputDirectory,'vercel-shell');
 for(const route of ['/gen','/des','/des1','/des/editor','/des1/report','/des2','/des2/report','/des3','/des3/report','/des4','/des4/report','/des5','/des5/report','/des6','/des6/report'])assert(config.rewrites.some(r=>r.source===route));
 for(const file of ['player-bootstrap','des-editor','editor','intent-worker','des2-worker'])await stat('dist/'+file+'.js');

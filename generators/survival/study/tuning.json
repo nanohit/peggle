@@ -1,0 +1,35 @@
+[
+  {
+    "recharge": 1250,
+    "seconds": 180,
+    "state": "playing",
+    "shots": 144,
+    "direct": 129,
+    "knockbacks": 5,
+    "generated": 13,
+    "live": 105,
+    "ms": 1931
+  },
+  {
+    "recharge": 1600,
+    "seconds": 600,
+    "state": "playing",
+    "shots": 374,
+    "direct": 529,
+    "knockbacks": 19,
+    "generated": 43,
+    "live": 122,
+    "ms": 9257
+  },
+  {
+    "recharge": 2000,
+    "seconds": 180,
+    "state": "playing",
+    "shots": 90,
+    "direct": 128,
+    "knockbacks": 5,
+    "generated": 13,
+    "live": 107,
+    "ms": 1752
+  }
+]

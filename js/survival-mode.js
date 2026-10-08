@@ -361,6 +361,8 @@ export function normalizeSurvivalSettings(rawSettings = null, viewportHeight = 6
 
   return {
     enabled: !!raw.enabled,
+    endless: raw.endless === true,
+    seed: String(raw.seed || 'survival-01').slice(0, 80),
     worldHeight,
     scrollSpeed,
     loseLineY,
@@ -411,8 +413,9 @@ export function getPegVerticalExtent(peg, pegRadius = 10) {
   if (!peg) return r;
 
   if (peg.shape === 'brick') {
-    const height = getEffectiveBrickSize(peg).height;
-    return Math.max(r * 0.6, height / 2);
+    const {width,height} = getEffectiveBrickSize(peg);
+    if(peg.curveSlices?.length) return Math.max(...peg.curveSlices.map(s=>Math.abs(s.y-peg.y)+Math.abs(s.ny)*height/2));
+    return Math.abs(Math.sin(peg.angle||0))*width/2+Math.abs(Math.cos(peg.angle||0))*height/2;
   }
 
   if (peg.type === 'bumper') {

@@ -2,6 +2,8 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "test:surv": "node scripts/survival-smoke.mjs",
+    "study:surv": "node generators/survival/study.mjs && python3 generators/survival/render.py",
     "build": "esbuild js/player-bootstrap.js --bundle --format=esm --splitting --outdir=dist",
     "build:cdn": "node scripts/build-cdn-bundle.mjs",
     "build:cdn-shell": "node scripts/build-cdn-shell.mjs",

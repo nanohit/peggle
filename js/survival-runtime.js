@@ -28,6 +28,9 @@ export class SurvivalRuntime {
     this.autoScroll = !!options.autoScroll;
     this.settings = normalizeSurvivalSettings(null, this.viewportHeight);
     this.cameraY = 0;
+    this.originY = 0;
+    this.elapsedSeconds = 0;
+    this.distanceHighWater = 0;
     this.knockbackDistance = 0;
     this.knockbackAppliedDistance = 0;
     this.knockbackElapsed = 0;
@@ -42,7 +45,7 @@ export class SurvivalRuntime {
 
   configure(settings) {
     this.settings = normalizeSurvivalSettings(settings, this.viewportHeight);
-    this.cameraY = clampCameraY(this.cameraY, this.settings.worldHeight, this.viewportHeight);
+    this.cameraY = this.isEndless() ? this._clampCameraYOverscroll(this.cameraY) : clampCameraY(this.cameraY, this.settings.worldHeight, this.viewportHeight);
     this.clearKnockback();
     return this.settings;
   }
@@ -50,7 +53,7 @@ export class SurvivalRuntime {
   resize(viewportHeight) {
     this.viewportHeight = Math.max(120, Math.round(Number(viewportHeight) || this.viewportHeight));
     this.settings = normalizeSurvivalSettings(this.settings, this.viewportHeight);
-    this.cameraY = clampCameraY(this.cameraY, this.settings.worldHeight, this.viewportHeight);
+    this.cameraY = this.isEndless() ? this._clampCameraYOverscroll(this.cameraY) : clampCameraY(this.cameraY, this.settings.worldHeight, this.viewportHeight);
     this.clearKnockback();
   }
 
@@ -63,7 +66,10 @@ export class SurvivalRuntime {
   }
 
   resetCamera(toTop = true) {
-    this.cameraY = toTop ? 0 : this.getMaxCameraY();
+    this.cameraY = toTop || this.isEndless() ? 0 : this.getMaxCameraY();
+    this.originY = 0;
+    this.elapsedSeconds = 0;
+    this.distanceHighWater = 0;
     this.clearKnockback();
   }
 
@@ -77,8 +83,9 @@ export class SurvivalRuntime {
     if (this.isEnabled() && this.autoScroll && !knockbackActive) {
       const progressRatio = getProgressRatio(this.cameraY, maxCameraY);
       const speedScale = evaluateSurvivalSpeedCurve(this.settings.speedCurve, progressRatio);
-      deltaY += this.settings.scrollSpeed * speedScale * dt;
+      deltaY += this.getScrollSpeed() * (this.isEndless() ? 1 : speedScale) * dt;
     }
+    if (this.isEnabled() && this.autoScroll) this.elapsedSeconds += dt;
 
     if (knockbackActive) {
       const duration = Math.max(0.001, this.knockbackDurationSeconds || DEFAULT_KNOCKBACK_SMOOTH_SECONDS);
@@ -100,12 +107,13 @@ export class SurvivalRuntime {
     if (deltaY === 0) return this.cameraY;
     const unclampedY = this.cameraY + deltaY;
     this.cameraY = this._clampCameraYOverscroll(unclampedY);
+    this.distanceHighWater = Math.max(this.distanceHighWater, this.originY + this.cameraY);
     return this.cameraY;
   }
 
   setCameraY(cameraY) {
     this.clearKnockback();
-    this.cameraY = clampCameraY(cameraY, this.settings.worldHeight, this.viewportHeight);
+    this.cameraY = this.isEndless() ? this._clampCameraYOverscroll(cameraY) : clampCameraY(cameraY, this.settings.worldHeight, this.viewportHeight);
     return this.cameraY;
   }
 
@@ -120,7 +128,18 @@ export class SurvivalRuntime {
   }
 
   getWorldHeight() {
-    return this.settings.worldHeight;
+    return this.isEndless() ? Math.max(this.viewportHeight * 3, this.cameraY + this.viewportHeight * 3) : this.settings.worldHeight;
+  }
+
+  isEndless() { return this.isEnabled() && this.settings.endless === true; }
+
+  getScrollSpeed() {
+    return this.settings.scrollSpeed * (this.isEndless() ? 1 + 0.85 * (1 - Math.exp(-this.distanceHighWater / 9500)) : 1);
+  }
+
+  rebase(distance) {
+    this.cameraY -= distance;
+    this.originY += distance;
   }
 
   getLoseLineY() {
@@ -173,7 +192,7 @@ export class SurvivalRuntime {
   }
 
   getMaxCameraY() {
-    return getMaxCameraY(this.settings.worldHeight, this.viewportHeight);
+    return this.isEndless() ? Number.POSITIVE_INFINITY : getMaxCameraY(this.settings.worldHeight, this.viewportHeight);
   }
 
   getSettings() {
@@ -195,6 +214,11 @@ export class SurvivalRuntime {
 
   getTrackerState() {
     if (!this.isEnabled()) return null;
+    if (this.isEndless()) return {
+      endless: true, distance: Math.max(0, this.originY + this.cameraY),
+      elapsedSeconds: this.elapsedSeconds, speed: this.getScrollSpeed(),
+      remainingRatio: 1, progressRatio: 1 - Math.exp(-this.distanceHighWater / 9500)
+    };
     const maxCameraY = this.getMaxCameraY();
     return {
       remainingRatio: getRemainingFieldRatio(this.cameraY, maxCameraY),
