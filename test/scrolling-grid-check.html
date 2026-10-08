@@ -1,0 +1,77 @@
+<!doctype html>
+<!-- Headless WebGL check: fractional scroll, cell wrap and peg-flash stability.
+     ?quality=medium or high also checks filtering at a different render ratio. -->
+<meta charset="utf-8">
+<pre id="out">RUNNING</pre>
+<div id="host" style="width:256px;height:256px"></div>
+<script type="module">
+import { GpuPlayfieldRenderer } from '../js/gpu-playfield.js';
+
+const check = (ok, message) => { if (!ok) throw new Error(message); };
+try {
+  const quality = new URLSearchParams(location.search).get('quality') || 'low';
+  const gpu = new GpuPlayfieldRenderer({ quality, adaptiveQuality: false });
+  check(gpu.attach(document.querySelector('#host')), 'GPU attach');
+  gpu.setLighting({ exposure: 0, bloom: 0, vignette: 0 });
+  check(gpu.render([], [], { width: 256, height: 256, scrollingBoard: true }), 'Render');
+  const gl = gpu.gl;
+  const w = gpu.canvas.width, h = gpu.canvas.height, ratio = w / 256;
+  const pixels = () => {
+    const result = new Uint8Array(w * h * 4);
+    gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, result);
+    return result;
+  };
+  gpu._scrollingGrid = 0;
+  gpu._renderComposite(gpu._targets.litPrev);
+  const baseline = pixels();
+  gpu._scrollingGrid = 1;
+  const rows = [];
+  for (const phase of [0, .125, .25, .375, .5, .625, .75, .875, 1, 31.75, 32, 32.25]) {
+    gpu._boardGridOffsetY = ((phase % 32) + 32) % 32;
+    gpu._renderComposite(gpu._targets.litPrev);
+    const frame = pixels();
+    let mass = 0, moment = 0;
+    for (let y = Math.ceil(7 * ratio); y < 24 * ratio; y++) {
+      for (let x = Math.ceil(5 * ratio); x < 10 * ratio; x++) {
+        const i = ((h - 1 - y) * w + x) * 4;
+        const weight = frame[i + 1] - baseline[i + 1];
+        mass += weight;
+        moment += weight * (y + .5) / ratio;
+      }
+    }
+    rows.push({ phase, mass, center: moment / mass });
+    check(gl.getError() === gl.NO_ERROR, 'WebGL error');
+  }
+  const variation = (Math.max(...rows.map(r => r.mass)) - Math.min(...rows.map(r => r.mass))) / rows[0].mass;
+  // Allow quantization into the final 8-bit framebuffer and the gentle cabinet
+  // light gradient. The old differentiated grooves visibly breathed in width.
+  check(variation < .025, `Line brightness/width changed: ${variation}`);
+  for (let i = 0; i < 9; i++) {
+    check(Math.abs(rows[i].center - rows[0].center + rows[i].phase) < .075, `Non-smooth displacement: ${JSON.stringify(rows)}`);
+  }
+  check(rows[10].mass === rows[0].mass && rows[10].center === rows[0].center, 'Cell-wrap seam');
+  check(Math.abs(rows[9].center - rows[0].center - .25) < .075, 'Before cell wrap');
+  check(Math.abs(rows[11].center - rows[0].center + .25) < .075, 'After cell wrap');
+
+  gpu.setLighting({ exposure: 1, bloom: 0, vignette: 0 });
+  const pegs = [{ id: 'p', type: 'orange', x: 90, y: 80 }];
+  const frame = hits => {
+    gpu.render(pegs, hits, { width: 256, height: 256, scrollingBoard: true, bypassTemporalHistory: true });
+    return pixels();
+  };
+  const quiet = frame([]), flash = frame(['p']);
+  let changedPixels = 0, gridChange = 0;
+  for (let i = 0; i < quiet.length; i += 4) {
+    if (Math.abs(quiet[i] - flash[i]) + Math.abs(quiet[i + 1] - flash[i + 1]) + Math.abs(quiet[i + 2] - flash[i + 2]) > 3) changedPixels++;
+  }
+  check(changedPixels > 20, 'Peg hit light was not exercised');
+  for (let y = Math.ceil(40 * ratio); y < 140 * ratio; y++) {
+    const i = ((h - 1 - y) * w + Math.floor(47.5 * ratio)) * 4;
+    for (let c = 0; c < 3; c++) gridChange = Math.max(gridChange, Math.abs(quiet[i + c] - flash[i + c]));
+  }
+  check(gridChange <= 1, `Grid flickers during peg flash: ${gridChange}`);
+  document.querySelector('#out').textContent = 'PASS ' + JSON.stringify({ quality, ratio, variation, gridChange, changedPixels, rows });
+} catch (error) {
+  document.querySelector('#out').textContent = 'FAIL ' + error.stack;
+}
+</script>
