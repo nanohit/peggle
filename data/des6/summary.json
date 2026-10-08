@@ -1,0 +1,50 @@
+{
+  "count": 48,
+  "bank": 160,
+  "newBank": 36,
+  "newForms": [
+    "braid",
+    "chevrons",
+    "crescents",
+    "lanterns",
+    "rosette",
+    "sail"
+  ],
+  "sourceCounts": {
+    "des2": 8,
+    "alea": 6,
+    "des5": 8,
+    "blast": 8,
+    "des1": 4,
+    "fresh": 8,
+    "des3": 6
+  },
+  "actions": {
+    "timing": 6,
+    "banks": 16,
+    "handoff": 6,
+    "portal": 7,
+    "balance": 3,
+    "aim": 5,
+    "release": 2,
+    "field": 3
+  },
+  "formationCount": 39,
+  "nativeRoutes": 48,
+  "meanPegs": 58.791666666666664,
+  "meanShots": 5.166666666666667,
+  "windowActions": {
+    "des5": {
+      "min": 2,
+      "mean": 2.6
+    },
+    "des6": {
+      "min": 4,
+      "mean": 5.317073170731708
+    }
+  },
+  "adjacentSimilarity": 0.47091946601724893,
+  "groupedSimilarity": 0.5369705403372153,
+  "seed": "des6-night-01",
+  "fingerprint": "898a31fe8fd9e7101db69cfcdbdfcc224e8d822c582672ebfdaaa884f01435a6"
+}

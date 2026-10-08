@@ -50,6 +50,7 @@ const SPECTACLE_PLAYER = window.__PEGGLE_SPECTACLE_PLAYER__ === true;
 const SYSTEMS_PLAYER = window.__PEGGLE_SYSTEMS_PLAYER__ === true;
 const FIELDS_PLAYER = window.__PEGGLE_FIELDS_PLAYER__ === true;
 const ORCHESTRATED_PLAYER = window.__PEGGLE_ORCHESTRATED_PLAYER__ === true;
+const JOURNEY_PLAYER = window.__PEGGLE_JOURNEY_PLAYER__ === true;
 const INTENT_PLAYER = window.__PEGGLE_INTENT_PLAYER__ === true;
 const WORLD_W = 400;
 const WORLD_H = Math.round(WORLD_W / ASPECT_RATIO); // 600
@@ -729,6 +730,27 @@ function loadDeferredImages(root) {
 resolve();
 
 async function resolve() {
+  if (JOURNEY_PLAYER) {
+    try {
+      const [manifest,bank,{resolveCampaign6}] = await Promise.all([
+        staticJson('/data/des6/campaign.json'),staticJson('/data/des6/bank.json'),import('../generators/destruction6/client.js')
+      ]);
+      const buildSequence=(entries,options)=>new Promise((resolve,reject)=>{
+        const url=URL.createObjectURL(new Blob(['import '+JSON.stringify(staticUrl('dist/des6-worker.js'))+';'],{type:'text/javascript'}));
+        const worker=new Worker(url,{type:'module'}),stop=()=>{worker.terminate();URL.revokeObjectURL(url);};
+        worker.onmessage=({data})=>{stop();data.error?reject(new Error(data.error)):resolve(data.sequence);};
+        worker.onerror=e=>{stop();reject(new Error(e.message));};worker.postMessage({entries,options});
+      });
+      const campaign=await resolveCampaign6({manifest,bank,seed:getQueryParam('seed'),loadSource:staticJson,buildSequence});
+      const levels=campaign.levels.map(normalizeLevelData);
+      await bootWithLevels(levels,campaign.name,{...campaign,levels,graph:graphFromLevels(levels)}, {
+        unlockAll:true,initialLevelId:getQueryParam('id'),journeyCatalog:true,journeySeed:campaign.sequence.seed
+      });
+    } catch (error) {
+      console.error('[des6]',error);showError('Не удалось собрать маршрут. Обновите страницу.');
+    }
+    return;
+  }
   if (DESTRUCTION_PLAYER) {
     try {
       const campaign = await staticJson(ORCHESTRATED_PLAYER ? '/data/des5/campaign.json' : FIELDS_PLAYER ? '/data/des4/campaign.json' : SYSTEMS_PLAYER ? '/data/des3/campaign.json' : SPECTACLE_PLAYER ? '/data/des2/campaign.json' : INTENT_PLAYER ? '/data/des1/campaign.json' : '/data/des/campaign.json');
@@ -2112,7 +2134,7 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
     }
     pauseLevelBtn.after(picker);
   }
-  if (GENERATED_PLAYER && !INTENT_PLAYER && !SPECTACLE_PLAYER && !SYSTEMS_PLAYER && !getQueryParam('seed')) {
+  if (GENERATED_PLAYER && !JOURNEY_PLAYER && !INTENT_PLAYER && !SPECTACLE_PLAYER && !SYSTEMS_PLAYER && !getQueryParam('seed')) {
     const variantsLink = document.createElement('a');
     const query = new URLSearchParams(location.search);
     const showingVariants = query.get('variants') === '1';
@@ -2187,6 +2209,13 @@ async function bootWithLevels(levels, campaignName, campaignData, options = {}) 
   if (options.systemsCatalog) {
     const report = document.createElement('a'); report.className='des-report-link';report.href=appUrl(options.orchestratedCatalog ? '/des5/report/' : options.fieldsCatalog ? '/des4/report/' : '/des3/report/');
     report.textContent='Генератор и проверенные конструкции';pauseLevelBtn.after(report);
+  }
+  if (options.journeyCatalog) {
+    const tools=document.createElement('div');tools.className='des-tools';
+    const newJourney=document.createElement('button');newJourney.className='pause-level-btn';newJourney.textContent='Новый маршрут';
+    newJourney.onclick=()=>{const bytes=crypto.getRandomValues(new Uint32Array(2));location.href=appUrl('/des6?'+new URLSearchParams({seed:'journey-'+[...bytes].map(n=>n.toString(36)).join('-')}));};
+    const report=document.createElement('a');report.className='des-report-link';report.href=appUrl('/des6/report/');report.textContent='Картинки и устройство кампании';
+    tools.append(newJourney,report);pauseLevelBtn.after(tools);
   }
   const pausePvpDuelBtn = pauseOverlay.querySelector('#pausePvpDuelBtn');
   pausePvpDuelBtn?.addEventListener('click', (event) => {

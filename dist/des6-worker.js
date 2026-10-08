@@ -1,0 +1,1 @@
+import{b as s}from"./chunk-GPPSGSWA.js";import"./chunk-46LTK3UL.js";import"./chunk-YVJL66ZD.js";import"./chunk-GHVBHUYJ.js";self.onmessage=({data:e})=>{try{self.postMessage({sequence:s(e.entries,e.options)})}catch(o){self.postMessage({error:o.message})}};

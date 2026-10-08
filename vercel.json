@@ -7,6 +7,10 @@
     }
   },
   "rewrites": [
+    {"source":"/des6","destination":"/des6/index.html"},
+    {"source":"/des6/","destination":"/des6/index.html"},
+    {"source":"/des6/report","destination":"/des6/report/index.html"},
+    {"source":"/des6/report/","destination":"/des6/report/index.html"},
     {"source":"/des5","destination":"/des5/index.html"},
     {"source":"/des5/","destination":"/des5/index.html"},
     {"source":"/des5/report","destination":"/des5/report/index.html"},
