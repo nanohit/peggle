@@ -244,7 +244,6 @@ uniform float uBoardTexture;
 uniform float uBoardGrid;
 uniform float uBoardGridDepth;
 uniform float uBoardGridOffsetY;
-uniform float uScrollingGrid;
 
 void main() {
   vec2 p = vec2(gl_FragCoord.x, uRender.y - gl_FragCoord.y) * (uCanvas / uRender);
@@ -260,10 +259,7 @@ void main() {
 
   // Grid mode cuts real channels into the surface instead of drawing lines, so
   // each groove lights on the key side and shades on the other.
-  // The scrolling grid is filtered in the final composite. Differentiating a
-  // narrow moving groove here flips its normal between pixel pairs, and peg
-  // reflections amplify that into flashing, apparently changing line widths.
-  if (uBoardStyle > 0.5 && uBoardStyle < 1.5 && uScrollingGrid < 0.5) {
+  if (uBoardStyle > 0.5 && uBoardStyle < 1.5) {
     vec2 cell = (p + vec2(0.0, uBoardGridOffsetY)) / max(uBoardGrid, 3.0);
     vec2 edge = abs(fract(cell) - 0.5);
     vec2 soft = fwidth(cell) * 1.2 + 0.015;
@@ -295,10 +291,8 @@ void main() {
 
   float rough = 0.62 - grain * 0.13;
 
-  // In scrolling mode albedo alpha carries foreground coverage for the grid
-  // composite. Objects already write their antialiased coverage into alpha;
-  // hidden lights write zero, so the lines remain behind visible objects only.
-  oAlbedo = vec4(albedo, 1.0 - uScrollingGrid);
+  // Alpha is coverage on every attachment so objects can blend over the board.
+  oAlbedo = vec4(albedo, 1.0);
   oNormal = vec4(N.xy * 0.5 + 0.5, rough, 1.0);
   oEmission = vec4(0.0, 0.0, 0.0, 1.0);
   oMaterial = vec4(0.0, 0.0, 0.0, 1.0);
@@ -1389,12 +1383,7 @@ uniform sampler2D uScene;
 uniform sampler2D uBloom1;
 uniform sampler2D uBloom2;
 uniform sampler2D uBloom3;
-uniform sampler2D uAlbedo;
 uniform vec2 uCanvas;
-uniform float uScrollingGrid;
-uniform float uBoardGrid;
-uniform float uBoardGridOffsetY;
-uniform float uBoardGridDepth;
 uniform float uBloomStrength;
 uniform float uVignette;
 uniform float uSaturation;
@@ -1408,14 +1397,6 @@ uniform vec3 uWaveC[MAX_WAVES];   // ring colour
 
 vec3 aces(vec3 x) {
   return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
-}
-
-// Exact box-filter coverage of a stripe, in logical canvas pixels. Its total
-// width stays constant at fractional camera offsets and at different DPRs.
-vec2 gridStripe(vec2 distance, float center, float halfWidth, vec2 pixelWidth) {
-  vec2 d = distance - center;
-  return (clamp(d + pixelWidth * 0.5, -halfWidth, halfWidth)
-        - clamp(d - pixelWidth * 0.5, -halfWidth, halfWidth)) / pixelWidth;
 }
 
 void main() {
@@ -1463,29 +1444,6 @@ void main() {
   float l = luma(color);
   color = clamp(mix(vec3(l), color, uSaturation), 0.0, 1.0);
   color = pow(color, vec3(1.0 / 2.2));
-  if (uScrollingGrid > 0.5) {
-    vec2 p = vec2(uv.x, 1.0 - uv.y) * uCanvas;
-    float stepSize = max(uBoardGrid, 3.0);
-    vec2 distance = mod(p + vec2(0.0, uBoardGridOffsetY), stepSize) - stepSize * 0.5;
-    vec2 pixelWidth = max(fwidth(p), vec2(0.0001));
-    vec2 core = gridStripe(distance, 0.0, 1.0, pixelWidth);
-    vec2 lip = gridStripe(distance, -2.0, 1.0, pixelWidth);
-    float lipCoverage = 1.0 - (1.0 - lip.x) * (1.0 - lip.y);
-    // Core and lip are adjacent, disjoint intervals on each axis. Only the
-    // crossings of opposite axes overlap; multiplying their filtered masks
-    // would dim a pixel straddling their shared edge as the camera moves.
-    float coreCoverage = core.x + core.y - core.x * core.y
-                       - core.x * lip.y - core.y * lip.x;
-    float boardCoverage = 1.0 - texture(uAlbedo, uv).a;
-    float strength = clamp(uBoardGridDepth / 0.48, 0.0, 1.0) * boardCoverage;
-    // A soft, fixed cabinet light gives the grooves depth without narrow
-    // specular lobes from every moving/struck peg. Peg lighting stays intact.
-    float wellLight = 0.75 + 0.25 * (1.0 - smoothstep(0.0, 1.0, p.y / uCanvas.y));
-    vec3 grooveColor = vec3(0.026, 0.057, 0.083) * wellLight;
-    vec3 lipColor = vec3(0.105, 0.220, 0.295) * wellLight;
-    color = color * (1.0 - (coreCoverage + lipCoverage) * strength)
-          + (grooveColor * coreCoverage + lipColor * lipCoverage) * strength;
-  }
   // Dither before the 8-bit write or the wide dark gradients will band.
   color += (hash21(vUv * uCanvas + 0.5) - 0.5) / 255.0;
   outColor = vec4(color, 1.0);
@@ -1712,7 +1670,6 @@ export class GpuPlayfieldRenderer {
     this.marchMinStep = null;
     this._lastTime = 0;
     this._boardGridOffsetY = 0;
-    this._scrollingGrid = 0;
     this._scaledSkyTop = [0, 0, 0];
     this._scaledSkyBottom = [0, 0, 0];
     this._resolvedKeyDir = [0, 0];
@@ -2753,8 +2710,7 @@ export class GpuPlayfieldRenderer {
       .f('uBoardTexture', board.boardTexture)
       .f('uBoardGrid', board.boardGrid)
       .f('uBoardGridDepth', board.boardGridDepth)
-      .f('uBoardGridOffsetY', this._boardGridOffsetY)
-      .f('uScrollingGrid', this._scrollingGrid);
+      .f('uBoardGridOffsetY', this._boardGridOffsetY);
     this._blit();
 
     // Coverage-weighted blending is the antialiasing: an edge fragment mixes
@@ -3035,12 +2991,7 @@ export class GpuPlayfieldRenderer {
       .tex('uBloom1', 1, t.bloom[1].texture)
       .tex('uBloom2', 2, t.bloom[2].texture)
       .tex('uBloom3', 3, t.bloom[3].texture)
-      .tex('uAlbedo', 4, t.albedo)
       .v2('uCanvas', this.width, this.height)
-      .f('uScrollingGrid', this._scrollingGrid)
-      .f('uBoardGrid', this.config.boardGrid)
-      .f('uBoardGridOffsetY', this._boardGridOffsetY)
-      .f('uBoardGridDepth', this.config.boardGridDepth)
       .f('uBloomStrength', this._bloomStrength)
       .f('uVignette', this._vignette)
       .f('uSaturation', this._saturation);
@@ -3126,7 +3077,6 @@ export class GpuPlayfieldRenderer {
     const gridStep = Math.max(3, cfg.boardGrid);
     const gridCameraY = pick('gridCameraY', Number(options.cameraY) || 0);
     this._boardGridOffsetY = ((gridCameraY % gridStep) + gridStep) % gridStep;
-    this._scrollingGrid = options.scrollingBoard === true && cfg.boardStyle > 0.5 && cfg.boardStyle < 1.5 ? 1 : 0;
     this._exposure = pick('exposure', cfg.exposure);
     this._bloomStrength = pick('bloom', cfg.bloom);
     this._bloomThreshold = pick('bloomThreshold', cfg.bloomThreshold);
