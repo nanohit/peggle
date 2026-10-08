@@ -1,132 +1,90 @@
 import {Builder} from '../destruction4/grammar.js';
-import {randomFrom} from '../destruction/grammar.js';
-import {createSeesaw} from '../../js/destruction-hinge.js';
-import {bounds,reach} from '../destruction2/ribbon-geometry.js';
-import {sized} from '../destruction4/geometry.js';
-import {TAU,between,choose,cubic,arc,spline,polarContour,transform} from '../destruction4/shapes.js';
-import {receiverBoundary,flowBoundary,envelopeBoundary} from './morphology.js';
+import {cubic,between} from '../destruction4/shapes.js';
+import {validateGeometry,sized} from '../destruction4/geometry.js';
+import {bounds} from '../destruction2/ribbon-geometry.js';
 
-const fixed={destructionStatic:true,destructionPhysicsOnHit:false};
-const latent={destructionStatic:false,destructionPhysicsOnHit:true,destructionPhysicsOnHitBallOnly:true};
-const loose={destructionStatic:false,destructionPhysicsOnHit:false};
+export const loose={destructionStatic:false,destructionPhysicsOnHit:false};
+export const latent={destructionStatic:false,destructionPhysicsOnHit:true,destructionPhysicsOnHitBallOnly:true};
+export const CATALOG={source:{source:'des3'},reservoir:{source:'des3'},carrier:{source:'des3'},bank:{source:'des2'},field:{source:'des2'},landscape:{source:'des4'}};
 
 export class SystemBuilder extends Builder {
  constructor(seed,genome){super(seed,'morphogenesis');this.id='des5-'+seed.replace(/[^a-zA-Z0-9_-]/g,'').slice(0,48);this.genome=genome;this.nodes=[];this.edges=[];this.decisions=[];}
  checkpoint(){return {pegs:this.pegs.length,groups:this.groups.length,parts:this.parts.length,curves:new Set(Object.keys(this.curves)),serial:this.serial};}
  rollback(s){this.pegs.length=s.pegs;this.groups.length=s.groups;this.parts.length=s.parts;this.serial=s.serial;for(const k of Object.keys(this.curves))if(!s.curves.has(k))delete this.curves[k];}
+ safeStroke(a,curve,extra={}){
+  const cp=this.checkpoint(),ids=a.ids.length,ps=this.stroke(a,curve,{width:this.genome.brickWidth,spacing:this.genome.brickWidth,extra});
+  if(!validateGeometry({pegs:this.pegs}).valid){this.rollback(cp);a.ids.length=ids;return [];}
+  return ps;
+ }
+ node(a,spec,start,ports={}){
+  const ps=this.pegs.slice(start);for(const p of ps)p.constructionSubsystem=a.nodeId;
+  const n={...spec,id:a.nodeId,source:a.source,partIds:this.parts.filter(p=>p.nodeId===a.nodeId).map(p=>p.id),pegIds:ps.map(p=>p.id),loadIds:ps.filter(p=>p.constructionRole==='cargo').map(p=>p.id),inputs:ports.inputs||[],outputs:ports.outputs||[],box:bounds(ps.map(sized)),ink:ps.reduce((s,p)=>s+(p.shape==='brick'?p.width*p.height:Math.PI*8.5**2),0),moving:spec.moving||0,recipe:spec.recipe||{},depth:spec.depth||0};
+  this.nodes.push(n);return n;
+ }
 }
 
-// These are role implementations, not board-sized scenes. Every constructor
-// receives its envelope/direction from the same graph and returns real ports.
-export const CATALOG={
- contour:{source:'des4',role:'enclosure',cost:1},
- channel:{source:'des2',role:'routing',cost:0},
- cup:{source:'des3',role:'receiving',cost:0},
- sling:{source:'des3',role:'receiving',cost:1},
- seesaw:{source:'des3',role:'redistribution',cost:1},
- bridge:{source:'des3',role:'redistribution',cost:2},
- shelf:{source:'des3',role:'release',cost:0},
- support:{source:'des4',role:'storage',cost:1},
- fan:{source:'des2',role:'rebound',cost:0}
-};
+// A mouth, a flat landing and two independently grown shoulders. Dimensions
+// are computed attachments, never stored drawings. The landing keeps a load
+// involved after its release, rather than bouncing it straight off the board.
+export function vessel({x,y,w,depth,bias=0,flare=.82,floor=44}){
+ const left={x:x-w/2,y:y-depth},right={x:x+w/2,y:y-depth*(1+bias*.22)},lx=x-floor/2,rx=x+floor/2;
+ return {segments:[cubic([[left.x,left.y],[left.x+w*(1-flare)*.3,y-5],[lx-w*.18,y],[lx,y]]),cubic([[lx,y],[lx+floor/3,y],[rx-floor/3,y],[rx,y]]),cubic([[rx,y],[rx+w*.18,y],[right.x-w*(1-flare)*.3,y-5],[right.x,right.y]])],left,right,floor};
+}
+export const port=(x,y,w)=>({x,y,halfWidth:w/2,accepts:['ball','cargo']});
 
-export function compileNode(b,spec){
- const {id,kind,x,y,w,h,direction:d=1}=spec,r=randomFrom(b.seed+':'+id+':'+spec.variant),g=b.genome;
- const a=b.part(kind,{x,y,w,h,direction:d}),start=b.pegs.length,groupStart=b.groups.length;
- a.nodeId=id;a.source=CATALOG[kind].source;
- const payload=b.part('load',{owner:id});payload.nodeId=id;payload.source=a.source;
- const port=(px,py,width,vx=0,vy=1)=>({x:px,y:py,halfWidth:width/2,vx,vy,accepts:['ball','cargo']});
- let inputs=[port(x,y-h/2,w*.6)],outputs=[port(x,y+h/2,w*.55)],recipe={},moving=0;
- function load(points){for(const p of points)b.addIfClear(payload,p.x,p.y,{...loose,constructionRole:'cargo'},0);}
- function hinged(cx,cy,width,side=0){
-  const native=createSeesaw({id:a.id+':hinge'+b.groups.length,x:cx,y:cy,width,pivotFraction:side<0?.27:side>0?.73:.5,minAngle:-.56,maxAngle:.56});
-  b.groups.push(...native.groups);
-  for(const p of native.pegs)b.peg(a,p.x,p.y,{...p,id:b.id+':p'+(++b.serial),type:'blue',...(p.constructionPart==='bearing'?fixed:latent),constructionRole:p.constructionPart==='bearing'?'bearing':'lever'});
-  const count=width>110?5:3;load(Array.from({length:count},(_,i)=>({x:cx+(i-(count-1)/2)*19,y:cy-14})));
-  moving++;
+export function reservoir(b,{id,x,y,w,depth,kinetic=false,direction=1,bias=0,floor=48,role='catch'}){
+ const start=b.pegs.length,a=b.part(kinetic?'tipping-vessel':'landing-vessel',{x,y,w,depth,bias,floor});a.nodeId=id;a.source='des3';
+ const curve=vessel({x,y,w,depth,bias,floor}),members=b.safeStroke(a,curve,{constructionRole:'receiver-wall'});
+ if(!members.length){b.parts.pop();return null;}
+ if(kinetic)attachHinge(b,a,members,direction<0?curve.right:curve.left,{direction,angle:.67});
+ return b.node(a,{kind:'reservoir',x,y,w,h:depth,role,moving:+kinetic,recipe:{law:'retain-then-tip',operator:'vessel-shoulders',depth,bias,floor}},start,{inputs:[port(x,y-depth-12,w-25)],outputs:[port(x,y+20,floor)]});
+}
+
+function attachHinge(b,a,members,pivot,{direction=0,angle=.45}={}){
+ const group=a.id+':body';for(const p of members)Object.assign(p,latent,{groupId:group});
+ const pin=members.reduce((best,p)=>Math.hypot(p.x-pivot.x,p.y-pivot.y)<Math.hypot(best.x-pivot.x,best.y-pivot.y)?p:best);
+ // Native hinge limits refer to this peg's angle, not to the compound body's
+ // rest pose. A curved brick is rendered/collided from world-space slices;
+ // give its centre-mounted joint a neutral frame without changing that ribbon.
+ // Otherwise a near-vertical lip can snap the whole vessel at initialization.
+ if(pin.curveSlices?.length>=2)pin.angle=0;
+ pin.destructionHinge={pivotFraction:.5,minAngle:direction>0?-.08:-angle,maxAngle:direction<0?.08:angle,damping:.998,stopBounce:.03};pin.constructionRole='bearing-arm';
+ b.groups.push({id:group,name:'Составной балансир',pattern:'construction',destructionBody:true});
+ b.addIfClear(a,pin.x,pin.y+23,{radiusScale:.9,constructionRole:'bearing'},1);
+ return pin;
+}
+
+// Grow a single native body from receiving lobes and connecting arms. Number,
+// height, width and attachment order change the actual mechanism: spoon,
+// unequal balance, three-bay distributor, etc. No per-frame scripted motion.
+export function carrier(b,{id,bays,pivot,depth=0,direction=0}){
+ const start=b.pegs.length,a=b.part('compound-carrier',{bays,pivot});a.nodeId=id;a.source='des3';const segments=[];
+ for(let i=0;i<bays.length;i++){
+  const v=vessel(bays[i]);
+  if(i){const prev=vessel(bays[i-1]),dy=pivot.y-(prev.right.y+v.left.y)/2;segments.push(cubic([[prev.right.x,prev.right.y],[prev.right.x+16,prev.right.y+dy],[v.left.x-16,v.left.y+dy],[v.left.x,v.left.y]]));}
+  segments.push(...v.segments);
  }
- if(kind==='seesaw'){
-  hinged(x,y,w);inputs=[port(x,y-31,w*.82)];outputs=[port(x-w*.35,y+w*.27,w*.3,-1.2,1),port(x+w*.35,y+w*.27,w*.3,1.2,1)];recipe={law:'native-hinged-distribution',width:w};
- }
- if(kind==='bridge'){
-  const gap=between(r,27,36),leaf=Math.max(55,(w-gap)/2),off=(leaf+gap)/2;
-  for(const side of [-1,1])hinged(x+side*off,y,leaf,side);
-  b.brick(a,x,y+18,gap+10,10.2,0,{...fixed,constructionRole:'release-lock'});
-  inputs=[port(x,y-31,w*.82)];outputs=[port(x-off,y+leaf*.31,leaf*.7,-.7,1),port(x+off,y+leaf*.31,leaf*.7,.7,1)];recipe={law:'opposed-hinged-spans',gap,leaf};
- }
- if(kind==='shelf'){
-  b.brick(a,x,y,w,10.2,0,{constructionRole:'release-floor'});
-  load(Array.from({length:Math.min(6,Math.floor(w/21))},(_,i)=>({x:x+(i-(Math.min(6,Math.floor(w/21))-1)/2)*19,y:y-14})));
-  inputs=[port(x,y-31,w*.85)];outputs=[port(x,y+20,w*.8)];recipe={law:'supported-load',width:w};
- }
- if(kind==='support'){
-  const ranks=h>112?2:1,columns=w>166?3:2,span=w/(columns-1),bottom=y+h*.33,step=Math.min(67,h*.59),postWidth=between(r,11,14),jitter=between(r,-.02,.02)*span;
-  const positions=Array.from({length:columns},(_,i)=>x-w/2+i*span);
-  const joints=[],links=[];
-  for(let rank=0;rank<ranks;rank++){
-   const yy=bottom-rank*step,shift=rank*jitter;
-   for(const px of positions){const cx=px+shift;b.brick(a,cx,rank?yy+step/2:yy+18,postWidth,rank?step-12:24,0,{...(rank?latent:fixed),constructionRole:'support'});joints.push({x:cx,y:yy,rank});}
-   for(let col=1;col<columns;col++){
-    const cx=(positions[col-1]+positions[col])/2+shift,width=span-1;
-    b.brick(a,cx,yy,width,12,0,{...loose,constructionRole:'floor'});links.push({rank,from:col-1,to:col,width});
-    const n=Math.min(4,Math.floor(width/20));load(Array.from({length:n},(_,i)=>({x:cx+(i-(n-1)/2)*20,y:yy-15})));
-   }
+ const members=b.safeStroke(a,{segments},{constructionRole:'carrier-wall'});if(!members.length){b.parts.pop();return null;}
+ const pin=attachHinge(b,a,members,pivot,{direction,angle:between(b.r,.94,1.20)});
+ const weights=[];
+ if(b.genome.focus>.5&&bays.length>1){
+  // A counterweight is ordinary attached material. Hitting it changes the
+  // native body's centre of mass, so another shot can reverse the balance.
+  const candidates=members.filter(p=>Math.abs(p.x-pin.x)>29&&Math.abs(p.x-pin.x)<85).sort((p,q)=>Math.abs(p.x-(pin.x-b.genome.direction*50))-Math.abs(q.x-(pin.x-b.genome.direction*50)));
+  for(const p of candidates){
+   const extra={...latent,groupId:pin.groupId,constructionRole:'counterweight'},count=b.genome.focus>.76?3:2;
+   for(let i=0;i<count;i++){const y=p.y+14+i*17.1;if(b.clear({x:p.x,y},.2)){const q=b.peg(a,p.x,y,extra);weights.push(q.id);}else break;}
+   if(weights.length)break;
   }
-  moving=1;inputs=[port(x,bottom-(ranks-1)*step-33,w*.87)];outputs=[port(x-d*w*.28,bottom+41,w*.44,-d*.8,1),port(x+d*w*.28,bottom+41,w*.44,d*.8,1)];
-  recipe={law:'support-network',ranks,columns,joints,links,step,jitter};
  }
- if(kind==='cup'||kind==='sling'){
-  const radius=w/2,shape=receiverBoundary(spec,g,r),{curve,lip,bottom}=shape,depth=shape.program.depth,bias=bottom.x-x;
-  const walls=b.stroke(a,curve,{width:g.brickWidth,spacing:g.brickWidth});
-  if(kind==='sling'){
-   const group=a.id+':body',hingeX=x-d*(radius+5),hingeY=lip+4;walls.forEach(p=>Object.assign(p,latent,{groupId:group}));
-   b.brick(a,hingeX,hingeY,22,10.2,0,{...latent,groupId:group,destructionHinge:{pivotFraction:.5,minAngle:d>0?0:-.82,maxAngle:d>0?.82:0,damping:.997},constructionRole:'pour-handle'});
-   b.groups.push({id:group,name:'Подвижный приёмник',pattern:'construction',destructionBody:true});moving++;
-  }
-  load([-1,0,1].map(k=>({x:bottom.x+k*20,y:bottom.y-17})));
-  inputs=[port(x,lip-14,w*.77)];outputs=[port(kind==='sling'?x+d*w*.38:bottom.x,bottom.y+17,w*.52,kind==='sling'?d*.8:0,1)];recipe={law:'mouth-depth-discharge',...shape.program};
- }
- if(kind==='contour'){
-  const spiral=g.radialGrowth>.62,closed=!spiral&&g.openness<.68&&spec.role==='focus',rx=w*.45,ry=h*.44,opening=between(r,.75,1.5)*g.openness;
-  let curve,profile;
-  if(spiral){
-   const span=between(r,Math.PI*1.85,Math.PI*2.7),phase=-Math.PI*.5+g.bend*.8;
-   const points=Array.from({length:25},(_,i)=>{const t=i/24,a=phase+span*t,rad=.30+.7*t;return {x:x+Math.cos(a)*rx*rad,y:y+Math.sin(a)*ry*rad};});curve=spline(points);profile='radial-growth';recipe.program={operator:'radial-field',span,phase,startRadius:.30,anchors:points};
-  }else{
-   const field=envelopeBoundary(spec,g,r,{closed});curve=field.curve;recipe.program=field.program;profile=closed?'rotating-containment':'harmonic-aperture';
-  }
-  const members=b.stroke(a,curve,{width:g.brickWidth,spacing:g.brickWidth});
-  if(closed&&spec.response){const arms=choose(r,[2,3,4]);for(let i=0;i<arms;i++){const theta=i*TAU/arms+g.phase;b.stroke(a,cubic([[x+Math.cos(theta)*rx*.46,y+Math.sin(theta)*ry*.46],[x+Math.cos(theta+.2)*rx*.5,y+Math.sin(theta+.2)*ry*.5],[x+Math.cos(theta+.25)*rx*.6,y+Math.sin(theta+.25)*ry*.6],[x+Math.cos(theta+.3)*rx*.65,y+Math.sin(theta+.3)*ry*.65]]),{width:27,spacing:27});}members.push(...b.pegs.slice(start).filter(p=>!members.includes(p)&&p.constructionAssembly===a.id));}
-  if(spec.response){b.animate(a,members,{x,y},{rotation:closed?d*TAU:d*between(r,.14,.30),duration:closed?between(r,9,13):between(r,1.8,3),hitTrigger:!closed,hitMode:'single',cycle:closed,easing:closed?'linear':'easeInOut'});moving++;}
-  load([-1,0,1].map(k=>({x:x+k*22,y:y+ry*.22})));
-  inputs=[{...port(x,y-ry-16,w*.42),accepts:closed?['ball']:['ball','cargo']}];outputs=[port(x+g.bend*w*.15,y+ry+16,w*.57,d*g.lateral*1.6,1)];recipe={...recipe,law:profile,rx,ry,opening:closed?0:opening,phase:g.phase};
- }
- if(kind==='channel'){
-  const flow=flowBoundary(spec,g,r),path=flow.curve,p0=flow.anchors[0],p1=flow.anchors.at(-1);
-  b.stroke(a,path,{width:g.brickWidth,spacing:g.brickWidth});
-  const echo=b.part('flow-echo');echo.nodeId=id;echo.source=a.source;
-  const heading=Math.atan2(p1.y-p0.y,p1.x-p0.x),offset=choose(r,[-1,1])*34,parallel=transform(path,{x:-Math.sin(heading)*offset,y:Math.cos(heading)*offset});
-  const marks=b.dots(echo,parallel,{spacing:29,scale:g.pegScale});
-  // An offset curve can fold inward at a tight bend. Keep only geometrically
-  // clear targets; the primary path remains a complete native ribbon.
-  for(const p of marks){const others=b.pegs.filter(q=>q.id!==p.id);if(others.some(q=>q.shape==='brick'&&Math.hypot(q.x-p.x,q.y-p.y)<17)){b.pegs=b.pegs.filter(q=>q!==p);echo.ids=echo.ids.filter(id=>id!==p.id);}}
-  inputs=[port(p0.x,p0.y-16,w*.28)];outputs=[port(p1.x,p1.y+16,w*.27,d*.8,1)];recipe={law:'shared-spline-flow',...flow.program};
- }
- if(kind==='fan'){
-  const rad=w*.45,tilt=g.bend*.45+d*.15;b.dots(a,transform(arc(0,-h*.16,rad,h*.40,.18,Math.PI-.18),{x,y,angle:tilt}),{spacing:27,scale:g.pegScale});
-  inputs=[port(x,y-h*.44,w*.65)];outputs=[port(x+d*w*.3,y+h*.38,w*.38,d,1)];recipe={law:'open-rebound-bank'};
- }
- const ps=b.pegs.slice(start);for(const p of ps)p.constructionSubsystem=id;
- const box=bounds(ps.map(sized)),ink=ps.reduce((s,p)=>s+(p.shape==='brick'?p.width*p.height:Math.PI*(8.5*(p.radiusScale||p.bumperScale||1))**2),0);
- // Reserve rotation and hinge excursions, not merely their resting picture.
- let envelope={...box};if(['seesaw','bridge'].includes(kind))envelope={minX:Math.min(box.minX,x-w/2-14),maxX:Math.max(box.maxX,x+w/2+14),minY:Math.min(box.minY,y-w*.30-18),maxY:Math.max(box.maxY,y+w*.30+30)};
- if(kind==='sling'){const pivot={x:x-d*(w/2+5),y:y-h*.32+4},rr=Math.max(...ps.filter(p=>p.shape==='brick').map(p=>reach(sized(p),[pivot.x,pivot.y])));envelope={minX:Math.min(box.minX,pivot.x-rr*.25),maxX:Math.max(box.maxX,pivot.x+rr*.25),minY:Math.min(box.minY,y-h*.6),maxY:Math.max(box.maxY,y+h*.6)};}
- if(kind==='contour'&&moving){
-  const animation=b.groups.at(-1).animation,poses=[];
-  for(let step=0;step<=8;step++){const angle=animation.rotation*step/8,co=Math.cos(angle),si=Math.sin(angle),point=q=>({x:x+(q.x-x)*co-(q.y-y)*si,y:y+(q.x-x)*si+(q.y-y)*co});
-   for(const p of ps){if(p.constructionRole==='cargo'){poses.push(sized(p));continue;}const q={...p,...point(p),angle:p.angle+angle};if(p.curveSlices)q.curveSlices=p.curveSlices.map(v=>({...v,...point(v),nx:v.nx*co-v.ny*si,ny:v.nx*si+v.ny*co}));poses.push(sized(q));}
-  }envelope=bounds(poses);
- }
- const pockets=kind==='contour'&&recipe.law!=='radial-growth'?[{x,y:y+h*.13,w:w*.45,h:h*.31,accepts:['bearing'],contained:true}]:[];
- return {...spec,source:a.source,partIds:b.parts.filter(p=>p.nodeId===id).map(p=>p.id),pegIds:ps.map(p=>p.id),groupIds:b.groups.slice(groupStart).map(p=>p.id),inputs,outputs,pockets,box,envelope,ink,recipe,moving,loadIds:ps.filter(p=>p.constructionRole==='cargo').map(p=>p.id)};
+ return b.node(a,{kind:'carrier',x:pivot.x,y:pivot.y,w:bays.at(-1).x+bays.at(-1).w/2-bays[0].x+bays[0].w/2,h:Math.max(...bays.map(q=>q.depth)),moving:1,depth,recipe:{law:'compound-balance',operator:'attach-vessels-to-arms',bays,pin:pin.id,weights}},start,{inputs:bays.map(q=>port(q.x,q.y-q.depth-12,q.w-24)),outputs:bays.map(q=>port(q.x,q.y+18,q.floor||44))});
+}
+
+export function source(b,{id,x,y,w=74,count=3,depth=0}){
+ const start=b.pegs.length,a=b.part('release-floor',{x,y,w,count});a.nodeId=id;a.source='des3';
+ const floor=b.brick(a,x,y,w,10.2,0,{constructionRole:'release-floor'});
+ if(!validateGeometry({pegs:b.pegs}).valid){b.pegs.pop();b.parts.pop();return null;}
+ const load=b.part('supported-load',{owner:id});load.nodeId=id;load.source='des3';
+ for(let i=0;i<count;i++)b.addIfClear(load,x+(i-(count-1)/2)*19,y-14,{...loose,constructionRole:'cargo'},0);
+ return b.node(a,{kind:'source',x,y,w,h:28,depth,recipe:{law:'release-supported-load',floorId:floor.id}},start,{inputs:[port(x,y-32,w)],outputs:[port(x,y+16,w)]});
 }

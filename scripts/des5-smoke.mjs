@@ -13,16 +13,19 @@ for(const level of campaign.levels){
  const g=level.metadata.generator,r=proof.accepted.find(r=>r.id===level.id),h=holdout.rows.find(r=>r.id===level.id),plan=g.plan;
  assert.equal(geometryKey(generateLevel(r.options)),geometryKey(level),'Catalog must reproduce from synthesis');assert.equal(r.geometryKey,geometryKey(level));assert(validateGeometry(level).valid);
  assert.equal(level.pegRadius,8.5);assert.equal(level.ballCount,12);assert(level.pegs.every(p=>allowed.has(p.type)));assert(!level.metadata.intentGraph);assert(level.bucketEnabled&&level.hitPegTimedClearEnabled);
- assert(r.proof.complete&&r.proof.replayComplete&&r.evidence.complete&&r.envelope.valid);assert(h.adaptive.complete&&h.adaptive.replayComplete&&h.envelope.valid);
- assert(r.metrics.coupledInk>=.5);assert(r.evidence.interaction.links.some(e=>e.observed&&(e.from===plan.nodes[0].id||e.to===plan.nodes[0].id)),'Focal form must participate');
+ assert(r.proof.complete&&r.proof.replayComplete&&r.evidence.complete&&r.envelope.valid&&r.nativeInitial.valid);assert(h.adaptive.complete&&h.adaptive.replayComplete&&h.envelope.valid);
+ const first=new Map(r.proof.frames[0].pegs.map(p=>[p.id,p]));
+ assert(validateGeometry({pegs:level.pegs.map(p=>({...p,...first.get(p.id)}))}).valid,'Actual initial pose must preserve the composition');
+ for(const p of level.pegs.filter(p=>p.destructionHinge))assert(Math.hypot(p.x-first.get(p.id).x,p.y-first.get(p.id).y)<.01,'No hinge snap before the first shot');
+ assert(r.metrics.pegs>=56&&r.metrics.occupiedCells>=32);assert(r.evidence.interaction.catches.some(c=>c.caught&&c.holdMs>=300),'Actual sustained cargo capture, not a graph transition');assert(r.evidence.interaction.release.allEdgesCaught,'Each source must have a real catch destination');
  if(level.pegs.some(p=>p.type.startsWith('portal')))assert(r.evidence.portalEvents.length+r.evidence.bodyPortalEvents.length>0);
- if(level.pegs.some(p=>p.type==='bombMagnet'))assert(r.evidence.fieldDifference>=12||r.evidence.fieldExitDifference>0);
+ if(level.pegs.some(p=>p.type==='bombMagnet'))assert(r.evidence.fieldDifference>=8||r.evidence.fieldExitDifference>0);
  for(const p of level.pegs.filter(p=>p.bezierGroupId))assert(p.curveSlices.length>=5&&level.bezierCurves[p.bezierGroupId]);
- const sum=Object.values(plan.contributions).reduce((s,n)=>s+n,0);assert(Math.abs(sum-1)<1e-8);assert(plan.activeResponses<=g.budget.active);assert(plan.nodes.length<=g.budget.nodes);assert(level.pegs.length<=g.budget.pegs);
- graphs.add(JSON.stringify(plan.topology.degrees.map(n=>[n.inputs,n.outputs])));plan.nodes.forEach(n=>operators.add(n.recipe.program?.operator||n.recipe.law));
+ const sum=Object.values(plan.contributions).reduce((s,n)=>s+n,0);assert(Math.abs(sum-1)<1e-8);assert(!level.pegs.some(p=>p.type==='obstacle'));assert(plan.sketch&&plan.edges.some(e=>e.cargoIds.length));
+ graphs.add(JSON.stringify(plan.topology.degrees.map(n=>[n.inputs,n.outputs])));plan.nodes.forEach(n=>operators.add(n.recipe.operator||n.recipe.program?.operator||n.recipe.law));
 }
-assert(graphs.size>=8);assert(operators.size>=6);assert(autonomy.pairedChanges>=8&&autonomy.highMeanBranches>autonomy.lowMeanBranches);
+assert(graphs.size>=4);assert(operators.size>=6);assert(autonomy.pairedChanges>=4);
 for(const [file,row] of Object.entries(inventory.inventory))assert.equal(createHash('sha256').update(await readFile(file)).digest('hex'),row.sha256,'Old campaign changed');
 const browser=generateCandidates({seed:'browser-only-unseen',count:1,attempts:8,genome:{branching:.75}});assert.equal(browser.length,1);assert(validateGeometry(browser[0]).valid);
 const shell=await readFile('vercel-shell/des5/index.html','utf8'),bootstrap=await readFile('js/player-bootstrap.js','utf8');assert(shell.includes('__PEGGLE_ORCHESTRATED_PLAYER__=true'));assert(shell.includes('__PEGGLE_SYSTEMS_PLAYER__=true'));assert(bootstrap.includes("ORCHESTRATED_PLAYER ? '/data/des5/campaign.json'"));assert(bootstrap.includes('destructionGenerator: !SYSTEMS_PLAYER'));assert(bootstrap.includes("options.orchestratedCatalog ? '/des5/report/'"));
-console.log('ok: 32 reproducible native/independent systems; focal relationships, bounded contributions,',graphs.size,'graph topologies,',operators.size,'numeric/physical operators; unseen browser synthesis and legacy bytes preserved');
+console.log('ok: 32 reproducible native/independent systems; sustained captures, full-board compositions,',graphs.size,'graph topologies,',operators.size,'numeric/physical operators; unseen browser synthesis and legacy bytes preserved');

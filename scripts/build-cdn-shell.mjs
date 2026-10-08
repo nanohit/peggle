@@ -18,7 +18,7 @@ for(const [file,title,flags] of [
  ['des2/index.html','Alea · Free roam','window.__PEGGLE_GENERATED_PLAYER__=true;window.__PEGGLE_DESTRUCTION_PLAYER__=true;window.__PEGGLE_SPECTACLE_PLAYER__=true;'],
  ['des3/index.html','Alea · Связанные системы','window.__PEGGLE_GENERATED_PLAYER__=true;window.__PEGGLE_DESTRUCTION_PLAYER__=true;window.__PEGGLE_SYSTEMS_PLAYER__=true;'],
  ['des4/index.html','Alea · Живые формы','window.__PEGGLE_GENERATED_PLAYER__=true;window.__PEGGLE_DESTRUCTION_PLAYER__=true;window.__PEGGLE_SYSTEMS_PLAYER__=true;window.__PEGGLE_FIELDS_PLAYER__=true;'],
- ['des5/index.html','Alea · Оркестрация','window.__PEGGLE_GENERATED_PLAYER__=true;window.__PEGGLE_DESTRUCTION_PLAYER__=true;window.__PEGGLE_SYSTEMS_PLAYER__=true;window.__PEGGLE_ORCHESTRATED_PLAYER__=true;'],
+ ['des5/index.html','Alea · Сцены 0.2','window.__PEGGLE_GENERATED_PLAYER__=true;window.__PEGGLE_DESTRUCTION_PLAYER__=true;window.__PEGGLE_SYSTEMS_PLAYER__=true;window.__PEGGLE_ORCHESTRATED_PLAYER__=true;'],
  ['des1/index.html','Alea · Destruction compositions','window.__PEGGLE_GENERATED_PLAYER__=true;window.__PEGGLE_DESTRUCTION_PLAYER__=true;window.__PEGGLE_INTENT_PLAYER__=true;']
 ]) await save(file,template.replaceAll('__PEGGLE_CDN_BASE__',base).replace('__PEGGLE_TITLE__',title).replace('__PEGGLE_FLAGS__',flags));
 // The editor and reports live on the CDN too. document.write creates a parser

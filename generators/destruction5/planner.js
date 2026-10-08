@@ -1,148 +1,104 @@
 import {randomFrom} from '../destruction/grammar.js';
-import {SystemBuilder,compileNode,CATALOG} from './components.js';
-import {validateGeometry,sized} from '../destruction4/geometry.js';
-import {objectBounds} from '../destruction2/ribbon-geometry.js';
+import {SystemBuilder,source,reservoir,carrier,port} from './components.js';
 import {between,choose,clamp,TAU,cubic} from '../destruction4/shapes.js';
 
+const absFloor=(p,q)=>Math.abs(p.x-q.x)<(q.floor||44)*.65&&Math.abs(p.y-q.y)<9;
+
 export function designGenome(seed){
- const r=randomFrom(seed+':des5-intent');
- return {focus:between(r,.28,.86),kinetic:between(r,.18,.94),branching:between(r,.10,.88),openness:between(r,.47,.97),lateral:between(r,.13,.94),complexity:between(r,.30,.94),bend:between(r,-.72,.72),phase:r()*TAU,radialGrowth:r(),brickWidth:between(r,30,35),pegScale:between(r,1,1.27),direction:choose(r,[-1,1])};
-}
-function weighted(r,rows){const total=rows.reduce((s,[,w])=>s+w,0);let t=r()*total;for(const [value,w] of rows){t-=w;if(t<=0)return value;}return rows.at(-1)[0];}
-function dimensions(kind,w,r){
- if(kind==='contour')return {w,h:w*between(r,.75,1.10)};
- if(kind==='channel')return {w,h:between(r,115,176)};
- if(kind==='support')return {w:Math.min(215,w),h:between(r,122,158)};
- if(kind==='seesaw'||kind==='bridge'||kind==='shelf')return {w:Math.min(kind==='bridge'?200:188,w),h:70};
- if(kind==='cup'||kind==='sling')return {w,h:w*between(r,.48,.66)};
- return {w,h:between(r,55,88)};
-}
-const near=(p,v)=>{const dx=v.b.x-v.a.x,dy=v.b.y-v.a.y,t=clamp(((p.x-v.a.x)*dx+(p.y-v.a.y)*dy)/(dx*dx+dy*dy||1),0,1);return Math.hypot(p.x-v.a.x-t*dx,p.y-v.a.y-t*dy);};
-const area=b=>Math.max(0,b.maxX-b.minX)*Math.max(0,b.maxY-b.minY);
-function intersection(a,b){return Math.max(0,Math.min(a.maxX,b.maxX)-Math.max(a.minX,b.minX))*Math.max(0,Math.min(a.maxY,b.maxY)-Math.max(a.minY,b.minY));}
-
-// A frontier is an unmet physical opportunity. Branching changes the number
-// of discharge regions and the preference for old branches vs deeper growth;
-// it is not a label on a randomly selected list of components.
-export function growthFrontier(nodes,edges,g){
- return nodes.flatMap(node=>node.outputs.flatMap((out,index)=>{
-  const split=node.outputs.length===1&&out.halfWidth>=38&&g.branching>.57,
-   ports=split?[-1,1].map(side=>({...out,x:out.x+side*out.halfWidth*.5,halfWidth:out.halfWidth*.56,vx:out.vx+side*g.branching*.75,partition:side})): [{...out,partition:0}];
-  return ports.map(port=>{const key=node.id+':'+index+':'+port.partition,
-   used=edges.some(e=>e.outletKey===key),
-   preference=(1-g.branching)*(1+node.depth)**2+g.branching*(1+node.outputs.length)/(1+node.depth*.5);
-   return {node,port,index,key,used,weight:preference*(used?.035:1)};
-  });
- }));
+ const r=randomFrom(seed+':des5-play');
+ return {focus:between(r,.2,.9),kinetic:between(r,.15,.95),branching:r(),openness:between(r,.5,.95),lateral:r(),complexity:between(r,.45,.95),bend:between(r,-.7,.7),phase:r()*TAU,radialGrowth:r(),brickWidth:between(r,30,35),pegScale:1,direction:choose(r,[-1,1])};
 }
 
-export function growSystem({seed='meta-000',genome:override}={}){
- seed=String(seed).slice(0,60);const genome={...designGenome(seed),...override},g=genome,r=randomFrom(seed+':des5-growth'),b=new SystemBuilder(seed,g);
- const budget={pegs:Math.round(48+g.complexity*44),nodes:3+Math.round(g.complexity*3),active:1+Math.round(g.kinetic*2),targets:Math.round(19+g.complexity*8),corridorWidth:26+g.openness*16},reservations=[];
- let serial=0,active=0;
- const eligible=(kind)=>active+CATALOG[kind].cost<=budget.active;
- const receiver=()=>weighted(r,[['cup',.37],['sling',eligible('sling')?g.kinetic*.7:0],['seesaw',eligible('seesaw')?g.kinetic*.65:0],['support',eligible('support')?g.kinetic*.33:0],['contour',g.focus*.42],['fan',g.openness*.48],['channel',g.lateral*.60]].map(([kind,weight])=>[kind,weight/(1+b.nodes.filter(n=>n.kind===kind).length*2.2)]));
- function add(spec,{commit=true}={}){
-  const checkpoint=b.checkpoint(),node=compileNode(b,{...spec,response:g.kinetic>.49&&active<budget.active}),geo=validateGeometry({pegs:b.pegs}),board=node.envelope.minX>=12&&node.envelope.maxX<=388&&node.envelope.minY>=105&&node.envelope.maxY<=538;
-  if(spec.role==='supply'&&node.loadIds.length<2){b.rollback(checkpoint);return {reason:'depleted-source'};}
-  if(active+node.moving>budget.active){b.rollback(checkpoint);return {reason:'response-budget'};}
-  if(!geo.valid||!board||b.pegs.length>budget.pegs){b.rollback(checkpoint);return {reason:!geo.valid?'geometry':!board?'motion-envelope':'material-budget',errors:geo.errors.slice(0,3)};}
-  const crossing=b.nodes.filter(n=>!(spec.role==='interior'&&spec.parentId===n.id)&&intersection(n.envelope,node.envelope)>Math.min(area(n.envelope),area(node.envelope))*.45);
-  if(crossing.length){b.rollback(checkpoint);return {reason:'response-conflict'};}
-  // The proposal's score evaluates the same global field. A corridor is empty
-  // for a reason; filling it is a cost, even when pegs do not initially overlap.
-  const intrusion=b.pegs.slice(checkpoint.pegs).filter(p=>reservations.some(v=>!v.endpoints.includes(node.id)&&near(p,v)<v.width/2+10)).length;
-  if(intrusion>3){b.rollback(checkpoint);return {reason:'flight-corridor'};}
-  if(!commit){b.rollback(checkpoint);return {node};}
-  b.nodes.push(node);active+=node.moving;return {node};
- }
- const rootKind=weighted(r,[['contour',g.focus*1.6],['channel',(1-g.focus)*.95],['support',g.kinetic*.62],['seesaw',g.kinetic*.34],['bridge',g.kinetic*.20],['cup',.16]]);
- for(let trial=0;trial<60&&!b.nodes.length;trial++){
-  const kind=trial>34?'channel':rootKind,w=between(r,163,199)+g.focus*41,dim=dimensions(kind,w,r),margin=dim.w/2+22;
-  add({id:'n0',kind,x:between(r,margin,400-margin),y:between(r,195,286),...dim,direction:g.direction,role:'focus',depth:0,variant:trial});
- }
- if(!b.nodes.length)throw Error('No full-size initial subsystem fits');
- serial=1;
- for(let step=0;step<budget.nodes*3&&b.nodes.length<budget.nodes;step++){
-  const frontier=weighted(r,growthFrontier(b.nodes,b.edges,g).map(f=>[f,f.weight])),parent=frontier.node,pocket=parent.pockets.find(p=>p.w>=69&&p.accepts.includes('bearing')),
-   interior=pocket&&eligible('seesaw')&&!b.nodes.some(n=>n.parentId===parent.id)&&r()<g.kinetic*.52,
-   upstream=!interior&&parent.inputs.some(p=>p.accepts.includes('cargo'))&&!b.edges.some(e=>e.to===parent.id)&&r()<.19,
-   side=!interior&&!upstream&&r()<g.lateral*.30,remote=!interior&&!upstream&&!side&&!b.edges.some(e=>e.kind==='portal')&&r()<g.lateral*.24;
-  const mode=interior?'interior':upstream?'supply':side?'rebound':remote?'remote':'receive',kind=interior?'seesaw':mode==='supply'?weighted(r,[['shelf',.4],['cup',.3],['seesaw',eligible('seesaw')?g.kinetic*.45:0]]):mode==='rebound'?weighted(r,[['fan',.4],['channel',.6]]):receiver();
-  const port=upstream?choose(r,parent.inputs):frontier.port,candidates=[],failures={};
-  for(let trial=0;trial<36;trial++){
-   const wantedWidth=interior?between(r,67,Math.min(91,pocket.w)):mode==='rebound'?between(r,79,112):clamp(port.halfWidth*between(r,1.65,2.45),96,mode==='supply'?151:162),dim=dimensions(kind,wantedWidth,r),dy=upstream?-between(r,55,106):mode==='rebound'?between(r,-20,55):between(r,65,113),y=interior?pocket.y+between(r,-8,8):remote?between(r,209,420):port.y+dy;
-   const predicted=port.x+port.vx*(Math.sqrt(Math.abs(dy)/.06))*(upstream?-.35:1),x=interior?pocket.x+between(r,-12,12):remote?(parent.x<200?between(r,270,328):between(r,72,130)):mode==='rebound'?parent.x+choose(r,[-1,1])*(parent.w/2+dim.w/2+between(r,14,33)):predicted+between(r,-38,38)*g.lateral;
-   const spec={id:'n'+serial,kind,x,y,...dim,direction:upstream?Math.sign(parent.x-x)||g.direction:Math.sign(x-parent.x)||g.direction,role:mode,...(interior?{parentId:parent.id}:{}),depth:parent.depth+(upstream?0:1),variant:step*36+trial},result=add(spec,{commit:false});
-   if(result.reason){failures[result.reason]=(failures[result.reason]||0)+1;continue;}
-   const node=result.node,input=upstream?parent.inputs[0]:node.inputs[0],output=interior?{x:parent.x,y:parent.y+parent.h*.1,halfWidth:parent.w*.15,vx:0,vy:1}:upstream?node.outputs[0]:port,alignment=Math.abs(input.x-output.x)/Math.max(30,input.halfWidth),spread=Math.hypot(node.x-200,node.y-300)/230;
-   const score=-alignment*.55+spread*.25+g.lateral*Math.abs(node.x-parent.x)/200-intersection(node.envelope,parent.envelope)/3000;
-   candidates.push({spec,node,input,output,score});
+// Start with a playable composition: a broad gesture, a target rhythm and
+// something worthwhile to set in motion. Fit/physics are subsequent checks.
+export function growSystem({seed='meta-000',genome:override,attempt=0}={}){
+ seed=String(seed).slice(0,60);const g={...designGenome(seed),...override},r=randomFrom(seed+':des5-sketch:'+attempt),b=new SystemBuilder(seed,g),mode=g.kinetic>.57?'balance':g.lateral>.48?'crossflow':'confluence';
+ const sketch={gesture:mode,mirror:g.direction,rhythm:choose(r,['stagger','diamond','shear','fan']),wave:between(r,8,25),pitch:between(r,43,54),phase:r()*TAU};
+ const xx=x=>g.direction<0?400-x:x;
+ const commit=(kind,curve,extra={})=>{
+  const cp=b.checkpoint(),a=b.part(kind);a.source=kind==='landscape'?'des4':'des2';a.nodeId='g'+b.nodes.length;const start=b.pegs.length,ps=b.safeStroke(a,curve,extra);
+  if(!ps.length){b.rollback(cp);return null;}
+  return b.node(a,{kind:'bank',x:ps.reduce((s,p)=>s+p.x,0)/ps.length,y:ps.reduce((s,p)=>s+p.y,0)/ps.length,recipe:{law:'sweep-and-rebound',operator:kind}},start);
+ };
+ const edge=(from,to,input)=>{if(!from||!to||!from.loadIds.length)return;b.edges.push({id:'e'+b.edges.length,from:from.id,to:to.id,kind:'catch',out:from.outputs[0],in:input||to.inputs[0],cargoIds:from.loadIds,receiverIds:to.pegIds,releaseIds:from.pegIds.filter(id=>b.pegs.find(p=>p.id===id)?.constructionRole==='release-floor'),required:true});};
+ let focal,landings=[];
+ if(mode==='balance'){
+  const count=g.branching>.7?3:g.branching<.2?1:2,y=between(r,294,335),span=count===1?0:count===2?between(r,156,196):between(r,220,242),centers=Array.from({length:count},(_,i)=>count===1?200+g.bend*62:200-span/2+i*span/(count-1));
+  const bays=centers.map((x,i)=>({x,y:y+(count===2?(i-.5)*g.bend*93:between(r,-22,22)),w:count===1?between(r,177,263):count===2?between(r,81,132):between(r,77,88),depth:between(r,14,23)+(1-g.openness)*66,floor:count===1?between(r,76,126):count===2?between(r,36,74):between(r,30,52),bias:g.bend*(i%2?-1:1)}));
+  focal=carrier(b,{id:'mechanism',bays,pivot:{x:200+between(r,-17,17),y:bays.reduce((sum,q)=>sum+q.y-q.depth,0)/bays.length-between(r,0,14)},direction:count===1?g.direction:0});if(!focal)throw Error('carrier');
+  const selected=count===3?choose(r,[[0,2],[1]]):count===2?choose(r,[[0],[1],[0,1]]):[0];
+  for(const [j,i] of selected.entries()){
+   const q=bays[i],s=source(b,{id:'load'+j,x:q.x+between(r,-8,8),y:between(r,153,179),w:count===3?63:between(r,70,91),count:count===3?3:choose(r,[3,4])});edge(s,focal,focal.inputs[i]);
   }
-  candidates.sort((a,b)=>b.score-a.score);const chosen=candidates[0];
-  if(!chosen){b.decisions.push({parent:parent.id,request:mode,kind,action:'omit',failures});continue;}
-  const checkpoint=b.checkpoint(),{node}=add(chosen.spec);if(!node)throw Error('Deterministic proposal did not replay');
-  const edge={id:'e'+b.edges.length,from:upstream?node.id:parent.id,to:upstream?parent.id:node.id,kind:interior?'bearing':remote?'portal':mode==='rebound'?'ricochet':'discharge',out:{...chosen.output},in:{...chosen.input},outletKey:upstream?node.id+':0:0':interior?undefined:frontier.key,required:false};
-  if(remote){
-   const a=b.part('portal-coupler');a.source='des2';a.nodeId=parent.id;const entry={x:edge.out.x,y:edge.out.y+25},exit={x:edge.in.x+between(r,-40,40),y:edge.in.y-between(r,49,79)},flight=between(r,20,29),velocity={vx:(edge.in.x-exit.x)/flight,vy:(edge.in.y-exit.y-.06*flight*flight)/flight},entryAngle=Math.atan2(edge.out.vy,edge.out.vx)-Math.PI/2,exitAngle=Math.atan2(velocity.vy,velocity.vx)-Math.PI/2;
-   if(!b.clear({...entry,type:'portalBlue',angle:entryAngle,portalScale:2},5)||!b.clear({...exit,type:'portalOrange',angle:exitAngle,portalScale:2},5)){b.rollback(checkpoint);b.nodes.pop();active-=node.moving;b.decisions.push({parent:parent.id,request:mode,kind,action:'omit',failures:{'portal-aperture':1}});continue;}
-   const pa=b.peg(a,entry.x,entry.y,{type:'portalBlue',angle:entryAngle,portalScale:2,portalOneWay:true,portalOneWayFlip:false,constructionSubsystem:parent.id}),pb=b.peg(a,exit.x,exit.y,{type:'portalOrange',angle:exitAngle,portalScale:2,portalOneWay:true,portalOneWayFlip:true,constructionSubsystem:node.id});pa.portalTargetId=pb.id;pb.portalTargetId=pa.id;edge.portals=[pa.id,pb.id];edge.entry=entry;edge.exit=exit;edge.estimatedOutletVelocity=velocity;
-  }
-  serial++;
-  b.edges.push(edge);if(remote){reservations.push({a:edge.out,b:edge.entry,width:budget.corridorWidth,endpoints:[edge.from,edge.to]},{a:edge.exit,b:edge.in,width:budget.corridorWidth,endpoints:[edge.from,edge.to]});}else reservations.push({a:edge.out,b:edge.in,width:budget.corridorWidth,endpoints:[edge.from,edge.to]});b.decisions.push({parent:parent.id,request:mode,kind,action:'grow',node:node.id,reason:mode==='supply'?'load the existing aperture':mode==='rebound'?'redirect a related side shot':remote?'connect a remote compatible aperture':'receive the discharge region'});
- }
- // Rejoining is allowed when an existing aperture catches an unserved fan.
- // It adds a contract, never decorative pegs or a compulsory action sequence.
- if(g.branching>.60)for(const f of growthFrontier(b.nodes,b.edges,g).filter(f=>!f.used)){
-  const into=b.nodes.filter(n=>n.id!==f.node.id&&!b.edges.some(e=>e.from===f.node.id&&e.to===n.id)).flatMap(n=>n.inputs.map(p=>({n,p,dy:p.y-f.port.y}))).filter(o=>o.dy>35&&o.dy<170&&Math.abs(o.p.x-f.port.x-f.port.vx*Math.sqrt(o.dy/.06))<o.p.halfWidth*.8);
-  into.sort((a,b)=>a.dy-b.dy);const match=into[0];if(!match)continue;
-  const corridor={a:f.port,b:match.p,width:budget.corridorWidth,endpoints:[f.node.id,match.n.id]};
-  if(b.pegs.some(p=>!corridor.endpoints.includes(p.constructionSubsystem)&&near(p,corridor)<corridor.width/2+8.5))continue;
-  b.edges.push({id:'e'+b.edges.length,from:f.node.id,to:match.n.id,kind:'discharge',out:{...f.port},in:{...match.p},outletKey:f.key,rejoin:true,required:false});reservations.push(corridor);
- }
- // Effects are edge implementations. A field requires moving load and acts
- // along a transfer; a bumper belongs to a rebound bank. Neither fills a hole.
- for(const edge of b.edges){
-  const source=b.nodes.find(n=>n.id===edge.from);
-  if(edge.kind==='discharge'&&source.loadIds.length>=2&&!b.pegs.some(p=>p.type==='bombMagnet')&&r()<g.kinetic*.35){
-   const a=b.part('field-coupler');a.source='des2';a.nodeId=edge.from;
-   for(const t of [.32,.48,.64]){const x=edge.out.x+(edge.in.x-edge.out.x)*t+g.direction*20,y=edge.out.y+(edge.in.y-edge.out.y)*t;if(!b.clear({x,y},9))continue;
-    const p=b.field(a,x,y,{radius:between(r,89,118),strength:between(r,.25,.37)});p.constructionSubsystem=edge.from;edge.field=p.id;break;
+  const split=count>1&&g.lateral>.65&&g.kinetic<.83,catches=split?[{x:105,w:154},{x:295,w:154}]:[{x:200+g.bend*24,w:between(r,258,318)}];
+  for(const [i,q] of catches.entries()){const n=reservoir(b,{id:'landing'+i,...q,y:between(r,470,502),depth:between(r,48,75),bias:g.bend,floor:split?58:between(r,83,116)});if(n)landings.push(n);}
+  for(const side of [-1,1]){const q=side<0?bays[0]:bays.at(-1),x0=side<0?30:370,x1=count===1?q.x+side*q.w*.27:q.x-side*12,y0=between(r,195,213),y1=Math.min(q.y-q.depth-26,between(r,215,238));commit('launch-wing',cubic([[x0,y0],[x0-side*19,y0-21],[x1+side*51,y1],[x1,y1]]));}
+ }else{
+  const ranks=mode==='crossflow'?choose(r,[2,3]):choose(r,[1,2]);
+  for(let rank=0;rank<ranks;rank++){
+   const y=rank===0?between(r,178,213):rank===1?between(r,291,330):between(r,410,430);
+   if(mode==='crossflow'){
+    const side=(rank%2?1:-1)*g.direction,x0=side<0?29:371,x1=side<0?between(r,299,352):between(r,48,101),drop=between(r,28,rank===2?66:111),sway=between(r,37,116);
+    commit('landscape',cubic([[x0,y],[x0-side*sway,y-21],[x1+side*sway,y+drop+22],[x1,y+drop]]));
+   }else{
+    const open=between(r,58,113),bottom=y+between(r,83,116),top=between(r,22,39);
+    for(const side of [-1,1])commit('converging-wing',cubic([[200+side*(200-top),y],[200+side*171,y+48],[200+side*(open/2+21),bottom-16],[200+side*open/2,bottom]]));
    }
   }
-  if(edge.kind==='ricochet'&&!b.pegs.some(p=>p.type==='bumper')&&r()<g.lateral*.45){
-   const x=(edge.out.x+edge.in.x)/2,y=(edge.out.y+edge.in.y)/2,scale=between(r,1.7,2.2);if(b.clear({x,y,type:'bumper',bumperScale:scale},9)){const a=b.part('rebound-coupler');a.source='des2';a.nodeId=edge.from;const p=b.bumper(a,x,y,scale);p.constructionSubsystem=edge.from;edge.bumper=p.id;}
+  const positions=choose(r,[[xx(100),xx(290)],[xx(126)],[xx(275)]]);
+  for(const [i,x] of positions.entries()){
+   const cy=between(r,421,477),w=positions.length===1?between(r,156,196):between(r,117,144),receiver=reservoir(b,{id:'landing'+i,x,y:cy,w,depth:between(r,40,59),bias:g.bend,floor:positions.length===1?66:45,kinetic:g.kinetic>.37&&i===0,direction:x<200?1:-1});
+   if(!receiver)continue;landings.push(receiver);
+   for(const y of [cy-90,cy-120,cy-150]){const s=source(b,{id:'load'+i,x,y,w:70,count:3});if(s){edge(s,receiver);break;}}
+  }
+  focal=b.nodes[0];
+ }
+ if(!landings.length||!b.edges.length)throw Error('no playable transfer');
+ for(const n of landings){
+  const center=b.pegs.filter(p=>p.constructionSubsystem===n.id&&p.shape==='brick').sort((p,q)=>Math.hypot(p.x-n.x,p.y-n.y)-Math.hypot(q.x-n.x,q.y-n.y))[0];if(center)center.constructionRole='catch-floor';
+  if(focal?.kind==='carrier')b.edges.push({id:'e'+b.edges.length,from:focal.id,to:n.id,kind:'recatch',out:port(focal.x,focal.y+40,focal.w*.7),in:n.inputs[0],cargoIds:b.edges.filter(e=>e.to===focal.id).flatMap(e=>e.cargoIds),receiverIds:n.pegIds,releaseIds:b.pegs.filter(p=>p.constructionSubsystem===focal.id&&p.shape==='brick'&&focal.recipe.bays.some(q=>absFloor(p,q))).map(p=>p.id),upstream:b.edges.filter(e=>e.to===focal.id).flatMap(e=>e.releaseIds),required:false});
+  const inside=b.part('landing-targets');inside.source='des3';inside.nodeId=n.id;const width=Math.min(n.w*.47,116),count=Math.max(3,Math.floor(width/25));
+  for(let i=0;i<count;i++)b.addIfClear(inside,n.x+(i-(count-1)/2)*26,n.y-26,{constructionSubsystem:n.id,constructionRole:'landing-target'},4);
+ }
+ // One coherent target rhythm covers the board, not an automatic offset echo
+ // beside every curve. Reserve only load entries and falling columns.
+ const field=b.part('target-landscape',{...sketch});field.source='des2';field.nodeId='targets';const start=b.pegs.length,pitch=sketch.pitch;
+ const corridors=b.edges.filter(e=>e.required).map(e=>({x:e.out.x,y0:e.out.y+16,y1:e.in.y-10,w:Math.min(34,e.out.halfWidth)}));
+ const effect=b.part('shot-opportunity');effect.source='des2';effect.nodeId='targets';
+ if(g.radialGrowth>.56){for(const p of [{x:xx(316),y:365},{x:xx(72),y:379},{x:200,y:396}])if(b.clear({...p,type:'bumper',bumperScale:1.9},3)){b.bumper(effect,p.x,p.y,1.9);break;}}
+ else if(g.lateral>.72){for(const e of b.edges.filter(e=>e.required)){const p={x:clamp(e.out.x+g.direction*56,32,368),y:e.out.y+56};if(b.clear(p,5)){b.field(effect,p.x,p.y,{radius:87,strength:.23});break;}}}
+ if(g.kinetic<.31&&b.edges.length){
+  const e=b.edges.find(e=>e.required),entry={x:e.out.x,y:e.out.y+16},exit={x:e.in.x+g.direction*54,y:e.in.y-39},scale=1.5;
+  if(b.clear({...entry,type:'portalBlue',portalScale:scale},1)&&b.clear({...exit,type:'portalOrange',portalScale:scale,angle:.55*g.direction},1)){
+   const pa=b.peg(effect,entry.x,entry.y,{type:'portalBlue',portalScale:scale,portalOneWay:true}),pb=b.peg(effect,exit.x,exit.y,{type:'portalOrange',portalScale:scale,angle:.55*g.direction,portalOneWay:true,portalOneWayFlip:true});pa.portalTargetId=pb.id;pb.portalTargetId=pa.id;e.portals=[pa.id,pb.id];
   }
  }
- // A bank belongs to a connection. It follows the shared graph curvature and
- // is only added when it clears the actual opening and the material budget.
- for(const edge of b.edges.filter(e=>e.kind==='discharge')){
-  const dx=edge.in.x-edge.out.x,dy=edge.in.y-edge.out.y;if(dy<35||Math.abs(dx)<25)continue;
-  const cp=b.checkpoint(),a=b.part('transfer-bank');a.nodeId=edge.from;a.source='des2';const side=-Math.sign(dx),offset=27;
-  b.stroke(a,cubic([[edge.out.x+side*offset,edge.out.y+12],[edge.out.x+side*(offset+g.bend*10),edge.out.y+dy*.36],[edge.in.x+side*(edge.in.halfWidth+14),edge.in.y-dy*.22],[edge.in.x+side*(edge.in.halfWidth+12),edge.in.y-18]]),{width:g.brickWidth,spacing:g.brickWidth});
-  if(!validateGeometry({pegs:b.pegs}).valid||b.pegs.length>budget.pegs)b.rollback(cp);else {edge.bank=a.id;for(const p of b.pegs.slice(cp.pegs))p.constructionSubsystem=edge.from;}
+ for(let row=0,y=124;y<=519;row++,y+=pitch)for(let col=0,x=27;x<=376;col++,x+=pitch){
+  let px=x,py=y;const u=(x-200)/180,v=(y-320)/210;
+  if(sketch.rhythm==='stagger')px+=(row%2?pitch*.45:0)+Math.sin(v*3+sketch.phase)*sketch.wave*.35;
+  if(sketch.rhythm==='diamond'){px+=u*Math.cos(v*2)*sketch.wave;py+=Math.abs(u)*sketch.wave*(row%2?-1:1);}
+  if(sketch.rhythm==='shear'){px+=v*g.bend*33;py+=u*sketch.wave;}
+  if(sketch.rhythm==='fan'){px+=Math.sin(v*2)*u*sketch.wave;py+=Math.cos(u*2+sketch.phase)*sketch.wave;}
+  if(corridors.some(c=>py>c.y0&&py<c.y1&&Math.abs(px-c.x)<c.w))continue;
+  b.addIfClear(field,px,py,{constructionSubsystem:'targets',constructionRole:'ricochet-target'},11);
  }
- return {builder:b,genome,budget,reservations};
+ if(b.pegs.length>start)b.node(field,{kind:'field',x:200,y:320,w:350,h:395,recipe:{law:'board-target-rhythm',operator:sketch.rhythm}},start);
+
+ return {builder:b,genome:g,sketch,budget:{targets:Math.round(25+g.complexity*9)},reservations:corridors,attempt};
 }
 
-export function finalize({builder:b,genome:g,budget,reservations}){
- const r=randomFrom(b.seed+':des5-targets'),eligible=b.pegs.filter(p=>['blue','orange'].includes(p.type));eligible.forEach(p=>p.type='blue');
- const groupStarts=new Map(),groupCounts=new Map();for(const p of eligible){const key=p.bezierGroupId||p.constructionAssembly;groupCounts.set(key,(groupCounts.get(key)||0)+1);}for(const [key,n] of groupCounts)groupStarts.set(key,Math.floor(r()*n));
- const indices=new Map(),wanted=Math.min(budget.targets,Math.round(eligible.length*.46)),counts=new Map(),pool=eligible.map(p=>{const key=p.bezierGroupId||p.constructionAssembly,i=indices.get(key)||0;indices.set(key,i+1);return {p,t:((i-groupStarts.get(key)+groupCounts.get(key))%groupCounts.get(key))/groupCounts.get(key)+(p.constructionRole==='cargo'?.12:0)};}),nodeWeights=new Map(b.nodes.map(n=>[n.id,n.ink**(.9+g.focus*.3)]));
- while(pool.length&&[...counts.values()].reduce((s,n)=>s+n,0)<wanted){
-  pool.sort((a,b)=>{const score=o=>((counts.get(o.p.constructionSubsystem)||0)+o.t*.45)/Math.max(1,nodeWeights.get(o.p.constructionSubsystem)||900);return score(a)-score(b);});
-  const {p}=pool.shift();p.type='orange';counts.set(p.constructionSubsystem,(counts.get(p.constructionSubsystem)||0)+1);
- }
- const chosen=new Set(eligible.filter(p=>p.type==='orange').map(p=>p.id)),base=b.finish({});
- // Builder supplies native settings and path bookkeeping, while target mass
- // belongs to the global plan rather than each component constructor.
- // b.finish assigns its own additional targets; restore the exact global set.
- for(const p of eligible)p.type=chosen.has(p.id)?'orange':'blue';
- base.id=b.id;base.name='Оркестрация · '+b.seed;
- const nodeInk=b.nodes.reduce((s,n)=>s+n.ink,0),partSources=new Map(b.parts.map(p=>[p.id,p.source])),contributions={};let totalInk=0;
- for(const p of b.pegs){const ink=p.shape==='brick'?p.width*p.height:Math.PI*(8.5*(p.radiusScale||1))**2;totalInk+=ink;const source=partSources.get(p.constructionAssembly)||'des2';contributions[source]=(contributions[source]||0)+ink;}
- for(const source of Object.keys(contributions))contributions[source]/=totalInk;
+export function finalize({builder:b,genome:g,sketch,budget,reservations,attempt}){
+ const r=randomFrom(b.seed+':des5-target-colour'),eligible=b.pegs.filter(p=>p.type==='blue'),chosen=new Set(),wanted=Math.min(budget.targets,Math.floor(eligible.length*.47));
+ for(const p of eligible)if(['release-floor','landing-target'].includes(p.constructionRole))chosen.add(p.id);
+ const parts=new Map();for(const p of eligible){const key=p.bezierGroupId||p.constructionAssembly;if(!parts.has(key))parts.set(key,[]);parts.get(key).push(p);}
+ const pool=[];for(const ps of parts.values()){const offset=Math.floor(r()*ps.length);for(let k=0;k<ps.length;k++){const p=ps[(k+offset)%ps.length];pool.push({p,t:p.constructionRole==='ricochet-target'?r():k/ps.length+r()*.15});}}
+ pool.sort((a,c)=>a.t-c.t);for(const {p} of pool)if(chosen.size<wanted)chosen.add(p.id);
+ const base=b.finish({});for(const p of eligible)p.type=chosen.has(p.id)?'orange':'blue';base.id=b.id;base.name='Сцена · '+b.seed;
+ for(const n of b.nodes){n.pegIds=b.pegs.filter(p=>p.constructionSubsystem===n.id).map(p=>p.id);n.ink=b.pegs.filter(p=>n.pegIds.includes(p.id)).reduce((s,p)=>s+(p.shape==='brick'?p.width*p.height:Math.PI*8.5**2),0);}
+ for(const e of b.edges)e.receiverIds=b.nodes.find(n=>n.id===e.to).pegIds.filter(id=>b.pegs.find(p=>p.id===id)?.constructionRole!=='counterweight');
+ const contributions={},sources=new Map(b.parts.map(p=>[p.id,p.source])),total=b.pegs.reduce((s,p)=>s+(p.shape==='brick'?p.width*p.height:Math.PI*8.5**2),0);
+ for(const p of b.pegs){const source=sources.get(p.constructionAssembly)||'des2',ink=p.shape==='brick'?p.width*p.height:Math.PI*8.5**2;contributions[source]=(contributions[source]||0)+ink/total;}
  const degrees=b.nodes.map(n=>({id:n.id,inputs:b.edges.filter(e=>e.to===n.id).length,outputs:b.edges.filter(e=>e.from===n.id).length}));
- base.metadata={generator:{name:'destruction_orchestrated',version:'0.1.0',seed:b.seed,genome:g,budget,parts:b.parts,plan:{nodes:b.nodes,edges:b.edges,reservations,decisions:b.decisions,contributions,focusShare:b.nodes[0].ink/nodeInk,activeResponses:b.nodes.reduce((s,n)=>s+n.moving,0),topology:{degrees,branches:degrees.filter(n=>n.outputs>1).length,merges:degrees.filter(n=>n.inputs>1).length,depth:Math.max(...b.nodes.map(n=>n.depth))}}}};
+ base.metadata={generator:{name:'destruction_play_composition',version:'0.2.0',seed:b.seed,genome:g,budget,parts:b.parts,plan:{sketch,attempt,nodes:b.nodes,edges:b.edges,reservations,decisions:b.decisions,contributions,focusShare:Math.max(...b.nodes.map(n=>n.ink))/total,activeResponses:b.nodes.reduce((s,n)=>s+n.moving,0),topology:{degrees,branches:degrees.filter(n=>n.outputs>1).length,merges:degrees.filter(n=>n.inputs>1).length,depth:b.edges.length}}}};
  return base;
 }

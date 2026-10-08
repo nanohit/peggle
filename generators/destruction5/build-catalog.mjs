@@ -19,13 +19,10 @@ else if(process.argv[1]?.endsWith('/build-catalog.mjs')){
  const compact=row=>({...row,proof:row.proof?{...row.proof,frames:undefined}:undefined}),save=()=>writeFile('data/des5/candidates.json',JSON.stringify({fingerprint,sources:SOURCES,accepted:accepted.map(compact),rejected:rejected.map(compact)}));
  await new Promise((resolve,reject)=>{function next(){while(active<3&&queue.length){const options=queue.shift();active++;const w=new Worker(new URL(import.meta.url),{workerData:options});w.on('error',reject);w.on('message',row=>{(row.reason?rejected:accepted).push(row);active--;console.log(row.id,row.reason||'accept',row.proof?.shots,'nodes',row.metrics?.nodes);writes=writes.then(save);if(queue.length)next();else if(!active)writes.then(resolve,reject);});}if(!active)writes.then(resolve,reject);}next();});
  if(accepted.length<wanted)throw Error('Need more proven candidates '+accepted.length+'/'+wanted);
- // A side interaction cannot justify an isolated dominant focal object.
- // This is a portfolio condition on observed relations, not an extra mechanic.
- const eligible=accepted.filter(row=>row.metrics.coupledInk>=.5&&row.evidence.interaction.links.some(e=>e.observed&&(e.from===row.level.metadata.generator.plan.nodes[0].id||e.to===row.level.metadata.generator.plan.nodes[0].id)));
- if(eligible.length<wanted)throw Error('Need more connected focal systems '+eligible.length+'/'+wanted);
+ const eligible=accepted;
  const selected=[],remaining=eligible.slice();
  while(selected.length<wanted){let best=0,bestScore=-Infinity;for(const [i,row] of remaining.entries()){
-  const nearest=Math.max(0,...selected.map(q=>similarity(row,q))),quality=row.metrics.coupledInk*.035+Math.min(row.metrics.pegs,55)/55*.02,
+  const nearest=Math.max(0,...selected.map(q=>similarity(row,q))),quality=row.metrics.coupledInk*.035+Math.min(row.metrics.pegs,80)/80*.02,
    score=1-nearest+quality;if(score>bestScore){best=i;bestScore=score;}
  }selected.push(remaining.splice(best,1)[0]);}
  const ordered=[];while(selected.length){let best=0,bestScore=-Infinity;for(const [i,row] of selected.entries()){
@@ -36,10 +33,10 @@ else if(process.argv[1]?.endsWith('/build-catalog.mjs')){
  for(const [i,row] of ordered.entries()){
   const level=generateLevel(row.options);if(geometryKey(level)!==row.geometryKey)throw Error('Generator changed during candidate evaluation');
   const evidence=observe(level,row.proof,{frames:true});if(!evidence.complete)throw Error('Native replay failed '+level.id);
-  level.name=(i+1)+' · Оркестрация';level.metadata.generator.validation={fingerprint,route:row.proof.angles,replay:true};levels.push(level);proofs.push({...row,level:undefined,proof:{...row.proof,frames:evidence.frames},evidence:{...evidence,frames:undefined}});console.log('replay',i+1,level.id);
+  level.name=(i+1)+' · Сцена';level.metadata.generator.validation={fingerprint,route:row.proof.angles,replay:true};levels.push(level);proofs.push({...row,level:undefined,proof:{...row.proof,frames:evidence.frames},evidence:{...evidence,frames:undefined}});console.log('replay',i+1,level.id);
  }
  if(await computeFingerprint()!==fingerprint)throw Error('Sources changed while building catalog');
- await writeFile('data/des5/campaign.json',JSON.stringify({name:'Alea · Оркестрация 0.1',levels},null,2));
- await writeFile('data/des5/proof.json',JSON.stringify({fingerprint,sources:SOURCES,selectionEligible:eligible.length,accepted:proofs,rejected:rejected.map(r=>({...compact(r),level:undefined})),selection:'Observed focal relationship and >=50% coupled node ink, then farthest-first on occupied area, orientation, continuous intent, actual source ink, topology and observed native behavior. Cadence interleaves contrast and route length; no per-level mechanic quotas.'}));
+ await writeFile('data/des5/campaign.json',JSON.stringify({name:'Alea · Сцены 0.2',levels},null,2));
+ await writeFile('data/des5/proof.json',JSON.stringify({fingerprint,sources:SOURCES,selectionEligible:eligible.length,accepted:proofs,rejected:rejected.map(r=>({...compact(r),level:undefined})),selection:'Farthest-first composition portfolio after sustained native catch and winning-route gates; full-board target rhythm, curve orientation, structural program and route cadence. Geometry and clearing are feasibility evidence, not a fun score.'}));
  console.log('selected',levels.length,'from',accepted.length,'accepted;',rejected.length,'rejected');
 }
