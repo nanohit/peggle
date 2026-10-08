@@ -5,6 +5,7 @@ const config=JSON.parse(await readFile('cdn-ref.json','utf8'));
 const ref=String(process.env.PEGGLE_CDN_REF || config.ref);
 if(!/^[a-f0-9]{7,40}$/i.test(ref)||!/^nanohit\/peggle$/.test(config.repository)) throw Error('Use an immutable nanohit/peggle commit');
 const base=`https://cdn.jsdelivr.net/gh/${config.repository}@${ref}/`;
+const archiveBase=`https://raw.githubusercontent.com/${config.repository}/${config.sourceRef||ref}/`;
 await rm(out,{recursive:true,force:true});
 async function save(file,html){
  const size=Buffer.byteLength(html);if(size>2500)throw Error(`${file}: ${size} bytes exceeds tiny launcher limit`);
@@ -27,7 +28,8 @@ async function documentLauncher(file,source,{editor=false,local=false}={}){
  const sourceBase=new URL('.',new URL(source,base)).href;
  const transform=editor ? `.replace('src="js/main.js"','src="dist/${local?'des-editor':'editor'}.js"').replace(/<link[^>]*fonts\\.(?:googleapis|gstatic)[^>]*>/g,'')` : '';
  const flags=editor ? `window.__PEGGLE_STATIC_BASE__=${JSON.stringify(base)};window.__PEGGLE_CDN_SNAPSHOT_FIRST__=true;window.__PEGGLE_LOCAL_EDITOR__=${local};` : '';
- await save(file,`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Alea</title><body style="background:#020712;color:#a5e9ff;font:16px system-ui">Загрузка…<script>${flags}fetch(${JSON.stringify(new URL(source,base).href)}).then(r=>{if(!r.ok)throw Error(r.status);return r.text()}).then(t=>{t=t${transform};t=t.replace(/href="\\/(?!\\/)/g,'href="'+location.origin+'/');t=t.replace(/<head>/,'<head><base href="${editor?base:sourceBase}">');if(!/<head>/.test(t))t=t.replace(/<html[^>]*>/,'$&<head><base href="${sourceBase}"></head>');document.open();document.write(t);document.close()}).catch(e=>{document.body.textContent='Не удалось загрузить. Обновите страницу.';console.error(e)})</script>`);
+ const archiveLinks=editor?'':`.replace(/(href|src)="([^"]+)"/g,(m,a,h)=>{const u=new URL(h,'${sourceBase}').href;if(!u.startsWith('${base}'))return m;const p=u.slice('${base}'.length);return /^(?:data\\/(?:quality\\/|des\\d*\\/(?!campaign\\.json|summary\\.json|autonomy\\.json|source-inventory\\.json))|generators\\/[^/]+\\/(?!report\\/|README\\.md)|js\\/(?!cdn-preload\\.js)|api\\/|scripts\\/|test\\/|docs\\/|server\\/)/.test(p)?a+'="${archiveBase}'+p+'"':m})`;
+ await save(file,`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Alea</title><body style="background:#020712;color:#a5e9ff;font:16px system-ui">Загрузка…<script>${flags}fetch(${JSON.stringify(new URL(source,base).href)}).then(r=>{if(!r.ok)throw Error(r.status);return r.text()}).then(t=>{t=t${transform};t=t.replace(/href="\\/(?!\\/)/g,'href="'+location.origin+'/');t=t${archiveLinks};t=t.replace(/<head>/,'<head><base href="${editor?base:sourceBase}">');if(!/<head>/.test(t))t=t.replace(/<html[^>]*>/,'$&<head><base href="${sourceBase}"></head>');document.open();document.write(t);document.close()}).catch(e=>{document.body.textContent='Не удалось загрузить. Обновите страницу.';console.error(e)})</script>`);
 }
 await documentLauncher('des/editor/index.html','editor.html',{editor:true,local:true});
 await documentLauncher('editor.html','editor.html',{editor:true});
