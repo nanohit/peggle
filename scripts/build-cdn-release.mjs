@@ -10,7 +10,7 @@ if(execFileSync('git',['status','--porcelain'],{encoding:'utf8'}).trim())throw E
 const index='/tmp/alea-cdn-runtime.index',env={...process.env,GIT_INDEX_FILE:index};
 const git=(args,input)=>execFileSync('git',args,{env,input,encoding:'utf8',maxBuffer:8e6}).trim();
 const entries=git(['ls-tree','-rl',sourceRef]).split('\n').map(s=>{const [head,path]=s.split('\t');const [mode,type,sha,size]=head.trim().split(/\s+/);return {mode,type,sha,path,size:Number(size)};});
-const archive=p=>p.startsWith('data/quality/')||(/^data\/des\d*\//.test(p)&&!/^data\/des\d*\/(?:campaign|summary|autonomy|source-inventory|bank|formations)\.json$/.test(p))||(p.startsWith('generators/')&&!p.includes('/report/')&&!p.endsWith('/README.md'))||/^(api|server|scripts|test|docs|\.claude)\//.test(p)||(p.startsWith('js/')&&p!=='js/cdn-preload.js')||p==='visuals/demo_layout_safari_16pro.png'||p==='curve_example.jpg';
+const archive=p=>p.startsWith('data/quality/')||p.startsWith('generators/destruction6/report/images/route-')||(/^data\/des\d*\//.test(p)&&!/^data\/des\d*\/(?:campaign|summary|autonomy|source-inventory|bank|formations)\.json$/.test(p))||(p.startsWith('generators/')&&!p.includes('/report/')&&!p.endsWith('/README.md'))||/^(api|server|scripts|test|docs|\.claude)\//.test(p)||(p.startsWith('js/')&&p!=='js/cdn-preload.js')||p==='visuals/demo_layout_safari_16pro.png'||p==='curve_example.jpg';
 await rm(index,{force:true});git(['read-tree',sourceRef]);
 const removed=entries.filter(r=>archive(r.path)).map(r=>r.path);
 git(['update-index','--force-remove','--stdin'],removed.join('\n')+'\n');
