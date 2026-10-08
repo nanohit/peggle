@@ -15,7 +15,7 @@ assert(normalized.survival.enabled&&normalized.destruction.enabled&&normalized.s
 const sim=make('native-core');assert(sim.game.isSurvivalMode()&&sim.game.isDestructionMode());
 assert.equal(sim.game.hitPegClearDelayMs,HIT_PEG_CLEAR_DELAY_DEFAULT_MS);
 assert(sim.game.pegs.length>60);assert.equal(sim.game.getUiStateSnapshot().ballsLeft,Infinity);
-assert.equal(sim.game.survivalRuntime.getScrollSpeed(),40);
+assert.equal(sim.game.survivalRuntime.getScrollSpeed(),25);
 
 // Drive actual browser frames at 60Hz. NativeSimulation normally supplies 120Hz
 // input, which previously hid the reload transition's halved physics cadence.
